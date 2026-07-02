@@ -1,21 +1,16 @@
 #!/usr/bin/env bash
-# SnapAgent 一键安装脚本
-# 用法: curl -sL <script-url> | bash
-# 或:   bash install.sh [MAVEN_GROUP_ID:MAVEN_ARTIFACT_ID:VERSION]
+# SnapAgent 一键安装脚本 (GitHub Release)
+# 用法: bash install.sh
+# 从 GitHub Release 下载 JAR+POM 并安装到本地 Maven 仓库
 
 set -euo pipefail
 
-# 默认坐标
-COORDS="${1:-com.watsontech.snapagent:snap-agent-spring-boot-2x-starter:1.0.0-SNAPSHOT}"
-GROUP_ID=$(echo "$COORDS" | cut -d: -f1)
-ARTIFACT_ID=$(echo "$COORDS" | cut -d: -f2)
-VERSION=$(echo "$COORDS" | cut -d: -f3)
+VERSION="1.0.0-SNAPSHOT"
+RELEASE_URL="https://github.com/watson-song/snap-agent/releases/download/v0.1-alpha"
 
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║          SnapAgent — 一键安装                          ║"
+echo "║          SnapAgent — 一键安装 (v0.1-alpha)               ║"
 echo "╚══════════════════════════════════════════════════════════╝"
-echo ""
-echo "坐标: ${GROUP_ID}:${ARTIFACT_ID}:${VERSION}"
 echo ""
 
 # 1. 检查 Maven
@@ -25,34 +20,47 @@ if ! command -v mvn &>/dev/null; then
 fi
 echo "✓ Maven: $(mvn --version | head -1)"
 
-# 2. 克隆并安装到本地仓库
+# 2. 临时目录
 TMP_DIR=$(mktemp -d /tmp/snap-agent-install.XXXXXX)
 trap "rm -rf $TMP_DIR" EXIT
 
 echo ""
-echo "→ 克隆仓库..."
-git clone https://github.com/<your-org>/snap-agent.git "$TMP_DIR/snap-agent" 2>/dev/null || {
-    echo "  远程克隆失败，尝试本地路径..."
-    if [ -d "./snap-agent" ]; then
-        cp -r ./snap-agent "$TMP_DIR/snap-agent"
-    else
-        echo "✗ 无法获取源码，请手动 git clone 后运行 mvn install"
-        exit 1
-    fi
-}
+echo "→ 下载 SnapAgent artifacts..."
+cd "$TMP_DIR"
 
-echo "→ 构建并安装到本地 Maven 仓库..."
-cd "$TMP_DIR/snap-agent"
-mvn clean install -DskipTests -q
+curl -sL "${RELEASE_URL}/snap-agent-core-${VERSION}.jar" -o "snap-agent-core-${VERSION}.jar"
+curl -sL "${RELEASE_URL}/snap-agent-core-${VERSION}.pom" -o "snap-agent-core-${VERSION}.pom"
+curl -sL "${RELEASE_URL}/snap-agent-spring-boot-2x-starter-${VERSION}.jar" -o "snap-agent-spring-boot-2x-starter-${VERSION}.jar"
+curl -sL "${RELEASE_URL}/snap-agent-spring-boot-2x-starter-${VERSION}.pom" -o "snap-agent-spring-boot-2x-starter-${VERSION}.pom"
+
+echo "→ 安装到本地 Maven 仓库..."
+
+# 3. 先装 core
+mvn install:install-file \
+  -Dfile="snap-agent-core-${VERSION}.jar" \
+  -DpomFile="snap-agent-core-${VERSION}.pom" \
+  -DgroupId=com.watsontech.snapagent \
+  -DartifactId=snap-agent-core \
+  -Dversion="${VERSION}" \
+  -Dpackaging=jar -q
+
+# 4. 再装 starter
+mvn install:install-file \
+  -Dfile="snap-agent-spring-boot-2x-starter-${VERSION}.jar" \
+  -DpomFile="snap-agent-spring-boot-2x-starter-${VERSION}.pom" \
+  -DgroupId=com.watsontech.snapagent \
+  -DartifactId=snap-agent-spring-boot-2x-starter \
+  -Dversion="${VERSION}" \
+  -Dpackaging=jar -q
 
 echo ""
 echo "✓ 安装完成！"
 echo ""
-echo "→ 接下来在宿主项目中添加依赖："
+echo "→ 在宿主项目中添加依赖："
 echo ""
 echo "  <dependency>"
-echo "      <groupId>${GROUP_ID}</groupId>"
-echo "      <artifactId>${ARTIFACT_ID}</artifactId>"
+echo "      <groupId>com.watsontech.snapagent</groupId>"
+echo "      <artifactId>snap-agent-spring-boot-2x-starter</artifactId>"
 echo "      <version>${VERSION}</version>"
 echo "  </dependency>"
 echo ""
@@ -68,4 +76,4 @@ echo "      enabled: true"
 echo ""
 echo "→ 提供只读 DataSource Bean (名称: snapAgentReadOnlyDataSource)"
 echo ""
-echo "详细集成文档: docs/INTEGRATION.md"
+echo "详细集成文档: https://github.com/watson-song/snap-agent#readme"

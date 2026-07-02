@@ -44,8 +44,16 @@ SnapAgent is an **embedded AI skill framework**. Add one Maven dependency + a fe
 
 ### 1. Install
 
+**Option A — One-line install (downloads pre-built JARs from GitHub Releases):**
+
 ```bash
-git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTests
+bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/v0.1-alpha/install.sh)
+```
+
+**Option B — Build from source:**
+
+```bash
+git clone https://github.com/watson-song/snap-agent.git && cd snap-agent && mvn clean install -DskipTests
 ```
 
 ### 2. Add Dependency
