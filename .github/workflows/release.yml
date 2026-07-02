@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 8
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build
+        run: mvn clean install -DskipTests -q
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate standalone POMs
+        run: |
+          mkdir -p dist
+
+          cat > dist/snap-agent-core-${{ steps.version.outputs.version }}.pom <<'POM_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>com.watsontech.snapagent</groupId>
+              <artifactId>snap-agent-core</artifactId>
+              <version>${{ steps.version.outputs.version }}</version>
+              <packaging>jar</packaging>
+              <name>SnapAgent Core</name>
+              <description>Pure SPI layer: skill parsing, agent loop, LLM SPI, tool SPI</description>
+              <dependencyManagement>
+                  <dependencies>
+                      <dependency>
+                          <groupId>org.springframework.boot</groupId>
+                          <artifactId>spring-boot-dependencies</artifactId>
+                          <version>2.5.15</version>
+                          <type>pom</type>
+                          <scope>import</scope>
+                      </dependency>
+                  </dependencies>
+              </dependencyManagement>
+              <dependencies>
+                  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-autoconfigure</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.springframework</groupId><artifactId>spring-core</artifactId><optional>true</optional></dependency>
+              </dependencies>
+          </project>
+          POM_EOF
+
+          cat > dist/snap-agent-spring-boot-2x-starter-${{ steps.version.outputs.version }}.pom <<'POM_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <project xmlns="http://maven.apache.org/POM/4.0.0"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+              <modelVersion>4.0.0</modelVersion>
+              <groupId>com.watsontech.snapagent</groupId>
+              <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+              <version>${{ steps.version.outputs.version }}</version>
+              <packaging>jar</packaging>
+              <name>SnapAgent Spring Boot 2.x Starter</name>
+              <description>AutoConfig + Controller + Filter + Security + Tools + LLM for Spring Boot 2.x</description>
+              <dependencyManagement>
+                  <dependencies>
+                      <dependency>
+                          <groupId>org.springframework.boot</groupId>
+                          <artifactId>spring-boot-dependencies</artifactId>
+                          <version>2.5.15</version>
+                          <type>pom</type>
+                          <scope>import</scope>
+                      </dependency>
+                  </dependencies>
+              </dependencyManagement>
+              <dependencies>
+                  <dependency><groupId>com.watsontech.snapagent</groupId><artifactId>snap-agent-core</artifactId><version>${{ steps.version.outputs.version }}</version></dependency>
+                  <dependency><groupId>org.springframework</groupId><artifactId>spring-web</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.springframework</groupId><artifactId>spring-webmvc</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId><scope>provided</scope></dependency>
+                  <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-autoconfigure</artifactId></dependency>
+                  <dependency><groupId>com.squareup.okhttp3</groupId><artifactId>okhttp</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+                  <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId></dependency>
+                  <dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-core</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.apache.shiro</groupId><artifactId>shiro-core</artifactId><version>1.8.0</version><optional>true</optional></dependency>
+                  <dependency><groupId>org.springframework</groupId><artifactId>spring-jdbc</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.springframework.data</groupId><artifactId>spring-data-redis</artifactId><optional>true</optional></dependency>
+                  <dependency><groupId>org.slf4j</groupId><artifactId>slf4j-api</artifactId></dependency>
+              </dependencies>
+          </project>
+          POM_EOF
+
+      - name: Copy artifacts to dist
+        run: |
+          cp snap-agent-core/target/snap-agent-core-*.jar dist/
+          cp snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-*.jar dist/
+          cp docs/install.sh dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/snap-agent-core-*.jar
+            dist/snap-agent-core-*.pom
+            dist/snap-agent-spring-boot-2x-starter-*.jar
+            dist/snap-agent-spring-boot-2x-starter-*.pom
+            dist/install.sh
