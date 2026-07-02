@@ -5,7 +5,7 @@
 
 set -euo pipefail
 
-VERSION="1.0.0-SNAPSHOT"
+VERSION="0.1-alpha"
 RELEASE_URL="https://github.com/watson-song/snap-agent/releases/download/v0.1-alpha"
 
 echo "╔══════════════════════════════════════════════════════════╗"
