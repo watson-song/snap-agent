@@ -1,0 +1,28 @@
+server:
+  port: 8080
+
+snap-agent:
+  enabled: true
+  base-path: /snap-agent
+  skills-dir: /app/skills
+  llm:
+    api-key: dummy-key-for-e2e
+    model: claude-sonnet-4-6
+    timeout-seconds: 10
+  agent:
+    max-turns: 20
+    task-timeout-minutes: 10
+  jdbc:
+    enabled: true
+  routing:
+    mode: static
+    internal-token: e2e-internal-secret
+    internal-path: /snap-agent-internal
+    static-peers:
+      - http://127.0.0.1:8080
+  security:
+    required-permission: ""
+
+logging:
+  level:
+    com.watsontech.snapagent: INFO

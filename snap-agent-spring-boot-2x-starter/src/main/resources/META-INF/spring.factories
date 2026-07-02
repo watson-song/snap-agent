@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.watsontech.snapagent.boot2x.autoconfig.SnapAgentAutoConfiguration

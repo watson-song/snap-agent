@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapAgent</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">SnapAgent</span>
+            </div>
+        </div>
+        <div class="sidebar-actions">
+            <label class="btn btn-upload" title="上传 Skill 文件 (.md / .zip)">
+                <span>📄 文件</span>
+                <input type="file" id="uploadInput" accept=".md,.zip" hidden>
+            </label>
+            <label class="btn btn-upload" title="上传 Skill 文件夹">
+                <span>📁 文件夹</span>
+                <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
+            </label>
+            <button class="btn btn-refresh" id="refreshBtn" title="刷新 Skills">
+                <span>🔄</span>
+            </button>
+        </div>
+        <div class="skill-list-header">
+            <span>Skills</span>
+            <span class="skill-count" id="skillCount">0</span>
+        </div>
+        <ul class="skill-list" id="skills"></ul>
+    </aside>
+
+    <!-- Main Area -->
+    <main class="main-area">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="skill-context" id="skillContext">
+                <span class="placeholder">选择一个 Skill 开始</span>
+            </div>
+            <div class="model-selector">
+                <label>模型</label>
+                <select id="modelSelect"></select>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <div class="chat-area" id="chatArea">
+            <div class="chat-welcome" id="chatWelcome">
+                <div class="welcome-icon">⚡</div>
+                <h2>SnapAgent</h2>
+                <p>选择左侧的 Skill，输入参数后开始诊断</p>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="input-area" id="inputArea" style="display:none;">
+            <div class="input-form" id="inputForm"></div>
+            <div class="input-bar">
+                <textarea id="messageInput" placeholder="输入消息或参数..." rows="1"></textarea>
+                <button class="btn btn-send" id="runBtn" title="发送">
+                    <span>➤</span>
+                </button>
+            </div>
+        </footer>
+    </main>
+</div>
+<script src="md.js"></script>
+<script src="app.js?v=8"></script>
+</body>
+</html>
