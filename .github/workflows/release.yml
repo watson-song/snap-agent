@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -115,7 +117,38 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body: |
+            SnapAgent ${{ github.ref_name }}
+
+            ## Quick Install
+
+            ```bash
+            bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/${{ github.ref_name }}/install.sh)
+            ```
+
+            ## Add Dependency
+
+            ```xml
+            <dependency>
+                <groupId>com.watsontech.snapagent</groupId>
+                <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+                <version>${{ steps.version.outputs.version }}</version>
+            </dependency>
+            ```
+
+            ## Minimum Config
+
+            ```yaml
+            snap-agent:
+              enabled: true
+              llm:
+                api-key: ${LLM_API_KEY}
+                model: claude-sonnet-4-6
+              jdbc:
+                enabled: true
+            ```
+
+            License: Apache 2.0
           files: |
             dist/snap-agent-core-*.jar
             dist/snap-agent-core-*.pom
