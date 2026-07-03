@@ -147,13 +147,14 @@ EOF
 
 # ---- 6. 复制并模板化 SF 配置文件 ----
 echo "▶ 生成 SF 配置文件..."
-for f in pom-snippet.xml application-sf.yml INTEGRATION-AI.md README-SF.md; do
+for f in pom-snippet.xml application-sf.yml INTEGRATION-AI.md README-SF.md install-sf.sh; do
     if [ ! -f "$TEMPLATES_DIR/$f" ]; then
         echo "✗ 模板文件缺失: $TEMPLATES_DIR/$f"
         exit 1
     fi
     sed "s/__VERSION__/${VERSION}/g" "$TEMPLATES_DIR/$f" > "$STAGE/$f"
 done
+chmod +x "$STAGE/install-sf.sh"
 
 # ---- 7. 打 zip ----
 echo "▶ 打包 zip..."
