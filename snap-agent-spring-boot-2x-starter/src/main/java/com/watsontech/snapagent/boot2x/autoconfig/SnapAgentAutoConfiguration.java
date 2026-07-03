@@ -11,6 +11,8 @@ import com.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
 import com.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import com.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import com.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
+import com.watsontech.snapagent.boot2x.tool.LogPathGuard;
+import com.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
 import com.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import com.watsontech.snapagent.boot2x.tool.SqlGuard;
 import com.watsontech.snapagent.boot2x.web.InternalTaskController;
@@ -151,6 +153,27 @@ public class SnapAgentAutoConfiguration {
         org.springframework.data.redis.core.RedisTemplate template = redisProvider.getIfAvailable();
         log.info("RedisReadToolProvider assembled");
         return new RedisReadToolProvider(template);
+    }
+
+    // ---- LogPathGuard ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.logs", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public LogPathGuard logPathGuard(SnapAgentProperties props) {
+        log.info("LogPathGuard assembled with {} allowed path(s)",
+                props.getLogs().getAllowedPaths().size());
+        return new LogPathGuard(props.getLogs().getAllowedPaths(),
+                props.getLogs().getMaxLines(),
+                props.getLogs().getMaxFileBytes());
+    }
+
+    // ---- LogReadToolProvider ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.logs", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public LogReadToolProvider logReadToolProvider(LogPathGuard logPathGuard) {
+        log.info("LogReadToolProvider assembled");
+        return new LogReadToolProvider(logPathGuard);
     }
 
     // ---- ToolDispatcher ----

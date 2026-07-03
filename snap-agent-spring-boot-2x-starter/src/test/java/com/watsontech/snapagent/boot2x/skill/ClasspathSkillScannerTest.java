@@ -99,7 +99,8 @@ class ClasspathSkillScannerTest {
         String[] skillFiles = {
                 "docs/skills/health-check.md",
                 "docs/skills/database-query.md",
-                "docs/skills/redis-query.md"
+                "docs/skills/redis-query.md",
+                "docs/skills/log-analysis.md"
         };
         SkillLoader loader = new SkillLoader();
         ClassLoader cl = getClass().getClassLoader();
@@ -115,7 +116,7 @@ class ClasspathSkillScannerTest {
                 for (String tool : meta.getTools()) {
                     assertThat(tool)
                             .as("tool %s referenced by %s is not a registered tool", tool, path)
-                            .isIn("mysql_query", "redis_get");
+                            .isIn("mysql_query", "redis_get", "log_read");
                 }
             }
         }

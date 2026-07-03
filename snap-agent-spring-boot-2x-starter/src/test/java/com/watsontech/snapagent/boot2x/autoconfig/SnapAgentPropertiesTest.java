@@ -99,6 +99,17 @@ class SnapAgentPropertiesTest {
     }
 
     @Test
+    void shouldDefaultLogsSettings() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Logs logs = props.getLogs();
+
+        assertThat(logs.isEnabled()).isTrue();
+        assertThat(logs.getAllowedPaths()).isEmpty();
+        assertThat(logs.getMaxLines()).isEqualTo(500);
+        assertThat(logs.getMaxFileBytes()).isEqualTo(10L * 1024 * 1024);
+    }
+
+    @Test
     void shouldDefaultSecuritySettings() {
         SnapAgentProperties props = new SnapAgentProperties();
         SnapAgentProperties.Security security = props.getSecurity();
@@ -189,6 +200,20 @@ class SnapAgentPropertiesTest {
     }
 
     @Test
+    void shouldSetAndVerifyAllLogsProperties() {
+        SnapAgentProperties.Logs logs = new SnapAgentProperties.Logs();
+        logs.setEnabled(false);
+        logs.setAllowedPaths(Arrays.asList("/app/logs", "/var/log"));
+        logs.setMaxLines(200);
+        logs.setMaxFileBytes(5L * 1024 * 1024);
+
+        assertThat(logs.isEnabled()).isFalse();
+        assertThat(logs.getAllowedPaths()).containsExactly("/app/logs", "/var/log");
+        assertThat(logs.getMaxLines()).isEqualTo(200);
+        assertThat(logs.getMaxFileBytes()).isEqualTo(5L * 1024 * 1024);
+    }
+
+    @Test
     void shouldSetAndVerifyAllMcpProperties() {
         SnapAgentProperties.Mcp mcp = new SnapAgentProperties.Mcp();
         mcp.setEnabled(true);
@@ -236,6 +261,7 @@ class SnapAgentPropertiesTest {
         props.setAgent(new SnapAgentProperties.Agent());
         props.setJdbc(new SnapAgentProperties.Jdbc());
         props.setRedis(new SnapAgentProperties.Redis());
+        props.setLogs(new SnapAgentProperties.Logs());
         props.setMcp(new SnapAgentProperties.Mcp());
         props.setSecurity(new SnapAgentProperties.Security());
 
@@ -245,6 +271,7 @@ class SnapAgentPropertiesTest {
         assertThat(props.getAgent()).isNotNull();
         assertThat(props.getJdbc()).isNotNull();
         assertThat(props.getRedis()).isNotNull();
+        assertThat(props.getLogs()).isNotNull();
         assertThat(props.getMcp()).isNotNull();
         assertThat(props.getSecurity()).isNotNull();
     }

@@ -34,6 +34,7 @@ public class SnapAgentProperties {
     private Agent agent = new Agent();
     private Jdbc jdbc = new Jdbc();
     private Redis redis = new Redis();
+    private Logs logs = new Logs();
     private Mcp mcp = new Mcp();
     private Security security = new Security();
     private Routing routing = new Routing();
@@ -102,6 +103,14 @@ public class SnapAgentProperties {
 
     public void setRedis(Redis redis) {
         this.redis = redis;
+    }
+
+    public Logs getLogs() {
+        return logs;
+    }
+
+    public void setLogs(Logs logs) {
+        this.logs = logs;
     }
 
     public Mcp getMcp() {
@@ -337,6 +346,49 @@ public class SnapAgentProperties {
 
         public void setMaxKeyCount(int maxKeyCount) {
             this.maxKeyCount = maxKeyCount;
+        }
+    }
+
+    /** Log file analysis configuration. */
+    public static class Logs {
+        private boolean enabled = true;
+        /** Directories under which log files may be read. */
+        private List<String> allowedPaths = new ArrayList<String>();
+        /** Max lines returned by a single log_read call. */
+        private int maxLines = 500;
+        /** Max file size in bytes (rejects larger files to prevent OOM). */
+        private long maxFileBytes = 10L * 1024 * 1024; // 10 MB
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<String> getAllowedPaths() {
+            return allowedPaths;
+        }
+
+        public void setAllowedPaths(List<String> allowedPaths) {
+            this.allowedPaths = allowedPaths;
+        }
+
+        public int getMaxLines() {
+            return maxLines;
+        }
+
+        public void setMaxLines(int maxLines) {
+            this.maxLines = maxLines;
+        }
+
+        public long getMaxFileBytes() {
+            return maxFileBytes;
+        }
+
+        public void setMaxFileBytes(long maxFileBytes) {
+            this.maxFileBytes = maxFileBytes;
         }
     }
 
