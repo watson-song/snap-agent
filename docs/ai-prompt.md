@@ -76,7 +76,12 @@ SQL 查询只允许 SELECT 语句，所有 SQL 必须加 LIMIT。
 2. 确认 application.yml 中 snap-agent.enabled=true
 3. 确认 LLM api-key 通过环境变量注入，未硬编码
 4. 确认存在名为 snapAgentReadOnlyDataSource 的 DataSource Bean
-5. 确认 skills 目录下至少有一个 .md Skill 文件
-6. 确认 SecurityConfig 放行了 /snap-agent/runs/*/stream 和 /snap-agent-internal/**
-7. 确认 SqlGuard 测试通过 (mvn test -Dtest=SqlGuardTest)
+5. 确认 Skill 文件存在：内置 Skill 目录（classpath 下的 skills/）和上传 Skill 目录（文件系统 upload-skills-dir）至少各有一个 .md Skill 文件
+6. 确认 SecurityConfig 放行了以下 SnapAgent 端点：
+   - /snap-agent/skills, /snap-agent/skills/**
+   - /snap-agent/models, /snap-agent/tools
+   - /snap-agent/runs, /snap-agent/runs/*, /snap-agent/runs/*/stream, /snap-agent/runs/*/transcript
+   - /snap-agent-internal/**
+7. 确认任何响应包装过滤器（response-wrapping filter）跳过 /snap-agent/runs/*/stream 路径，避免破坏 SSE 流
+8. 确认 SqlGuard 测试通过 (mvn test -Dtest=SqlGuardTest)
 ```

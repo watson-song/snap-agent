@@ -22,7 +22,8 @@
 ```yaml
 snap-agent:
   enabled: true
-  skills-dir: file:/opt/skills/          # 或 classpath:/skills/
+  builtin-skills-dir: classpath:/docs/skills/   # builtin skills, 打包在 JAR 内
+  upload-skills-dir: /opt/snap-agent/skills/    # 用户上传/自定义 skill, 文件系统目录
   llm:
     api-key: ${LLM_API_KEY}              # 必填，否则 LlmClient 不装配
     model: claude-sonnet-4-6
@@ -185,9 +186,15 @@ snap-agent:
 
 ## 部署 skill 文件
 
-- `skills-dir: file:/opt/skills/`，目录 750，应用账号可读。
-- admin 通过部署流水线（GitOps / ConfigMap）写入 `*.md`。
-- 改动后 `POST /skills/refresh`（或重启）生效。
+skill 分两层来源，部署方式不同：
+
+- **Builtin skills**：打包在 starter JAR 内（`classpath:/docs/skills/`），无需文件系统部署，升级 starter 即可更新。
+- **Upload skills（自定义）**：部署到 `upload-skills-dir`（推荐 `/opt/snap-agent/skills/`，或临时用 `/tmp/snap-agent-skills/`），目录权限 750，应用账号可读写。
+- 除文件系统部署外，也可通过上传 API 动态管理自定义 skill：
+  - `POST /snap-agent/skills/upload` — 上传单个 `.md` 或 `.zip` skill 文件。
+  - `POST /snap-agent/skills/upload-folder` — 上传整个 skill 目录（多文件，含目录型 skill）。
+  - `DELETE /snap-agent/skills/{name}` — 删除自定义 skill；若该名称被 custom 覆盖 builtin，删除后恢复 builtin 版本。builtin skill 不可删除（403）。
+- 改动后 `POST /skills/refresh`（或重启）生效；上传 API 自动触发刷新。
 - skill frontmatter 必须 `name`/`description`/`tools` 齐全，否则标 `INVALID`（见 [02](02-skill-loading.md) §3）。
 
 ## 安全检查清单（集成前）
@@ -201,3 +208,20 @@ snap-agent:
 - [ ] 限流配置评估（默认并发 1 / 每小时 20，按运维规模调）
 - [ ] 多租户宿主：评估只读 DSN 是否带 RLS / 视图限制
 - [ ] 审计开关开（默认开），定期抽查 `GET /runs/{id}/transcript`
+
+## 集成注意事项：响应包装过滤器
+
+若宿主项目已有响应包装过滤器（如 `BizApiResponseWrapper`，将所有响应包成 `{ "code":0, "data":... }` 结构），**必须**跳过 `/stream` 路径，否则 SSE 实时流会被包装破坏、浏览器无法逐事件解析。
+
+示例（宿主 Filter 内）：
+```java
+String requestUri = ((HttpServletRequest) request).getRequestURI();
+if (requestUri != null && requestUri.contains("/stream")) {
+    chain.doFilter(request, response);   // 原样放行，不包装
+    return;
+}
+// 其余路径正常包装
+```
+
+- 仅 `/stream` 路径需豁免；`/skills`、`/runs` 等 REST 端点被包装无影响（前端按包装格式解析即可）。
+- 若宿主用 `@ControllerAdvice` / ResponseBodyAdvice 做统一包装，同理需排除 SSE 返回类型（`text/event-stream`）。

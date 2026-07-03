@@ -98,7 +98,7 @@ public DataSource snapAgentReadOnlyDataSource() {
 
 ### 5. Write Your First Skill
 
-Create `my-skill.md` in your `skills-dir`:
+Create `my-skill.md` in your `upload-skills-dir` (default `/tmp/snap-agent-skills`). Skills can be standalone `.md` files OR directories containing `SKILL.md` + auxiliary files:
 
 ```markdown
 ---
@@ -172,7 +172,7 @@ Open `http://localhost:8080/snap-agent/`, select a Skill, type your question, an
 
 | Feature | Description |
 |---------|-------------|
-| **Skill-driven** | Markdown defines Agent behavior — no code needed, drop a file and it's live |
+| **Skill-driven** | Two-tier: built-in (classpath) + uploadable (filesystem, persists across restarts). Markdown defines Agent behavior — no code needed, drop a file and it's live |
 | **Tool-extensible** | `ToolProvider` SPI + `@Component` auto-discovery; built-in JDBC/Redis |
 | **SSE real-time streaming** | Token-level push of the thinking process — watch the Agent reason step by step |
 | **Safety guardrails** | SqlGuard read-only enforcement + rate limiting + audit transcript |
@@ -187,7 +187,8 @@ Open `http://localhost:8080/snap-agent/`, select a Skill, type your question, an
 snap-agent:
   enabled: true                          # master switch, default false
   base-path: /snap-agent                 # URL prefix
-  skills-dir: classpath:/skills/         # Skill directory (classpath or filesystem path)
+  builtin-skills-dir: classpath:/docs/skills/    # read-only, packaged in JAR
+  upload-skills-dir: /tmp/snap-agent-skills       # read-write, persists across restarts
   llm:
     base-url: https://api.anthropic.com
     api-key: ""                          # recommend env var ${LLM_API_KEY}
@@ -256,6 +257,7 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 | GET | `/snap-agent/runs/{id}/transcript` | Full transcript |
 | POST | `/snap-agent/skills/refresh` | Refresh skill directory |
 | POST | `/snap-agent/skills/upload` | Upload .md / .zip |
+| DELETE | `/snap-agent/skills/{name}` | Delete a custom skill (restores builtin if overridden) |
 
 ## Roadmap
 

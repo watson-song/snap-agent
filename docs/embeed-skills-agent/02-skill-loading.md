@@ -2,7 +2,12 @@
 
 ## 1. 标准 skill 格式定义
 
-一份 skill = 一个 `*.md` 文件，结构如下：
+一份 skill 可以是两种形式之一：
+
+- **独立 `.md` 文件**（如 `my-skill.md`）：整个文件即一个 skill。
+- **目录 skill**（如 `my-skill/SKILL.md` + `my-skill/REFERENCE.md`）：目录下必须包含 `SKILL.md` 作为入口；目录内其他文件为辅助资源（如参考文档、SQL 片段），**不被解析**，仅供 skill 正文引用。当目录存在 `SKILL.md` 时，整个目录视为一个 skill。
+
+标准 skill 文件结构如下：
 
 ```markdown
 ---
@@ -110,8 +115,11 @@ inputs:
 ## 4. 启动缓存 + 手动刷新（决策 #9）
 
 ### 启动扫描
-- `SnapAgentAutoConfiguration` 装配 `SkillRegistry` 时，构造阶段同步扫描 `skills-dir`（`PathMatchingResourcePatternResolver`，支持 `classpath:` 与 `file:` 前缀）。
-- 扫描 `*.md`，逐个解析，存入 `Map<String, SkillMeta>`（key=name）。
+- `SnapAgentAutoConfiguration` 装配 `SkillRegistry` 时，构造阶段**两层扫描**：
+  - **内置 skill**：经 `ClasspathSkillScanner` 用 Spring 的 `ResourcePatternResolver` 扫描 `classpath:/docs/skills/**/*.md`，启动时解析一次，只读。
+  - **上传 skill**：经 `FilesystemSkillScanner` 用 `Files.walkFileTree` 扫描文件系统 `upload-skills-dir`，刷新时重新扫描，读写。
+- **目录 skill 扫描规则**：`preVisitDirectory` 检查目录下是否存在 `SKILL.md`；若存在，仅解析 `SKILL.md` 并跳过子树（`SKIP_SUBTREE`），整个目录视为一个 skill；若不存在，视为组织性目录，递归进入子目录继续扫描。
+- 解析后存入 `Map<String, SkillMeta>`（key=name）。
 - 扫描失败（目录不存在 / 无文件）→ 日志 WARN，registry 为空，不崩；`GET /skills` 返回空列表。
 - **不做文件监听**（无 WatchService 线程，无竞态）。
 
@@ -174,11 +182,29 @@ SkillMeta.tools = [mysql_query, redis_get]
   - 未提供的 optional input → 替换为空字符串 `""`（与现有 skill 的 `IF('{warehouseCode}' = '', ...)` SQL 惯用法兼容）。
 - 替换后正文注入 system prompt（见 [03-agent-engine.md](03-agent-engine.md) §system prompt 构造）。
 
-## 7. skill 来源 = 服务端目录（决策 #13）
+## 7. skill 来源 = 两层模型（决策 #13）
 
-- 仅从 `skills-dir` 加载（admin 控制的文件系统/classpath 目录）。
-- **无运行时上传**接口。「恶意 skill」= 文件被篡改，属运维问题，不在本库威胁模型内。
-- 部署建议：`skills-dir: file:/opt/skills/`，目录权限 750，仅应用账号可读，admin 通过部署流水线写入。
+skill 来源分为两层：
+
+- **内置（builtin）**：classpath 扫描，只读，打包在 JAR 中，**不可删除**。
+- **可上传（custom）**：文件系统扫描，读写，重启后持久化。
+
+### 运行时上传 / 删除接口
+- `POST /skills/upload`：上传单个 `.md` 文件或 `.zip`（解压到 `upload-skills-dir`）。
+- `POST /skills/upload-folder`：以 `multipart/form-data` 上传整个目录。
+- `DELETE /skills/{name}`：删除自定义 skill；**内置 skill 不可删除**。
+
+### 覆盖与恢复
+- 自定义 skill 可按 name 覆盖同名内置 skill（custom 优先级高于 builtin）。
+- 删除覆盖用的自定义 skill 后，同名内置 skill **自动恢复**。
+
+### 元数据字段
+- 每个 skill 的 `SkillMeta` 带 `source` 字段：`"builtin"` 或 `"custom"`。
+- 当 custom 覆盖 builtin 时，`overridesBuiltin` 标记为 `true`。
+
+### 部署建议
+- `upload-skills-dir: file:/opt/snap-agent-skills/`，目录权限 750，仅应用账号可读写。
+- 内置 skill 由 JAR 版本管理，随发版更新。
 
 ## 8. 验证
 

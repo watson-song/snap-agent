@@ -47,7 +47,8 @@ Starter 会自动引入 `snap-agent-core`。以下依赖如果宿主项目已有
 snap-agent:
   enabled: true                          # 必须显式开启
   base-path: /snap-agent               # URL 前缀，可自定义
-  skills-dir: classpath:/skills/         # Skill .md 文件目录，也支持文件系统路径
+  builtin-skills-dir: classpath:/docs/skills/    # 只读，打包在 JAR 中
+  upload-skills-dir: /tmp/snap-agent-skills       # 读写，重启持久化
   llm:
     base-url: https://api.anthropic.com  # LLM API 地址
     api-key: ${LLM_API_KEY}              # 推荐用环境变量
@@ -109,15 +110,19 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     protected void configure(HttpSecurity http) throws Exception {
         http.csrf().disable()
             .authorizeRequests()
-                // 公开端点（UI、Skill 列表、SSE 流）
+                // 公开端点（UI 静态资源）
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                              "/snap-agent/*.css").permitAll()
-                .antMatchers("/snap-agent/skills", "/snap-agent/models",
-                             "/snap-agent/tools").permitAll()
-                .antMatchers("/snap-agent/runs/*/stream").permitAll()
-                .antMatchers("/snap-agent-internal/**").permitAll()
-                // 需要认证的端点
-                .antMatchers("/snap-agent/runs/**").authenticated()
+                // SnapAgent API 全部 permitAll（鉴权由 SnapAgent 自身完成）
+                .antMatchers("/snap-agent/skills").permitAll()        // GET 列表
+                .antMatchers("/snap-agent/skills/**").permitAll()     // refresh / upload / delete / upload-folder
+                .antMatchers("/snap-agent/models").permitAll()        // GET 模型列表
+                .antMatchers("/snap-agent/tools").permitAll()         // GET 工具列表
+                .antMatchers("/snap-agent/runs").permitAll()          // POST 创建任务
+                .antMatchers("/snap-agent/runs/*").permitAll()        // GET 任务状态
+                .antMatchers("/snap-agent/runs/*/stream").permitAll() // GET SSE 流
+                .antMatchers("/snap-agent/runs/*/transcript").permitAll() // GET 完整 transcript
+                .antMatchers("/snap-agent-internal/**").permitAll()   // Pod 间内部端点
                 .anyRequest().authenticated()
             .and()
                 .httpBasic();  // 或 formLogin() 或你的自定义认证
@@ -155,7 +160,24 @@ public class MyPrincipalResolver implements PrincipalResolver {
 
 ## 第六步：编写 Skill 文件
 
-在 `skills-dir` 指定的目录下创建 `.md` 文件：
+SnapAgent 采用**两级 Skill 目录**模型：
+
+| 目录 | 配置项 | 读写性 | 生命周期 | 典型来源 |
+|------|--------|--------|----------|----------|
+| 内置目录 | `snap-agent.builtin-skills-dir` | 只读 | 随 JAR 打包，重启不变 | 开发期在 `src/main/resources/docs/skills/` 编写 |
+| 上传目录 | `snap-agent.upload-skills-dir` | 读写 | 文件系统持久化，重启保留 | 运行期通过 API 上传或运维直接放文件 |
+
+### 内置 Skill（Build-Time）
+
+在 `src/main/resources/docs/skills/` 下创建 `.md` 文件，构建时会被打包进 JAR 的 classpath。该目录只读，运行期无法修改，适合放稳定、随版本发布的 Skill。
+
+### 上传 Skill（Runtime）
+
+运行期可通过 `POST /snap-agent/skills/upload`（单文件）或 `POST /snap-agent/skills/upload-folder`（整目录）上传 Skill 到 `upload-skills-dir`，也可由运维直接在文件系统中放置。该目录可读写，重启后持久化，适合放动态、业务方自助提交的 Skill。
+
+两种 Skill 在 SkillRegistry 中合并注册，LLM 侧无感知差异。如果内置与上传目录存在同名 Skill，**上传目录优先**。
+
+下面以内置 Skill 为例，创建 `.md` 文件：
 
 ```markdown
 ---
@@ -192,13 +214,21 @@ LIMIT 10;
 
 ### Skill 目录结构
 
+内置目录与上传目录**均支持**两种 Skill 形态：单文件 `.md` 和文件夹型 Skill（目录下以 `SKILL.md` 为入口，可携带附加资源文件）。
+
 ```
-skills/
-├── order-diagnose.md              # 单文件 Skill
+docs/skills/                          # builtin-skills-dir（classpath，只读）
+├── order-diagnose.md                 # 单文件 Skill
 ├── health-check.md
-└── replenishment-strategy-diagnose/  # 文件夹 Skill（主文件必须为 SKILL.md）
+└── replenishment-strategy-diagnose/  # 文件夹 Skill（入口必须为 SKILL.md）
     ├── SKILL.md
-    └── reference-data.sql          # 附加资源文件
+    └── reference-data.sql            # 附加资源文件
+
+/tmp/snap-agent-skills/               # upload-skills-dir（文件系统，读写）
+├── ad-hoc-check.md                   # 运行期上传的单文件 Skill
+└── complex-flow/                     # 运行期上传的文件夹 Skill
+    ├── SKILL.md
+    └── template.sql
 ```
 
 ## 第七步：启动 & 验证
@@ -271,6 +301,44 @@ public class HttpCallToolProvider implements ToolProvider {
 
 工具会自动被 `ToolDispatcher` 收集并暴露给 LLM。在 Skill 文件中通过工具名引导 LLM 使用。
 
+## 集成注意事项
+
+### 注意事项 1：响应包装过滤器（Response Wrapping Filters）
+
+如果宿主项目存在**响应包装过滤器**（例如 `BizApiResponseWrapper`，将所有响应统一包装为 `{ "code": 0, "data": ..., "msg": "..." }` 标准信封），**必须**让该过滤器跳过 SSE 流式端点。否则响应会被缓冲，SSE 事件无法实时推送到客户端，导致前端长时间无响应直至超时。
+
+```java
+// 在你的响应包装过滤器中，跳过 /stream 路径
+if (requestUri != null && requestUri.contains("/stream")) {
+    chain.doFilter(request, response);
+    return;
+}
+```
+
+> 除 `/stream` 外，如果包装逻辑会修改 `Content-Type: text/event-stream` 的响应，也建议一并跳过 `transcript` 等长响应端点。
+
+### 注意事项 2：Spring Security 白名单
+
+所有 SnapAgent 端点**必须**加入宿主项目的 Spring Security 白名单（`permitAll`）。SnapAgent 内部完成自身鉴权（Basic Auth / token query param），若被宿主 Security 拦截会导致 401/403 或重定向。
+
+**简洁写法**（推荐）：
+
+```
+/snap-agent/**
+/snap-agent-internal/**
+```
+
+**细粒度写法**：
+
+```
+/snap-agent/skills, /snap-agent/skills/**
+/snap-agent/models, /snap-agent/tools
+/snap-agent/runs, /snap-agent/runs/*, /snap-agent/runs/*/stream, /snap-agent/runs/*/transcript
+/snap-agent-internal/**
+```
+
+> 详见第五步的安全配置示例。如果宿主使用 Shiro 或无安全框架，对应地在 Shiro 链定义或反向代理层放行这些路径。
+
 ## 常见问题
 
 ### Q: 页面打开空白 / JS 报错
@@ -296,7 +364,7 @@ SqlGuard 拒绝了非 SELECT 语句。检查 Skill 文件中的 SQL 是否只包
 ## 最佳实践
 
 1. **数据库账号用只读**：即使 SqlGuard 拦截写操作，DataSource 也应使用只读数据库账号
-2. **Skill 文件用 Git 管理**：将 skills 目录放在项目资源目录中，随代码版本管理
+2. **内置 Skill 用 Git 管理**：将 `src/main/resources/docs/skills/` 目录纳入版本控制，随代码发布；上传目录的 Skill 建议定期备份或通过 API 导出
 3. **LLM 超时设够大**：复杂诊断可能需要多轮 LLM 调用，建议 `timeout-seconds: 120`
 4. **限制并发**：生产环境建议 `max-concurrent-runs-per-user: 1`，防止资源滥用
 5. **监控线程池**：`snapAgentExecutor` 线程池（core=2, max=4, queue=10），高并发时需调整

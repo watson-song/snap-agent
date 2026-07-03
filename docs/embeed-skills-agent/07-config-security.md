@@ -6,7 +6,8 @@
 snap-agent:
   enabled: false                      # 默认关, 零影响（见 01 §4）
   base-path: /snap-agent            # controller 前缀
-  skills-dir: classpath:/skills/      # 或 file:/opt/skills/
+  builtin-skills-dir: classpath:/docs/skills/  # 只读，打包在 JAR 中
+  upload-skills-dir: /tmp/snap-agent-skills     # 读写，重启持久化
   llm:
     base-url: https://api.anthropic.com
     api-key: ${LLM_API_KEY:}          # 空 → LlmClient 不装配
@@ -50,7 +51,8 @@ snap-agent:
 |------|---------|------|
 | `enabled` | AutoConfig `@ConditionalOnProperty` | 01 §4 |
 | `base-path` | SnapAgentController `@RequestMapping` | 06 |
-| `skills-dir` | SkillRegistry 扫描路径 | 02 §4 |
+| `builtin-skills-dir` | 内置 Skill 扫描路径（classpath，只读），默认 `classpath:/docs/skills/` | 02 §4 |
+| `upload-skills-dir` | 上传 Skill 扫描路径（文件系统，读写），默认 `/tmp/snap-agent-skills` | 02 §4 |
 | `llm.*` | AnthropicLlmClient / `GET /models` / POST /runs 校验 | 05 |
 | `agent.max-turns` | AgentExecutor 停止条件 | 03 §4 |
 | `agent.task-timeout-minutes` | AgentExecutor 超时 | 03 §4 |

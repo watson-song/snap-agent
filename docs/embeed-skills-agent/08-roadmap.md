@@ -41,7 +41,7 @@
 |----|------|
 | `snap-agent-spring-boot-3x-starter` | `jakarta.servlet` 版本，controller/filter 重写 |
 | OpenAI 适配器 | `OpenAiLlmClient`，`llm.provider: openai` |
-| skill 热重载 | WatchService 监听 `skills-dir`，文件变更自动 refresh（仍线程安全） |
+| skill 热重载 | WatchService 监听 `upload-skills-dir`，文件变更自动 refresh（仍线程安全） |
 | 报告富文本渲染 | markdown 报告 + 表格 + 折叠 SQL + 复制按钮（前端增强） |
 | OkHttp shade/relocate | `llm.shade-okhttp=true`，解决与宿主 OkHttp 大版本冲突 |
 | 多 DSN（多环境） | `jdbc.datasources: {sit: ..., uat: ...}`，skill `inputs.env` 选 DSN |

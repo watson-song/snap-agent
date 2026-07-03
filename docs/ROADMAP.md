@@ -40,7 +40,7 @@
 | MCP 协议接入 | `mcp.servers` 配置，SSE transport，远端工具以 `mcp__{server}__{tool}` 注册 | 无需写 Java 即可接入外部工具 |
 | 任务取消 | `POST /runs/{id}/cancel`，OkHttp `Call.cancel()` 中断流式 | 用户可随时停止长时间运行的任务 |
 | 报告导出 | `GET /runs/{id}/report?format=md` | 诊断报告可下载、可分享 |
-| Skill 热重载 | WatchService 监听 `skills-dir`，文件变更自动 refresh | 开发 Skill 时无需重启应用 |
+| Skill 热重载 | WatchService 监听 `upload-skills-dir`，文件变更自动 refresh | 开发 Skill 时无需重启应用 |
 | 审计持久化 | ring-buffer → 可选 DB 表 (`skills_agent_audit`) | 长期审计追溯 |
 | 对话历史 | `GET /runs?userId=&skillId=&page=` | 跨 session 查历史任务 |
 

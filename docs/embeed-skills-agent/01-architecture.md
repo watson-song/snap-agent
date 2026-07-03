@@ -37,7 +37,7 @@ core 暴露的 `SnapAgentController` 所需的 web 抽象由 starter 注入；co
 
 | 组件 | 所属 | 职责 |
 |------|------|------|
-| **SkillRegistry** | core | 启动扫描 `skills-dir` 下 `*.md`，解析 frontmatter，交叉校验 `tools` 契约，缓存 `SkillMeta`；`POST /skills/refresh` 重扫 |
+| **SkillRegistry** | core | 两层 skill 模型：① builtin skills 由 `ClasspathSkillScanner` 从 classpath（`classpath:/docs/skills/`）扫描；② upload skills 从文件系统 `upload-skills-dir` 扫描；同名时 custom 覆盖 builtin。支持目录型 skill（以 `SKILL.md` 为入口文件）。解析 frontmatter，交叉校验 `tools` 契约，缓存 `SkillMeta`；`POST /skills/refresh` 重扫 upload 目录并合并 builtin |
 | **SkillMeta** | core | 一份 skill 的内存表示：name/description/inputs/tools/body/availability |
 | **AgentExecutor** | core | LLM 流式循环：构造 system prompt（只读前缀 + skill 正文 + 工具清单）→ 调 LLM → 解析 `tool_use` → 交 ToolDispatcher → 回填 → 直到 `end_turn` 或 `max-turns` |
 | **TaskStore** | core | 内存 + 可选 Redis 持久的 `AgentTask` 仓库（status + transcript + 审计） |

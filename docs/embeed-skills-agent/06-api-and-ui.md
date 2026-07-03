@@ -15,6 +15,8 @@
       "name": "sep-wh-replenish-diagnose",
       "description": "分仓补货计划生成问题分析...",
       "availability": "AVAILABLE",
+      "source": "builtin",
+      "overridesBuiltin": false,
       "inputs": [
         {"key":"skuCode","label":"件号编码","required":true,"type":"string"},
         {"key":"env","label":"环境","required":true,"type":"enum","options":["sit","uat","prod"]}
@@ -39,13 +41,51 @@
 前端用它清理过期 localStorage 模型缓存。
 
 ### 1.4 `POST /skills/refresh`
-重新扫描 `skills-dir`。响应：
+重新扫描 `upload-skills-dir` 并合并 builtin skills。响应：
 ```json
 { "total":5, "available":4, "unavailable":1, "invalid":0 }
 ```
 鉴权：需 `snap-agent.security.required-permission` 配的权限（默认空=已登录即可；建议宿主配 admin 权限码）。
 
-### 1.5 `POST /runs`
+### 1.5 `POST /skills/upload`
+上传单个 skill 文件（`.md` 或 `.zip`）。`multipart/form-data`，字段名 `file`。
+
+- `.md` 文件：直接写入 `upload-skills-dir`，frontmatter 校验同 builtin。
+- `.zip` 文件：解压到 `upload-skills-dir` 下独立子目录（目录型 skill，入口 `SKILL.md`）。
+- 同名 custom 覆盖 builtin；上传后自动刷新 registry。
+
+响应（200）：
+```json
+{ "name": "my-custom-skill", "source": "custom", "overridesBuiltin": false, "availability": "AVAILABLE" }
+```
+错误：400（格式不支持 / frontmatter 缺字段）→ `INVALID`。
+
+### 1.6 `POST /skills/upload-folder`
+上传整个 skill 目录（多文件，支持目录型 skill）。`multipart/form-data`，多个 `files` 字段。
+
+- 全部文件写入 `upload-skills-dir` 下同一子目录。
+- 至少含一个 `SKILL.md`（目录型 skill 入口）或顶层 `*.md`。
+- 上传后自动刷新 registry。
+
+响应（200）：
+```json
+{ "total":3, "available":3, "unavailable":0, "invalid":0 }
+```
+
+### 1.7 `DELETE /skills/{name}`
+删除一个自定义 skill。
+
+- 仅可删除 `source=custom` 的 skill。
+- 若该 custom 覆盖了同名 builtin，删除后恢复 builtin 版本。
+- builtin skill（无 custom 覆盖）不可删除 → 403。
+- skill 不存在 → 404。
+
+响应（200）：
+```json
+{ "deleted": "my-custom-skill", "restoredBuiltin": false }
+```
+
+### 1.8 `POST /runs`
 发起一次诊断。请求：
 ```json
 {
@@ -65,15 +105,17 @@
 { "taskId": "sa_202606291030_ab12", "status": "PENDING", "streamUrl": "/snap-agent/runs/sa_.../stream" }
 ```
 
-### 1.6 `GET /runs/{id}/stream`（SSE）
-`text/event-stream`，事件协议见 [03-agent-engine.md](03-agent-engine.md) §8。`event:` 类型：`thought` / `tool_call` / `tool_result` / `error` / `done`。
+### 1.9 `GET /runs/{id}/stream`（SSE）
+`text/event-stream`，事件协议见 [03-agent-engine.md](03-agent-engine.md) §8。`event:` 类型：`thought` / `tool_call` / `tool_result` / `task_error` / `done`。
+
+> 注：错误事件使用 `task_error` 而非 `error`，因为 `error` 作为 SSE event name 会触发浏览器 `EventSource` 内置 error handler，导致连接提前关闭并显示「连接断开」。
 
 响应头必须含 `X-Accel-Buffering: no`（兼容 Nginx，禁用代理缓冲）。
 
-### 1.7 `GET /runs/{id}/transcript`
+### 1.10 `GET /runs/{id}/transcript`
 返回该 task 完整 transcript（thought + tool_call + tool_result + 审计记录），事后复盘。鉴权：发起人或 admin。
 
-### 1.8 `GET /runs/{id}`（状态查询）
+### 1.11 `GET /runs/{id}`（状态查询）
 ```json
 { "taskId":"sa_...", "status":"RUNNING", "skillId":"...", "model":"...", "createdAt":"...", "updatedAt":"..." }
 ```
@@ -108,7 +150,7 @@
 7. SSE `tool_call` → 渲染工具名 + 参数（SQL 高亮）。
 8. SSE `tool_result` → 在对应 tool_call 下方展开结果（表格，限制显示行数）。
 9. SSE `done` → 渲染最终报告（markdown），关 EventSource。
-10. SSE `error` → 红色提示，关 EventSource。
+10. SSE `task_error` → 红色提示，关 EventSource。
 
 ## 3. localStorage 缓存策略（决策 #4 模型临时修改）
 
