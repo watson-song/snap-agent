@@ -3,6 +3,10 @@ target/
 dist/
 sf-dist/
 
+# SF packaging (internal, not for public repo)
+scripts/sf-templates/
+scripts/package-sf.sh
+
 # IDE
 .idea/
 *.iml

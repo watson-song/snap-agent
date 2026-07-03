@@ -16,11 +16,63 @@
 
 ## 第一步：安装库到本地 Maven 仓库
 
+**方式 A — 从源码构建安装：**
+
 ```bash
 git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTests
 ```
 
-> 如果你的项目使用私有 Nexus 仓库，将 `snap-agent-core` 和 `snap-agent-spring-boot-2x-starter` 的 JAR deploy 到 Nexus 后在宿主项目中直接引用依赖即可。
+> 此方式将 jar 安装到 `~/.m2/repository`，仅适用于本机开发。CI/CD 构建Agent通常没有预装的 snap-agent，需用方式 B。
+
+**方式 B — 离线 CI/CD（项目内 `lib/` 文件仓库）：**
+
+适用于构建环境无法访问外部 Maven 仓库、或 `~/.m2` 不持久化的场景。将 jar+pom 放入项目内的 `lib/` 目录，Maven 直接从文件系统解析，不访问外网。
+
+1. 从 [GitHub Release](https://github.com/watson-song/snap-agent/releases) 下载 `snap-agent-core-*.jar`、`snap-agent-core-*.pom`、`snap-agent-spring-boot-2x-starter-*.jar`、`snap-agent-spring-boot-2x-starter-*.pom`。
+
+2. 按 Maven 仓库布局放入项目根目录的 `lib/`：
+
+```
+项目根/
+├── pom.xml
+└── lib/
+    └── com/watsontech/snapagent/
+        ├── snap-agent-core/<version>/
+        │   ├── snap-agent-core-<version>.jar
+        │   └── snap-agent-core-<version>.pom
+        └── snap-agent-spring-boot-2x-starter/<version>/
+            ├── snap-agent-spring-boot-2x-starter-<version>.jar
+            └── snap-agent-spring-boot-2x-starter-<version>.pom
+```
+
+3. 在宿主 `pom.xml` 中添加本地文件仓库和依赖：
+
+```xml
+<repositories>
+    <repository>
+        <id>snap-agent-local</id>
+        <!-- ⚠ 多模块项目必须用 ${maven.multiModuleProjectDirectory}，不能用 ${project.basedir} -->
+        <!-- ${project.basedir} 在子模块构建时解析为子模块目录，Maven 找不到根目录的 lib/ -->
+        <!-- ${maven.multiModuleProjectDirectory}（Maven 3.3.1+）始终指向项目根目录 -->
+        <url>file://${maven.multiModuleProjectDirectory}/lib</url>
+        <releases>
+            <enabled>true</enabled>
+            <checksumPolicy>ignore</checksumPolicy>
+        </releases>
+        <snapshots>
+            <enabled>false</enabled>
+        </snapshots>
+    </repository>
+</repositories>
+```
+
+> **多模块项目（重要）**：`<repository>` 的 URL 必须用 `${maven.multiModuleProjectDirectory}` 而非 `${project.basedir}`。后者在子模块构建时解析为子模块目录而非项目根目录，Maven 找不到 `lib/` 会静默回退到远程仓库，导致 CI/CD 报 `Could not find artifact`。`${maven.multiModuleProjectDirectory}` 是 Maven 3.3.1+ 内置变量，始终指向多模块项目的根目录。
+
+> 将 `lib/` 目录提交到 Git，确保 CI/CD checkout 后可直接解析。
+
+**方式 C — 私有 Nexus 仓库：**
+
+将 `snap-agent-core` 和 `snap-agent-spring-boot-2x-starter` 的 JAR deploy 到 Nexus 后在宿主项目中直接引用依赖即可。
 
 ## 第二步：添加 Maven 依赖
 
@@ -352,6 +404,10 @@ if (requestUri != null && requestUri.contains("/stream")) {
 ### Q: LLM 返回 401 / 403
 
 检查 `api-key` 或 `auth-token` 配置。如果使用代理，确认 `base-url` 指向正确的代理地址。
+
+### Q: CI/CD 构建报 `Could not find artifact com.watsontech.snapagent:...`
+
+多模块项目中 `<repository>` 的 URL 用了 `${project.basedir}/lib`，子模块构建时 `${project.basedir}` 解析为子模块目录而非项目根目录，Maven 找不到 `lib/` 静默跳过，回退到远程仓库。改为 `${maven.multiModuleProjectDirectory}/lib` 即可。也要确认 `lib/` 目录和 pom.xml 改动已提交到 Git。
 
 ### Q: 数据库查询报错 "SqlGuard rejected"
 
