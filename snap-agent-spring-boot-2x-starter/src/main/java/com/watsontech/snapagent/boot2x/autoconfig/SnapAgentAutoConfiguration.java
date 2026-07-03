@@ -148,10 +148,12 @@ public class SnapAgentAutoConfiguration {
             type = "org.springframework.data.redis.core.RedisTemplate")
     @ConditionalOnMissingBean
     public RedisReadToolProvider redisReadToolProvider(
-            ObjectProvider<org.springframework.data.redis.core.RedisTemplate> redisProvider,
+            org.springframework.beans.factory.BeanFactory beanFactory,
             SnapAgentProperties props) {
-        org.springframework.data.redis.core.RedisTemplate template = redisProvider.getIfAvailable();
-        log.info("RedisReadToolProvider assembled");
+        String beanName = props.getRedis().getRedisTemplateBeanName();
+        org.springframework.data.redis.core.RedisTemplate template =
+                beanFactory.getBean(beanName, org.springframework.data.redis.core.RedisTemplate.class);
+        log.info("RedisReadToolProvider assembled with RedisTemplate bean '{}'", beanName);
         return new RedisReadToolProvider(template);
     }
 
