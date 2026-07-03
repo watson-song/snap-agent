@@ -70,6 +70,40 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 
 > 将 `lib/` 目录提交到 Git，确保 CI/CD checkout 后可直接解析。
 
+> **⚠ 如果 CI/CD 的 `settings.xml` 配置了 `<mirror>`**（如 `<mirrorOf>*</mirror>` 重定向到 Artifactory/Nexus），`file://` 本地文件仓库会被 mirror 全局拦截，Maven 绕过 `lib/` 直接请求远程仓库。此时需改用 **方式 B-fallback（system scope）**：
+
+```xml
+<!-- system scope 方式：直接从文件系统加载 JAR，绕过 Maven 仓库解析 -->
+<!-- 需显式声明 starter 和 core 两个依赖（system scope 不解析传递依赖） -->
+<dependencies>
+    <dependency>
+        <groupId>com.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+        <version><version></version>
+        <scope>system</scope>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/com/watsontech/snapagent/snap-agent-spring-boot-2x-starter/<version>/snap-agent-spring-boot-2x-starter-<version>.jar</systemPath>
+    </dependency>
+    <dependency>
+        <groupId>com.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-core</artifactId>
+        <version><version></version>
+        <scope>system</scope>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/com/watsontech/snapagent/snap-agent-core/<version>/snap-agent-core-<version>.jar</systemPath>
+    </dependency>
+</dependencies>
+
+<!-- spring-boot-maven-plugin 必须配置 includeSystemScope，否则 system scope JAR 不会打入 fat JAR -->
+<plugin>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-maven-plugin</artifactId>
+    <configuration>
+        <includeSystemScope>true</includeSystemScope>
+    </configuration>
+</plugin>
+```
+
+> system scope 的代价：不解析传递依赖，必须手动声明 `snap-agent-core`。但它是 mirror 拦截场景下唯一可行方案。
+
 **方式 C — 私有 Nexus 仓库：**
 
 将 `snap-agent-core` 和 `snap-agent-spring-boot-2x-starter` 的 JAR deploy 到 Nexus 后在宿主项目中直接引用依赖即可。
@@ -407,7 +441,13 @@ if (requestUri != null && requestUri.contains("/stream")) {
 
 ### Q: CI/CD 构建报 `Could not find artifact com.watsontech.snapagent:...`
 
-多模块项目中 `<repository>` 的 URL 用了 `${project.basedir}/lib`，子模块构建时 `${project.basedir}` 解析为子模块目录而非项目根目录，Maven 找不到 `lib/` 静默跳过，回退到远程仓库。改为 `${maven.multiModuleProjectDirectory}/lib` 即可。也要确认 `lib/` 目录和 pom.xml 改动已提交到 Git。
+可能原因有两个，按顺序排查：
+
+1. **多模块路径问题**：`<repository>` 的 URL 用了 `${project.basedir}/lib`，子模块构建时解析为子模块目录而非项目根目录。改为 `${maven.multiModuleProjectDirectory}/lib`。
+
+2. **Mirror 拦截（最可能）**：CI/CD 的 `settings.xml` 配置了 `<mirror>`（如 `<mirrorOf>*</mirror>`），将所有仓库请求重定向到 Artifactory/Nexus，`file://` 本地文件仓库被完全绕过。日志中只有 `Downloading from maven: https://artifactory...` 没有 `Downloading from snap-agent-local:` 即为此问题。此时 `file://` 仓库方案不可用，需改用 **system scope** 方式（见第一步方式 B 的 fallback 说明）。
+
+也要确认 `lib/` 目录和 pom.xml 改动已提交到 Git。
 
 ### Q: 数据库查询报错 "SqlGuard rejected"
 
