@@ -110,7 +110,9 @@ jobs:
         run: |
           cp snap-agent-core/target/snap-agent-core-*.jar dist/
           cp snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-*.jar dist/
-          cp docs/install.sh dist/
+          # Template the release version into install.sh so it always
+          # downloads assets matching the tag, not the dev default.
+          sed "s/^VERSION=.*/VERSION=\"${{ steps.version.outputs.version }}\"/" docs/install.sh > dist/install.sh
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

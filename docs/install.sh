@@ -5,11 +5,11 @@
 
 set -euo pipefail
 
-VERSION="0.1-alpha"
-RELEASE_URL="https://github.com/watson-song/snap-agent/releases/download/v0.1-alpha"
+VERSION="0.1"
+RELEASE_URL="https://github.com/watson-song/snap-agent/releases/download/v${VERSION}"
 
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║          SnapAgent — 一键安装 (v0.1-alpha)               ║"
+echo "║          SnapAgent — 一键安装 (v${VERSION})                    ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
