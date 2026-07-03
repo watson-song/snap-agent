@@ -79,7 +79,11 @@
 
 ### 步骤 3：在 application.yml 中添加 SnapAgent 配置
 
-将 `application-sf.yml` 的内容合并到宿主项目的 `application.yml`（或 `application.properties`）。关键配置：
+**先向用户确认工号**：在写入配置前，向用户询问：
+
+> 集成 SnapAgent 需要 cc-switch 代理的 Auth Token（即你的工号）。请提供你的工号，我会填入 `auth-token` 配置中。
+
+拿到工号后，将 `application-sf.yml` 的内容合并到宿主项目的 `application.yml`（或 `application.properties`）。关键配置：
 
 ```yaml
 snap-agent:
@@ -88,7 +92,7 @@ snap-agent:
   upload-skills-dir: /app/deploy/skills
   llm:
     base-url: https://claudecode.sf-express.com/ccr
-    auth-token: 01414185
+    auth-token: <使用者工号>        # ← 替换为用户提供的工号
     model: aliyun/glm-5.2
     allowed-models:
       - aliyun/glm-5.2
@@ -101,7 +105,8 @@ snap-agent:
     redis-template-bean-name: redisTemplate
 ```
 
-> - `base-url` + `auth-token` 是 cc-switch 代理网关地址，LLM 请求通过它路由到 `aliyun/glm-5.2` 模型。
+> - `base-url` 是 cc-switch 代理网关地址，LLM 请求通过它路由到 `aliyun/glm-5.2` 模型。
+> - `auth-token` 是使用者的工号，作为 Bearer token 发送。**不要硬编码任何人的工号**，必须向用户确认后填入。
 > - `upload-skills-dir: /app/deploy/skills` 是 SF 服务器上的 Skill 上传目录，重启后持久化。需确保该目录存在且应用账号有读写权限。
 > - `allowed-models` 是服务端强制白名单，前端无法绕过。
 

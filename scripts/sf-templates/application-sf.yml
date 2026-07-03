@@ -20,8 +20,9 @@ snap-agent:
   llm:
     # cc-switch 代理地址
     base-url: https://claudecode.sf-express.com/ccr
-    # Bearer token（cc-switch 的 ANTHROPIC_AUTH_TOKEN）
-    auth-token: 01414185
+    # Bearer token（cc-switch 的 ANTHROPIC_AUTH_TOKEN，即使用者工号）
+    # 部署前必须替换为实际工号，不要使用默认值
+    auth-token: "<替换为使用者工号>"
     # 默认模型（cc-switch 配置的 aliyun/glm-5.2）
     model: aliyun/glm-5.2
     # 服务端强制白名单 — 只允许以下模型

@@ -34,7 +34,7 @@ snap-agent-sf-install-v__VERSION__/
 |----|----|
 | LLM 代理 | `https://claudecode.sf-express.com/ccr`（cc-switch） |
 | 模型 | `aliyun/glm-5.2` |
-| Auth Token | `01414185`（Bearer） |
+| Auth Token | 使用者工号（Bearer，部署时替换） |
 | Skill 上传目录 | `/app/deploy/skills` |
 | 内置 Skill | health-check, database-query, redis-query |
 
