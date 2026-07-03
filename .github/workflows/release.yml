@@ -22,7 +22,7 @@ jobs:
           cache: maven
 
       - name: Build
-        run: mvn clean install -DskipTests -q
+        run: mvn clean install -DskipTests -Djacoco.skip=true -q
 
       - name: Get version from tag
         id: version
