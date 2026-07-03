@@ -1,7 +1,7 @@
 ---
 name: health-check
 description: "Performs a basic health check of the application — verifies database connectivity and key configuration. Use when the user asks 'is the system healthy?' or 'check health'."
-tools: [query_database]
+tools: [mysql_query]
 inputs:
   - key: schema
     label: "Database Schema"
@@ -12,7 +12,7 @@ inputs:
 # Health Check
 
 ## Step 1: Verify Database Connectivity
-Use the `query_database` tool to run a simple query:
+Use the `mysql_query` tool to run a simple query:
 ```sql
 SELECT 1 AS ok
 ```

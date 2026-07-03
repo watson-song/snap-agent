@@ -5,6 +5,9 @@ import com.watsontech.snapagent.core.skill.SkillLoader;
 import com.watsontech.snapagent.core.skill.SkillMeta;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,5 +85,49 @@ class ClasspathSkillScannerTest {
 
         assertThat(skills).allSatisfy(skill ->
                 assertThat(skill.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE));
+    }
+
+    /**
+     * Verifies that the shipped builtin skill files (under
+     * {@code src/main/resources/docs/skills/}) parse correctly and reference
+     * only registered tool names. Guards against the {@code query_database}
+     * vs {@code mysql_query} naming bug that previously made health-check
+     * UNAVAILABLE at runtime.
+     */
+    @Test
+    void shippedBuiltinSkillsShouldParseAndReferenceRegisteredTools() throws IOException {
+        String[] skillFiles = {
+                "docs/skills/health-check.md",
+                "docs/skills/database-query.md",
+                "docs/skills/redis-query.md"
+        };
+        SkillLoader loader = new SkillLoader();
+        ClassLoader cl = getClass().getClassLoader();
+        for (String path : skillFiles) {
+            try (InputStream is = cl.getResourceAsStream(path)) {
+                assertThat(is).as("shipped builtin skill not found on classpath: %s", path).isNotNull();
+                String content = readAll(is);
+                SkillMeta meta = loader.parse(content);
+                assertThat(meta.getAvailability())
+                        .as("shipped skill %s is not AVAILABLE: %s", path, meta.getUnavailableReason())
+                        .isEqualTo(SkillAvailability.AVAILABLE);
+                assertThat(meta.getName()).as("name for %s", path).isNotNull();
+                for (String tool : meta.getTools()) {
+                    assertThat(tool)
+                            .as("tool %s referenced by %s is not a registered tool", tool, path)
+                            .isIn("mysql_query", "redis_get");
+                }
+            }
+        }
+    }
+
+    private static String readAll(InputStream is) throws IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int len;
+        while ((len = is.read(buffer)) > 0) {
+            baos.write(buffer, 0, len);
+        }
+        return new String(baos.toByteArray(), StandardCharsets.UTF_8);
     }
 }
