@@ -28,10 +28,17 @@ class SnapAgentPropertiesTest {
     }
 
     @Test
-    void shouldDefaultSkillsDirToClasspathSkills() {
+    void shouldDefaultBuiltinSkillsDirToClasspathDocsSkills() {
         SnapAgentProperties props = new SnapAgentProperties();
 
-        assertThat(props.getSkillsDir()).isEqualTo("classpath:/skills/");
+        assertThat(props.getBuiltinSkillsDir()).isEqualTo("classpath:/docs/skills/");
+    }
+
+    @Test
+    void shouldDefaultUploadSkillsDirToTmpSnapAgentSkills() {
+        SnapAgentProperties props = new SnapAgentProperties();
+
+        assertThat(props.getUploadSkillsDir()).isEqualTo("/tmp/snap-agent-skills");
     }
 
     @Test
@@ -223,7 +230,8 @@ class SnapAgentPropertiesTest {
     @Test
     void shouldSetAndVerifyTopLevelProperties() {
         SnapAgentProperties props = new SnapAgentProperties();
-        props.setSkillsDir("/custom/skills");
+        props.setBuiltinSkillsDir("/custom/builtin");
+        props.setUploadSkillsDir("/custom/upload");
         props.setLlm(new SnapAgentProperties.Llm());
         props.setAgent(new SnapAgentProperties.Agent());
         props.setJdbc(new SnapAgentProperties.Jdbc());
@@ -231,7 +239,8 @@ class SnapAgentPropertiesTest {
         props.setMcp(new SnapAgentProperties.Mcp());
         props.setSecurity(new SnapAgentProperties.Security());
 
-        assertThat(props.getSkillsDir()).isEqualTo("/custom/skills");
+        assertThat(props.getBuiltinSkillsDir()).isEqualTo("/custom/builtin");
+        assertThat(props.getUploadSkillsDir()).isEqualTo("/custom/upload");
         assertThat(props.getLlm()).isNotNull();
         assertThat(props.getAgent()).isNotNull();
         assertThat(props.getJdbc()).isNotNull();

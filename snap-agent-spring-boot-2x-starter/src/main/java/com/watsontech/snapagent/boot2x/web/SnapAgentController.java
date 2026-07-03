@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -180,6 +181,65 @@ public class SnapAgentController {
         return ResponseEntity.ok(result);
     }
 
+    // ---- DELETE /skills/{name} ----
+    @DeleteMapping("/skills/{name}")
+    public ResponseEntity<Object> deleteSkill(@PathVariable String name) {
+        if (name == null || name.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skill name is required");
+        }
+
+        // Check if skill exists at all
+        SkillMeta skill = skillRegistry.get(name);
+        if (skill == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND",
+                    "skill not found: " + name);
+        }
+
+        // Builtin-only skills cannot be deleted
+        Path customPath = skillRegistry.getCustomSkillPath(name);
+        if (customPath == null) {
+            return errorResponse(HttpStatus.FORBIDDEN, "BUILTIN_SKILL",
+                    "cannot delete builtin skill: " + name);
+        }
+
+        try {
+            if (Files.isDirectory(customPath)) {
+                // Directory skill — delete entire directory recursively
+                deleteRecursively(customPath);
+                log.info("Deleted directory skill '{}' at {}", name, customPath);
+            } else {
+                Files.deleteIfExists(customPath);
+                log.info("Deleted file skill '{}' at {}", name, customPath);
+            }
+
+            SkillRegistry.RefreshResult rr = skillRegistry.refresh();
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("deleted", name);
+            result.put("total", rr.getTotal());
+            result.put("available", rr.getAvailable());
+            result.put("unavailable", rr.getUnavailable());
+            result.put("invalid", rr.getInvalid());
+            // Check if a builtin was restored
+            result.put("builtinRestored", skillRegistry.isBuiltin(name));
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Failed to delete skill '{}': {}", name, e.getMessage());
+            return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "DELETE_ERROR",
+                    "failed to delete skill: " + e.getMessage());
+        }
+    }
+
+    private void deleteRecursively(Path path) throws java.io.IOException {
+        if (Files.isDirectory(path)) {
+            try (java.util.stream.Stream<Path> entries = Files.list(path)) {
+                for (Path entry : (Iterable<Path>) entries::iterator) {
+                    deleteRecursively(entry);
+                }
+            }
+        }
+        Files.deleteIfExists(path);
+    }
+
     // ---- POST /skills/upload ----
     @PostMapping("/skills/upload")
     public ResponseEntity<Object> uploadSkill(@RequestParam("file") MultipartFile file) {
@@ -191,16 +251,13 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "filename is empty");
         }
 
-        String skillsDirPath = properties.getSkillsDir();
+        String skillsDirPath = properties.getUploadSkillsDir();
         if (skillsDirPath == null || skillsDirPath.isEmpty()) {
-            return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "CONFIG_ERROR",
-                    "skills-dir is not configured");
+            return errorResponse(HttpStatus.BAD_REQUEST, "CONFIG_ERROR",
+                    "upload-skills-dir is not configured");
         }
-        // Strip file: or classpath: prefix
         if (skillsDirPath.startsWith("file:")) {
             skillsDirPath = skillsDirPath.substring(5);
-        } else if (skillsDirPath.startsWith("classpath:")) {
-            skillsDirPath = skillsDirPath.substring(10);
         }
 
         try {
@@ -272,15 +329,13 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "no files provided");
         }
 
-        String skillsDirPath = properties.getSkillsDir();
+        String skillsDirPath = properties.getUploadSkillsDir();
         if (skillsDirPath == null || skillsDirPath.isEmpty()) {
-            return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "CONFIG_ERROR",
-                    "skills-dir is not configured");
+            return errorResponse(HttpStatus.BAD_REQUEST, "CONFIG_ERROR",
+                    "upload-skills-dir is not configured");
         }
         if (skillsDirPath.startsWith("file:")) {
             skillsDirPath = skillsDirPath.substring(5);
-        } else if (skillsDirPath.startsWith("classpath:")) {
-            skillsDirPath = skillsDirPath.substring(10);
         }
 
         try {
@@ -693,6 +748,8 @@ public class SnapAgentController {
         dto.put("description", skill.getDescription());
         dto.put("availability", skill.getAvailability().name());
         dto.put("tools", skill.getTools());
+        dto.put("source", skill.getSource());
+        dto.put("overridesBuiltin", skill.isOverridesBuiltin());
         if (skill.getUnavailableReason() != null) {
             dto.put("unavailableReason", skill.getUnavailableReason());
         }

@@ -160,9 +160,10 @@ async function runSkill() {
     const msgInput = document.getElementById('messageInput');
     const message = msgInput.value.trim();
     if (message) {
-        if (!inputs.message && !Object.keys(inputs).length) {
+        // If the skill has a "message" input field that's empty, fill it
+        if ('message' in inputs && !inputs.message) {
             inputs.message = message;
-        } else if (!inputs.message) {
+        } else if (!('message' in inputs)) {
             inputs._user_message = message;
         }
         msgInput.value = '';

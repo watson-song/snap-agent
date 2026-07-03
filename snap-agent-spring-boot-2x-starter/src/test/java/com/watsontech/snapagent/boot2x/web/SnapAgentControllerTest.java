@@ -40,6 +40,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -421,5 +422,83 @@ class SnapAgentControllerTest {
 
         relayController.streamRun("sa_local", null);
         org.mockito.Mockito.verifyNoInteractions(relay);
+    }
+
+    // ---- DELETE /skills/{name} tests ----
+
+    @Test
+    void shouldReturn404WhenDeleteNonExistentSkill() throws Exception {
+        when(skillRegistry.get("nonexistent")).thenReturn(null);
+
+        mockMvc.perform(delete("/snap-agent/skills/nonexistent"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("SKILL_NOT_FOUND"));
+    }
+
+    @Test
+    void shouldReturn403WhenDeleteBuiltinSkill() throws Exception {
+        SkillMeta builtin = new SkillMeta("builtin-skill", "desc",
+                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                SkillAvailability.AVAILABLE, null, "builtin", false);
+        when(skillRegistry.get("builtin-skill")).thenReturn(builtin);
+        when(skillRegistry.getCustomSkillPath("builtin-skill")).thenReturn(null);
+
+        mockMvc.perform(delete("/snap-agent/skills/builtin-skill"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("BUILTIN_SKILL"));
+    }
+
+    @Test
+    void shouldDeleteCustomSkillAndReturn200() throws Exception {
+        SkillMeta custom = new SkillMeta("custom-skill", "desc",
+                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                SkillAvailability.AVAILABLE, null, "custom", false);
+        when(skillRegistry.get("custom-skill")).thenReturn(custom);
+
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("test-skill", ".md");
+        java.nio.file.Files.write(tempFile, "content".getBytes());
+        when(skillRegistry.getCustomSkillPath("custom-skill")).thenReturn(tempFile);
+        when(skillRegistry.refresh())
+                .thenReturn(new SkillRegistry.RefreshResult(0, 0, 0, 0));
+        when(skillRegistry.isBuiltin("custom-skill")).thenReturn(false);
+
+        mockMvc.perform(delete("/snap-agent/skills/custom-skill"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value("custom-skill"))
+                .andExpect(jsonPath("$.builtinRestored").value(false));
+
+        assertThat(java.nio.file.Files.exists(tempFile)).isFalse();
+    }
+
+    @Test
+    void shouldReportBuiltinRestoredWhenCustomOverrideDeleted() throws Exception {
+        SkillMeta custom = new SkillMeta("shared", "desc",
+                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                SkillAvailability.AVAILABLE, null, "custom", true);
+        when(skillRegistry.get("shared")).thenReturn(custom);
+
+        java.nio.file.Path tempFile = java.nio.file.Files.createTempFile("test-skill", ".md");
+        java.nio.file.Files.write(tempFile, "content".getBytes());
+        when(skillRegistry.getCustomSkillPath("shared")).thenReturn(tempFile);
+        when(skillRegistry.refresh())
+                .thenReturn(new SkillRegistry.RefreshResult(1, 1, 0, 0));
+        when(skillRegistry.isBuiltin("shared")).thenReturn(true);
+
+        mockMvc.perform(delete("/snap-agent/skills/shared"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.builtinRestored").value(true));
+    }
+
+    @Test
+    void shouldIncludeSourceInSkillDto() throws Exception {
+        SkillMeta skill = new SkillMeta("test-skill", "desc",
+                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                SkillAvailability.AVAILABLE, null, "builtin", false);
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(skill));
+
+        mockMvc.perform(get("/snap-agent/skills"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skills[0].source").value("builtin"))
+                .andExpect(jsonPath("$.skills[0].overridesBuiltin").value(false));
     }
 }

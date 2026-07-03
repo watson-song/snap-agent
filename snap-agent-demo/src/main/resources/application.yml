@@ -4,7 +4,8 @@ server:
 snap-agent:
   enabled: true
   base-path: /snap-agent
-  skills-dir: /app/skills
+  builtin-skills-dir: classpath:/docs/skills/
+  upload-skills-dir: /tmp/snap-agent-skills
   llm:
     api-key: dummy-key-for-e2e
     model: claude-sonnet-4-6

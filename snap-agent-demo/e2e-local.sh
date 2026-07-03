@@ -37,13 +37,13 @@ log "building demo fat jar"
 cd "${DEMO_DIR}"
 mvn -q clean package -DskipTests || fail "demo mvn package failed"
 
-# 3. Start the app on a free port, with skills-dir pointing at the source tree
+# 3. Start the app on a free port, with upload-skills-dir pointing at the source tree
 log "starting demo app on port ${HOST_PORT}"
 JAR="${DEMO_DIR}/target/snap-agent-demo-1.0.0-SNAPSHOT.jar"
 SKILLS_DIR="${DEMO_DIR}/src/main/resources/skills"
 java -jar "${JAR}" \
   --server.port="${HOST_PORT}" \
-  --snap-agent.skills-dir="${SKILLS_DIR}" \
+  --snap-agent.upload-skills-dir="${SKILLS_DIR}" \
   > /tmp/snap-agent-e2e.log 2>&1 &
 APP_PID=$!
 

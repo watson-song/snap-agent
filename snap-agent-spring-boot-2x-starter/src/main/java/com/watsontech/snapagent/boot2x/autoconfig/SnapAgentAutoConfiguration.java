@@ -9,6 +9,7 @@ import com.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import com.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
 import com.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
 import com.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
+import com.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import com.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import com.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import com.watsontech.snapagent.boot2x.tool.SqlGuard;
@@ -28,6 +29,7 @@ import com.watsontech.snapagent.core.tool.ToolProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -40,6 +42,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import javax.servlet.Filter;
 import javax.sql.DataSource;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -163,13 +166,26 @@ public class SnapAgentAutoConfiguration {
         return new ToolDispatcher(providers, props.getAgent().getMaxToolResultChars());
     }
 
+    // ---- ClasspathSkillScanner (builtin skills) ----
+    @Bean
+    @ConditionalOnMissingBean
+    public ClasspathSkillScanner classpathSkillScanner() {
+        return new ClasspathSkillScanner();
+    }
+
     // ---- SkillRegistry ----
     @Bean
     @ConditionalOnMissingBean
-    public SkillRegistry skillRegistry(SnapAgentProperties props, ToolDispatcher toolDispatcher) {
-        String skillsDir = props.getSkillsDir();
-        Path dir = resolveSkillsDir(skillsDir);
-        return new SkillRegistry(dir, toolDispatcher);
+    public SkillRegistry skillRegistry(SnapAgentProperties props, ToolDispatcher toolDispatcher,
+                                       ClasspathSkillScanner classpathSkillScanner) {
+        // Scan classpath for builtin skills
+        List<com.watsontech.snapagent.core.skill.SkillMeta> builtinSkills =
+                classpathSkillScanner.scan(props.getBuiltinSkillsDir());
+
+        // Resolve upload dir (filesystem, read-write)
+        Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
+
+        return new SkillRegistry(uploadDir, builtinSkills, toolDispatcher);
     }
 
     // ---- AgentExecutor ----
@@ -244,7 +260,7 @@ public class SnapAgentAutoConfiguration {
     public InternalTaskController internalTaskController(
             TaskStore taskStore,
             SnapAgentProperties props,
-            AsyncTaskExecutor taskExecutor) {
+            @Qualifier("snapAgentExecutor") AsyncTaskExecutor taskExecutor) {
         return new InternalTaskController(taskStore,
                 props.getRouting().getInternalToken(),
                 taskExecutor);
@@ -261,7 +277,7 @@ public class SnapAgentAutoConfiguration {
             SnapAgentProperties properties,
             ObjectProvider<SecurityGateway> securityGatewayProvider,
             RateLimiter rateLimiter,
-            AsyncTaskExecutor taskExecutor,
+            @Qualifier("snapAgentExecutor") AsyncTaskExecutor taskExecutor,
             ObjectProvider<PeerSseRelay> peerSseRelayProvider,
             ObjectProvider<LlmClient> llmClientProvider) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
@@ -290,19 +306,24 @@ public class SnapAgentAutoConfiguration {
 
     // ---- helpers ----
 
-    private Path resolveSkillsDir(String skillsDir) {
-        if (skillsDir == null || skillsDir.isEmpty()) {
-            log.warn("skills-dir is not configured; skill registry will be empty");
+    private Path resolveUploadDir(String uploadSkillsDir) {
+        if (uploadSkillsDir == null || uploadSkillsDir.isEmpty()) {
+            log.warn("upload-skills-dir is not configured; only builtin skills will be loaded");
             return null;
         }
-        String path = skillsDir;
+        String path = uploadSkillsDir;
         if (path.startsWith("file:")) {
             path = path.substring(5);
-        } else if (path.startsWith("classpath:")) {
-            // For classpath resources, try to resolve as file (may not work in JAR)
-            path = path.substring(10);
-            log.warn("classpath: skills-dir resolved to '{}'; ensure files are on the filesystem", path);
         }
-        return Paths.get(path);
+        Path dir = Paths.get(path);
+        try {
+            if (!Files.isDirectory(dir)) {
+                Files.createDirectories(dir);
+                log.info("Created upload-skills-dir: {}", dir);
+            }
+        } catch (java.io.IOException e) {
+            log.warn("Failed to create upload-skills-dir {}: {}", dir, e.getMessage());
+        }
+        return dir;
     }
 }

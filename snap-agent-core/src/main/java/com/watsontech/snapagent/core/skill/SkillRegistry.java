@@ -14,24 +14,39 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Scans a skill directory, parses {@code .md} files into {@link SkillMeta},
- * validates the tools contract against a {@link ToolDispatcher}, and caches
- * the results in memory.
+ * Scans built-in (classpath) and upload (filesystem) skill sources, parses
+ * {@code .md} files into {@link SkillMeta}, validates the tools contract
+ * against a {@link ToolDispatcher}, and caches the merged results in memory.
+ *
+ * <p><b>Two-tier model:</b> built-in skills are passed in as a pre-parsed list
+ * (typically from {@code ClasspathSkillScanner} in the starter module). Upload
+ * skills are scanned from the filesystem {@code uploadDir}. When a custom skill
+ * has the same {@code name} as a builtin, the custom one wins (shadows the
+ * builtin); {@link SkillMeta#isOverridesBuiltin()} is set to {@code true}.</p>
+ *
+ * <p><b>Directory skills:</b> a subdirectory containing {@code SKILL.md} is
+ * treated as a single skill — only {@code SKILL.md} is parsed, other files are
+ * auxiliary. Subdirectories without {@code SKILL.md} are organizational and
+ * recursed into.</p>
  *
  * <p>The cache is stored in a volatile holder reference. {@link #refresh()}
- * re-scans the directory and atomically replaces the holder, so concurrent
- * readers never see a partially-built cache.</p>
+ * re-scans the upload directory and atomically replaces the holder, so
+ * concurrent readers never see a partially-built cache.</p>
  */
 public class SkillRegistry {
 
     private static final Logger log = LoggerFactory.getLogger(SkillRegistry.class);
 
-    private final Path skillsDir;
+    private static final String SKILL_MD = "SKILL.md";
+
+    private final Path uploadDir;
+    private final List<SkillMeta> builtinMetas;
     private final ToolDispatcher dispatcher;
     private final SkillLoader loader;
     private volatile Cache cache;
@@ -59,23 +74,37 @@ public class SkillRegistry {
     private static class Cache {
         final List<SkillMeta> all;
         final Map<String, SkillMeta> byName;
+        final Map<String, Path> customSkillPaths;
 
-        Cache(List<SkillMeta> all, Map<String, SkillMeta> byName) {
+        Cache(List<SkillMeta> all, Map<String, SkillMeta> byName,
+              Map<String, Path> customSkillPaths) {
             this.all = Collections.unmodifiableList(all);
             this.byName = Collections.unmodifiableMap(byName);
+            this.customSkillPaths = Collections.unmodifiableMap(customSkillPaths);
         }
     }
 
-    public SkillRegistry(Path skillsDir, ToolDispatcher dispatcher) {
-        this(skillsDir, dispatcher, new SkillLoader());
+    public SkillRegistry(Path uploadDir, ToolDispatcher dispatcher) {
+        this(uploadDir, Collections.<SkillMeta>emptyList(), dispatcher);
     }
 
-    public SkillRegistry(Path skillsDir, ToolDispatcher dispatcher, SkillLoader loader) {
-        this.skillsDir = skillsDir;
+    public SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills,
+                         ToolDispatcher dispatcher) {
+        this(uploadDir, builtinSkills, dispatcher, new SkillLoader());
+    }
+
+    public SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills,
+                         ToolDispatcher dispatcher, SkillLoader loader) {
+        this.uploadDir = uploadDir != null
+                ? uploadDir.toAbsolutePath().normalize() : null;
+        this.builtinMetas = builtinSkills == null
+                ? Collections.<SkillMeta>emptyList()
+                : new ArrayList<SkillMeta>(builtinSkills);
         this.dispatcher = dispatcher;
         this.loader = loader;
         this.cache = new Cache(Collections.<SkillMeta>emptyList(),
-                Collections.<String, SkillMeta>emptyMap());
+                Collections.<String, SkillMeta>emptyMap(),
+                Collections.<String, Path>emptyMap());
         try {
             this.cache = scan();
         } catch (RuntimeException e) {
@@ -83,7 +112,7 @@ public class SkillRegistry {
         }
     }
 
-    /** Returns all loaded skill metadata (including INVALID entries). */
+    /** Returns all merged skill metadata (builtin + custom, custom wins on name conflict). */
     public List<SkillMeta> all() {
         return cache.all;
     }
@@ -96,7 +125,33 @@ public class SkillRegistry {
         return cache.byName.get(name);
     }
 
-    /** Re-scans the directory and atomically replaces the cache. */
+    /** Returns true if a builtin skill with the given name exists. */
+    public boolean isBuiltin(String name) {
+        if (name == null) {
+            return false;
+        }
+        for (SkillMeta meta : builtinMetas) {
+            if (name.equals(meta.getName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Returns the filesystem path (file or directory) for a custom skill, or {@code null}. */
+    public Path getCustomSkillPath(String name) {
+        if (name == null) {
+            return null;
+        }
+        return cache.customSkillPaths.get(name);
+    }
+
+    /** Returns the upload directory path (for controller upload/delete operations). */
+    public Path getUploadDir() {
+        return uploadDir;
+    }
+
+    /** Re-scans the upload directory and atomically replaces the cache. */
     public RefreshResult refresh() {
         Cache newCache;
         try {
@@ -127,54 +182,127 @@ public class SkillRegistry {
     }
 
     private Cache scan() {
-        if (skillsDir == null) {
-            log.warn("skills-dir is null; skill registry is empty");
-            return new Cache(Collections.<SkillMeta>emptyList(),
-                    Collections.<String, SkillMeta>emptyMap());
-        }
-        if (!Files.isDirectory(skillsDir)) {
-            log.warn("skills-dir not found or not a directory: {}", skillsDir);
-            return new Cache(Collections.<SkillMeta>emptyList(),
-                    Collections.<String, SkillMeta>emptyMap());
+        // 1. Validate builtin skills and index by name
+        Map<String, SkillMeta> builtinByName = new LinkedHashMap<String, SkillMeta>();
+        for (SkillMeta meta : builtinMetas) {
+            if (meta.getName() == null || meta.getAvailability() == SkillAvailability.INVALID) {
+                log.debug("Skipping invalid builtin skill: {}", meta.getUnavailableReason());
+                continue;
+            }
+            SkillMeta validated = validateContract(meta).withSource("builtin");
+            builtinByName.put(validated.getName(), validated);
         }
 
-        List<SkillMeta> metas = new ArrayList<>();
-        try {
-            Files.walkFileTree(skillsDir, new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (file.toString().endsWith(".md")) {
-                        try {
-                            String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-                            SkillMeta parsed = loader.parse(content);
-                            SkillMeta validated = validateContract(parsed);
-                            metas.add(validated);
-                        } catch (IOException e) {
-                            log.warn("Failed to read skill file {}: {}", file, e.getMessage());
-                        } catch (RuntimeException e) {
-                            log.warn("Failed to parse skill file {}: {}", file, e.getMessage());
+        // 2. Scan upload directory (filesystem)
+        Map<String, SkillMeta> customByName = new LinkedHashMap<String, SkillMeta>();
+        Map<String, Path> customPaths = new HashMap<String, Path>();
+
+        if (uploadDir == null) {
+            log.warn("upload-skills-dir is null; only builtin skills will be loaded");
+        } else if (!Files.isDirectory(uploadDir)) {
+            log.warn("upload-skills-dir not found or not a directory: {}", uploadDir);
+        } else {
+            try {
+                Files.walkFileTree(uploadDir, new SimpleFileVisitor<Path>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                        // Root directory is always organizational
+                        if (dir.equals(uploadDir)) {
+                            return FileVisitResult.CONTINUE;
                         }
+                        // Subdirectory with SKILL.md → directory skill
+                        Path skillMd = dir.resolve(SKILL_MD);
+                        if (Files.exists(skillMd)) {
+                            try {
+                                String content = new String(Files.readAllBytes(skillMd),
+                                        StandardCharsets.UTF_8);
+                                SkillMeta parsed = loader.parse(content);
+                                if (parsed.getAvailability() == SkillAvailability.INVALID) {
+                                    log.debug("Skipping invalid directory skill {}: {}",
+                                            skillMd, parsed.getUnavailableReason());
+                                    return FileVisitResult.SKIP_SUBTREE;
+                                }
+                                SkillMeta validated = validateContract(parsed).withSource("custom");
+                                if (customByName.containsKey(validated.getName())) {
+                                    log.warn("Duplicate custom skill name '{}': overriding previous",
+                                            validated.getName());
+                                }
+                                customByName.put(validated.getName(), validated);
+                                customPaths.put(validated.getName(), dir);
+                            } catch (IOException e) {
+                                log.warn("Failed to read skill file {}: {}",
+                                        skillMd, e.getMessage());
+                            } catch (RuntimeException e) {
+                                log.warn("Failed to parse skill file {}: {}",
+                                        skillMd, e.getMessage());
+                            }
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+                        // No SKILL.md → organizational directory, recurse
+                        return FileVisitResult.CONTINUE;
                     }
-                    return FileVisitResult.CONTINUE;
-                }
-            });
-        } catch (IOException e) {
-            log.warn("Failed to walk skill files in {}: {}", skillsDir, e.getMessage());
-            return new Cache(Collections.<SkillMeta>emptyList(),
-                    Collections.<String, SkillMeta>emptyMap());
-        }
 
-        if (metas.isEmpty()) {
-            log.warn("no skill files found in {}", skillsDir);
-        }
-
-        Map<String, SkillMeta> byName = new HashMap<>();
-        for (SkillMeta m : metas) {
-            if (m.getName() != null && !m.getName().isEmpty()) {
-                byName.put(m.getName(), m);
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        String fileName = file.getFileName().toString();
+                        if (fileName.endsWith(".md")) {
+                            try {
+                                String content = new String(Files.readAllBytes(file),
+                                        StandardCharsets.UTF_8);
+                                SkillMeta parsed = loader.parse(content);
+                                if (parsed.getAvailability() == SkillAvailability.INVALID) {
+                                    log.debug("Skipping invalid skill file {}: {}",
+                                            file, parsed.getUnavailableReason());
+                                    return FileVisitResult.CONTINUE;
+                                }
+                                SkillMeta validated = validateContract(parsed).withSource("custom");
+                                if (customByName.containsKey(validated.getName())) {
+                                    log.warn("Duplicate custom skill name '{}': overriding previous",
+                                            validated.getName());
+                                }
+                                customByName.put(validated.getName(), validated);
+                                customPaths.put(validated.getName(), file);
+                            } catch (IOException e) {
+                                log.warn("Failed to read skill file {}: {}",
+                                        file, e.getMessage());
+                            } catch (RuntimeException e) {
+                                log.warn("Failed to parse skill file {}: {}",
+                                        file, e.getMessage());
+                            }
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+            } catch (IOException e) {
+                log.warn("Failed to walk skill files in {}: {}", uploadDir, e.getMessage());
             }
         }
-        return new Cache(metas, byName);
+
+        if (builtinByName.isEmpty() && customByName.isEmpty()) {
+            log.warn("no skill files found in builtin or upload directories");
+        }
+
+        // 3. Merge: custom overrides builtin by name
+        List<SkillMeta> merged = new ArrayList<SkillMeta>();
+        Map<String, SkillMeta> byName = new LinkedHashMap<String, SkillMeta>();
+
+        for (SkillMeta meta : builtinByName.values()) {
+            if (!customByName.containsKey(meta.getName())) {
+                merged.add(meta);
+                byName.put(meta.getName(), meta);
+            }
+        }
+
+        for (SkillMeta meta : customByName.values()) {
+            SkillMeta result = meta;
+            if (builtinByName.containsKey(meta.getName())) {
+                result = meta.withOverridesBuiltin(true);
+            }
+            merged.add(result);
+            byName.put(result.getName(), result);
+        }
+
+        return new Cache(merged, byName, customPaths);
     }
 
     /**
@@ -186,13 +314,13 @@ public class SkillRegistry {
             return meta;
         }
         if (dispatcher == null) {
-            // No dispatcher → all tools considered missing
             return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
                     meta.getInputs(), meta.getBody(), SkillAvailability.UNAVAILABLE,
-                    "tool dispatcher not configured");
+                    "tool dispatcher not configured", meta.getSource(),
+                    meta.isOverridesBuiltin());
         }
         Set<String> available = dispatcher.availableToolNames();
-        List<String> missing = new ArrayList<>();
+        List<String> missing = new ArrayList<String>();
         for (String tool : meta.getTools()) {
             if (!available.contains(tool)) {
                 missing.add(tool);
@@ -203,6 +331,7 @@ public class SkillRegistry {
         }
         return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
                 meta.getInputs(), meta.getBody(), SkillAvailability.UNAVAILABLE,
-                "tool(s) not available: " + missing);
+                "tool(s) not available: " + missing, meta.getSource(),
+                meta.isOverridesBuiltin());
     }
 }

@@ -1,5 +1,6 @@
 package com.watsontech.snapagent.core.skill;
 
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
@@ -31,7 +32,7 @@ public class SkillLoader {
     private final Yaml yaml;
 
     public SkillLoader() {
-        this.yaml = new Yaml(new SafeConstructor());
+        this.yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
     }
 
     /**

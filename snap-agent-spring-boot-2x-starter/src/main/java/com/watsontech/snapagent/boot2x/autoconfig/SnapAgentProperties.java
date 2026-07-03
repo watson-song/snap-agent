@@ -24,8 +24,11 @@ public class SnapAgentProperties {
     /** Controller path prefix. */
     private String basePath = "/snap-agent";
 
-    /** Directory to scan for skill .md files. */
-    private String skillsDir = "classpath:/skills/";
+    /** Directory on the classpath for built-in skills (read-only, packaged in JAR). */
+    private String builtinSkillsDir = "classpath:/docs/skills/";
+
+    /** Directory on the filesystem for uploaded skills (read-write, persists across restarts). */
+    private String uploadSkillsDir = "/tmp/snap-agent-skills";
 
     private Llm llm = new Llm();
     private Agent agent = new Agent();
@@ -53,12 +56,20 @@ public class SnapAgentProperties {
         this.basePath = basePath;
     }
 
-    public String getSkillsDir() {
-        return skillsDir;
+    public String getBuiltinSkillsDir() {
+        return builtinSkillsDir;
     }
 
-    public void setSkillsDir(String skillsDir) {
-        this.skillsDir = skillsDir;
+    public void setBuiltinSkillsDir(String builtinSkillsDir) {
+        this.builtinSkillsDir = builtinSkillsDir;
+    }
+
+    public String getUploadSkillsDir() {
+        return uploadSkillsDir;
+    }
+
+    public void setUploadSkillsDir(String uploadSkillsDir) {
+        this.uploadSkillsDir = uploadSkillsDir;
     }
 
     public Llm getLlm() {
