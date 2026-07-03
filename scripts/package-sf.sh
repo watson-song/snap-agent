@@ -10,8 +10,8 @@
 #   - lib/  本地 Maven 文件仓库（jar + 独立 pom，CICD 无外网可直接用）
 #   - pom-snippet.xml      粘贴到宿主 pom.xml 的 repository + dependency
 #   - application-sf.yml   SF 默认配置（cc-switch 模型 + /app/deploy/skills）
-#   - INTEGRATION-AI.md    AI 可执行集成指南
-#   - README-SF.md         快速参考
+#   - README.md            AI 可执行集成指南（集成 + 验证 + 排查 + 升级）
+#   - install-sf.sh        一键安装脚本（复制 lib/ + 打印 AI 提示词）
 #
 # 版本号自动从 pom.xml 读取，无需手动指定。
 # 后续发布新版本时只需改 pom.xml 版本后重新运行此脚本。
@@ -147,7 +147,7 @@ EOF
 
 # ---- 6. 复制并模板化 SF 配置文件 ----
 echo "▶ 生成 SF 配置文件..."
-for f in pom-snippet.xml application-sf.yml INTEGRATION-AI.md README-SF.md install-sf.sh; do
+for f in pom-snippet.xml application-sf.yml README.md install-sf.sh; do
     if [ ! -f "$TEMPLATES_DIR/$f" ]; then
         echo "✗ 模板文件缺失: $TEMPLATES_DIR/$f"
         exit 1
