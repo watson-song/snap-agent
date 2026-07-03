@@ -1,0 +1,65 @@
+# ============================================================
+# SnapAgent — SF 默认配置
+# 将以下内容合并到宿主项目的 application.yml 中
+# ============================================================
+
+snap-agent:
+  # 总开关 — true 才会装配 Agent bean
+  enabled: true
+  # Web 端点前缀，所有 API 挂在 /snap-agent/** 下
+  base-path: /snap-agent
+
+  # ---- 两层 Skill 目录 ----
+  # 内置 Skill（classpath，只读，打包在 JAR 里）
+  builtin-skills-dir: classpath:/docs/skills/
+  # 上传 Skill（文件系统，读写，重启后持久化）
+  # SF 服务器部署路径
+  upload-skills-dir: /app/deploy/skills
+
+  # ---- LLM 配置（cc-switch 代理网关）----
+  llm:
+    # cc-switch 代理地址
+    base-url: https://claudecode.sf-express.com/ccr
+    # Bearer token（cc-switch 的 ANTHROPIC_AUTH_TOKEN）
+    auth-token: 01414185
+    # 默认模型（cc-switch 配置的 aliyun/glm-5.2）
+    model: aliyun/glm-5.2
+    # 服务端强制白名单 — 只允许以下模型
+    allowed-models:
+      - aliyun/glm-5.2
+    # 流式输出
+    streaming: true
+    # 单次请求最大 token
+    max-tokens: 8192
+    # 超时秒数
+    timeout-seconds: 120
+
+  # ---- JDBC 只读数据源 ----
+  jdbc:
+    enabled: true
+    # 宿主项目需提供名为 snapAgentReadOnlyDataSource 的只读 DataSource Bean
+    datasource-bean-name: snapAgentReadOnlyDataSource
+
+  # ---- Redis 只读 ----
+  redis:
+    enabled: true
+    # 宿主项目需提供名为 redisTemplate 的 RedisTemplate Bean
+    redis-template-bean-name: redisTemplate
+
+  # ---- Agent 执行参数 ----
+  agent:
+    max-turns: 20
+    task-timeout-minutes: 30
+    max-concurrent-runs-per-user: 1
+    max-runs-per-hour: 20
+    max-result-rows: 1000
+
+  # ---- 安全 ----
+  security:
+    # auto = 自动探测 Spring Security / Shiro / 无框架
+    framework: auto
+    audit-log: true
+
+  # ---- 多实例路由（单机设 none）----
+  routing:
+    mode: none

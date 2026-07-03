@@ -1,6 +1,7 @@
 # Build output
 target/
 dist/
+sf-dist/
 
 # IDE
 .idea/
