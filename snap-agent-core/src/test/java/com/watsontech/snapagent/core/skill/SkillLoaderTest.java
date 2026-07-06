@@ -268,4 +268,59 @@ class SkillLoaderTest {
         assertThat(meta.getInputs().get(1).getKey()).isEqualTo("env");
         assertThat(meta.getInputs().get(1).getOptions()).containsExactly("sit", "uat");
     }
+
+    @Test
+    void shouldParseShortcutsWhenPresent() {
+        String content = "---\n"
+                + "name: redis-query\n"
+                + "description: Redis key inspection\n"
+                + "tools: [redis_get]\n"
+                + "shortcuts:\n"
+                + "  - label: \"检查Key\"\n"
+                + "    message: \"检查一个Redis Key是否存在\"\n"
+                + "  - label: \"读取Key值\"\n"
+                + "    message: \"读取一个Redis Key的值\"\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getShortcuts()).hasSize(2);
+        assertThat(meta.getShortcuts().get(0).getLabel()).isEqualTo("检查Key");
+        assertThat(meta.getShortcuts().get(0).getMessage()).isEqualTo("检查一个Redis Key是否存在");
+        assertThat(meta.getShortcuts().get(1).getLabel()).isEqualTo("读取Key值");
+        assertThat(meta.getShortcuts().get(1).getMessage()).isEqualTo("读取一个Redis Key的值");
+    }
+
+    @Test
+    void shouldDefaultToEmptyShortcutsWhenNotDeclared() {
+        String content = "---\n"
+                + "name: s1\n"
+                + "description: desc\n"
+                + "tools: [mysql_query]\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getShortcuts()).isEmpty();
+    }
+
+    @Test
+    void shouldMarkInvalidWhenShortcutMissingLabel() {
+        String content = "---\n"
+                + "name: s1\n"
+                + "description: desc\n"
+                + "tools: [mysql_query]\n"
+                + "shortcuts:\n"
+                + "  - message: \"only message\"\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.INVALID);
+        assertThat(meta.getUnavailableReason()).contains("shortcut");
+    }
 }

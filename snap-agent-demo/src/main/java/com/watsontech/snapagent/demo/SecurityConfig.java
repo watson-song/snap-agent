@@ -9,15 +9,15 @@ import org.springframework.security.config.annotation.web.configuration.WebSecur
  * Demo-only Spring Security config.
  *
  * <ul>
- *   <li>Public: {@code /snap-agent/user-info} — returns auth status (no login required).</li>
- *   <li>Public: static resources ({@code *.html}, {@code *.js}, {@code *.css}).</li>
- *   <li>Public: {@code /snap-agent/runs/*/stream} — SSE endpoint (EventSource sends
- *       cookies automatically; controller verifies task ownership).</li>
- *   <li>Public: {@code /snap-agent-internal/**} — permitAll; the shared secret in the
- *       {@link com.watsontech.snapagent.boot2x.web.InternalTaskController} is the only
- *       credential (host must permit this path for pod-to-pod traffic).</li>
- *   <li>All other {@code /snap-agent/**} endpoints — basic auth (user {@code demo}/{@code demo}),
- *       so the {@code SecurityGateway} resolves a real principal.</li>
+ *   <li>Public: /snap-agent/user-info — returns auth status (no login required).</li>
+ *   <li>Public: static resources (.html, .js, .css).</li>
+ *   <li>Public: SSE stream endpoint (/snap-agent/runs/{id}/stream) — EventSource sends
+ *       cookies automatically; controller verifies task ownership.</li>
+ *   <li>Public: /snap-agent-internal/ — permitAll; the shared secret in the
+ *       InternalTaskController is the only credential (host must permit this path
+ *       for pod-to-pod traffic).</li>
+ *   <li>All other /snap-agent/ endpoints — basic auth (user demo/demo),
+ *       so the SecurityGateway resolves a real principal.</li>
  * </ul>
  */
 @Configuration

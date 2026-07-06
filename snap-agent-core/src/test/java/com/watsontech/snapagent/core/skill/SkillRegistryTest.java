@@ -50,7 +50,9 @@ class SkillRegistryTest {
     private SkillMeta builtinSkill(String name, String tools) {
         return new SkillMeta(name, "builtin " + name,
                 Arrays.asList(tools.split(", ")),
-                Collections.<InputSpec>emptyList(), "builtin body",
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(),
+                "builtin body",
                 SkillAvailability.AVAILABLE, null, "builtin", false);
     }
 

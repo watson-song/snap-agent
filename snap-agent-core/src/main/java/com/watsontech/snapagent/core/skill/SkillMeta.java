@@ -17,6 +17,7 @@ public final class SkillMeta {
     private final String description;
     private final List<String> tools;
     private final List<InputSpec> inputs;
+    private final List<Shortcut> shortcuts;
     private final String body;
     private final SkillAvailability availability;
     private final String unavailableReason;
@@ -26,18 +27,19 @@ public final class SkillMeta {
     public SkillMeta(String name, String description, List<String> tools,
                      List<InputSpec> inputs, String body,
                      SkillAvailability availability, String unavailableReason) {
-        this(name, description, tools, inputs, body, availability, unavailableReason,
-                "custom", false);
+        this(name, description, tools, inputs, Collections.<Shortcut>emptyList(), body,
+                availability, unavailableReason, "custom", false);
     }
 
     public SkillMeta(String name, String description, List<String> tools,
-                     List<InputSpec> inputs, String body,
+                     List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
                      SkillAvailability availability, String unavailableReason,
                      String source, boolean overridesBuiltin) {
         this.name = name;
         this.description = description;
         this.tools = tools == null ? Collections.<String>emptyList() : tools;
         this.inputs = inputs == null ? Collections.<InputSpec>emptyList() : inputs;
+        this.shortcuts = shortcuts == null ? Collections.<Shortcut>emptyList() : shortcuts;
         this.body = body;
         this.availability = availability;
         this.unavailableReason = unavailableReason;
@@ -59,6 +61,10 @@ public final class SkillMeta {
 
     public List<InputSpec> getInputs() {
         return inputs;
+    }
+
+    public List<Shortcut> getShortcuts() {
+        return shortcuts;
     }
 
     public String getBody() {
@@ -83,13 +89,13 @@ public final class SkillMeta {
 
     /** Returns a copy with the given source. */
     public SkillMeta withSource(String source) {
-        return new SkillMeta(name, description, tools, inputs, body,
+        return new SkillMeta(name, description, tools, inputs, shortcuts, body,
                 availability, unavailableReason, source, overridesBuiltin);
     }
 
     /** Returns a copy with overridesBuiltin set. */
     public SkillMeta withOverridesBuiltin(boolean overrides) {
-        return new SkillMeta(name, description, tools, inputs, body,
+        return new SkillMeta(name, description, tools, inputs, shortcuts, body,
                 availability, unavailableReason, source, overrides);
     }
 

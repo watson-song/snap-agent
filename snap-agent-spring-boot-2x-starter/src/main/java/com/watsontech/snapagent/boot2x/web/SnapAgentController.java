@@ -505,6 +505,14 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", validationError);
         }
 
+        // Auto-inject log paths for log_read skills
+        if (skill.getTools().contains("log_read") && inputs != null) {
+            List<String> logPaths = properties.getLogs().getAllowedPaths();
+            if (logPaths != null && !logPaths.isEmpty()) {
+                inputs.put("_log_paths", String.join(", ", logPaths));
+            }
+        }
+
         // Validate model — check against dynamic API list first, then static config
         String model = (String) body.get("model");
         if (model != null && !model.isEmpty()) {
@@ -882,6 +890,19 @@ public class SnapAgentController {
             inputs.add(input);
         }
         dto.put("inputs", inputs);
+        // Shortcuts
+        List<Map<String, Object>> shortcuts = new ArrayList<Map<String, Object>>();
+        for (com.watsontech.snapagent.core.skill.Shortcut sc : skill.getShortcuts()) {
+            Map<String, Object> scDto = new LinkedHashMap<String, Object>();
+            scDto.put("label", sc.getLabel());
+            scDto.put("message", sc.getMessage());
+            shortcuts.add(scDto);
+        }
+        dto.put("shortcuts", shortcuts);
+        // Log paths for log_read skills
+        if (skill.getTools().contains("log_read")) {
+            dto.put("logPaths", properties.getLogs().getAllowedPaths());
+        }
         return dto;
     }
 

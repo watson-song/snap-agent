@@ -139,6 +139,10 @@ function selectSkill(skill, li) {
             inputsHint = `<div class="ctx-inputs">⚠️ 必须输入: ${required.map(i => i.label || i.key).join(', ')}</div>`;
         }
     }
+    // Show log paths if available
+    if (skill.logPaths && skill.logPaths.length > 0) {
+        inputsHint += `<div class="ctx-logpath">📄 日志目录: ${skill.logPaths.join(', ')}</div>`;
+    }
     ctx.innerHTML = `
         <div class="ctx-name">${skill.name}</div>
         <div class="ctx-desc">${skill.description || ''}</div>
@@ -148,6 +152,26 @@ function selectSkill(skill, li) {
     // Show input area
     const inputArea = document.getElementById('inputArea');
     inputArea.style.display = 'block';
+
+    // Render shortcuts
+    const shortcutBar = document.getElementById('shortcutBar');
+    shortcutBar.innerHTML = '';
+    if (skill.shortcuts && skill.shortcuts.length > 0) {
+        skill.shortcuts.forEach(sc => {
+            const btn = document.createElement('button');
+            btn.className = 'shortcut-btn';
+            btn.textContent = sc.label;
+            btn.addEventListener('click', () => {
+                msgInput.value = sc.message;
+                msgInput.focus();
+                updateSendButtonState();
+            });
+            shortcutBar.appendChild(btn);
+        });
+        shortcutBar.style.display = 'flex';
+    } else {
+        shortcutBar.style.display = 'none';
+    }
 
     // Render input form
     const form = document.getElementById('inputForm');

@@ -531,6 +531,40 @@ body {
     padding: 16px 24px;
 }
 
+.shortcut-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.shortcut-btn {
+    padding: 6px 14px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.shortcut-btn:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.ctx-logpath {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-top: 4px;
+}
+
 .input-form {
     display: flex;
     flex-wrap: wrap;

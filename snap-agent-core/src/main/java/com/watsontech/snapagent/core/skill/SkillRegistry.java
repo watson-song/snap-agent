@@ -315,7 +315,8 @@ public class SkillRegistry {
         }
         if (dispatcher == null) {
             return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
-                    meta.getInputs(), meta.getBody(), SkillAvailability.UNAVAILABLE,
+                    meta.getInputs(), meta.getShortcuts(), meta.getBody(),
+                    SkillAvailability.UNAVAILABLE,
                     "tool dispatcher not configured", meta.getSource(),
                     meta.isOverridesBuiltin());
         }
@@ -330,7 +331,8 @@ public class SkillRegistry {
             return meta;
         }
         return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
-                meta.getInputs(), meta.getBody(), SkillAvailability.UNAVAILABLE,
+                meta.getInputs(), meta.getShortcuts(), meta.getBody(),
+                SkillAvailability.UNAVAILABLE,
                 "tool(s) not available: " + missing, meta.getSource(),
                 meta.isOverridesBuiltin());
     }

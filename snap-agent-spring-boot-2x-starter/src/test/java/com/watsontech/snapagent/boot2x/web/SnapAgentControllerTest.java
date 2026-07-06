@@ -11,6 +11,7 @@ import com.watsontech.snapagent.core.agent.TranscriptEvent;
 import com.watsontech.snapagent.core.security.SecurityGateway;
 import com.watsontech.snapagent.core.skill.SkillAvailability;
 import com.watsontech.snapagent.core.skill.SkillMeta;
+import com.watsontech.snapagent.core.skill.Shortcut;
 import com.watsontech.snapagent.core.skill.InputSpec;
 import com.watsontech.snapagent.core.skill.SkillRegistry;
 import com.watsontech.snapagent.core.tool.ToolDispatcher;
@@ -438,7 +439,8 @@ class SnapAgentControllerTest {
     @Test
     void shouldReturn403WhenDeleteBuiltinSkill() throws Exception {
         SkillMeta builtin = new SkillMeta("builtin-skill", "desc",
-                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                Collections.singletonList("mysql_query"), Collections.emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
                 SkillAvailability.AVAILABLE, null, "builtin", false);
         when(skillRegistry.get("builtin-skill")).thenReturn(builtin);
         when(skillRegistry.getCustomSkillPath("builtin-skill")).thenReturn(null);
@@ -451,7 +453,8 @@ class SnapAgentControllerTest {
     @Test
     void shouldDeleteCustomSkillAndReturn200() throws Exception {
         SkillMeta custom = new SkillMeta("custom-skill", "desc",
-                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                Collections.singletonList("mysql_query"), Collections.emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
                 SkillAvailability.AVAILABLE, null, "custom", false);
         when(skillRegistry.get("custom-skill")).thenReturn(custom);
 
@@ -473,7 +476,8 @@ class SnapAgentControllerTest {
     @Test
     void shouldReportBuiltinRestoredWhenCustomOverrideDeleted() throws Exception {
         SkillMeta custom = new SkillMeta("shared", "desc",
-                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                Collections.singletonList("mysql_query"), Collections.emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
                 SkillAvailability.AVAILABLE, null, "custom", true);
         when(skillRegistry.get("shared")).thenReturn(custom);
 
@@ -492,7 +496,8 @@ class SnapAgentControllerTest {
     @Test
     void shouldIncludeSourceInSkillDto() throws Exception {
         SkillMeta skill = new SkillMeta("test-skill", "desc",
-                Collections.singletonList("mysql_query"), Collections.emptyList(), "body",
+                Collections.singletonList("mysql_query"), Collections.emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
                 SkillAvailability.AVAILABLE, null, "builtin", false);
         when(skillRegistry.all()).thenReturn(Collections.singletonList(skill));
 
@@ -500,5 +505,24 @@ class SnapAgentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.skills[0].source").value("builtin"))
                 .andExpect(jsonPath("$.skills[0].overridesBuiltin").value(false));
+    }
+
+    @Test
+    void shouldIncludeShortcutsInSkillDto() throws Exception {
+        List<Shortcut> shortcuts = Arrays.asList(
+                new Shortcut("所有表", "列出当前数据库的所有表"),
+                new Shortcut("表数据量", "查看当前数据库各表的数据量"));
+        SkillMeta skill = new SkillMeta("db-skill", "desc",
+                Collections.singletonList("mysql_query"), Collections.<InputSpec>emptyList(),
+                shortcuts, "body",
+                SkillAvailability.AVAILABLE, null, "builtin", false);
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(skill));
+
+        mockMvc.perform(get("/snap-agent/skills"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skills[0].shortcuts[0].label").value("所有表"))
+                .andExpect(jsonPath("$.skills[0].shortcuts[0].message").value("列出当前数据库的所有表"))
+                .andExpect(jsonPath("$.skills[0].shortcuts[1].label").value("表数据量"))
+                .andExpect(jsonPath("$.skills[0].shortcuts[1].message").value("查看当前数据库各表的数据量"));
     }
 }

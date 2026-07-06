@@ -142,8 +142,21 @@ public class SkillLoader {
             }
         }
 
-        return new SkillMeta(name, description, tools, inputs, body,
-                SkillAvailability.AVAILABLE, null);
+        // Parse shortcuts (optional)
+        List<Shortcut> shortcuts = Collections.emptyList();
+        Object shortcutsObj = map.get("shortcuts");
+        if (shortcutsObj != null) {
+            if (!(shortcutsObj instanceof List)) {
+                return invalid(name, "shortcuts must be a list");
+            }
+            shortcuts = parseShortcuts((List<?>) shortcutsObj, name);
+            if (shortcuts == null) {
+                return invalid(name, "invalid shortcut spec: missing label or message");
+            }
+        }
+
+        return new SkillMeta(name, description, tools, inputs, shortcuts, body,
+                SkillAvailability.AVAILABLE, null, "custom", false);
     }
 
     @SuppressWarnings("unchecked")
@@ -172,6 +185,24 @@ public class SkillLoader {
                 defaultValue = String.valueOf(defObj);
             }
             result.add(new InputSpec(key, label, required, type, options, defaultValue));
+        }
+        return result;
+    }
+
+    private List<Shortcut> parseShortcuts(List<?> rawList, String skillName) {
+        List<Shortcut> result = new ArrayList<>();
+        for (Object item : rawList) {
+            if (!(item instanceof Map)) {
+                return null;
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> sm = (Map<String, Object>) item;
+            Object labelObj = sm.get("label");
+            Object messageObj = sm.get("message");
+            if (!(labelObj instanceof String) || !(messageObj instanceof String)) {
+                return null;
+            }
+            result.add(new Shortcut((String) labelObj, (String) messageObj));
         }
         return result;
     }
@@ -242,7 +273,7 @@ public class SkillLoader {
 
     private SkillMeta invalid(String name, String reason) {
         return new SkillMeta(name, null, Collections.<String>emptyList(),
-                Collections.<InputSpec>emptyList(), null,
-                SkillAvailability.INVALID, reason);
+                Collections.<InputSpec>emptyList(), Collections.<Shortcut>emptyList(),
+                null, SkillAvailability.INVALID, reason, "custom", false);
     }
 }
