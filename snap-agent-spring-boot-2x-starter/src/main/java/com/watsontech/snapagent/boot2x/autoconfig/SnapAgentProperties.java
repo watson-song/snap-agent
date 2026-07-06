@@ -144,6 +144,7 @@ public class SnapAgentProperties {
         private String baseUrl = "https://api.anthropic.com";
         private String apiKey = "";
         private String authToken = "";
+        private String proxyUrl = "";
         private String model = "claude-sonnet-4-6";
         private List<String> allowedModels = new ArrayList<String>();
         private int maxTokens = 8192;
@@ -177,6 +178,14 @@ public class SnapAgentProperties {
 
         public void setAuthToken(String authToken) {
             this.authToken = authToken;
+        }
+
+        public String getProxyUrl() {
+            return proxyUrl;
+        }
+
+        public void setProxyUrl(String proxyUrl) {
+            this.proxyUrl = proxyUrl;
         }
 
         public String getModel() {

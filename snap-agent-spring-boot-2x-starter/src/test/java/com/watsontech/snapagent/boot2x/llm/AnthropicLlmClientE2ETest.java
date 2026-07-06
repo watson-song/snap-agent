@@ -45,7 +45,7 @@ class AnthropicLlmClientE2ETest {
     @Test
     void shouldStreamTextResponseFromRealApi() throws InterruptedException {
         AnthropicLlmClient client = new AnthropicLlmClient(
-                BASE_URL, API_KEY, "", 60);
+                BASE_URL, API_KEY, "", null, 60);
 
         CapturingSink sink = new CapturingSink();
         LlmRequest req = new LlmRequest(
@@ -87,7 +87,7 @@ class AnthropicLlmClientE2ETest {
     @Test
     void shouldHandleStreamingWithSystemPrompt() throws InterruptedException {
         AnthropicLlmClient client = new AnthropicLlmClient(
-                BASE_URL, API_KEY, "", 60);
+                BASE_URL, API_KEY, "", null, 60);
 
         CapturingSink sink = new CapturingSink();
         LlmRequest req = new LlmRequest(
@@ -115,7 +115,7 @@ class AnthropicLlmClientE2ETest {
     @Test
     void shouldReceiveSseEventsInCorrectOrder() throws InterruptedException {
         AnthropicLlmClient client = new AnthropicLlmClient(
-                BASE_URL, API_KEY, "", 60);
+                BASE_URL, API_KEY, "", null, 60);
 
         CapturingSink sink = new CapturingSink();
         LlmRequest req = new LlmRequest(

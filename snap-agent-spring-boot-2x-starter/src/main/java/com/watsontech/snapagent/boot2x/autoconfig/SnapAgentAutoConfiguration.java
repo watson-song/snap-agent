@@ -122,6 +122,7 @@ public class SnapAgentAutoConfiguration {
                 props.getLlm().getBaseUrl(),
                 props.getLlm().getApiKey(),
                 props.getLlm().getAuthToken(),
+                props.getLlm().getProxyUrl(),
                 props.getLlm().getTimeoutSeconds());
     }
 

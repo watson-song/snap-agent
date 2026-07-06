@@ -48,6 +48,7 @@ class SnapAgentPropertiesTest {
 
         assertThat(llm.getBaseUrl()).isEqualTo("https://api.anthropic.com");
         assertThat(llm.getApiKey()).isEmpty();
+        assertThat(llm.getProxyUrl()).isEmpty();
         assertThat(llm.getModel()).isEqualTo("claude-sonnet-4-6");
         assertThat(llm.getAllowedModels()).containsExactly("claude-sonnet-4-6", "claude-opus-4-6");
         assertThat(llm.getMaxTokens()).isEqualTo(8192);
@@ -140,6 +141,7 @@ class SnapAgentPropertiesTest {
         SnapAgentProperties.Llm llm = new SnapAgentProperties.Llm();
         llm.setBaseUrl("https://custom.api.com");
         llm.setApiKey("sk-custom");
+        llm.setProxyUrl("http://proxy.example.com:3128");
         llm.setModel("custom-model");
         llm.setAllowedModels(Arrays.asList("custom-model"));
         llm.setMaxTokens(4096);
@@ -148,6 +150,7 @@ class SnapAgentPropertiesTest {
 
         assertThat(llm.getBaseUrl()).isEqualTo("https://custom.api.com");
         assertThat(llm.getApiKey()).isEqualTo("sk-custom");
+        assertThat(llm.getProxyUrl()).isEqualTo("http://proxy.example.com:3128");
         assertThat(llm.getModel()).isEqualTo("custom-model");
         assertThat(llm.getAllowedModels()).containsExactly("custom-model");
         assertThat(llm.getMaxTokens()).isEqualTo(4096);

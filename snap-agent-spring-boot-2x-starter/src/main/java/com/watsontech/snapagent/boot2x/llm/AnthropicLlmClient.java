@@ -19,6 +19,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -48,19 +51,29 @@ public class AnthropicLlmClient implements LlmClient {
     private final ObjectMapper objectMapper;
 
     public AnthropicLlmClient(String baseUrl, String apiKey, int timeoutSeconds) {
-        this(baseUrl, apiKey, null, timeoutSeconds);
+        this(baseUrl, apiKey, null, null, timeoutSeconds);
     }
 
-    /** Constructor with optional Bearer token auth (for proxy gateways like cc-switch). */
-    public AnthropicLlmClient(String baseUrl, String apiKey, String authToken, int timeoutSeconds) {
+    /** Constructor with optional Bearer token auth and HTTP proxy (for proxy gateways like cc-switch). */
+    public AnthropicLlmClient(String baseUrl, String apiKey, String authToken, String proxyUrl, int timeoutSeconds) {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.authToken = authToken;
         this.objectMapper = new ObjectMapper();
-        this.httpClient = new OkHttpClient.Builder()
+        OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                 .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
-                .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
-                .build();
+                .readTimeout(timeoutSeconds, TimeUnit.SECONDS);
+        if (proxyUrl != null && !proxyUrl.isEmpty()) {
+            try {
+                URL url = new URL(proxyUrl);
+                int port = url.getPort() > 0 ? url.getPort() : 80;
+                clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(url.getHost(), port)));
+                log.info("LLM client using HTTP proxy: {}", proxyUrl);
+            } catch (Exception e) {
+                log.warn("Invalid proxy-url '{}', ignoring: {}", proxyUrl, e.getMessage());
+            }
+        }
+        this.httpClient = clientBuilder.build();
     }
 
     /** Testable constructor — allows injecting a custom OkHttpClient. */
