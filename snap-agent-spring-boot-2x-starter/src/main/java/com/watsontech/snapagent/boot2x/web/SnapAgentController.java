@@ -10,7 +10,9 @@ import com.watsontech.snapagent.core.agent.TaskStore;
 import com.watsontech.snapagent.core.agent.TranscriptEvent;
 import com.watsontech.snapagent.core.llm.LlmClient;
 import com.watsontech.snapagent.core.llm.Message;
+import com.watsontech.snapagent.core.security.SecurityAuditLogger;
 import com.watsontech.snapagent.core.security.SecurityGateway;
+import com.watsontech.snapagent.core.security.UserInfo;
 import com.watsontech.snapagent.core.skill.InputSpec;
 import com.watsontech.snapagent.core.skill.SkillAvailability;
 import com.watsontech.snapagent.core.skill.SkillMeta;
@@ -41,6 +43,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -74,6 +77,7 @@ public class SnapAgentController {
     private final AsyncTaskExecutor taskExecutor;
     private final PeerSseRelay peerSseRelay;
     private final LlmClient llmClient;
+    private final SecurityAuditLogger auditLogger;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -84,7 +88,7 @@ public class SnapAgentController {
                                 RateLimiter rateLimiter,
                                 AsyncTaskExecutor taskExecutor) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor, null, null);
+                properties, securityGateway, rateLimiter, taskExecutor, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -97,7 +101,7 @@ public class SnapAgentController {
                                 AsyncTaskExecutor taskExecutor,
                                 PeerSseRelay peerSseRelay) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, null);
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -110,6 +114,21 @@ public class SnapAgentController {
                                 AsyncTaskExecutor taskExecutor,
                                 PeerSseRelay peerSseRelay,
                                 LlmClient llmClient) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -120,11 +139,41 @@ public class SnapAgentController {
         this.taskExecutor = taskExecutor;
         this.peerSseRelay = peerSseRelay;
         this.llmClient = llmClient;
+        this.auditLogger = auditLogger;
+    }
+
+    // ---- GET /user-info (public, no auth required) ----
+    @GetMapping("/user-info")
+    public ResponseEntity<Object> getUserInfo() {
+        UserInfo info = new UserInfo();
+        if (securityGateway == null) {
+            info.setMessage("security not configured");
+            return ResponseEntity.ok(info);
+        }
+        String userId = securityGateway.currentUserId();
+        if (userId == null) {
+            return ResponseEntity.ok(info);
+        }
+        info.setUserId(userId);
+        info.setUsername(userId);
+        info.setAuthenticated(true);
+        boolean authorized = securityGateway.hasPermission(
+                properties.getSecurity().getRequiredPermission());
+        info.setAuthorized(authorized);
+        if (!authorized) {
+            info.setMessage("您未授权，请联系管理员授权访问");
+        }
+        return ResponseEntity.ok(info);
     }
 
     // ---- GET /skills ----
     @GetMapping("/skills")
     public ResponseEntity<Object> listSkills() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        audit(currentUserId(), "GET", "/skills", "LIST_SKILLS", null);
+
         List<SkillMeta> skills = skillRegistry.all();
         List<Map<String, Object>> skillList = new ArrayList<Map<String, Object>>();
         for (SkillMeta skill : skills) {
@@ -138,6 +187,11 @@ public class SnapAgentController {
     // ---- GET /tools ----
     @GetMapping("/tools")
     public ResponseEntity<Object> listTools() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        audit(currentUserId(), "GET", "/tools", "LIST_TOOLS", null);
+
         Set<String> names = toolDispatcher.availableToolNames();
         List<Map<String, Object>> toolList = new ArrayList<Map<String, Object>>();
         for (String name : names) {
@@ -153,6 +207,11 @@ public class SnapAgentController {
     // ---- GET /models ----
     @GetMapping("/models")
     public ResponseEntity<Object> listModels() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        audit(currentUserId(), "GET", "/models", "LIST_MODELS", null);
+
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         List<String> models = new ArrayList<String>();
         if (llmClient != null) {
@@ -172,6 +231,11 @@ public class SnapAgentController {
     // ---- POST /skills/refresh ----
     @PostMapping("/skills/refresh")
     public ResponseEntity<Object> refreshSkills() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        audit(currentUserId(), "POST", "/skills/refresh", "REFRESH_SKILLS", null);
+
         SkillRegistry.RefreshResult rr = skillRegistry.refresh();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("total", rr.getTotal());
@@ -184,6 +248,9 @@ public class SnapAgentController {
     // ---- DELETE /skills/{name} ----
     @DeleteMapping("/skills/{name}")
     public ResponseEntity<Object> deleteSkill(@PathVariable String name) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
         if (name == null || name.isEmpty()) {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skill name is required");
         }
@@ -201,6 +268,9 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.FORBIDDEN, "BUILTIN_SKILL",
                     "cannot delete builtin skill: " + name);
         }
+
+        audit(currentUserId(), "DELETE", "/skills/" + name, "DELETE_SKILL",
+                Collections.<String, Object>singletonMap("skill", name));
 
         try {
             if (Files.isDirectory(customPath)) {
@@ -243,6 +313,9 @@ public class SnapAgentController {
     // ---- POST /skills/upload ----
     @PostMapping("/skills/upload")
     public ResponseEntity<Object> uploadSkill(@RequestParam("file") MultipartFile file) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
         if (file == null || file.isEmpty()) {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "file is empty");
         }
@@ -312,6 +385,8 @@ public class SnapAgentController {
             result.put("available", rr.getAvailable());
             result.put("unavailable", rr.getUnavailable());
             result.put("invalid", rr.getInvalid());
+            audit(currentUserId(), "POST", "/skills/upload", "UPLOAD_SKILL",
+                    Collections.<String, Object>singletonMap("filename", filename));
             return ResponseEntity.ok(result);
         } catch (Exception e) {
             log.error("Failed to upload skill file {}: {}", filename, e.getMessage());
@@ -325,6 +400,9 @@ public class SnapAgentController {
     public ResponseEntity<Object> uploadSkillFolder(
             @RequestParam("files") MultipartFile[] files,
             @RequestParam(value = "dirName", required = false) String dirName) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
         if (files == null || files.length == 0) {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "no files provided");
         }
@@ -490,6 +568,13 @@ public class SnapAgentController {
         result.put("taskId", task.getTaskId());
         result.put("status", task.getStatus().name());
         result.put("streamUrl", properties.getBasePath() + "/runs/" + task.getTaskId() + "/stream");
+
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("skillId", skillId);
+        auditDetails.put("model", model);
+        auditDetails.put("taskId", task.getTaskId());
+        audit(userId, "POST", "/runs", "RUN_SKILL", auditDetails);
+
         return ResponseEntity.accepted().body(result);
     }
 
@@ -741,6 +826,37 @@ public class SnapAgentController {
     }
 
     // ---- helpers ----
+
+    /**
+     * Checks authentication and permission. Returns null if OK,
+     * or an error ResponseEntity if not authenticated/authorized.
+     */
+    private ResponseEntity<Object> requireAuth() {
+        if (securityGateway == null) {
+            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "security not configured");
+        }
+        String userId = securityGateway.currentUserId();
+        if (userId == null) {
+            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
+        }
+        if (!securityGateway.hasPermission(properties.getSecurity().getRequiredPermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "permission denied");
+        }
+        return null;
+    }
+
+    /** Returns the current authenticated user id, or null. */
+    private String currentUserId() {
+        return securityGateway != null ? securityGateway.currentUserId() : null;
+    }
+
+    /** Records an audit event if an audit logger is configured. */
+    private void audit(String userId, String method, String path, String action,
+                       Map<String, Object> details) {
+        if (auditLogger != null) {
+            auditLogger.onApiAccess(userId, method, path, action, details);
+        }
+    }
 
     private Map<String, Object> toSkillDto(SkillMeta skill) {
         Map<String, Object> dto = new LinkedHashMap<String, Object>();

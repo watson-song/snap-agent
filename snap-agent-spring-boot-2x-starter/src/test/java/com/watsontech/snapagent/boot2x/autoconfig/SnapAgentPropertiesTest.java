@@ -46,6 +46,7 @@ class SnapAgentPropertiesTest {
         SnapAgentProperties props = new SnapAgentProperties();
         SnapAgentProperties.Llm llm = props.getLlm();
 
+        assertThat(llm.getApiType()).isEqualTo("anthropic");
         assertThat(llm.getBaseUrl()).isEqualTo("https://api.anthropic.com");
         assertThat(llm.getApiKey()).isEmpty();
         assertThat(llm.getProxyUrl()).isEmpty();
@@ -116,7 +117,7 @@ class SnapAgentPropertiesTest {
         SnapAgentProperties.Security security = props.getSecurity();
 
         assertThat(security.getFramework()).isEqualTo("auto");
-        assertThat(security.getRequiredPermission()).isEmpty();
+        assertThat(security.getRequiredPermission()).isEqualTo("snap-agent:access");
         assertThat(security.getFilterOrder()).isEqualTo(Integer.MAX_VALUE - 10);
         assertThat(security.getPrincipalResolverClass()).isEmpty();
         assertThat(security.isAuditLog()).isTrue();
@@ -139,6 +140,7 @@ class SnapAgentPropertiesTest {
     @Test
     void shouldSetAndVerifyAllLlmProperties() {
         SnapAgentProperties.Llm llm = new SnapAgentProperties.Llm();
+        llm.setApiType("openai");
         llm.setBaseUrl("https://custom.api.com");
         llm.setApiKey("sk-custom");
         llm.setProxyUrl("http://proxy.example.com:3128");
@@ -148,6 +150,7 @@ class SnapAgentPropertiesTest {
         llm.setTimeoutSeconds(60);
         llm.setStreaming(false);
 
+        assertThat(llm.getApiType()).isEqualTo("openai");
         assertThat(llm.getBaseUrl()).isEqualTo("https://custom.api.com");
         assertThat(llm.getApiKey()).isEqualTo("sk-custom");
         assertThat(llm.getProxyUrl()).isEqualTo("http://proxy.example.com:3128");

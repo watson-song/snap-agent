@@ -8,6 +8,7 @@ import com.watsontech.snapagent.boot2x.routing.PeerRouter;
 import com.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import com.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
 import com.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
+import com.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
 import com.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import com.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import com.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
@@ -22,8 +23,8 @@ import com.watsontech.snapagent.core.agent.AgentExecutor;
 import com.watsontech.snapagent.core.agent.RateLimiter;
 import com.watsontech.snapagent.core.agent.TaskStore;
 import com.watsontech.snapagent.core.llm.LlmClient;
-import com.watsontech.snapagent.core.llm.LlmClient;
 import com.watsontech.snapagent.core.security.PrincipalResolver;
+import com.watsontech.snapagent.core.security.SecurityAuditLogger;
 import com.watsontech.snapagent.core.security.SecurityGateway;
 import com.watsontech.snapagent.core.skill.SkillRegistry;
 import com.watsontech.snapagent.core.tool.ToolDispatcher;
@@ -94,6 +95,16 @@ public class SnapAgentAutoConfiguration {
         return new DefaultPrincipalResolver();
     }
 
+    // ---- SecurityAuditLogger ----
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.security", name = "audit-log", havingValue = "true", matchIfMissing = true)
+    public SecurityAuditLogger securityAuditLogger() {
+        log.info("Using LoggingSecurityAuditLogger (default SLF4J audit logger)");
+        return new LoggingSecurityAuditLogger();
+    }
+
     // ---- SecurityGateway: Spring Security adapter ----
     @Bean
     @ConditionalOnClass(name = "org.springframework.security.core.context.SecurityContextHolder")
@@ -118,6 +129,17 @@ public class SnapAgentAutoConfiguration {
     @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
             "'${snap-agent.llm.api-key:}' != '' or '${snap-agent.llm.auth-token:}' != ''")
     public LlmClient llmClient(SnapAgentProperties props) {
+        String apiType = props.getLlm().getApiType();
+        if ("openai".equalsIgnoreCase(apiType)) {
+            log.info("Using OpenAiLlmClient (api-type=openai, base-url={})", props.getLlm().getBaseUrl());
+            return new com.watsontech.snapagent.boot2x.llm.OpenAiLlmClient(
+                    props.getLlm().getBaseUrl(),
+                    props.getLlm().getApiKey(),
+                    props.getLlm().getAuthToken(),
+                    props.getLlm().getProxyUrl(),
+                    props.getLlm().getTimeoutSeconds());
+        }
+        log.info("Using AnthropicLlmClient (api-type=anthropic, base-url={})", props.getLlm().getBaseUrl());
         return new AnthropicLlmClient(
                 props.getLlm().getBaseUrl(),
                 props.getLlm().getApiKey(),
@@ -305,13 +327,16 @@ public class SnapAgentAutoConfiguration {
             RateLimiter rateLimiter,
             @Qualifier("snapAgentExecutor") AsyncTaskExecutor taskExecutor,
             ObjectProvider<PeerSseRelay> peerSseRelayProvider,
-            ObjectProvider<LlmClient> llmClientProvider) {
+            ObjectProvider<LlmClient> llmClientProvider,
+            ObjectProvider<SecurityAuditLogger> auditLoggerProvider) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
         LlmClient llmClient = llmClientProvider.getIfAvailable();
+        SecurityAuditLogger auditLogger = auditLoggerProvider.getIfAvailable();
         return new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, gateway, rateLimiter, taskExecutor, relay, llmClient);
+                properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
+                auditLogger);
     }
 
     // ---- SnapAgentFilter ----

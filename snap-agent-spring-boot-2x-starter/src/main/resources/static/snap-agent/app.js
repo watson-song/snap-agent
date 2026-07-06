@@ -1,18 +1,67 @@
 // SnapAgent SPA - Chat-style UI with real streaming & conversation history
-// Version: v8-md-fix (fix infinite loop in renderMarkdown on incomplete tables)
-console.log('[SnapAgent] app.js v8-md-fix loaded');
+// Version: v10-auth (username display, 401/403 detection)
+console.log('[SnapAgent] app.js v10-auth loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;
 let currentStream = null;
 let conversationHistory = []; // [{role, content}] for multi-turn
 
-// ===== Auth helper =====
-function authHeader() {
-    return { 'Authorization': 'Basic ' + btoa('demo:demo') };
+// ===== Auth: check user status via /user-info =====
+async function checkUserStatus() {
+    try {
+        const resp = await fetch(`${BASE}/user-info`);
+        if (!resp.ok) {
+            showAuthPrompt('登录失效', '请先登录系统后再访问 SnapAgent');
+            return false;
+        }
+        const info = await resp.json();
+        if (!info.authenticated) {
+            showAuthPrompt('未登录', '请先登录系统后再访问 SnapAgent');
+            return false;
+        }
+        if (!info.authorized) {
+            showAuthPrompt('未授权', info.message || '您未授权，请联系管理员授权访问');
+            return false;
+        }
+        // Display username in top bar
+        if (info.username) {
+            document.getElementById('userName').textContent = info.username;
+            document.getElementById('userInfo').style.display = 'flex';
+        }
+        return true;
+    } catch (e) {
+        showAuthPrompt('网络错误', '无法连接服务器，请检查网络后重试');
+        return false;
+    }
 }
-function jsonHeader() {
-    return { ...authHeader(), 'Content-Type': 'application/json' };
+
+function handleAuthError(resp) {
+    if (resp.status === 401) {
+        showAuthPrompt('登录失效', '请先登录系统后再访问 SnapAgent');
+        return true;
+    }
+    if (resp.status === 403) {
+        showAuthPrompt('无权限', '当前账号无 SnapAgent 访问权限，请联系管理员');
+        return true;
+    }
+    return false;
+}
+
+function showAuthPrompt(title, msg) {
+    // Avoid stacking multiple prompts
+    if (document.getElementById('authPrompt')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'authPrompt';
+    overlay.className = 'auth-prompt';
+    overlay.innerHTML =
+        '<div class="auth-card">' +
+        '<div class="auth-icon">🔒</div>' +
+        '<div class="auth-title">' + title + '</div>' +
+        '<div class="auth-msg">' + msg + '</div>' +
+        '<button class="btn-auth-retry" onclick="location.reload()">刷新重试</button>' +
+        '</div>';
+    document.body.appendChild(overlay);
 }
 
 // ===== Toast =====
@@ -27,6 +76,7 @@ function toast(msg, type = 'success') {
 // ===== Load Skills =====
 async function loadSkills() {
     const resp = await fetch(`${BASE}/skills`);
+    if (handleAuthError(resp)) return;
     const data = await resp.json();
     const ul = document.getElementById('skills');
     ul.innerHTML = '';
@@ -53,6 +103,7 @@ async function loadSkills() {
 // ===== Load Models =====
 async function loadModels() {
     const resp = await fetch(`${BASE}/models`);
+    if (handleAuthError(resp)) return;
     const data = await resp.json();
     const select = document.getElementById('modelSelect');
     select.innerHTML = '';
@@ -191,7 +242,7 @@ async function runSkill() {
     try {
         const resp = await fetch(`${BASE}/runs`, {
             method: 'POST',
-            headers: jsonHeader(),
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 skillId: selectedSkill.name,
                 inputs,
@@ -199,6 +250,7 @@ async function runSkill() {
                 history: conversationHistory.length > 1 ? conversationHistory.slice(0, -1) : []
             })
         });
+        if (handleAuthError(resp)) { updateSendButtonState(); return; }
         const data = await resp.json();
         console.log('[runSkill] POST /runs response:', data.status, 'taskId=', data.taskId);
         if (data.taskId) {
@@ -221,8 +273,8 @@ function subscribeStream(taskId) {
     let allText = ''; // accumulate all text for conversation history
     let pendingRender = false; // debounce DOM updates via requestAnimationFrame
 
-    // EventSource doesn't support custom headers; pass auth as query param
-    const url = `${BASE}/runs/${taskId}/stream?token=${btoa('demo:demo')}`;
+    // EventSource sends cookies automatically (same-origin)
+    const url = `${BASE}/runs/${taskId}/stream`;
     console.log('[subscribeStream] Creating EventSource for taskId=', taskId, 'url=', url);
     const es = new EventSource(url);
     currentStream = es;
@@ -464,9 +516,9 @@ document.getElementById('uploadInput').addEventListener('change', async (e) => {
     try {
         const resp = await fetch(`${BASE}/skills/upload`, {
             method: 'POST',
-            headers: authHeader(),
             body: formData
         });
+        if (handleAuthError(resp)) return;
         const data = await resp.json();
         if (data.error) {
             toast(data.message || '上传失败', 'error');
@@ -493,9 +545,9 @@ document.getElementById('uploadFolderInput').addEventListener('change', async (e
     try {
         const resp = await fetch(`${BASE}/skills/upload-folder`, {
             method: 'POST',
-            headers: authHeader(),
             body: formData
         });
+        if (handleAuthError(resp)) return;
         const data = await resp.json();
         if (data.error) {
             toast(data.message || '上传失败', 'error');
@@ -514,7 +566,8 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     btn.style.opacity = '0.6';
     try {
-        await fetch(`${BASE}/skills/refresh`, { method: 'POST', headers: authHeader() });
+        const resp = await fetch(`${BASE}/skills/refresh`, { method: 'POST' });
+        if (handleAuthError(resp)) return;
         await loadSkills();
         toast('Skills 已刷新', 'success');
     } catch (e) {
@@ -554,5 +607,10 @@ document.getElementById('inputForm').addEventListener('input', updateSendButtonS
 document.getElementById('inputForm').addEventListener('change', updateSendButtonState);
 
 // ===== Init =====
-loadSkills();
-loadModels();
+(async function() {
+    const ok = await checkUserStatus();
+    if (ok) {
+        loadSkills();
+        loadModels();
+    }
+})();

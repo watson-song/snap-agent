@@ -141,6 +141,8 @@ public class SnapAgentProperties {
 
     /** LLM client configuration. */
     public static class Llm {
+        /** API type: "anthropic" (default) or "openai" (OpenAI-compatible). */
+        private String apiType = "anthropic";
         private String baseUrl = "https://api.anthropic.com";
         private String apiKey = "";
         private String authToken = "";
@@ -154,6 +156,14 @@ public class SnapAgentProperties {
         public Llm() {
             allowedModels.add("claude-sonnet-4-6");
             allowedModels.add("claude-opus-4-6");
+        }
+
+        public String getApiType() {
+            return apiType;
+        }
+
+        public void setApiType(String apiType) {
+            this.apiType = apiType;
         }
 
         public String getBaseUrl() {
@@ -508,7 +518,7 @@ public class SnapAgentProperties {
     /** Security adapter configuration. */
     public static class Security {
         private String framework = "auto";
-        private String requiredPermission = "";
+        private String requiredPermission = "snap-agent:access";
         private int filterOrder = Integer.MAX_VALUE - 10;
         private String principalResolverClass = "";
         private boolean auditLog = true;
