@@ -225,8 +225,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 @Override
 protected void configure(HttpSecurity http) throws Exception {
     http.authorizeRequests()
-        // 公开：user-info 端点（返回用户登录/授权状态，无需登录）
-        .antMatchers("/snap-agent/user-info").permitAll()
+        // 公开：前端鉴权配置（返回 token header/cookie/localStorage key 名，无敏感信息）
+        .antMatchers("/snap-agent/auth-config").permitAll()
         // 公开：静态资源（SPA 页面壳）
         .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                      "/snap-agent/*.css").permitAll()
@@ -234,21 +234,44 @@ protected void configure(HttpSecurity http) throws Exception {
         .antMatchers("/snap-agent/runs/*/stream").permitAll()
         // 公开：跨 Pod 内部路由（使用共享密钥）
         .antMatchers("/snap-agent-internal/**").permitAll()
-        // 其他 SnapAgent API 端点均要求登录
+        // 其他 SnapAgent API 端点均要求登录（含 /user-info）
         .antMatchers("/snap-agent/**").authenticated()
         // 其他端点按宿主原有策略
         .anyRequest().authenticated();
 }
 ```
 
+> **重要**：`/snap-agent/user-info` **不要**加入 JWT filter 白名单/跳过列表。`/user-info` 需要经过宿主认证链，`SecurityContext` 被填充后 SnapAgent 才能读取用户身份。如果 JWT filter 跳过该 URL，`SecurityContext` 不会被填充，SnapAgent 会看到 `anonymousUser`。前端已经处理 401 响应——未登录时显示"登录失效"提示。
+
 > **安全模型说明**：
-> - `/user-info` 是唯一公开的 API 端点，返回 `{ authenticated, authorized, userId, username, message }`。前端页面加载时先调用此端点，判断用户是否已登录、是否有权限访问 SnapAgent。
-> - 所有其他 API 端点（`/skills`、`/models`、`/tools`、`/runs` 等）均要求用户已登录。SnapAgent Controller 内部通过 `SecurityGateway` 检查用户身份和 `required-permission` 权限（默认 `snap-agent:access`）。
+> - `/auth-config` 是公开端点，返回前端鉴权配置（`authHeader`、`authCookie`、`authLocalStorageKey`），告诉前端从哪里读 token、以什么 header 名发送。无敏感信息。
+> - `/user-info` **需要认证**，返回已登录用户的 `{ authenticated, authorized, userId, username, message }`。前端页面加载时先调 `/auth-config` 获取配置，再带 token 调 `/user-info` 判断用户状态。
+> - 所有其他 API 端点均要求用户已登录。SnapAgent Controller 内部通过 `SecurityGateway` 检查用户身份和 `required-permission` 权限（默认 `snap-agent:access`）。
 > - `/runs/*/stream`（SSE）虽然 permitAll，但 Controller 会校验任务归属（仅任务创建者可订阅流）。EventSource 不支持自定义 Header，但会自动发送 Cookie，因此同源请求的 Session/Cookie 鉴权可以正常工作。
 > - **权限配置**：SnapAgent 默认要求用户拥有 `snap-agent:access` 权限标识。宿主需在权限系统中为用户分配此权限：
 >   - **Spring Security**：用户的 `GrantedAuthority` 列表中需包含 `snap-agent:access`（非 `ROLE_` 前缀，是精确匹配）
 >   - **Shiro**：用户需被分配 `snap-agent:access` 权限（通配符匹配）
 >   - 如需放开给所有登录用户，设 `snap-agent.security.required-permission: ""`（空字符串）
+>
+> **端点清单**：
+>
+> | 端点 | 方法 | 公开/认证 | 说明 |
+> |------|------|----------|------|
+> | `/auth-config` | GET | 公开 | 前端鉴权配置（header/cookie/localStorage key 名） |
+> | `/*.html`, `/*.js`, `/*.css` | GET | 公开 | SPA 静态资源 |
+> | `/runs/{id}/stream` | GET | 公开 | SSE 流（Controller 校验任务归属） |
+> | `/snap-agent-internal/**` | GET | 公开 | 跨 Pod 内部路由（共享密钥） |
+> | `/user-info` | GET | 认证 | 当前用户登录/授权状态 |
+> | `/skills` | GET | 认证 | Skill 列表 |
+> | `/skills/{name}` | DELETE | 认证 | 删除自定义 Skill（builtin 不可删） |
+> | `/skills/upload` | POST | 认证 | 上传单个 Skill 文件（.md/.zip） |
+> | `/skills/upload-folder` | POST | 认证 | 上传 Skill 目录（多文件） |
+> | `/skills/refresh` | POST | 认证 | 刷新 Skill 列表 |
+> | `/models` | GET | 认证 | 可用模型列表 |
+> | `/tools` | GET | 认证 | 可用工具列表 |
+> | `/runs` | POST | 认证 | 启动 Agent 执行 |
+> | `/runs/{id}` | GET | 认证 | 查询任务状态 |
+> | `/runs/{id}/transcript` | GET | 认证 | 获取任务完整 transcript |
 >
 > 如果宿主用 Shiro，在 Shiro 链定义中放行上述公开路径，其余 `/snap-agent/**` 要求登录。
 > 如果宿主无安全框架，跳过此步骤（但 SnapAgent 将无法识别用户身份）。
@@ -341,34 +364,41 @@ server {
 
 1. **启动日志无报错** — 搜索 `SnapAgent` 或 `snapagent`，确认有 `Loaded N builtin skill(s)` 日志。
 
-2. **访问 user-info（无需登录）**：
+2. **访问 auth-config（公开，无需登录）**：
    ```bash
-   curl http://localhost:8080/snap-agent/user-info
+   curl http://localhost:8080/snap-agent/auth-config
    ```
-   应返回 `{"authenticated":false,"authorized":false}`（未登录时）。
+   应返回 `{"authHeader":"","authCookie":"","authLocalStorageKey":""}`（未配置 token 鉴权时均为空字符串）。
 
-3. **访问 Skill 列表（需登录）**：
+3. **访问 user-info（需登录）**：
    ```bash
-   # 替换为宿主项目的认证方式（如 Cookie、Basic Auth 等）
+   # 替换为宿主项目的认证方式（如 Cookie、Basic Auth、Token Header 等）
+   curl -u user:password http://localhost:8080/snap-agent/user-info
+   ```
+   应返回 `{"authenticated":true,"authorized":true,"userId":"...","username":"..."}`。
+   未登录时应返回 401。
+
+4. **访问 Skill 列表（需登录）**：
+   ```bash
    curl -u user:password http://localhost:8080/snap-agent/skills
    ```
    应返回包含 `health-check`、`database-query`、`redis-query`、`log-analysis` 的 skill 列表。
 
-4. **访问模型列表（需登录）**：
+5. **访问模型列表（需登录）**：
    ```bash
    curl -u user:password http://localhost:8080/snap-agent/models
    ```
    应返回 `default: aliyun/glm-5.2`。
 
-5. **访问工具列表（需登录）**：
+6. **访问工具列表（需登录）**：
    ```bash
    curl -u user:password http://localhost:8080/snap-agent/tools
    ```
    应返回 `mysql_query`（如 JDBC 已配置）、`redis_get`（如 Redis 已配置）和 `log_read`（如 logs 已配置）。
 
-6. **打开 Web UI**：浏览器访问 `http://localhost:8080/snap-agent/`，应看到 Skill 选择页面（顶部显示用户名）。
+7. **打开 Web UI**：浏览器访问 `http://localhost:8080/snap-agent/`，应看到 Skill 选择页面（顶部显示用户名）。
 
-7. **跑一个 Skill**：选 `health-check`，点 Run，看 SSE 流是否实时输出 thought → tool_call → tool_result → done。
+8. **跑一个 Skill**：选 `health-check`，点 Run，看 SSE 流是否实时输出 thought → tool_call → tool_result → done。
 
 **全部通过 = 集成成功。**
 
