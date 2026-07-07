@@ -239,7 +239,9 @@ class SnapAgentControllerSecurityTest {
 
     @Test
     void userInfoShouldNotRequireAuth() throws Exception {
-        // /user-info is public — no requireAuth() check
+        // /user-info does not call requireAuth() — returns 200 with authenticated=false
+        // when SecurityContext has no principal. Auth enforcement is at the security
+        // filter chain level (host app), not the controller.
         when(securityGateway.currentUserId()).thenReturn(null);
 
         mockMvc.perform(get("/snap-agent/user-info"))

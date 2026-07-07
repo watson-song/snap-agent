@@ -109,14 +109,43 @@ ALTER USER 'readonly_user'@'%' DEFAULT ROLE NONE;
 
 本库 filter 不做认证，依赖宿主安全框架已认证。宿主须在安全配置里放行该路径（已认证才能进）。
 
+> **重要**：所有 `/snap-agent/**` 端点（包括 `/snap-agent/user-info`）都需要认证。不要将 `/snap-agent/user-info` 加入 JWT filter 的白名单/跳过列表，否则 SecurityContext 不会被填充，SnapAgent 会看到 `anonymousUser`。前端已经处理 401 响应——未登录时显示"登录失效"提示。
+
+### 前后端分离（Token 鉴权）配置
+
+当前后端分离项目使用 token header（如 JWT）而非 session 鉴权时，需配置 SnapAgent 前端从 localStorage 或 cookie 读取 token 并以 header 发送：
+
+```yaml
+snap-agent:
+  security:
+    auth-token-header: token              # 宿主 API 期望的 token header 名称
+    auth-token-local-storage-key: TOKEN   # 宿主前端存储 token 的 localStorage key
+    # 或使用 cookie: auth-token-cookie: a_authorization
+```
+
+配置后，SnapAgent 前端会：
+1. 启动时调用 `GET /snap-agent/auth-config`（公开端点）获取配置
+2. 从指定 localStorage key（优先）或 cookie 读取 token
+3. 以指定 header 名称注入到所有 API fetch 请求
+
+未配置时（默认），前端依赖浏览器自动携带 cookie（适用于 session 鉴权项目）。
+
 ### Spring Security
 ```java
 @Override
 protected void configure(HttpSecurity http) throws Exception {
     http
         .authorizeRequests()
-            .antMatchers("/snap-agent/**").authenticated()   // 已登录即可
-            // 或 .antMatchers("/snap-agent/**").hasAuthority("snap-agent:run")
+            // 公开：前端鉴权配置（无敏感信息）
+            .antMatchers("/snap-agent/auth-config").permitAll()
+            // 静态资源放行（SPA 壳页面）
+            .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
+                    "/snap-agent/*.css").permitAll()
+            // SSE 流端点放行（EventSource 无法发送自定义 header；controller 校验 task ownership）
+            .antMatchers("/snap-agent/runs/*/stream").permitAll()
+            // 其余所有 /snap-agent/** 端点（含 /user-info）需认证
+            .antMatchers("/snap-agent/**").authenticated()
+            // 或 .antMatchers("/snap-agent/**").hasAuthority("snap-agent:access")
             ...
         ;
 }
@@ -128,8 +157,13 @@ protected void configure(HttpSecurity http) throws Exception {
 @Bean
 public ShiroFilterChainDefinition shiroFilterChainDefinition() {
     DefaultShiroFilterChainDefinition chain = new DefaultShiroFilterChainDefinition();
-    chain.addPathDefinition("/snap-agent/**", "authc");    // 已登录
-    // 或 chain.addPathDefinition("/snap-agent/**", "perms[snap-agent:run]");
+    chain.addPathDefinition("/snap-agent/auth-config", "anon");  // 前端鉴权配置
+    chain.addPathDefinition("/snap-agent/*.html", "anon");   // 静态资源
+    chain.addPathDefinition("/snap-agent/*.js", "anon");
+    chain.addPathDefinition("/snap-agent/*.css", "anon");
+    chain.addPathDefinition("/snap-agent/runs/*/stream", "anon");  // SSE
+    chain.addPathDefinition("/snap-agent/**", "authc");    // 其余需登录
+    // 或 chain.addPathDefinition("/snap-agent/**", "perms[snap-agent:access]");
     chain.addPathDefinition("/**", "anon");
     return chain;
 }
@@ -149,27 +183,56 @@ location /snap-agent/ {
 }
 ```
 
-## 步骤 5：（可选）PrincipalResolver
+## 步骤 5：（可能需要）PrincipalResolver
 
-若默认 `PrincipalResolver`（String→UserDetails→反射 getId/getUserId/getUsername）取不到 userId：
-1. 宿主写实现：
+SnapAgent 需要从 SecurityContext 的 principal 对象中解析出用户标识（userId）。默认 `DefaultPrincipalResolver` 按以下顺序解析：
+
+1. `principal instanceof String` → 直接返回
+2. `principal instanceof UserDetails` → 调用 `getUsername()`
+3. 反射调用 `getId()` / `getUserId()` / `getUsername()` / `getUserName()`（按序尝试，返回第一个非 null 值；非 String 类型自动 `toString()` 转换）
+
+**常见需要自定义的场景**：
+
+| 场景 | 是否需要自定义 | 原因 |
+|------|--------------|------|
+| principal 是 String（JWT/CAS 常见） | 否 | 步骤 1 直接命中 |
+| principal 实现 UserDetails 且 `getUsername()` 返回用户标识 | 否 | 步骤 2 命中 |
+| principal 有 `getId()` 返回 Long | 否 | 步骤 3 反射 + `toString()` 自动转换 |
+| principal 有 `getUserName()`（Lombok `userName` 字段） | 否 | 步骤 3 反射命中 `getUserName` |
+| principal 的用户标识字段名不在上述列表中（如 `getEmpNo()`、`getStaffId()`） | **是** | 默认反射不覆盖 |
+| principal 的 `getId()` 返回数据库自增 ID 而非业务用户标识，且需要业务标识 | **是** | 需跳过 `getId()` 取其他字段 |
+
+**自定义方式**（二选一）：
+
+方式 A：yml 配置类名
 ```java
 public class AppPrincipalResolver implements PrincipalResolver {
     @Override
     public String resolve(Object principal) {
-        if (principal instanceof AppUserDetails u) return u.getUserId();
+        if (principal instanceof AppUserDetails u) return u.getEmpNo();
         return null;
     }
 }
 ```
-2. yml 配：
 ```yaml
 snap-agent:
   security:
     principal-resolver-class: com.sf.your_db.sys.security.AppPrincipalResolver
 ```
 
-这是**唯一**可能需要宿主写代码的点。多数 JWT/CAS 场景 principal 是 String，默认实现就够。
+方式 B：声明 `@Bean`（优先级高于默认实现，`@ConditionalOnMissingBean` 生效）
+```java
+@Bean
+public PrincipalResolver snapAgentPrincipalResolver() {
+    return principal -> {
+        if (principal instanceof LoginUser u) return u.getUserName();
+        if (principal instanceof String s) return s;
+        return null;
+    };
+}
+```
+
+> 方式 B 无需 yml 配置，SnapAgent 自动检测到 bean 后跳过默认实现。
 
 ## 故障排查
 
@@ -180,7 +243,8 @@ snap-agent:
 | `mysql_query` 调用报「DataSource bean 'xxx' not found」 | `jdbc.datasource-bean-name` 与宿主声明的 bean 名不一致 |
 | `mysql_query` 报 SQL 被拒 | 看 `unavailableReason` / 日志，对照 [04](04-tools-and-mcp.md) §2.4 拒绝用例 |
 | SSE 收不到事件 / 一次性全到 | 反向代理 buffering 未关；Nginx 加 `proxy_buffering off` |
-| 401「无法解析 principal」 | 默认 resolver 取不到 userId；走步骤 5 配自定义 |
+| 401「无法解析 principal」 | 默认 resolver 取不到 userId；看日志 `Cannot resolve principal of type XXX`；走步骤 5 配自定义 PrincipalResolver |
+| `user-info` 返回 `authenticated: false, userId: null` | ① `/snap-agent/user-info` 在 JWT filter 白名单中 → SecurityContext 未填充（移出白名单）；② principal 对象无 `getId`/`getUserId`/`getUsername`/`getUserName` 方法 → 配自定义 PrincipalResolver（步骤 5） |
 | 429 RATE_LIMITED | 每用户并发 1 或每小时 20 上限；等 `Retry-After` 或调 yml |
 | agent 一直转不出报告 | 可能命中 max-turns；调大 `agent.max-turns`；或 LLM 卡住，查 transcript |
 

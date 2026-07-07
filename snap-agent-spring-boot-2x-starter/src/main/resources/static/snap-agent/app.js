@@ -1,16 +1,56 @@
 // SnapAgent SPA - Chat-style UI with real streaming & conversation history
-// Version: v10-auth (username display, 401/403 detection)
-console.log('[SnapAgent] app.js v10-auth loaded');
+// Version: v12-token (token-based auth support with localStorage)
+console.log('[SnapAgent] app.js v12-token loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;
 let currentStream = null;
 let conversationHistory = []; // [{role, content}] for multi-turn
 
+// ===== Auth config: read token source from server =====
+let authConfig = { authHeader: '', authCookie: '', authLocalStorageKey: '' };
+
+async function loadAuthConfig() {
+    try {
+        const resp = await fetch(`${BASE}/auth-config`);
+        if (resp.ok) {
+            authConfig = await resp.json();
+        }
+    } catch (e) {
+        // ignore — fall back to cookie-based auth
+    }
+}
+
+function getAuthToken() {
+    // Priority: localStorage > cookie
+    if (authConfig.authLocalStorageKey) {
+        try {
+            var val = localStorage.getItem(authConfig.authLocalStorageKey);
+            if (val) return val;
+        } catch (e) { /* localStorage not available */ }
+    }
+    if (authConfig.authCookie) {
+        var match = document.cookie.match(new RegExp('(^|;\\s*)' + authConfig.authCookie + '=([^;]*)'));
+        if (match) return decodeURIComponent(match[2]);
+    }
+    return null;
+}
+
+function authHeaders(headers) {
+    headers = headers || {};
+    if (authConfig.authHeader) {
+        const token = getAuthToken();
+        if (token && !headers[authConfig.authHeader]) {
+            headers[authConfig.authHeader] = token;
+        }
+    }
+    return headers;
+}
+
 // ===== Auth: check user status via /user-info =====
 async function checkUserStatus() {
     try {
-        const resp = await fetch(`${BASE}/user-info`);
+        const resp = await fetch(`${BASE}/user-info`, { headers: authHeaders() });
         if (!resp.ok) {
             showAuthPrompt('登录失效', '请先登录系统后再访问 SnapAgent');
             return false;
@@ -75,7 +115,7 @@ function toast(msg, type = 'success') {
 
 // ===== Load Skills =====
 async function loadSkills() {
-    const resp = await fetch(`${BASE}/skills`);
+    const resp = await fetch(`${BASE}/skills`, { headers: authHeaders() });
     if (handleAuthError(resp)) return;
     const data = await resp.json();
     const ul = document.getElementById('skills');
@@ -102,7 +142,7 @@ async function loadSkills() {
 
 // ===== Load Models =====
 async function loadModels() {
-    const resp = await fetch(`${BASE}/models`);
+    const resp = await fetch(`${BASE}/models`, { headers: authHeaders() });
     if (handleAuthError(resp)) return;
     const data = await resp.json();
     const select = document.getElementById('modelSelect');
@@ -266,7 +306,7 @@ async function runSkill() {
     try {
         const resp = await fetch(`${BASE}/runs`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
                 skillId: selectedSkill.name,
                 inputs,
@@ -540,6 +580,7 @@ document.getElementById('uploadInput').addEventListener('change', async (e) => {
     try {
         const resp = await fetch(`${BASE}/skills/upload`, {
             method: 'POST',
+            headers: authHeaders(),
             body: formData
         });
         if (handleAuthError(resp)) return;
@@ -569,6 +610,7 @@ document.getElementById('uploadFolderInput').addEventListener('change', async (e
     try {
         const resp = await fetch(`${BASE}/skills/upload-folder`, {
             method: 'POST',
+            headers: authHeaders(),
             body: formData
         });
         if (handleAuthError(resp)) return;
@@ -590,7 +632,7 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     btn.style.opacity = '0.6';
     try {
-        const resp = await fetch(`${BASE}/skills/refresh`, { method: 'POST' });
+        const resp = await fetch(`${BASE}/skills/refresh`, { method: 'POST', headers: authHeaders() });
         if (handleAuthError(resp)) return;
         await loadSkills();
         toast('Skills 已刷新', 'success');
@@ -632,6 +674,7 @@ document.getElementById('inputForm').addEventListener('change', updateSendButton
 
 // ===== Init =====
 (async function() {
+    await loadAuthConfig();
     const ok = await checkUserStatus();
     if (ok) {
         loadSkills();

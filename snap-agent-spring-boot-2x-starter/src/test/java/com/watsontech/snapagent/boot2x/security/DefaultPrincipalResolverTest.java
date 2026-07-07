@@ -165,7 +165,7 @@ class DefaultPrincipalResolverTest {
     }
 
     @Test
-    void shouldSkipNonStringGetId() {
+    void shouldConvertNonStringGetIdViaToString() {
         Object principal = new Object() {
             public Long getId() {
                 return 42L;
@@ -178,8 +178,8 @@ class DefaultPrincipalResolverTest {
 
         String result = resolver.resolve(principal);
 
-        // getId returns Long (not String), should fall through to getUserId
-        assertThat(result).isEqualTo("string-id");
+        // getId returns Long (not String), should be converted via toString() → "42"
+        assertThat(result).isEqualTo("42");
     }
 
     @Test
@@ -197,5 +197,63 @@ class DefaultPrincipalResolverTest {
         String result = resolver.resolve(principal);
 
         assertThat(result).isEqualTo("fallback");
+    }
+
+    @Test
+    void shouldResolveGetUserNameWhenGetUsernameAbsent() {
+        // Simulates Lombok-generated accessor for a field named "userName"
+        Object principal = new Object() {
+            public String getUserName() {
+                return "lombok-user";
+            }
+        };
+
+        String result = resolver.resolve(principal);
+
+        assertThat(result).isEqualTo("lombok-user");
+    }
+
+    @Test
+    void shouldPreferGetUsernameOverGetUserName() {
+        Object principal = new Object() {
+            public String getUsername() {
+                return "standard";
+            }
+
+            public String getUserName() {
+                return "lombok-variant";
+            }
+        };
+
+        String result = resolver.resolve(principal);
+
+        assertThat(result).isEqualTo("standard");
+    }
+
+    @Test
+    void shouldResolveLongGetIdAsOnlyMethod() {
+        // Simulates LoginUser where getId() returns Long and no other methods exist
+        Object principal = new Object() {
+            public Long getId() {
+                return 1451846L;
+            }
+        };
+
+        String result = resolver.resolve(principal);
+
+        assertThat(result).isEqualTo("1451846");
+    }
+
+    @Test
+    void shouldReturnNullWhenGetIdReturnsNullObject() {
+        Object principal = new Object() {
+            public Long getId() {
+                return null;
+            }
+        };
+
+        String result = resolver.resolve(principal);
+
+        assertThat(result).isNull();
     }
 }

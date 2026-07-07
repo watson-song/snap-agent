@@ -15,16 +15,22 @@ import java.lang.reflect.Method;
  * <ol>
  *   <li>{@code principal instanceof String} → return directly.</li>
  *   <li>{@code principal instanceof UserDetails} → {@code getUsername()}.</li>
- *   <li>Reflection: try {@code getId()}, {@code getUserId()}, {@code getUsername()}
- *       (in that order); return the first non-null {@code String} result.</li>
+ *   <li>Reflection: try {@code getId()}, {@code getUserId()}, {@code getUsername()},
+ *       {@code getUserName()} (in that order); return the first non-null result,
+ *       converting non-String types via {@code toString()}.</li>
  *   <li>All fail → return {@code null}.</li>
  * </ol>
+ *
+ * <p>The {@code getUserName()} variant handles Lombok-generated accessors for
+ * fields named {@code userName} (Lombok generates {@code getUserName()}, not
+ * {@code getUsername()}). Non-String return types (e.g. {@code Long} from
+ * {@code getId()}) are converted via {@code toString()}.</p>
  */
 public class DefaultPrincipalResolver implements PrincipalResolver {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultPrincipalResolver.class);
 
-    private static final String[] REFLECTION_METHODS = {"getId", "getUserId", "getUsername"};
+    private static final String[] REFLECTION_METHODS = {"getId", "getUserId", "getUsername", "getUserName"};
 
     @Override
     public String resolve(Object principal) {
@@ -60,10 +66,14 @@ public class DefaultPrincipalResolver implements PrincipalResolver {
         try {
             Method method = target.getClass().getMethod(methodName);
             Object result = method.invoke(target);
+            if (result == null) {
+                return null;
+            }
             if (result instanceof String) {
                 return (String) result;
             }
-            return null;
+            // Non-String return type (e.g. Long from getId()) — convert via toString()
+            return result.toString();
         } catch (NoSuchMethodException e) {
             return null;
         } catch (IllegalAccessException e) {

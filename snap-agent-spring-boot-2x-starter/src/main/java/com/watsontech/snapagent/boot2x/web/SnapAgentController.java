@@ -142,7 +142,17 @@ public class SnapAgentController {
         this.auditLogger = auditLogger;
     }
 
-    // ---- GET /user-info (public, no auth required) ----
+    // ---- GET /auth-config (public, returns frontend auth config) ----
+    @GetMapping("/auth-config")
+    public ResponseEntity<Object> getAuthConfig() {
+        Map<String, Object> config = new LinkedHashMap<String, Object>();
+        config.put("authHeader", properties.getSecurity().getAuthTokenHeader());
+        config.put("authCookie", properties.getSecurity().getAuthTokenCookie());
+        config.put("authLocalStorageKey", properties.getSecurity().getAuthTokenLocalStorageKey());
+        return ResponseEntity.ok(config);
+    }
+
+    // ---- GET /user-info (requires auth; returns auth status + authorization) ----
     @GetMapping("/user-info")
     public ResponseEntity<Object> getUserInfo() {
         UserInfo info = new UserInfo();

@@ -9,7 +9,6 @@ import org.springframework.security.config.annotation.web.configuration.WebSecur
  * Demo-only Spring Security config.
  *
  * <ul>
- *   <li>Public: /snap-agent/user-info — returns auth status (no login required).</li>
  *   <li>Public: static resources (.html, .js, .css).</li>
  *   <li>Public: SSE stream endpoint (/snap-agent/runs/{id}/stream) — EventSource sends
  *       cookies automatically; controller verifies task ownership.</li>
@@ -27,8 +26,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     protected void configure(HttpSecurity http) throws Exception {
         http.csrf().disable()
                 .authorizeRequests()
-                // Public: user-info endpoint (returns auth status, no login required)
-                .antMatchers("/snap-agent/user-info").permitAll()
+                // Public: auth config (tells frontend how to authenticate — no sensitive info)
+                .antMatchers("/snap-agent/auth-config").permitAll()
                 // Public: static resources (SPA shell)
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                         "/snap-agent/*.css").permitAll()

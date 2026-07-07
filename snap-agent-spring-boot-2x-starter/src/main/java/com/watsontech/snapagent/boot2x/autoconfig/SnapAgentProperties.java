@@ -522,6 +522,9 @@ public class SnapAgentProperties {
         private int filterOrder = Integer.MAX_VALUE - 10;
         private String principalResolverClass = "";
         private boolean auditLog = true;
+        private String authTokenHeader = "";
+        private String authTokenCookie = "";
+        private String authTokenLocalStorageKey = "";
 
         public String getFramework() {
             return framework;
@@ -561,6 +564,30 @@ public class SnapAgentProperties {
 
         public void setAuditLog(boolean auditLog) {
             this.auditLog = auditLog;
+        }
+
+        public String getAuthTokenHeader() {
+            return authTokenHeader;
+        }
+
+        public void setAuthTokenHeader(String authTokenHeader) {
+            this.authTokenHeader = authTokenHeader;
+        }
+
+        public String getAuthTokenCookie() {
+            return authTokenCookie;
+        }
+
+        public void setAuthTokenCookie(String authTokenCookie) {
+            this.authTokenCookie = authTokenCookie;
+        }
+
+        public String getAuthTokenLocalStorageKey() {
+            return authTokenLocalStorageKey;
+        }
+
+        public void setAuthTokenLocalStorageKey(String authTokenLocalStorageKey) {
+            this.authTokenLocalStorageKey = authTokenLocalStorageKey;
         }
     }
 }

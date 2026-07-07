@@ -43,6 +43,9 @@ snap-agent:
     filter-order: <Ordered.LOWEST_PRECEDENCE - 10>   # 见 §4 注
     principal-resolver-class: ""      # 空=默认实现；填全限定类名=自定义
     audit-log: true
+    auth-token-header: ""             # 前后端分离 token 鉴权：HTTP header 名称（如 token）
+    auth-token-cookie: ""             # token 存 cookie 时：cookie 名称
+    auth-token-local-storage-key: ""  # token 存 localStorage 时：key 名称（如 TOKEN）
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -134,7 +137,7 @@ public FilterRegistrationBean<SnapAgentFilter> snapAgentFilter(...) {
 ### 为什么放在宿主 auth 之后
 - 宿主安全过滤器链（Spring Security `FilterChainProxy` 默认 order `-100`；Shiro `ShiroFilterFactoryBean` 类似）先跑，填充 `SecurityContextHolder` / `Subject`。
 - 本 filter order = 2147483637 ≫ -100，确保安全上下文已就绪，再读 principal。
-- 宿主须放行 `/snap-agent/**`（见 [09](09-integration-guide.md) §4），否则请求到不了本 filter。
+- 宿主须放行 `/snap-agent/**`（见 [09](09-integration-guide.md) §4），否则请求到不了本 filter。注意：所有 `/snap-agent/**` 端点（含 `/snap-agent/user-info`）都需认证，不要将其加入 JWT filter 白名单。
 
 ### 可配序
 - 宿主若有别的后置 filter 需在本 filter 之前/之后，调 `security.filter-order`。
@@ -153,16 +156,28 @@ public interface PrincipalResolver {
 解析顺序：
 1. `principal instanceof String` → 直接返回（许多 JWT/CAS 场景 principal 就是 username）。
 2. `principal instanceof UserDetails` → `((UserDetails) principal).getUsername()`。
-3. 反射：尝试调 `getId()` / `getUserId()` / `getUsername()` 方法（按顺序），返回第一个非 null。
+3. 反射：尝试调 `getId()` / `getUserId()` / `getUsername()` / `getUserName()` 方法（按顺序），返回第一个非 null 结果。非 String 返回值（如 `Long`）自动通过 `toString()` 转换。`getUserName()` 覆盖 Lombok 对 `userName` 字段生成的访问器。
 4. 都失败 → 返回 null → controller 401 + 日志 WARN「无法解析 principal 类型 X，请配 principal-resolver-class」。
 
 ### 自定义
+两种方式（二选一）：
+
+**方式 A**：yml 配置类名
 ```yaml
 snap-agent:
   security:
     principal-resolver-class: com.example.app.security.AppPrincipalResolver
 ```
-宿主写 ~5 行实现 `PrincipalResolver`，把自定义 `User` 对象的 `userId` 字段取出来。这是**唯一**可能需要宿主写代码的集成点。
+
+**方式 B**：声明 `@Bean`（`@ConditionalOnMissingBean` 自动跳过默认实现）
+```java
+@Bean
+public PrincipalResolver snapAgentPrincipalResolver() {
+    return principal -> { /* ... */ };
+}
+```
+
+> 常见需要自定义的场景：principal 的用户标识字段不在 `getId`/`getUserId`/`getUsername`/`getUserName` 列表中（如 `getEmpNo`），或需要跳过 `getId()`（返回数据库自增 ID）取业务标识。详见 [09](09-integration-guide.md) §5。
 
 ## 6. 审计（决策 #14）
 
