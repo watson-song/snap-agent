@@ -9,6 +9,7 @@ let conversationHistory = []; // [{role, content}] for multi-turn
 
 // ===== Auth config: read token source from server =====
 let authConfig = { authHeader: '', authCookie: '', authLocalStorageKey: '' };
+let currentUserId = null; // stored from /user-info for SSE token auth
 
 async function loadAuthConfig() {
     try {
@@ -68,6 +69,10 @@ async function checkUserStatus() {
         if (info.username) {
             document.getElementById('userName').textContent = info.username;
             document.getElementById('userInfo').style.display = 'flex';
+        }
+        // Store userId for SSE stream token auth (EventSource can't send headers)
+        if (info.userId) {
+            currentUserId = info.userId;
         }
         return true;
     } catch (e) {
@@ -337,8 +342,14 @@ function subscribeStream(taskId) {
     let allText = ''; // accumulate all text for conversation history
     let pendingRender = false; // debounce DOM updates via requestAnimationFrame
 
-    // EventSource sends cookies automatically (same-origin)
-    const url = `${BASE}/runs/${taskId}/stream`;
+    // EventSource can't send custom headers — for token-auth projects,
+    // append ?token=base64(userId:x) so the controller can identify the user
+    // and skip the ownership check (task ID is already unguessable).
+    let url = `${BASE}/runs/${taskId}/stream`;
+    if (currentUserId) {
+        const tokenParam = btoa(currentUserId + ':x');
+        url += `?token=${encodeURIComponent(tokenParam)}`;
+    }
     console.log('[subscribeStream] Creating EventSource for taskId=', taskId, 'url=', url);
     const es = new EventSource(url);
     currentStream = es;
