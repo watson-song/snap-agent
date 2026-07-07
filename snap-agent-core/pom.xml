@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.watsontech.snapagent</groupId>
+        <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-parent</artifactId>
         <version>0.2</version>
     </parent>

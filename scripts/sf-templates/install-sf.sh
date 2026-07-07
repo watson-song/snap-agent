@@ -38,8 +38,8 @@ echo "▶ 复制 lib/ 到 $TARGET_DIR/lib/ ..."
 if [ -d "$TARGET_DIR/lib" ]; then
     echo "  ⚠ lib/ 已存在，将合并覆盖 SnapAgent 相关文件"
 fi
-mkdir -p "$TARGET_DIR/lib/com/watsontech/snapagent"
-cp -r "$PKG_DIR/lib/com/watsontech/snapagent/"* "$TARGET_DIR/lib/com/watsontech/snapagent/"
+mkdir -p "$TARGET_DIR/lib/cn/watsontech/snapagent"
+cp -r "$PKG_DIR/lib/cn/watsontech/snapagent/"* "$TARGET_DIR/lib/cn/watsontech/snapagent/"
 echo "✓ lib/ 已复制（Maven 会从这里解析 snap-agent jar，不访问外网）"
 echo ""
 

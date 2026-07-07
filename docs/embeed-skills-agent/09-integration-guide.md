@@ -6,7 +6,7 @@
 
 ```xml
 <dependency>
-  <groupId>com.watsontech.snapagent</groupId>
+  <groupId>cn.watsontech.snapagent</groupId>
   <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
   <version>1.0.0</version>
 </dependency>

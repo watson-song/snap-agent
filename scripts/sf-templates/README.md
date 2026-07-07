@@ -30,7 +30,7 @@
 snap-agent-sf-install-v__VERSION__/
 ├── install-sf.sh                       # 一键安装脚本
 ├── lib/                                # Maven 本地文件仓库
-│   └── com/watsontech/snapagent/
+│   └── cn/watsontech/snapagent/
 │       ├── snap-agent-core/__VERSION__/
 │       │   ├── snap-agent-core-__VERSION__.jar
 │       │   └── snap-agent-core-__VERSION__.pom
@@ -50,7 +50,7 @@ snap-agent-sf-install-v__VERSION__/
 宿主项目/
 ├── pom.xml
 └── lib/                                    ← 新增
-    └── com/watsontech/snapagent/
+    └── cn/watsontech/snapagent/
         ├── snap-agent-core/__VERSION__/
         │   ├── snap-agent-core-__VERSION__.jar
         │   └── snap-agent-core-__VERSION__.pom
@@ -86,7 +86,7 @@ snap-agent-sf-install-v__VERSION__/
 <dependencies>
     <!-- SnapAgent Starter（自动引入 snap-agent-core） -->
     <dependency>
-        <groupId>com.watsontech.snapagent</groupId>
+        <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
         <version>__VERSION__</version>
     </dependency>
@@ -443,7 +443,7 @@ server {
 
 | 可能原因 | 排查方法 | 修复 |
 |---------|---------|------|
-| `lib/` 没复制全 | 确认 `lib/com/watsontech/snapagent/` 下有 jar 和 pom | 重新复制 `lib/` 目录 |
+| `lib/` 没复制全 | 确认 `lib/cn/watsontech/snapagent/` 下有 jar 和 pom | 重新复制 `lib/` 目录 |
 | `builtin-skills-dir` 路径错误 | 确认配置有 `builtin-skills-dir: classpath:/docs/skills/` | 添加该配置项 |
 
 ### 3. `GET /skills` 中 skill 状态为 `UNAVAILABLE`
@@ -526,7 +526,7 @@ server {
 | RedisTemplate Bean 不存在 | 确认项目有 Redis 配置 | 添加 Redis 配置或设 `snap-agent.redis.enabled: false` |
 | 配置项拼写错误 | 检查 YAML 缩进和 key 名称 | 对照 `application-sf.yml` 修正 |
 
-### 10. CI/CD 构建报 `Could not find artifact com.watsontech.snapagent:...`
+### 10. CI/CD 构建报 `Could not find artifact cn.watsontech.snapagent:...`
 
 | 可能原因 | 排查方法 | 修复 |
 |---------|---------|------|

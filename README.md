@@ -60,7 +60,7 @@ git clone https://github.com/watson-song/snap-agent.git && cd snap-agent && mvn 
 
 ```xml
 <dependency>
-    <groupId>com.watsontech.snapagent</groupId>
+    <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
     <version>0.1-alpha</version>
 </dependency>

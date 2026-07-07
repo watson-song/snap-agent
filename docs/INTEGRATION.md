@@ -36,7 +36,7 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 项目根/
 ├── pom.xml
 └── lib/
-    └── com/watsontech/snapagent/
+    └── cn/watsontech/snapagent/
         ├── snap-agent-core/<version>/
         │   ├── snap-agent-core-<version>.jar
         │   └── snap-agent-core-<version>.pom
@@ -77,18 +77,18 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 <!-- 需显式声明 starter 和 core 两个依赖（system scope 不解析传递依赖） -->
 <dependencies>
     <dependency>
-        <groupId>com.watsontech.snapagent</groupId>
+        <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
         <version><version></version>
         <scope>system</scope>
-        <systemPath>${maven.multiModuleProjectDirectory}/lib/com/watsontech/snapagent/snap-agent-spring-boot-2x-starter/<version>/snap-agent-spring-boot-2x-starter-<version>.jar</systemPath>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/<version>/snap-agent-spring-boot-2x-starter-<version>.jar</systemPath>
     </dependency>
     <dependency>
-        <groupId>com.watsontech.snapagent</groupId>
+        <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-core</artifactId>
         <version><version></version>
         <scope>system</scope>
-        <systemPath>${maven.multiModuleProjectDirectory}/lib/com/watsontech/snapagent/snap-agent-core/<version>/snap-agent-core-<version>.jar</systemPath>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-core/<version>/snap-agent-core-<version>.jar</systemPath>
     </dependency>
 </dependencies>
 
@@ -114,7 +114,7 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 
 ```xml
 <dependency>
-    <groupId>com.watsontech.snapagent</groupId>
+    <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
     <version>1.0.0-SNAPSHOT</version>
 </dependency>
@@ -439,7 +439,7 @@ if (requestUri != null && requestUri.contains("/stream")) {
 
 检查 `api-key` 或 `auth-token` 配置。如果使用代理，确认 `base-url` 指向正确的代理地址。
 
-### Q: CI/CD 构建报 `Could not find artifact com.watsontech.snapagent:...`
+### Q: CI/CD 构建报 `Could not find artifact cn.watsontech.snapagent:...`
 
 可能原因有两个，按顺序排查：
 

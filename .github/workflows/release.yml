@@ -38,7 +38,7 @@ jobs:
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
               <modelVersion>4.0.0</modelVersion>
-              <groupId>com.watsontech.snapagent</groupId>
+              <groupId>cn.watsontech.snapagent</groupId>
               <artifactId>snap-agent-core</artifactId>
               <version>${{ steps.version.outputs.version }}</version>
               <packaging>jar</packaging>
@@ -71,7 +71,7 @@ jobs:
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
                    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
               <modelVersion>4.0.0</modelVersion>
-              <groupId>com.watsontech.snapagent</groupId>
+              <groupId>cn.watsontech.snapagent</groupId>
               <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
               <version>${{ steps.version.outputs.version }}</version>
               <packaging>jar</packaging>
@@ -89,7 +89,7 @@ jobs:
                   </dependencies>
               </dependencyManagement>
               <dependencies>
-                  <dependency><groupId>com.watsontech.snapagent</groupId><artifactId>snap-agent-core</artifactId><version>${{ steps.version.outputs.version }}</version></dependency>
+                  <dependency><groupId>cn.watsontech.snapagent</groupId><artifactId>snap-agent-core</artifactId><version>${{ steps.version.outputs.version }}</version></dependency>
                   <dependency><groupId>org.springframework</groupId><artifactId>spring-web</artifactId><optional>true</optional></dependency>
                   <dependency><groupId>org.springframework</groupId><artifactId>spring-webmvc</artifactId><optional>true</optional></dependency>
                   <dependency><groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId><scope>provided</scope></dependency>
@@ -132,7 +132,7 @@ jobs:
 
             ```xml
             <dependency>
-                <groupId>com.watsontech.snapagent</groupId>
+                <groupId>cn.watsontech.snapagent</groupId>
                 <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
                 <version>${{ steps.version.outputs.version }}</version>
             </dependency>

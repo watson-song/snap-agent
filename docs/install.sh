@@ -39,7 +39,7 @@ echo "→ 安装到本地 Maven 仓库..."
 mvn install:install-file \
   -Dfile="snap-agent-core-${VERSION}.jar" \
   -DpomFile="snap-agent-core-${VERSION}.pom" \
-  -DgroupId=com.watsontech.snapagent \
+  -DgroupId=cn.watsontech.snapagent \
   -DartifactId=snap-agent-core \
   -Dversion="${VERSION}" \
   -Dpackaging=jar -q
@@ -48,7 +48,7 @@ mvn install:install-file \
 mvn install:install-file \
   -Dfile="snap-agent-spring-boot-2x-starter-${VERSION}.jar" \
   -DpomFile="snap-agent-spring-boot-2x-starter-${VERSION}.pom" \
-  -DgroupId=com.watsontech.snapagent \
+  -DgroupId=cn.watsontech.snapagent \
   -DartifactId=snap-agent-spring-boot-2x-starter \
   -Dversion="${VERSION}" \
   -Dpackaging=jar -q
@@ -59,7 +59,7 @@ echo ""
 echo "→ 在宿主项目中添加依赖："
 echo ""
 echo "  <dependency>"
-echo "      <groupId>com.watsontech.snapagent</groupId>"
+echo "      <groupId>cn.watsontech.snapagent</groupId>"
 echo "      <artifactId>snap-agent-spring-boot-2x-starter</artifactId>"
 echo "      <version>${VERSION}</version>"
 echo "  </dependency>"
