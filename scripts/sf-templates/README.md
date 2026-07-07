@@ -145,11 +145,17 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
 
 ### 步骤 4：在 application.yml 中添加 SnapAgent 配置
 
-**先向用户确认工号**：在写入配置前，向用户询问：
+**先向用户确认两个信息**：在写入配置前，向用户询问：
 
-> 集成 SnapAgent 需要 cc-switch 代理的 Auth Token（即你的工号）。请提供你的工号，我会填入 `auth-token` 配置中。
+> 1. 集成 SnapAgent 需要 cc-switch 代理的 Auth Token（即你的工号）。请提供你的工号，我会填入 `auth-token` 配置中。
+> 2. 你的项目前端 token 存在哪里？如果是前后端分离用 token 鉴权（非 session/cookie），需要知道：
+>    - HTTP header 名称是什么？（如 `token`、`Authorization`）
+>    - token 存在 localStorage 还是 cookie？
+>    - localStorage 的 key 名或 cookie 名是什么？
+>
+> 如果项目用 session/cookie 鉴权（非前后端分离），跳过第 2 个问题。
 
-拿到工号后，将 `application-sf.yml` 的内容合并到宿主项目的 `application.yml`（或 `application.properties`）。关键配置：
+拿到信息后，将 `application-sf.yml` 的内容合并到宿主项目的 `application.yml`（或 `application.properties`）。关键配置：
 
 ```yaml
 snap-agent:
@@ -167,6 +173,10 @@ snap-agent:
     proxy-url: ""                  # ← K8s Pod 无法直连外网时填 http://proxy-host:port
   security:
     required-permission: snap-agent:access  # ← 用户需拥有此权限才能访问 SnapAgent
+    # ---- 前后端分离 Token 鉴权（用 session/cookie 鉴权的项目留空即可）----
+    auth-token-header: token              # ← 宿主 API 的 token header 名（如 token / Authorization）
+    auth-token-local-storage-key: TOKEN   # ← 前端 localStorage 的 token key（如 TOKEN）
+    # 或用 cookie: auth-token-cookie: a_authorization
   jdbc:
     enabled: true
     datasource-bean-name: snapAgentReadOnlyDataSource
@@ -187,6 +197,11 @@ snap-agent:
 > - `proxy-url` 是 HTTP 代理地址。当 K8s Pod 无法直连外网（即 `base-url` 指向的 cc-switch 网关不可达）时，配置一个可达的 HTTP 代理（如 `http://10.x.x.x:3128`），LLM 请求将通过代理转发。留空则直连。
 > - `logs.allowed-paths` 是日志分析 Skill 可读的目录白名单。**必须替换为宿主项目实际的日志目录**（通常是 `logging.file.name` 的父目录或 `logging.path`）。未配置则 `log-analysis` skill 不可用。
 > - `security.required-permission` 是访问 SnapAgent 的权限标识，默认 `snap-agent:access`。用户必须在宿主权限系统中拥有此权限才能访问 SnapAgent（Spring Security 的 `GrantedAuthority` 或 Shiro 的 permission）。如需放开给所有登录用户，设为空字符串。
+> - **`security.auth-token-*`（前后端分离必填）**：如果宿主项目用 session/cookie 鉴权，这三个配置留空即可，前端依赖浏览器自动携带 cookie。如果宿主项目用 token 鉴权（JWT 等），**必须配置**：
+>   - `auth-token-header`：宿主 API 期望的 token HTTP header 名称（如 `token`、`Authorization`）
+>   - `auth-token-local-storage-key`：前端 localStorage 存 token 的 key 名（如 `TOKEN`）
+>   - `auth-token-cookie`：如果 token 存 cookie 而非 localStorage，填 cookie 名（如 `a_authorization`）
+>   - 配置后 SnapAgent 前端会从 localStorage（优先）或 cookie 读取 token，以指定 header 名发送到所有 API 请求。不配置则前端不发送 token header，`/user-info` 等需认证端点会返回 401。
 
 ### 步骤 5：创建上传 Skill 目录
 
