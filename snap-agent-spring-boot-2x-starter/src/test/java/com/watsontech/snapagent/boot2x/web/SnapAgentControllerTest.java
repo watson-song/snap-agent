@@ -100,7 +100,7 @@ class SnapAgentControllerTest {
         mockMvc.perform(get("/snap-agent/models"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.default").value("claude-sonnet-4-6"))
-                .andExpect(jsonPath("$.allowed[0]").value("claude-sonnet-4-6"));
+                .andExpect(jsonPath("$.allowed").isEmpty());
     }
 
     @Test
@@ -213,6 +213,7 @@ class SnapAgentControllerTest {
                 Collections.singletonList("mysql_query"), Collections.<InputSpec>emptyList(),
                 "body", SkillAvailability.AVAILABLE, null);
         when(skillRegistry.get("test-skill")).thenReturn(skill);
+        properties.getLlm().setAllowedModels(Arrays.asList("claude-sonnet-4-6"));
 
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("skillId", "test-skill");

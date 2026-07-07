@@ -398,6 +398,8 @@ server {
    应返回 `{"authenticated":true,"authorized":true,"userId":"...","username":"..."}`。
    未登录时应返回 401。
 
+   > **如果返回 `authorized: false`**：用户已登录且 `userId` 正确，但权限检查未通过。常见原因是宿主项目将权限存在 principal 的自定义字段（如 `LoginUser.permissionList`）而非 `GrantedAuthority` 中。需声明自定义 `SecurityGateway` bean，见「问题排查与修复」§6。
+
 4. **访问 Skill 列表（需登录）**：
    ```bash
    curl -u user:password http://localhost:8080/snap-agent/skills
@@ -471,8 +473,34 @@ server {
 | 可能原因 | 排查方法 | 修复 |
 |---------|---------|------|
 | 用户已登录但缺少 `required-permission` 权限 | 检查 `snap-agent.security.required-permission` 配置，确认用户在宿主权限系统中拥有该权限 | 为用户分配权限，或留空 `required-permission`（允许所有登录用户） |
+| 用户有权限但不在 `GrantedAuthority` 中 | 调 `GET /snap-agent/user-info` 看是否返回 `authorized: false`；检查宿主 JWT filter 是否将 `permissionList` 转为 `GrantedAuthority` | 声明自定义 `SecurityGateway` bean，见下方说明 |
 | Spring Security 未放行 `/snap-agent/runs/**` | 检查 Security 配置 | 见步骤 7，确保 `/snap-agent/**`（公开端点除外）为 `authenticated()` |
 | 宿主有其他安全拦截器（如自定义拦截器） | 检查 `WebMvcConfigurer` 的 `addInterceptors` | 让拦截器跳过 `/snap-agent/**` |
+
+> **`authorized: false` 专项说明**：许多企业级 Spring Boot 项目将权限码存在 principal 对象的自定义字段（如 `LoginUser.permissionList`）中，而非标准 `GrantedAuthority`。SnapAgent 默认的 `SpringSecurityAdapter.hasPermission()` 遍历 `Authentication.getAuthorities()` 做精确匹配，找不到权限码 → `authorized: false`。
+>
+> **修复**：在宿主项目声明自定义 `SecurityGateway` bean（`@ConditionalOnMissingBean` 会覆盖默认实现）：
+> ```java
+> @Component
+> public class HostSecurityGateway extends SpringSecurityAdapter {
+>     public HostSecurityGateway(PrincipalResolver principalResolver) {
+>         super(principalResolver);
+>     }
+>     @Override
+>     public boolean hasPermission(String code) {
+>         if (code == null || code.isEmpty()) return true;
+>         if (super.hasPermission(code)) return true;
+>         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+>         if (auth != null && auth.getPrincipal() instanceof LoginUser) {
+>             LoginUser loginUser = (LoginUser) auth.getPrincipal();
+>             List<String> permissions = loginUser.getPermissionList();
+>             return permissions != null && permissions.contains(code);
+>         }
+>         return false;
+>     }
+> }
+> ```
+> 替换 `LoginUser` 为宿主 principal 实际 FQCN。`currentUserId()` 继承自父类，无需重写。
 
 ### 7. SSE 流前端长时间无响应
 

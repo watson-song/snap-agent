@@ -114,6 +114,51 @@ if (!securityGateway.hasPermission(props.getSecurity().getRequiredPermission()))
 
 > 集成方须按自己框架的权限码体系配 `required-permission`，理解精确 vs 通配差异。
 
+### 3.5 自定义 SecurityGateway（权限不在 GrantedAuthority 时必须）
+
+**常见场景**：许多企业级 Spring Boot 项目将权限码存在 principal 对象的自定义字段（如 `LoginUser.permissionList`）中，而非标准 `GrantedAuthority`。此时 `SpringSecurityAdapter.hasPermission()` 遍历 `auth.getAuthorities()` 找不到权限码 → `authorized: false`。
+
+**现象**：`GET /snap-agent/user-info` 返回 `authenticated: true, authorized: false`，但用户 principal 的 permissionList 确实包含 `snap-agent:access`。
+
+**解决方案**：宿主声明自定义 `SecurityGateway` bean，覆盖默认 `SpringSecurityAdapter`（`@ConditionalOnMissingBean` 生效）：
+
+```java
+@Component
+public class HostSecurityGateway extends SpringSecurityAdapter {
+
+    public HostSecurityGateway(PrincipalResolver principalResolver) {
+        super(principalResolver);
+    }
+
+    @Override
+    public boolean hasPermission(String code) {
+        if (code == null || code.isEmpty()) return true;
+        // 1. 先查标准 GrantedAuthority
+        if (super.hasPermission(code)) return true;
+        // 2. 再查 principal 的自定义权限字段
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof LoginUser) {
+            LoginUser loginUser = (LoginUser) auth.getPrincipal();
+            List<String> permissions = loginUser.getPermissionList();
+            return permissions != null && permissions.contains(code);
+        }
+        return false;
+    }
+}
+```
+
+> `currentUserId()` 继承自 `SpringSecurityAdapter`，通过 `PrincipalResolver` 解析，无需重写。
+
+**替代方案**：修改宿主 JWT filter，在构造 `Authentication` 时将 `permissionList` 转为 `GrantedAuthority`：
+
+```java
+List<GrantedAuthority> authorities = loginUser.getPermissionList().stream()
+    .map(SimpleGrantedAuthority::new)
+    .collect(Collectors.toList());
+```
+
+这是 Spring Security 的"标准做法"，但可能影响宿主其他模块的权限逻辑。自定义 `SecurityGateway` 更安全、影响面最小。
+
 ## 4. Filter 可配序、鉴权委托宿主（决策 #4）
 
 ### Filter 职责

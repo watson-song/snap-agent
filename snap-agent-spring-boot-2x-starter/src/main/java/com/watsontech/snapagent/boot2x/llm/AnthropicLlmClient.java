@@ -122,7 +122,10 @@ public class AnthropicLlmClient implements LlmClient {
                 .header("content-type", "application/json")
                 .get();
         if (authToken != null && !authToken.isEmpty()) {
-            builder.header("Authorization", "Bearer " + authToken);
+            String headerValue = authToken.toLowerCase().startsWith("bearer ")
+                    ? authToken
+                    : "Bearer " + authToken;
+            builder.header("Authorization", headerValue);
         } else if (apiKey != null && !apiKey.isEmpty()) {
             builder.header("x-api-key", apiKey);
         }
@@ -162,7 +165,10 @@ public class AnthropicLlmClient implements LlmClient {
         // Use Bearer auth if authToken is set (for proxy gateways like cc-switch);
         // otherwise fall back to x-api-key (native Anthropic API)
         if (authToken != null && !authToken.isEmpty()) {
-            builder.header("Authorization", "Bearer " + authToken);
+            String headerValue = authToken.toLowerCase().startsWith("bearer ")
+                    ? authToken
+                    : "Bearer " + authToken;
+            builder.header("Authorization", headerValue);
         } else {
             builder.header("x-api-key", apiKey);
         }

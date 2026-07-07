@@ -154,8 +154,6 @@ public class SnapAgentProperties {
         private boolean streaming = true;
 
         public Llm() {
-            allowedModels.add("claude-sonnet-4-6");
-            allowedModels.add("claude-opus-4-6");
         }
 
         public String getApiType() {

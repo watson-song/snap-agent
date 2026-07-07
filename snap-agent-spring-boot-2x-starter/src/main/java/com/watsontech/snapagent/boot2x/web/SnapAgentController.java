@@ -533,7 +533,9 @@ public class SnapAgentController {
                     allowed = apiModels;
                 }
             }
-            if (!allowed.contains(model)) {
+            // Skip validation if no allowed list available (both API and config empty);
+            // let the LLM endpoint handle invalid models
+            if (!allowed.isEmpty() && !allowed.contains(model)) {
                 return errorResponse(HttpStatus.BAD_REQUEST, "MODEL_NOT_ALLOWED",
                         "model not in allowed list: " + model);
             }

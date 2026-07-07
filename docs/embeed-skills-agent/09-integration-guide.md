@@ -268,6 +268,48 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 
 > 方式 B 无需 yml 配置，SnapAgent 自动检测到 bean 后跳过默认实现。
 
+## 步骤 5b：（可能需要）自定义 SecurityGateway
+
+SnapAgent 默认使用 `SpringSecurityAdapter`，其 `hasPermission(code)` 遍历 `Authentication.getAuthorities()` 做**精确匹配**。
+
+**常见需要自定义的场景**：许多企业级 Spring Boot 项目将权限码存在 principal 对象的自定义字段（如 `LoginUser.permissionList`）中，而非标准 `GrantedAuthority`。此时 `auth.getAuthorities()` 不包含权限码 → `authorized: false`，即使用户确实有该权限。
+
+| 场景 | 是否需要自定义 | 原因 |
+|------|--------------|------|
+| 权限码作为 `GrantedAuthority` 注册 | 否 | 默认精确匹配命中 |
+| 权限码存在 principal 自定义字段（如 `permissionList`） | **是** | `getAuthorities()` 不包含 |
+| 权限码有 `ROLE_` 前缀 | **是** | 精确匹配不命中 `ROLE_snap-agent:access` |
+| `required-permission` 设为空 | 否 | 空码恒 true，跳过检查 |
+
+**自定义方式**：宿主声明 `SecurityGateway` bean（`@ConditionalOnMissingBean` 生效，覆盖默认）：
+
+```java
+@Component
+public class HostSecurityGateway extends SpringSecurityAdapter {
+
+    public HostSecurityGateway(PrincipalResolver principalResolver) {
+        super(principalResolver);
+    }
+
+    @Override
+    public boolean hasPermission(String code) {
+        if (code == null || code.isEmpty()) return true;
+        if (super.hasPermission(code)) return true;   // 先查标准 authorities
+        // 再查 principal 自定义权限字段
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof LoginUser) {
+            LoginUser loginUser = (LoginUser) auth.getPrincipal();
+            List<String> permissions = loginUser.getPermissionList();
+            return permissions != null && permissions.contains(code);
+        }
+        return false;
+    }
+}
+```
+
+> `currentUserId()` 继承自 `SpringSecurityAdapter`，通过 `PrincipalResolver` 解析，无需重写。
+> 详细说明见 [07](07-config-security.md) §3.5。
+
 ## 故障排查
 
 | 现象 | 排查 |
@@ -279,6 +321,7 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 | SSE 收不到事件 / 一次性全到 | 反向代理 buffering 未关；Nginx 加 `proxy_buffering off` |
 | 401「无法解析 principal」 | 默认 resolver 取不到 userId；看日志 `Cannot resolve principal of type XXX`；走步骤 5 配自定义 PrincipalResolver |
 | `user-info` 返回 `authenticated: false, userId: null` | ① `/snap-agent/user-info` 在 JWT filter 白名单中 → SecurityContext 未填充（移出白名单）；② principal 对象无 `getId`/`getUserId`/`getUsername`/`getUserName` 方法 → 配自定义 PrincipalResolver（步骤 5） |
+| `user-info` 返回 `authenticated: true, authorized: false` | 用户 principal 的权限不在 `Authentication.getAuthorities()` 中（如存在 `LoginUser.permissionList` 自定义字段）→ 声明自定义 `SecurityGateway` bean，见 [07](07-config-security.md) §3.5 |
 | 429 RATE_LIMITED | 每用户并发 1 或每小时 20 上限；等 `Retry-After` 或调 yml |
 | agent 一直转不出报告 | 可能命中 max-turns；调大 `agent.max-turns`；或 LLM 卡住，查 transcript |
 

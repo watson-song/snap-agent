@@ -162,7 +162,10 @@ public class OpenAiLlmClient implements LlmClient {
 
     private void addAuthHeader(Request.Builder builder) {
         if (authToken != null && !authToken.isEmpty()) {
-            builder.header("Authorization", "Bearer " + authToken);
+            String headerValue = authToken.toLowerCase().startsWith("bearer ")
+                    ? authToken
+                    : "Bearer " + authToken;
+            builder.header("Authorization", headerValue);
         } else if (apiKey != null && !apiKey.isEmpty()) {
             builder.header("Authorization", "Bearer " + apiKey);
         }

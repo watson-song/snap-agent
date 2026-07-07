@@ -51,7 +51,7 @@ class SnapAgentPropertiesTest {
         assertThat(llm.getApiKey()).isEmpty();
         assertThat(llm.getProxyUrl()).isEmpty();
         assertThat(llm.getModel()).isEqualTo("claude-sonnet-4-6");
-        assertThat(llm.getAllowedModels()).containsExactly("claude-sonnet-4-6", "claude-opus-4-6");
+        assertThat(llm.getAllowedModels()).isEmpty();
         assertThat(llm.getMaxTokens()).isEqualTo(8192);
         assertThat(llm.getTimeoutSeconds()).isEqualTo(120);
         assertThat(llm.isStreaming()).isTrue();
