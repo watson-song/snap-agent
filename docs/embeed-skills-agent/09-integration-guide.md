@@ -16,6 +16,32 @@
 - 宿主须已是 Spring Boot 2.x（`javax.servlet`）。Spring Boot 3.x 等 Phase 3 的 3x-starter。
 - 不需要额外引 OkHttp / snakeyaml：版本由 Spring Boot BOM 管控（决策 #17）。
 
+### 步骤 1b：宿主自有 Skill 打包配置（如有）
+
+SnapAgent 内置 Skill 打包在 starter JAR 的 `classpath:/docs/skills/` 中。如果宿主项目也有自己的 Skill 文件放在项目根目录的 `docs/skills/` 下，需要将该目录加入 Maven 资源打包，否则 `docs/` 不是标准资源目录，不会出现在 classpath 中。
+
+检查宿主项目根目录是否有 `docs/skills/*.md`。如果有，在宿主 `pom.xml` 的 `<build>` → `<resources>` 中添加（与现有配置合并，不覆盖）：
+
+```xml
+<build>
+    <resources>
+        <resource>
+            <directory>src/main/resources</directory>
+        </resource>
+        <!-- 把 docs/skills/ 下的 .md 打入 classpath:/docs/skills/ -->
+        <resource>
+            <directory>docs</directory>
+            <targetPath>docs</targetPath>
+            <includes>
+                <include>skills/**/*.md</include>
+            </includes>
+        </resource>
+    </resources>
+</build>
+```
+
+打包后宿主 Skill 与 SnapAgent 内置 Skill 合并在同一个 `classpath:/docs/skills/` 路径下，同名时宿主的覆盖 starter 的。无自有 Skill 则跳过此步。
+
 ## 步骤 2：配 yml
 
 最小可用配置：
