@@ -106,13 +106,15 @@ snap-agent-sf-install-v__VERSION__/
 
 ### 步骤 3b：配置宿主项目自有 Skill 的 classpath 打包（如有）
 
-> **AI 执行指引**：先检查宿主项目根目录下是否有 `docs/skills/` 目录且包含 `.md` 文件。如果有，执行以下配置；如果没有，跳过此步。
+> **AI 执行指引**：先检查宿主项目是否有 `docs/skills/` 目录且包含 `.md` 文件（含子目录中的 `SKILL.md`）。如果有，执行以下配置；如果没有，跳过此步。
 
-SnapAgent 内置 Skill 打包在 starter JAR 的 `classpath:/docs/skills/` 中。如果宿主项目也有自己的 Skill 文件放在项目根目录的 `docs/skills/` 下，需要将该目录加入 Maven 资源打包，否则不会出现在 classpath 中。
+SnapAgent 内置 Skill 打包在 starter JAR 的 `classpath:/docs/skills/` 中。如果宿主项目也有自己的 Skill 文件放在 `docs/skills/` 下，需要将该目录加入 Maven 资源打包，否则不会出现在 classpath 中。
 
 **检查方法**：
 ```bash
-ls docs/skills/*.md 2>/dev/null || echo "无 docs/skills 目录，跳过此步"
+# 用 find 而非 ls，因为 Skill 文件常在子目录中（如 docs/skills/my-skill/SKILL.md）
+find docs/skills -name "*.md" 2>/dev/null | head -5
+# 有输出 → 有自有 Skill，需配置；无输出 → 跳过此步
 ```
 
 **有则配置**：在宿主 `pom.xml` 的 `<build>` → `<resources>` 中添加（与现有 `<resources>` 合并，不要覆盖）：
@@ -125,6 +127,8 @@ ls docs/skills/*.md 2>/dev/null || echo "无 docs/skills 目录，跳过此步"
         </resource>
         <!-- 新增：把 docs/skills/ 下的 .md 打入 classpath:/docs/skills/ -->
         <resource>
+            <!-- 单模块项目：用相对路径 docs -->
+            <!-- 多模块项目：docs/ 在项目根目录而非子模块目录时，用 ${maven.multiModuleProjectDirectory}/docs -->
             <directory>docs</directory>
             <targetPath>docs</targetPath>
             <includes>
@@ -136,6 +140,7 @@ ls docs/skills/*.md 2>/dev/null || echo "无 docs/skills 目录，跳过此步"
 ```
 
 > 打包后宿主 Skill 与 SnapAgent 内置 Skill 合并在同一个 `classpath:/docs/skills/` 路径下。同名时宿主的覆盖 starter 的（custom 覆盖 builtin 机制）。
+> **多模块项目注意**：如果 `pom.xml` 在子模块目录（如 `scpdrp-starter/pom.xml`）而 `docs/` 在项目根目录，`<directory>docs</directory>` 会解析为子模块下的 `docs`（不存在）。此时需改为 `<directory>${maven.multiModuleProjectDirectory}/docs</directory>`（Maven 3.3.1+ 内置变量，始终指向项目根目录）。
 > 如果宿主项目没有自己的 Skill 文件，跳过此步即可——starter JAR 内置的 4 个 Skill 已经够用。
 
 ### 步骤 4：在 application.yml 中添加 SnapAgent 配置
