@@ -134,12 +134,19 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
             <includes>
                 <include>skills/**/*.md</include>
             </includes>
+            <!-- 排除与 SnapAgent 内置 Skill 同名的文件，避免冲突 -->
+            <excludes>
+                <exclude>skills/health-check.md</exclude>
+                <exclude>skills/database-query.md</exclude>
+                <exclude>skills/redis-query.md</exclude>
+                <exclude>skills/log-analysis.md</exclude>
+            </excludes>
         </resource>
     </resources>
 </build>
 ```
 
-> 打包后宿主 Skill 与 SnapAgent 内置 Skill 合并在同一个 `classpath:/docs/skills/` 路径下。同名时宿主的覆盖 starter 的（custom 覆盖 builtin 机制）。
+> **内置 Skill 保护机制**：SnapAgent v0.2.1+ 在 `ClasspathSkillScanner` 中实现了内置 Skill 保护——即使宿主项目的 `docs/skills/` 下有同名文件（如 `database-query.md`），SnapAgent JAR 内置版本始终优先，宿主版本会被自动跳过并记录 WARN 日志。上述 `<excludes>` 是额外的最佳实践，避免不必要的文件冲突。
 > **多模块项目注意**：如果 `pom.xml` 在子模块目录（如 `scpdrp-starter/pom.xml`）而 `docs/` 在项目根目录，`<directory>docs</directory>` 会解析为子模块下的 `docs`（不存在）。此时需改为 `<directory>${maven.multiModuleProjectDirectory}/docs</directory>`（Maven 3.3.1+ 内置变量，始终指向项目根目录）。
 > 如果宿主项目没有自己的 Skill 文件，跳过此步即可——starter JAR 内置的 4 个 Skill 已经够用。
 
@@ -292,6 +299,11 @@ protected void configure(HttpSecurity http) throws Exception {
 > | `/runs` | POST | 认证 | 启动 Agent 执行 |
 > | `/runs/{id}` | GET | 认证 | 查询任务状态 |
 > | `/runs/{id}/transcript` | GET | 认证 | 获取任务完整 transcript |
+> | `/conversations` | POST | 认证 | 保存/更新会话历史 |
+> | `/conversations` | GET | 认证 | 列出当前用户会话（可按 skillId 过滤） |
+> | `/conversations/{id}` | GET | 认证 | 加载某个会话的完整内容 |
+> | `/conversations/{id}/download` | GET | 认证 | 下载会话为 Markdown 文件 |
+> | `/conversations/{id}` | DELETE | 认证 | 删除某个会话 |
 >
 > 如果宿主用 Shiro，在 Shiro 链定义中放行上述公开路径，其余 `/snap-agent/**` 要求登录。
 > 如果宿主无安全框架，跳过此步骤（但 SnapAgent 将无法识别用户身份）。

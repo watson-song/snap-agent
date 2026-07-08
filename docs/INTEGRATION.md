@@ -146,6 +146,9 @@ snap-agent:
     max-result-rows: 1000                # SQL 查询行数上限
   jdbc:
     enabled: true                        # 开启数据库查询工具
+  logs:
+    enabled: true                        # 开启日志分析工具（log_read）
+    allowed-paths: [/opt/app/logs]       # 允许读取的日志目录白名单
   security:
     framework: auto                      # 自动检测 Spring Security / Shiro
     audit-log: true
@@ -208,6 +211,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .antMatchers("/snap-agent/runs/*").permitAll()        // GET 任务状态
                 .antMatchers("/snap-agent/runs/*/stream").permitAll() // GET SSE 流
                 .antMatchers("/snap-agent/runs/*/transcript").permitAll() // GET 完整 transcript
+                .antMatchers("/snap-agent/conversations").permitAll()       // POST/GET 对话历史
+                .antMatchers("/snap-agent/conversations/**").permitAll()    // GET/DELETE 对话详情/下载
                 .antMatchers("/snap-agent-internal/**").permitAll()   // Pod 间内部端点
                 .anyRequest().authenticated()
             .and()
@@ -262,6 +267,16 @@ SnapAgent 采用**两级 Skill 目录**模型：
 运行期可通过 `POST /snap-agent/skills/upload`（单文件）或 `POST /snap-agent/skills/upload-folder`（整目录）上传 Skill 到 `upload-skills-dir`，也可由运维直接在文件系统中放置。该目录可读写，重启后持久化，适合放动态、业务方自助提交的 Skill。
 
 两种 Skill 在 SkillRegistry 中合并注册，LLM 侧无感知差异。如果内置与上传目录存在同名 Skill，**上传目录优先**。
+
+> **内置 Skill 保护机制**：当宿主项目通过 Maven 资源打包将 `docs/skills/` 下的 `.md` 文件加入 classpath 时，`ClasspathSkillScanner` 采用两遍扫描确保 SnapAgent starter JAR 中的内置 skill 始终优先——即使宿主 classpath 中有同名文件，也会被跳过。如需覆盖内置 skill，请通过上传目录或 `POST /skills/upload` API 上传自定义版本。建议宿主打包时用 `<excludes>` 排除内置 skill 同名文件：
+> ```xml
+> <excludes>
+>     <exclude>skills/health-check.md</exclude>
+>     <exclude>skills/database-query.md</exclude>
+>     <exclude>skills/redis-query.md</exclude>
+>     <exclude>skills/log-analysis.md</exclude>
+> </excludes>
+> ```
 
 下面以内置 Skill 为例，创建 `.md` 文件：
 
@@ -420,6 +435,7 @@ if (requestUri != null && requestUri.contains("/stream")) {
 /snap-agent/skills, /snap-agent/skills/**
 /snap-agent/models, /snap-agent/tools
 /snap-agent/runs, /snap-agent/runs/*, /snap-agent/runs/*/stream, /snap-agent/runs/*/transcript
+/snap-agent/conversations, /snap-agent/conversations/**
 /snap-agent-internal/**
 ```
 

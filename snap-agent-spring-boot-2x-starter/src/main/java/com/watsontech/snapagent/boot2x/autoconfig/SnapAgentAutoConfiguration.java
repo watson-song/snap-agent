@@ -1,5 +1,6 @@
 package com.watsontech.snapagent.boot2x.autoconfig;
 
+import com.watsontech.snapagent.boot2x.conversation.FileConversationStore;
 import com.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import com.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import com.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -22,6 +23,7 @@ import com.watsontech.snapagent.boot2x.web.SnapAgentFilter;
 import com.watsontech.snapagent.core.agent.AgentExecutor;
 import com.watsontech.snapagent.core.agent.RateLimiter;
 import com.watsontech.snapagent.core.agent.TaskStore;
+import com.watsontech.snapagent.core.conversation.ConversationStore;
 import com.watsontech.snapagent.core.llm.LlmClient;
 import com.watsontech.snapagent.core.security.PrincipalResolver;
 import com.watsontech.snapagent.core.security.SecurityAuditLogger;
@@ -221,6 +223,15 @@ public class SnapAgentAutoConfiguration {
         return new ClasspathSkillScanner();
     }
 
+    // ---- ConversationStore (conversation history persistence) ----
+    @Bean
+    @ConditionalOnMissingBean
+    public ConversationStore conversationStore(SnapAgentProperties props) {
+        String baseDir = props.getUploadSkillsDir();
+        log.info("Using FileConversationStore with base dir: {}", baseDir);
+        return new FileConversationStore(baseDir);
+    }
+
     // ---- SkillRegistry ----
     @Bean
     @ConditionalOnMissingBean
@@ -328,15 +339,26 @@ public class SnapAgentAutoConfiguration {
             @Qualifier("snapAgentExecutor") AsyncTaskExecutor taskExecutor,
             ObjectProvider<PeerSseRelay> peerSseRelayProvider,
             ObjectProvider<LlmClient> llmClientProvider,
-            ObjectProvider<SecurityAuditLogger> auditLoggerProvider) {
+            ObjectProvider<SecurityAuditLogger> auditLoggerProvider,
+            ObjectProvider<ConversationStore> conversationStoreProvider,
+            org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         SecurityAuditLogger auditLogger = auditLoggerProvider.getIfAvailable();
+        ConversationStore conversationStore = conversationStoreProvider.getIfAvailable();
+        // Auto-resolve app log file path from Spring's logging.file.name
+        if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
+            String logFile = environment.getProperty("logging.file.name");
+            if (logFile != null && !logFile.isEmpty()) {
+                properties.getLogs().setAppLogFile(logFile);
+                log.info("App log file path resolved from logging.file.name: {}", logFile);
+            }
+        }
         return new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
-                auditLogger);
+                auditLogger, conversationStore);
     }
 
     // ---- SnapAgentFilter ----

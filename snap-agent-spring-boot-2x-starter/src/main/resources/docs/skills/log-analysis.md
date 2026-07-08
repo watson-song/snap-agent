@@ -19,7 +19,9 @@ Analyze application log files to answer the user's question about exceptions, us
 
 ## Step 1: Determine the Log File Path
 
-The allowed log directory paths are provided in the `<user_inputs>` block as `_log_paths`. Use the first path as the default log directory. Try common log file names:
+The application's log file path is provided in the `<user_inputs>` block as `{_app_log_file}`. **Always try this file first** — it is the host application's own log file and most likely contains the relevant logs.
+
+If `{_app_log_file}` is empty or not found, fall back to the allowed log directories provided as `{_log_paths}`. Try common log file names in those directories:
 
 - `{log_dir}/application.log` — main application log
 - `{log_dir}/error.log` — error-only log (if configured)

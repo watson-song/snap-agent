@@ -119,6 +119,11 @@ inputs:
   - **内置 skill**：经 `ClasspathSkillScanner` 用 Spring 的 `ResourcePatternResolver` 扫描 `classpath:/docs/skills/**/*.md`，启动时解析一次，只读。
   - **上传 skill**：经 `FilesystemSkillScanner` 用 `Files.walkFileTree` 扫描文件系统 `upload-skills-dir`，刷新时重新扫描，读写。
 - **目录 skill 扫描规则**：`preVisitDirectory` 检查目录下是否存在 `SKILL.md`；若存在，仅解析 `SKILL.md` 并跳过子树（`SKIP_SUBTREE`），整个目录视为一个 skill；若不存在，视为组织性目录，递归进入子目录继续扫描。
+- **内置 Skill 保护机制（两遍扫描）**：`ClasspathSkillScanner.scan()` 采用两遍扫描策略——
+  1. **第一遍**：扫描 URL 含 `snap-agent-spring-boot` 或 `snap-agent-core` 的资源（即 starter JAR 内置 skill），解析并记录 name 到 `seenNames` 集合。
+  2. **第二遍**：扫描其余资源（宿主 classpath），若 name 已在 `seenNames` 中 → 跳过并记录 WARN 日志。
+  - 效果：**内置 skill 始终优先于宿主 classpath 同名 skill**。如需覆盖内置 skill，通过上传目录（`upload-skills-dir`）方式，custom 优先级高于 builtin。
+  - 场景：宿主项目 `docs/skills/` 下放了 `health-check.md`，但 starter JAR 也有 `health-check.md` → 宿主版本被跳过，使用内置版本。
 - 解析后存入 `Map<String, SkillMeta>`（key=name）。
 - 扫描失败（目录不存在 / 无文件）→ 日志 WARN，registry 为空，不崩；`GET /skills` 返回空列表。
 - **不做文件监听**（无 WatchService 线程，无竞态）。

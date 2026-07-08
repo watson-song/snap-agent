@@ -8,6 +8,10 @@ import com.watsontech.snapagent.core.agent.RateLimiter;
 import com.watsontech.snapagent.core.agent.TaskStatus;
 import com.watsontech.snapagent.core.agent.TaskStore;
 import com.watsontech.snapagent.core.agent.TranscriptEvent;
+import com.watsontech.snapagent.core.conversation.Conversation;
+import com.watsontech.snapagent.core.conversation.ConversationMessage;
+import com.watsontech.snapagent.core.conversation.ConversationStore;
+import com.watsontech.snapagent.core.conversation.ConversationSummary;
 import com.watsontech.snapagent.core.llm.LlmClient;
 import com.watsontech.snapagent.core.llm.Message;
 import com.watsontech.snapagent.core.security.SecurityAuditLogger;
@@ -21,7 +25,9 @@ import com.watsontech.snapagent.core.tool.ToolDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -78,6 +84,7 @@ public class SnapAgentController {
     private final PeerSseRelay peerSseRelay;
     private final LlmClient llmClient;
     private final SecurityAuditLogger auditLogger;
+    private final ConversationStore conversationStore;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -88,7 +95,7 @@ public class SnapAgentController {
                                 RateLimiter rateLimiter,
                                 AsyncTaskExecutor taskExecutor) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor, null, null, null);
+                properties, securityGateway, rateLimiter, taskExecutor, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -101,7 +108,7 @@ public class SnapAgentController {
                                 AsyncTaskExecutor taskExecutor,
                                 PeerSseRelay peerSseRelay) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, null, null);
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -115,7 +122,7 @@ public class SnapAgentController {
                                 PeerSseRelay peerSseRelay,
                                 LlmClient llmClient) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient, null);
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -129,6 +136,23 @@ public class SnapAgentController {
                                 PeerSseRelay peerSseRelay,
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -140,6 +164,7 @@ public class SnapAgentController {
         this.peerSseRelay = peerSseRelay;
         this.llmClient = llmClient;
         this.auditLogger = auditLogger;
+        this.conversationStore = conversationStore;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -521,6 +546,11 @@ public class SnapAgentController {
             if (logPaths != null && !logPaths.isEmpty()) {
                 inputs.put("_log_paths", String.join(", ", logPaths));
             }
+            // Inject the application's own log file path so the LLM knows exactly which file to read
+            String appLogFile = properties.getLogs().getAppLogFile();
+            if (appLogFile != null && !appLogFile.isEmpty()) {
+                inputs.put("_app_log_file", appLogFile);
+            }
         }
 
         // Validate model — check against dynamic API list first, then static config
@@ -845,6 +875,207 @@ public class SnapAgentController {
         return emitter;
     }
 
+    // ---- POST /conversations (save/update a conversation) ----
+    @PostMapping("/conversations")
+    public ResponseEntity<Object> saveConversation(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (conversationStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "CONVERSATION_DISABLED",
+                    "conversation store not configured");
+        }
+
+        String userId = currentUserId();
+        String skillId = (String) body.get("skillId");
+        if (skillId == null || skillId.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required");
+        }
+
+        String conversationId = body.get("conversationId") instanceof String
+                ? (String) body.get("conversationId") : null;
+        String title = body.get("title") instanceof String
+                ? (String) body.get("title") : null;
+
+        // Parse messages
+        List<ConversationMessage> messages = new ArrayList<ConversationMessage>();
+        Object msgsObj = body.get("messages");
+        if (msgsObj instanceof List) {
+            for (Object item : (List<?>) msgsObj) {
+                if (!(item instanceof Map)) continue;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> m = (Map<String, Object>) item;
+                String role = m.get("role") instanceof String ? (String) m.get("role") : "user";
+                String content = m.get("content") != null ? String.valueOf(m.get("content")) : "";
+                long ts = 0;
+                if (m.get("timestamp") instanceof Number) {
+                    ts = ((Number) m.get("timestamp")).longValue();
+                } else {
+                    ts = System.currentTimeMillis();
+                }
+                messages.add(new ConversationMessage(role, content, ts));
+            }
+        }
+
+        long now = System.currentTimeMillis();
+        Conversation conv = new Conversation(conversationId, userId, skillId, title,
+                now, now, messages);
+        Conversation saved = conversationStore.save(conv);
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("conversationId", saved.getId());
+        result.put("skillId", saved.getSkillId());
+        result.put("title", saved.getTitle());
+        result.put("createdAt", saved.getCreatedAt());
+        result.put("updatedAt", saved.getUpdatedAt());
+        result.put("messageCount", saved.getMessageCount());
+
+        audit(userId, "POST", "/conversations", "SAVE_CONVERSATION",
+                Collections.<String, Object>singletonMap("conversationId", saved.getId()));
+
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /conversations (list for current user, optionally filtered by skill) ----
+    @GetMapping("/conversations")
+    public ResponseEntity<Object> listConversations(
+            @RequestParam(value = "skillId", required = false) String skillId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (conversationStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "CONVERSATION_DISABLED",
+                    "conversation store not configured");
+        }
+
+        String userId = currentUserId();
+        List<ConversationSummary> summaries = conversationStore.list(userId, skillId);
+
+        List<Map<String, Object>> items = new ArrayList<Map<String, Object>>();
+        for (ConversationSummary s : summaries) {
+            Map<String, Object> item = new LinkedHashMap<String, Object>();
+            item.put("conversationId", s.getId());
+            item.put("skillId", s.getSkillId());
+            item.put("title", s.getTitle());
+            item.put("createdAt", s.getCreatedAt());
+            item.put("updatedAt", s.getUpdatedAt());
+            item.put("messageCount", s.getMessageCount());
+            items.add(item);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("conversations", items);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /conversations/{id} (load a conversation) ----
+    @GetMapping("/conversations/{id}")
+    public ResponseEntity<Object> loadConversation(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (conversationStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "CONVERSATION_DISABLED",
+                    "conversation store not configured");
+        }
+
+        String userId = currentUserId();
+        Conversation conv = conversationStore.load(id, userId);
+        if (conv == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "CONVERSATION_NOT_FOUND",
+                    "conversation not found: " + id);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("conversationId", conv.getId());
+        result.put("skillId", conv.getSkillId());
+        result.put("title", conv.getTitle());
+        result.put("createdAt", conv.getCreatedAt());
+        result.put("updatedAt", conv.getUpdatedAt());
+
+        List<Map<String, Object>> msgList = new ArrayList<Map<String, Object>>();
+        for (ConversationMessage msg : conv.getMessages()) {
+            Map<String, Object> m = new LinkedHashMap<String, Object>();
+            m.put("role", msg.getRole());
+            m.put("content", msg.getContent());
+            m.put("timestamp", msg.getTimestamp());
+            msgList.add(m);
+        }
+        result.put("messages", msgList);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /conversations/{id}/download (download as markdown) ----
+    @GetMapping("/conversations/{id}/download")
+    public ResponseEntity<byte[]> downloadConversation(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(null);
+        }
+
+        if (conversationStore == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(null);
+        }
+
+        String userId = currentUserId();
+        String markdown = conversationStore.exportMarkdown(id, userId);
+        if (markdown == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(null);
+        }
+
+        audit(userId, "GET", "/conversations/" + id + "/download", "DOWNLOAD_CONVERSATION",
+                Collections.<String, Object>singletonMap("conversationId", id));
+
+        String safeTitle = "conversation";
+        Conversation conv = conversationStore.load(id, userId);
+        if (conv != null && conv.getTitle() != null && !conv.getTitle().isEmpty()) {
+            safeTitle = conv.getTitle().replaceAll("[^\\u4e00-\\u9fa5a-zA-Z0-9_\\- ]", "").trim();
+            if (safeTitle.isEmpty()) safeTitle = "conversation";
+        }
+
+        String encodedTitle;
+        try {
+            encodedTitle = java.net.URLEncoder.encode(safeTitle, "UTF-8").replace("+", "%20");
+        } catch (java.io.UnsupportedEncodingException e) {
+            encodedTitle = safeTitle;
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/markdown; charset=UTF-8"));
+        headers.set("Content-Disposition",
+                "attachment; filename=\"" + safeTitle + ".md\"; filename*=UTF-8''"
+                        + encodedTitle + ".md");
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(markdown.getBytes(StandardCharsets.UTF_8));
+    }
+
+    // ---- DELETE /conversations/{id} (delete a conversation) ----
+    @DeleteMapping("/conversations/{id}")
+    public ResponseEntity<Object> deleteConversation(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (conversationStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "CONVERSATION_DISABLED",
+                    "conversation store not configured");
+        }
+
+        String userId = currentUserId();
+        boolean deleted = conversationStore.delete(id, userId);
+        if (!deleted) {
+            return errorResponse(HttpStatus.NOT_FOUND, "CONVERSATION_NOT_FOUND",
+                    "conversation not found: " + id);
+        }
+
+        audit(userId, "DELETE", "/conversations/" + id, "DELETE_CONVERSATION",
+                Collections.<String, Object>singletonMap("conversationId", id));
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("deleted", id);
+        return ResponseEntity.ok(result);
+    }
+
     // ---- helpers ----
 
     /**
@@ -914,6 +1145,10 @@ public class SnapAgentController {
         // Log paths for log_read skills
         if (skill.getTools().contains("log_read")) {
             dto.put("logPaths", properties.getLogs().getAllowedPaths());
+            String appLogFile = properties.getLogs().getAppLogFile();
+            if (appLogFile != null && !appLogFile.isEmpty()) {
+                dto.put("appLogFile", appLogFile);
+            }
         }
         return dto;
     }

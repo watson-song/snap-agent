@@ -28,6 +28,20 @@
 ```
 `UNAVAILABLE`/`INVALID` 的 skill 也列出（前端灰显 + tooltip 说明 `unavailableReason`）。
 
+含 `log_read` 工具的 skill 额外返回日志路径信息：
+```json
+{
+  "name": "log-analysis",
+  "description": "Analyzes application log files...",
+  "availability": "AVAILABLE",
+  "tools": ["log_read"],
+  "logPaths": ["/opt/app/logs"],
+  "appLogFile": "/opt/app/logs/application.log"
+}
+```
+- `logPaths`：`snap-agent.logs.allowed-paths` 配置的目录白名单。
+- `appLogFile`：应用日志文件路径，自动从 Spring `logging.file.name` 解析（可被 `snap-agent.logs.app-log-file` 显式覆盖）。前端在 skill 上下文栏显示此路径。
+
 ### 1.2 `GET /tools`
 列出已装配工具。
 ```json
@@ -120,6 +134,48 @@
 { "taskId":"sa_...", "status":"RUNNING", "skillId":"...", "model":"...", "createdAt":"...", "updatedAt":"..." }
 ```
 
+### 1.12 `POST /conversations`
+保存或更新对话。请求：
+```json
+{
+  "id": null,                          // null=新建，非 null=更新
+  "skillId": "database-query",
+  "title": null,                        // null=自动从首条用户消息截取前 30 字符
+  "messages": [
+    {"role":"user","content":"查询用户表"},
+    {"role":"assistant","content":"用户表结构如下..."}
+  ]
+}
+```
+响应（200）：
+```json
+{ "id":"conv_202607081030_ab12", "skillId":"database-query", "title":"查询用户表", "createdAt":1751950000, "updatedAt":1751950001 }
+```
+
+### 1.13 `GET /conversations`
+列出当前用户的对话。Query 参数 `skillId` 可选，用于按 skill 过滤。结果按 `updatedAt` 降序排列。
+```json
+[
+  {"id":"conv_...", "skillId":"database-query", "title":"查询用户表", "messageCount":4, "createdAt":1751950000, "updatedAt":1751950001}
+]
+```
+
+### 1.14 `GET /conversations/{id}`
+加载完整对话（含 ownership 校验，非本人返回 404）。
+```json
+{
+  "id":"conv_...", "userId":"user1", "skillId":"database-query", "title":"查询用户表",
+  "createdAt":1751950000, "updatedAt":1751950001,
+  "messages":[{"role":"user","content":"...","timestamp":1751950000}, ...]
+}
+```
+
+### 1.15 `GET /conversations/{id}/download`
+下载对话为 Markdown 文件。响应 `Content-Type: text/markdown`，`Content-Disposition: attachment; filename="对话标题.md"`。非本人返回 404。
+
+### 1.16 `DELETE /conversations/{id}`
+删除对话（含 ownership 校验）。成功 200，不存在或非本人 404。
+
 ## 2. 单页 SPA（无构建）
 
 资源：`classpath:/static/snap-agent/`（`index.html` / `app.js` / `style.css`），starter 自动当静态资源暴露。
@@ -149,8 +205,17 @@
 6. SSE `thought` 事件 → 追加到 transcript 区（灰底）。
 7. SSE `tool_call` → 渲染工具名 + 参数（SQL 高亮）。
 8. SSE `tool_result` → 在对应 tool_call 下方展开结果（表格，限制显示行数）。
-9. SSE `done` → 渲染最终报告（markdown），关 EventSource。
+9. SSE `done` → 渲染最终报告（markdown），关 EventSource，自动保存对话历史到后端。
 10. SSE `task_error` → 红色提示，关 EventSource。
+
+### 对话历史（Per-Skill）
+- 每个 skill 维护独立的对话历史，切换 skill 后自动加载该 skill 的最近一次对话。
+- **切换 skill 时自动保存**：如果上一个 skill 的对话仍在 streaming，切换前会自动保存已累积的 AI 回复到该 skill 的对话历史（通过 stream 取消机制）。
+- 底部输入区有 📜 历史按钮 → 弹出历史对话列表模态框，**按当前选中 skill 过滤**（调用 `GET /conversations?skillId=xxx`）。
+- 历史列表按 `updatedAt` 降序，显示标题、时间；每条可：
+  - **恢复**：加载该对话到聊天区，继续追问。
+  - **下载**：导出为 Markdown 文件。
+  - **删除**：删除该对话。
 
 ## 3. localStorage 缓存策略（决策 #4 模型临时修改）
 

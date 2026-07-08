@@ -34,6 +34,12 @@ snap-agent:
     enabled: true
     redis-template-bean-name: redisTemplate
     max-key-count: 100
+  logs:
+    enabled: true                        # log_read 工具（日志分析）
+    allowed-paths: [/opt/app/logs]       # 允许读取的日志目录白名单
+    max-lines: 500                       # 单次最多返回行数
+    max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件（10MB）
+    app-log-file: ""                     # 应用日志文件路径；空=自动从 logging.file.name 解析
   mcp:
     enabled: false                    # Phase 2
     servers: {}                       # {name: {transport: sse, url, auth-header, auth-header-value}}

@@ -56,6 +56,12 @@ public class ClasspathSkillScanner {
     /**
      * Scans the classpath directory and returns parsed builtin skills.
      *
+     * <p>Resources from the SnapAgent JAR are processed first; resources from
+     * the host project's classpath are processed second and will NOT override
+     * SnapAgent's built-in skills with the same name. This prevents accidental
+     * shadowing when the host project configures Maven {@code <resources>}
+     * to include its own {@code docs/skills/} directory.</p>
+     *
      * @param classpathDir a classpath path like {@code classpath:/docs/skills/}
      * @return list of parsed skill metadata (source="builtin"); never {@code null}
      */
@@ -84,6 +90,68 @@ public class ClasspathSkillScanner {
             return Collections.emptyList();
         }
 
+        // Separate resources: SnapAgent JAR resources take precedence
+        List<Resource> snapAgentResources = new ArrayList<Resource>();
+        List<Resource> otherResources = new ArrayList<Resource>();
+        for (Resource res : resources) {
+            if (isFromSnapAgentJar(res)) {
+                snapAgentResources.add(res);
+            } else {
+                otherResources.add(res);
+            }
+        }
+
+        // Process SnapAgent JAR resources first, then host project resources
+        // (host resources cannot override SnapAgent built-in skill names)
+        List<SkillMeta> result = new ArrayList<SkillMeta>();
+        java.util.Set<String> seenNames = new java.util.HashSet<String>();
+
+        // Pass 1: SnapAgent JAR resources
+        for (SkillMeta meta : parseGroupedResources(snapAgentResources)) {
+            if (meta.getName() != null) {
+                seenNames.add(meta.getName());
+            }
+            result.add(meta);
+        }
+
+        // Pass 2: host project resources (skip names already provided by SnapAgent)
+        for (SkillMeta meta : parseGroupedResources(otherResources)) {
+            if (meta.getName() != null && seenNames.contains(meta.getName())) {
+                log.warn("Host project skill '{}' is shadowed by SnapAgent built-in; skipping host version",
+                        meta.getName());
+                continue;
+            }
+            if (meta.getName() != null) {
+                seenNames.add(meta.getName());
+            }
+            result.add(meta);
+        }
+
+        log.info("Loaded {} builtin skill(s) from {} ({} from SnapAgent JAR, {} from host classpath)",
+                result.size(), classpathDir, snapAgentResources.size(), otherResources.size());
+        return result;
+    }
+
+    /**
+     * Checks if a resource originates from a SnapAgent JAR file.
+     * Used to ensure host project classpath resources don't override
+     * SnapAgent's built-in skills.
+     */
+    private boolean isFromSnapAgentJar(Resource res) {
+        try {
+            String url = res.getURL().toString();
+            return url.contains("snap-agent-spring-boot") || url.contains("snap-agent-core");
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Groups resources by parent directory and parses them.
+     * Directory skills (with SKILL.md) are parsed as a single skill;
+     * standalone .md files are parsed individually.
+     */
+    private List<SkillMeta> parseGroupedResources(List<Resource> resources) {
         // Group resources by parent directory
         Map<String, List<Resource>> byDir = new LinkedHashMap<String, List<Resource>>();
         for (Resource res : resources) {
@@ -104,7 +172,6 @@ public class ClasspathSkillScanner {
 
         List<SkillMeta> result = new ArrayList<SkillMeta>();
         for (Map.Entry<String, List<Resource>> entry : byDir.entrySet()) {
-            String dir = entry.getKey();
             List<Resource> files = entry.getValue();
 
             // Check if this directory has SKILL.md
@@ -126,8 +193,6 @@ public class ClasspathSkillScanner {
                 }
             }
         }
-
-        log.info("Loaded {} builtin skill(s) from {}", result.size(), classpathDir);
         return result;
     }
 

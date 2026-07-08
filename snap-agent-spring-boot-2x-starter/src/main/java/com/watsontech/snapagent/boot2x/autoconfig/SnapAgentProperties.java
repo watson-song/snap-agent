@@ -375,6 +375,8 @@ public class SnapAgentProperties {
         private int maxLines = 500;
         /** Max file size in bytes (rejects larger files to prevent OOM). */
         private long maxFileBytes = 10L * 1024 * 1024; // 10 MB
+        /** Application's own log file path (auto-resolved from logging.file.name). */
+        private String appLogFile;
 
         public boolean isEnabled() {
             return enabled;
@@ -406,6 +408,14 @@ public class SnapAgentProperties {
 
         public void setMaxFileBytes(long maxFileBytes) {
             this.maxFileBytes = maxFileBytes;
+        }
+
+        public String getAppLogFile() {
+            return appLogFile;
+        }
+
+        public void setAppLogFile(String appLogFile) {
+            this.appLogFile = appLogFile;
         }
     }
 

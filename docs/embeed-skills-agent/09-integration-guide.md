@@ -43,12 +43,24 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
             <includes>
                 <include>skills/**/*.md</include>
             </includes>
+            <!-- 排除 SnapAgent 内置 skill 同名文件，避免 classpath 冲突 -->
+            <!-- ClasspathSkillScanner 会优先加载 starter JAR 中的内置 skill -->
+            <!-- 若宿主也有同名文件，scanner 会跳过宿主版本并打 WARN 日志 -->
+            <!-- 如需覆盖内置 skill，请用上传目录（upload-skills-dir）方式 -->
+            <excludes>
+                <exclude>skills/health-check.md</exclude>
+                <exclude>skills/database-query.md</exclude>
+                <exclude>skills/redis-query.md</exclude>
+                <exclude>skills/log-analysis.md</exclude>
+            </excludes>
         </resource>
     </resources>
 </build>
 ```
 
-打包后宿主 Skill 与 SnapAgent 内置 Skill 合并在同一个 `classpath:/docs/skills/` 路径下，同名时宿主的覆盖 starter 的。无自有 Skill 则跳过此步。
+> **内置 Skill 保护机制**：`ClasspathSkillScanner` 采用两遍扫描——第一遍扫描 SnapAgent starter JAR 中的资源（URL 含 `snap-agent-spring-boot` 或 `snap-agent-core`），第二遍扫描宿主 classpath 资源，跳过第一遍已发现的同名 skill。因此即使宿主 `docs/skills/` 下有与内置 skill 同名的文件，**内置版本始终优先**，宿主同名文件会被跳过并记录 WARN 日志。如需覆盖内置 skill，请通过上传目录（`upload-skills-dir`）或 `POST /skills/upload` API 上传自定义版本——上传目录的 custom skill 优先级高于 builtin。
+
+打包后宿主 Skill 与 SnapAgent 内置 Skill 合并在同一个 `classpath:/docs/skills/` 路径下。无自有 Skill 则跳过此步。
 
 ## 步骤 2：配 yml
 
@@ -67,6 +79,12 @@ snap-agent:
     datasource-bean-name: snapAgentReadOnlyDataSource
   redis:
     enabled: false                       # 不需要 Redis 工具就关
+  logs:
+    enabled: true                        # 日志分析工具（log_read）
+    allowed-paths:                       # 允许读取的日志目录白名单
+      - /opt/app/logs
+    max-lines: 500                       # 单次最多返回行数
+    max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件
   security:
     required-permission: ""              # 已登录即可；建议配 admin 权限码
 ```
@@ -99,7 +117,24 @@ snap-agent:
       password: ${RO_DB_PASSWORD}
 ```
 
-## 步骤 3：建只读 DB 用户
+### 日志文件路径自动注入
+
+当宿主配置了 `logging.file.name`（Spring Boot 标准属性），snap-agent 会自动将其解析为 `snap-agent.logs.app-log-file`，并在运行 `log_read` 类 skill 时注入到 `inputs._app_log_file` 中。LLM 会优先读取此文件作为应用日志。
+
+```yaml
+logging:
+  file:
+    name: /opt/app/logs/application.log   # snap-agent 自动读取此值
+```
+
+也可通过 `snap-agent.logs.app-log-file` 显式指定（优先于自动解析）：
+```yaml
+snap-agent:
+  logs:
+    app-log-file: /opt/app/logs/application.log
+```
+
+GET `/skills` 响应中，含 `log_read` 工具的 skill 会额外返回 `appLogFile` 和 `logPaths` 字段，前端据此显示日志路径信息。
 
 运维在 DB 上建受限只读账号：
 ```sql
@@ -337,6 +372,52 @@ skill 分两层来源，部署方式不同：
   - `DELETE /snap-agent/skills/{name}` — 删除自定义 skill；若该名称被 custom 覆盖 builtin，删除后恢复 builtin 版本。builtin skill 不可删除（403）。
 - 改动后 `POST /skills/refresh`（或重启）生效；上传 API 自动触发刷新。
 - skill frontmatter 必须 `name`/`description`/`tools` 齐全，否则标 `INVALID`（见 [02](02-skill-loading.md) §3）。
+
+## 对话历史持久化（ConversationStore SPI）
+
+SnapAgent 支持每个 skill 维护独立的对话历史，后端持久化以便用户切换 skill 后返回时恢复上下文。
+
+### 默认实现：FileConversationStore
+
+默认使用 `FileConversationStore`，将对话以 JSON 文件存储在 `upload-skills-dir/conversations/{userId}/{conversationId}.json`，无需额外配置。userId 经过路径消毒（非字母数字字符替换为 `_`），防止路径穿越。
+
+### 自定义实现（如数据库存储）
+
+如需将对话历史存入数据库，实现 `ConversationStore` 接口并声明为 Bean（`@ConditionalOnMissingBean` 覆盖默认实现）：
+
+```java
+@Component
+public class DbConversationStore implements ConversationStore {
+    @Override
+    public Conversation save(Conversation conversation) { /* INSERT/UPDATE */ }
+
+    @Override
+    public Conversation load(String conversationId, String userId) { /* SELECT with ownership check */ }
+
+    @Override
+    public List<ConversationSummary> list(String userId, String skillId) { /* SELECT summaries */ }
+
+    @Override
+    public boolean delete(String conversationId, String userId) { /* DELETE with ownership check */ }
+
+    @Override
+    public String exportMarkdown(String conversationId, String userId) { /* load + toMarkdown */ }
+}
+```
+
+> 所有方法都接收 `userId` 参数，必须做 ownership 校验——用户只能访问自己的对话。
+
+### 对话历史 REST 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/conversations` | 保存/更新对话（自动生成 ID 和标题） |
+| `GET` | `/conversations?skillId=xxx` | 列出当前用户的对话（可选按 skill 过滤，按 updatedAt 降序） |
+| `GET` | `/conversations/{id}` | 加载完整对话（含 ownership 校验） |
+| `GET` | `/conversations/{id}/download` | 下载对话为 Markdown 文件（`Content-Disposition: attachment`） |
+| `DELETE` | `/conversations/{id}` | 删除对话（含 ownership 校验） |
+
+> 这些端点挂在 `snap-agent.base-path` 下，与其他 API 遵循相同的鉴权规则。
 
 ## 安全检查清单（集成前）
 
