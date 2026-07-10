@@ -35,7 +35,7 @@ public class DataSourceConfig {
         ds.setDriverClassName("com.mysql.cj.jdbc.Driver");
         ds.setMaximumPoolSize(3);
         ds.setMinimumIdle(1);
-        ds.setConnectionTimeout(5000);
+        ds.setConnectionTimeout(15000);
         ds.setIdleTimeout(60000);
         ds.setMaxLifetime(300000);
         ds.setPoolName("snap-agent-jdbc");

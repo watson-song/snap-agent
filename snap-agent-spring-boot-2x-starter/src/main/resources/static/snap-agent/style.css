@@ -77,6 +77,7 @@ body {
 .sidebar.collapsed {
     width: 48px;
     min-width: 48px;
+    overflow: visible; /* allow tooltip ::after to show beyond sidebar */
 }
 .sidebar.collapsed .logo-text,
 .sidebar.collapsed .sidebar-actions,
@@ -84,13 +85,98 @@ body {
 .sidebar.collapsed .skill-list {
     display: none;
 }
+.sidebar.collapsed .skill-icons {
+    display: flex;
+}
 .sidebar.collapsed .sidebar-header {
-    padding: 20px 0;
+    padding: 20px 0 8px 0;
     display: flex;
     justify-content: center;
 }
-.sidebar.collapsed .sidebar-toggle {
-    transform: rotate(180deg);
+.sidebar.collapsed .sidebar-header .logo-icon {
+    font-size: 22px;
+}
+/* Arrow direction handled by JS text content swap (›/‹), no CSS rotation needed */
+.sidebar.collapsed .sidebar-footer {
+    padding: 8px 0;
+    justify-content: center;
+}
+
+.sidebar-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+}
+
+/* Collapsed skill letter-icons */
+.skill-icons {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    list-style: none;
+    padding: 8px 0;
+    margin: 0;
+    gap: 4px;
+}
+
+.skill-icons li {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin: 0 auto;
+    border-radius: 8px;
+    background: var(--bg-card);
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    transition: all 0.2s;
+    position: relative;
+}
+
+.skill-icons li:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-hover);
+}
+
+.skill-icons li.active {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.skill-icons li.unavailable {
+    opacity: 0.4;
+}
+
+/* Hover tooltip showing full skill name */
+.skill-icons li::after {
+    content: attr(data-name);
+    position: absolute;
+    left: calc(100% + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border-hover);
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s;
+    z-index: 100;
+    box-shadow: var(--shadow);
+}
+
+.skill-icons li:hover::after {
+    opacity: 1;
 }
 
 .sidebar-toggle {
@@ -269,6 +355,42 @@ body {
 
 .skill-badge.available { background: var(--green-light); color: var(--green); }
 .skill-badge.unavailable { background: var(--red-light); color: var(--red); }
+
+/* Background-running indicator on skill list items */
+.skill-item-running {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    font-size: 10px;
+    color: var(--green);
+    font-weight: 600;
+}
+
+.skill-item-running::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulseDot 1.2s infinite;
+}
+
+.skill-list li.has-running-stream {
+    border-color: var(--green);
+}
+
+/* Running indicator on collapsed sidebar letter-icons */
+.skill-icons li.has-running-stream {
+    border-color: var(--green);
+    box-shadow: 0 0 0 2px var(--green);
+    animation: iconPulse 1.5s infinite;
+}
+
+@keyframes iconPulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--green); }
+    50% { box-shadow: 0 0 0 4px var(--green); opacity: 0.85; }
+}
 
 /* ===== Main Area ===== */
 .main-area {
@@ -573,6 +695,39 @@ body {
     color: var(--text-secondary);
     margin-bottom: 6px;
     font-weight: 600;
+}
+
+.msg-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.msg-timestamp {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    margin-left: auto;
+}
+
+/* Running indicator dot shown while a skill's stream is active in background */
+.msg-running-dot {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulseDot 1.2s infinite;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+@keyframes pulseDot {
+    0%, 100% { opacity: 0.4; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.1); }
 }
 
 /* Streaming cursor */

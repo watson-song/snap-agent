@@ -355,6 +355,16 @@ public class SnapAgentAutoConfiguration {
                 log.info("App log file path resolved from logging.file.name: {}", logFile);
             }
         }
+        // Resolve host app's active Spring profiles so skills can reference {_app_profile}
+        // and the web UI can surface the current environment without prompting the user.
+        if (properties.getAppProfiles() == null || properties.getAppProfiles().isEmpty()) {
+            String[] active = environment.getActiveProfiles();
+            if (active != null && active.length > 0) {
+                String joined = String.join(",", active);
+                properties.setAppProfiles(joined);
+                log.info("App active profiles resolved: {}", joined);
+            }
+        }
         return new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,

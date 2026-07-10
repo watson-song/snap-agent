@@ -30,6 +30,13 @@ public class SnapAgentProperties {
     /** Directory on the filesystem for uploaded skills (read-write, persists across restarts). */
     private String uploadSkillsDir = "/tmp/snap-agent-skills";
 
+    /**
+     * Host application's active Spring profiles (comma-joined), auto-resolved at startup.
+     * Exposed to skills as {@code {_app_profile}} and surfaced in the web UI so the LLM
+     * does not need to ask which environment it is operating on.
+     */
+    private String appProfiles = "";
+
     private Llm llm = new Llm();
     private Agent agent = new Agent();
     private Jdbc jdbc = new Jdbc();
@@ -71,6 +78,14 @@ public class SnapAgentProperties {
 
     public void setUploadSkillsDir(String uploadSkillsDir) {
         this.uploadSkillsDir = uploadSkillsDir;
+    }
+
+    public String getAppProfiles() {
+        return appProfiles;
+    }
+
+    public void setAppProfiles(String appProfiles) {
+        this.appProfiles = appProfiles;
     }
 
     public Llm getLlm() {

@@ -1,15 +1,17 @@
-// SnapAgent SPA - Chat-style UI with real streaming & per-skill conversation history
-// Version: v15-streamfix (robust stream cancellation + conversation save on switch)
-console.log('[SnapAgent] app.js v15-streamfix loaded');
+// SnapAgent SPA — per-skill independent chat sessions with parallel streams
+// Version: v19 (fix: collapsed sidebar arrow direction; save user message before stream; load conversation on reconnect)
+console.log('[SnapAgent] app.js v19 loaded');
 
 const BASE = '/snap-agent';
-let selectedSkill = null;
-let currentStream = null;
-// Per-skill conversation state: { [skillId]: { conversationId, messages: [{role, content}] } }
-let skillConversations = {};
-let activeConversationId = null; // conversation ID for the currently selected skill
-// Cancellation function for the active stream — called by selectSkill to stop ALL event processing
-let streamCancelFn = null;
+let selectedSkill = null;            // currently active skill object
+let activeSkillName = null;           // name of the visible skill
+let skillsData = [];                 // cached skill objects (for restore / icon lookup)
+// Per-skill chat state: { [skillName]: { conversationId, transcript, conversationMessages, stream } }
+//   transcript entry: { type, content, timestamp, streaming? }
+//   stream: { taskId, es, thoughtIdx, thoughtText, allText, pendingRender, done, cancelled, capturedSkillName, thoughtEl } | null
+let skillChatState = {};
+// Host app active profiles (resolved from /user-info) — injected as environment context
+let currentProfiles = [];
 
 // ===== Auth config: read token source from server =====
 let authConfig = { authHeader: '', authCookie: '', authLocalStorageKey: '' };
@@ -27,7 +29,6 @@ async function loadAuthConfig() {
 }
 
 function getAuthToken() {
-    // Priority: localStorage > cookie
     if (authConfig.authLocalStorageKey) {
         try {
             var val = localStorage.getItem(authConfig.authLocalStorageKey);
@@ -69,14 +70,16 @@ async function checkUserStatus() {
             showAuthPrompt('未授权', info.message || '您未授权，请联系管理员授权访问');
             return false;
         }
-        // Display username in top bar
         if (info.username) {
             document.getElementById('userName').textContent = info.username;
             document.getElementById('userInfo').style.display = 'flex';
         }
-        // Store userId for SSE stream token auth (EventSource can't send headers)
         if (info.userId) {
             currentUserId = info.userId;
+        }
+        // Capture active profiles for environment-context injection
+        if (Array.isArray(info.activeProfiles) && info.activeProfiles.length > 0) {
+            currentProfiles = info.activeProfiles;
         }
         return true;
     } catch (e) {
@@ -98,7 +101,6 @@ function handleAuthError(resp) {
 }
 
 function showAuthPrompt(title, msg) {
-    // Avoid stacking multiple prompts
     if (document.getElementById('authPrompt')) return;
     const overlay = document.createElement('div');
     overlay.id = 'authPrompt';
@@ -114,7 +116,8 @@ function showAuthPrompt(title, msg) {
 }
 
 // ===== Toast =====
-function toast(msg, type = 'success') {
+function toast(msg, type) {
+    type = type || 'success';
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.textContent = msg;
@@ -122,22 +125,50 @@ function toast(msg, type = 'success') {
     setTimeout(() => el.remove(), 3000);
 }
 
+// ===== Helpers =====
+function getSkillState(skillName) {
+    if (!skillChatState[skillName]) {
+        skillChatState[skillName] = {
+            conversationId: null,
+            transcript: [],
+            conversationMessages: [],
+            stream: null
+        };
+    }
+    return skillChatState[skillName];
+}
+
+function formatTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const pad = n => String(n).padStart(2, '0');
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+
+function profileLabel() {
+    return currentProfiles.length > 0 ? currentProfiles.join(',') : '';
+}
+
 // ===== Load Skills =====
 async function loadSkills() {
     const resp = await fetch(`${BASE}/skills`, { headers: authHeaders() });
     if (handleAuthError(resp)) return;
     const data = await resp.json();
+    skillsData = data.skills || [];
     const ul = document.getElementById('skills');
+    const iconsUl = document.getElementById('skillIcons');
     ul.innerHTML = '';
-    document.getElementById('skillCount').textContent = data.skills.length;
-    data.skills.forEach(skill => {
+    iconsUl.innerHTML = '';
+    document.getElementById('skillCount').textContent = skillsData.length;
+    skillsData.forEach(skill => {
+        // Expanded list item
         const li = document.createElement('li');
         li.dataset.skillId = skill.name;
         const badge = skill.availability === 'AVAILABLE'
             ? '<span class="skill-badge available">可用</span>'
             : '<span class="skill-badge unavailable">不可用</span>';
         li.innerHTML = `
-            <div class="skill-item-name">${skill.name}${badge}</div>
+            <div class="skill-item-name">${skill.name}${badge}<span class="skill-item-running" style="display:none">运行中</span></div>
             <div class="skill-item-desc">${skill.description || ''}</div>
         `;
         if (skill.availability !== 'AVAILABLE') {
@@ -146,6 +177,29 @@ async function loadSkills() {
         }
         li.addEventListener('click', () => selectSkill(skill, li));
         ul.appendChild(li);
+
+        // Collapsed letter-icon item
+        const iconLi = document.createElement('li');
+        iconLi.dataset.skillId = skill.name;
+        iconLi.dataset.name = skill.name;
+        iconLi.textContent = (skill.name.charAt(0) || '?').toUpperCase();
+        iconLi.title = skill.name;
+        if (skill.availability !== 'AVAILABLE') {
+            iconLi.classList.add('unavailable');
+        }
+        iconLi.addEventListener('click', () => {
+            // Ensure sidebar expanded view exists for the matching li
+            const expandedLi = document.querySelector(`.skill-list li[data-skill-id="${CSS.escape(skill.name)}"]`);
+            selectSkill(skill, expandedLi || iconLi);
+        });
+        iconsUl.appendChild(iconLi);
+    });
+    // Re-apply running indicators for any stream already in progress
+    Object.keys(skillChatState).forEach(name => {
+        const st = skillChatState[name];
+        if (st.stream && !st.stream.done && !st.stream.cancelled) {
+            setSkillRunning(name, true);
+        }
     });
 }
 
@@ -172,39 +226,47 @@ async function loadModels() {
     });
 }
 
-// ===== Select Skill =====
+// ===== Select Skill (no stream cancellation — supports parallel runs) =====
 async function selectSkill(skill, li) {
-    // Cancel and save the active stream before switching skills
-    if (streamCancelFn) {
-        streamCancelFn(); // sets cancelled flag + saves partial conversation
-        streamCancelFn = null;
-    }
-    if (currentStream) {
-        currentStream.close();
-        currentStream = null;
-        hideRobotWorking();
-    }
-    document.querySelectorAll('.skill-list li').forEach(el => el.classList.remove('active'));
-    li.classList.add('active');
-    selectedSkill = skill;
-
-    // Load conversation for this skill (from memory map or backend)
     const skillName = skill.name;
-    if (!skillConversations[skillName]) {
-        // Try to load the latest conversation for this skill from backend
+    // Mark previous skill inactive — its stream keeps running in the background.
+    // Detach its live DOM references (the DOM will be replaced below).
+    if (activeSkillName && activeSkillName !== skillName) {
+        const prevStream = skillChatState[activeSkillName] && skillChatState[activeSkillName].stream;
+        if (prevStream) prevStream.thoughtEl = null;
+    }
+
+    document.querySelectorAll('.skill-list li, .skill-icons li').forEach(el => el.classList.remove('active'));
+    if (li) li.classList.add('active');
+    const iconLi = document.querySelector(`.skill-icons li[data-skill-id="${CSS.escape(skillName)}"]`);
+    if (iconLi) iconLi.classList.add('active');
+
+    selectedSkill = skill;
+    activeSkillName = skillName;
+
+    // Load conversation for this skill only if no in-memory state yet (preserves full
+    // transcript — thoughts, tool calls — when switching back after running a stream).
+    if (!skillChatState[skillName]) {
         const conv = await loadLatestConversation(skillName);
         if (conv) {
-            skillConversations[skillName] = {
+            const transcript = (conv.messages || []).map(m => ({
+                type: roleToType(m.role),
+                content: m.content,
+                timestamp: m.timestamp || Date.now()
+            }));
+            skillChatState[skillName] = {
                 conversationId: conv.conversationId,
-                messages: conv.messages || []
+                transcript: transcript,
+                conversationMessages: transcriptToLlmHistory(transcript),
+                stream: null
             };
         } else {
-            skillConversations[skillName] = { conversationId: null, messages: [] };
+            getSkillState(skillName);
         }
     }
-    activeConversationId = skillConversations[skillName].conversationId;
+    const state = skillChatState[skillName];
 
-    // Update top bar context with required inputs reminder
+    // Update top bar context
     const ctx = document.getElementById('skillContext');
     let inputsHint = '';
     if (skill.inputs && skill.inputs.length > 0) {
@@ -213,7 +275,11 @@ async function selectSkill(skill, li) {
             inputsHint = `<div class="ctx-inputs">⚠️ 必须输入: ${required.map(i => i.label || i.key).join(', ')}</div>`;
         }
     }
-    // Show log paths if available
+    if (skill.appProfiles) {
+        inputsHint += `<div class="ctx-logpath">🌍 当前环境: <strong>${skill.appProfiles}</strong></div>`;
+    } else if (profileLabel()) {
+        inputsHint += `<div class="ctx-logpath">🌍 当前环境: <strong>${profileLabel()}</strong></div>`;
+    }
     if (skill.appLogFile) {
         inputsHint += `<div class="ctx-logpath">📄 应用日志: ${skill.appLogFile}</div>`;
     }
@@ -226,9 +292,7 @@ async function selectSkill(skill, li) {
         ${inputsHint}
     `;
 
-    // Show input area
-    const inputArea = document.getElementById('inputArea');
-    inputArea.style.display = 'block';
+    document.getElementById('inputArea').style.display = 'block';
 
     // Render shortcuts
     const shortcutBar = document.getElementById('shortcutBar');
@@ -250,7 +314,7 @@ async function selectSkill(skill, li) {
         shortcutBar.style.display = 'none';
     }
 
-    // Render input form
+    // Render input form (auto-fill environment/profile fields)
     const form = document.getElementById('inputForm');
     form.innerHTML = '';
     if (skill.inputs && skill.inputs.length > 0) {
@@ -270,6 +334,10 @@ async function selectSkill(skill, li) {
                     o.textContent = opt;
                     sel.appendChild(o);
                 });
+                // Auto-fill environment-like fields with the active profile
+                if (isEnvInputKey(input.key) && profileLabel()) {
+                    sel.value = profileLabel().split(',')[0];
+                }
                 field.appendChild(label);
                 field.appendChild(sel);
             } else {
@@ -280,6 +348,10 @@ async function selectSkill(skill, li) {
                            input.type === 'number' ? 'number' : 'text';
                 if (input.required) inp.required = true;
                 if (input.default) inp.value = input.default;
+                // Auto-fill environment-like fields with the active profile
+                if (isEnvInputKey(input.key) && profileLabel()) {
+                    inp.value = profileLabel();
+                }
                 field.appendChild(label);
                 field.appendChild(inp);
             }
@@ -287,45 +359,153 @@ async function selectSkill(skill, li) {
         });
     }
 
-    // Render chat from the conversation history
-    const chatWelcome = document.getElementById('chatWelcome');
+    // Rebuild chat messages from the full in-memory transcript (thoughts + tool calls preserved)
+    renderTranscript(skillName);
+
+    document.getElementById('messageInput').focus();
+    updateSendButtonState();
+}
+
+function isEnvInputKey(key) {
+    if (!key) return false;
+    const k = key.toLowerCase();
+    return k === 'profile' || k === 'profiles' || k === 'environment' || k === 'env';
+}
+
+// ===== Render transcript (rebuild DOM from per-skill state) =====
+function renderTranscript(skillName) {
+    const state = getSkillState(skillName);
     const chatMessages = document.getElementById('chatMessages');
+    const chatWelcome = document.getElementById('chatWelcome');
     chatMessages.innerHTML = '';
-    const messages = skillConversations[skillName]?.messages || [];
-    if (messages.length > 0) {
+    // Reset live element refs — they will be re-attached below for any streaming entry
+    if (state.stream) state.stream.thoughtEl = null;
+    const hasContent = state.transcript.length > 0;
+    if (hasContent) {
         chatWelcome.style.display = 'none';
-        messages.forEach(msg => {
-            if (msg.role === 'user') {
-                appendMessage('user', msg.content);
-            } else if (msg.role === 'assistant') {
-                appendMessage('response', msg.content);
-            }
-        });
     } else {
         chatWelcome.style.display = 'flex';
     }
-    document.getElementById('messageInput').focus();
+    state.transcript.forEach((entry, idx) => {
+        const el = renderMessageEl(entry);
+        chatMessages.appendChild(el);
+        if (entry.streaming && state.stream) {
+            state.stream.thoughtIdx = idx;
+            state.stream.thoughtEl = el;
+        }
+    });
+    // If this skill has an active (not done) stream, show the working indicator
+    if (state.stream && !state.stream.done && !state.stream.cancelled) {
+        showRobotWorking();
+    } else {
+        hideRobotWorking();
+    }
+    scrollChat();
+}
+
+// ===== Build a single message DOM element from a transcript entry =====
+function renderMessageEl(entry) {
+    const el = document.createElement('div');
+    el.className = `msg msg-${entry.type}`;
+    const labelMap = {
+        'thought': '思考',
+        'response': '回复',
+        'tool-call': '工具调用',
+        'tool-result': '工具结果',
+        'error': '错误',
+        'user': '你'
+    };
+    if (entry.type === 'completion') {
+        // Subtle centered divider — no meta row
+        const contentEl = document.createElement('div');
+        contentEl.className = 'msg-content';
+        contentEl.textContent = entry.content || '';
+        el.appendChild(contentEl);
+        return el;
+    }
+    if (labelMap[entry.type]) {
+        const meta = document.createElement('div');
+        meta.className = 'msg-meta';
+        const label = document.createElement('span');
+        label.className = 'msg-label';
+        label.textContent = labelMap[entry.type];
+        meta.appendChild(label);
+        if (entry.timestamp) {
+            const ts = document.createElement('span');
+            ts.className = 'msg-timestamp';
+            ts.textContent = formatTime(entry.timestamp);
+            meta.appendChild(ts);
+        }
+        el.appendChild(meta);
+    }
+    const contentEl = document.createElement('div');
+    contentEl.className = 'msg-content';
+    if (entry.type === 'response' || entry.type === 'thought') {
+        try {
+            contentEl.innerHTML = renderMarkdown(entry.content || '');
+        } catch (err) {
+            contentEl.textContent = entry.content || '';
+        }
+    } else {
+        contentEl.textContent = entry.content || '';
+    }
+    el.appendChild(contentEl);
+    if (entry.streaming) {
+        el.classList.add('stream-cursor');
+    }
+    return el;
+}
+
+// ===== Append a transcript entry; render to live DOM only if the skill is active =====
+function appendTranscript(skillName, entry) {
+    const state = getSkillState(skillName);
+    state.transcript.push(entry);
+    if (activeSkillName === skillName) {
+        hideRobotWorking();
+        document.getElementById('chatMessages').appendChild(renderMessageEl(entry));
+        // Re-show working indicator if the stream is still running after a tool call/result
+        const st = skillChatState[skillName];
+        if (st.stream && !st.stream.done && !st.stream.cancelled) {
+            showRobotWorking();
+        }
+        scrollChat();
+    }
+}
+
+// ===== Finalize the in-progress streaming entry (demote to thought or keep as response) =====
+function finalizeStreamingThought(streamState, toType) {
+    if (streamState.thoughtIdx === null) return;
+    const state = getSkillState(streamState.capturedSkillName);
+    const entry = state.transcript[streamState.thoughtIdx];
+    if (entry) {
+        entry.streaming = false;
+        entry.type = toType; // 'thought' or 'response'
+    }
+    // Update the live DOM element if the skill is currently visible
+    if (activeSkillName === streamState.capturedSkillName && streamState.thoughtEl) {
+        const el = streamState.thoughtEl;
+        el.className = 'msg msg-' + toType;
+        el.classList.remove('stream-cursor');
+        const labelEl = el.querySelector('.msg-label');
+        if (labelEl) labelEl.textContent = toType === 'thought' ? '思考' : '回复';
+        const contentEl = el.querySelector('.msg-content');
+        if (contentEl) {
+            try {
+                contentEl.innerHTML = renderMarkdown(streamState.thoughtText);
+            } catch (err) {
+                contentEl.textContent = streamState.thoughtText;
+            }
+        }
+    }
+    streamState.thoughtIdx = null;
+    streamState.thoughtEl = null;
 }
 
 // ===== Send / Run =====
 async function runSkill() {
     if (!selectedSkill) return;
-    // Cancel and save any active stream before starting a new one
-    if (streamCancelFn) {
-        streamCancelFn();
-        streamCancelFn = null;
-    }
-    if (currentStream) {
-        currentStream.close();
-        currentStream = null;
-    }
-
-    // Get or create conversation for this skill
     const skillName = selectedSkill.name;
-    if (!skillConversations[skillName]) {
-        skillConversations[skillName] = { conversationId: null, messages: [] };
-    }
-    const conv = skillConversations[skillName];
+    const state = getSkillState(skillName);
 
     // Collect inputs from form fields
     const inputs = {};
@@ -338,7 +518,6 @@ async function runSkill() {
     const msgInputEl = document.getElementById('messageInput');
     const message = msgInputEl.value.trim();
     if (message) {
-        // If the skill has a "message" input field that's empty, fill it
         if ('message' in inputs && !inputs.message) {
             inputs.message = message;
         } else if (!('message' in inputs)) {
@@ -348,23 +527,18 @@ async function runSkill() {
         msgInputEl.style.height = 'auto';
     }
 
-    // Don't send if nothing to send
     if (Object.keys(inputs).length === 0) return;
 
     const model = document.getElementById('modelSelect').value;
 
-    // Show user message — just the value, no "key:" prefix
-    const displayMsg = inputs.message || inputs._user_message
-        || Object.values(inputs).join(', ');
-    appendMessage('user', displayMsg);
+    const displayMsg = inputs.message || inputs._user_message || Object.values(inputs).join(', ');
+    appendTranscript(skillName, { type: 'user', content: displayMsg, timestamp: Date.now() });
+    state.conversationMessages.push({ role: 'user', content: displayMsg });
+    // Save immediately so the user message is persisted before the stream starts
+    // (ensures it survives a page refresh during streaming)
+    saveConversationToBackend(skillName);
 
-    // Add to conversation history
-    conv.messages.push({ role: 'user', content: displayMsg });
-
-    // Show robot working animation immediately
     showRobotWorking();
-
-    // Disable send button
     sendBtn.disabled = true;
 
     console.log('[runSkill] Sending POST /runs, skillId=', skillName, 'model=', model);
@@ -377,99 +551,150 @@ async function runSkill() {
                 skillId: skillName,
                 inputs,
                 model,
-                history: conv.messages.length > 1 ? conv.messages.slice(0, -1) : []
+                history: state.conversationMessages.length > 1 ? state.conversationMessages.slice(0, -1) : []
             })
         });
         if (handleAuthError(resp)) { hideRobotWorking(); updateSendButtonState(); return; }
+
+        // Handle rate limit (429): don't cancel the existing stream — show error and keep it running
+        if (resp.status === 429) {
+            hideRobotWorking();
+            appendTranscript(skillName, { type: 'error', content: '⏱ 频率限制：当前已有任务在运行，请等待完成后再发起新请求', timestamp: Date.now() });
+            updateSendButtonState();
+            return;
+        }
+
         const data = await resp.json();
         console.log('[runSkill] POST /runs response:', data.status, 'taskId=', data.taskId);
         if (data.taskId) {
-            subscribeStream(data.taskId);
+            // Cancel the old stream ONLY after the new run is successfully created
+            if (state.stream) {
+                cancelSkillStream(skillName, true);
+            }
+            subscribeStream(data.taskId, skillName);
         } else if (data.error) {
             hideRobotWorking();
-            appendMessage('error', data.message || data.error);
+            appendTranscript(skillName, { type: 'error', content: data.message || data.error, timestamp: Date.now() });
         }
     } catch (e) {
         console.error('[runSkill] POST /runs failed:', e);
         hideRobotWorking();
-        appendMessage('error', '请求失败: ' + e.message);
+        appendTranscript(skillName, { type: 'error', content: '请求失败: ' + e.message, timestamp: Date.now() });
     } finally {
         updateSendButtonState();
     }
 }
 
-// ===== Stream Subscription =====
-function subscribeStream(taskId) {
-    let thoughtEl = null;
-    let thoughtText = '';
-    let allText = ''; // accumulate all text for conversation history
-    let pendingRender = false; // debounce DOM updates via requestAnimationFrame
-    let cancelled = false; // set to true by streamCancelFn — stops ALL event processing
-    // Capture the skill name at stream start so switching skills mid-stream doesn't leak
-    const streamSkillName = selectedSkill ? selectedSkill.name : null;
-
-    // Install the cancel function — called by selectSkill before closing the stream
-    streamCancelFn = function() {
-        cancelled = true;
-        // Save accumulated assistant text to the correct (captured) skill's conversation
-        if (allText && streamSkillName) {
-            if (!skillConversations[streamSkillName]) {
-                skillConversations[streamSkillName] = { conversationId: null, messages: [] };
-            }
-            var msgs = skillConversations[streamSkillName].messages;
-            // Only push if last message isn't already an assistant message (avoid dupes)
-            if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
-                msgs.push({ role: 'assistant', content: allText });
-                saveConversationToBackend(streamSkillName);
-            }
+// ===== Cancel a specific skill's stream (stops event processing, saves partial) =====
+function cancelSkillStream(skillName, savePartial) {
+    const state = getSkillState(skillName);
+    const streamState = state.stream;
+    if (!streamState) return;
+    streamState.cancelled = true;
+    // Finalize any streaming thought to stop the blinking cursor
+    finalizeStreamingThought(streamState, 'thought');
+    if (streamState.es) {
+        try { streamState.es.close(); } catch (e) { /* ignore */ }
+    }
+    if (savePartial && streamState.allText) {
+        const msgs = state.conversationMessages;
+        if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
+            msgs.push({ role: 'assistant', content: streamState.allText });
+            saveConversationToBackend(skillName);
         }
-    };
+    }
+    // Show interrupted indicator (only if the stream had actual content or was mid-stream)
+    if (streamState.thoughtIdx !== null || streamState.allText) {
+        appendTranscript(skillName, { type: 'completion', content: '— 已中断 —', timestamp: Date.now() });
+    }
+    if (activeSkillName === skillName) hideRobotWorking();
+    setSkillRunning(skillName, false);
+    state.stream = null;
+}
 
-    // EventSource can't send custom headers — for token-auth projects,
-    // append ?token=base64(userId:x) so the controller can identify the user
-    // and skip the ownership check (task ID is already unguessable).
+// ===== Stream Subscription (per-skill, independent) =====
+function subscribeStream(taskId, skillName) {
+    const state = getSkillState(skillName);
+    let streamState = state.stream;
+    if (!streamState) {
+        streamState = {
+            taskId: taskId,
+            es: null,
+            thoughtIdx: null,
+            thoughtText: '',
+            allText: '',
+            pendingRender: false,
+            done: false,
+            cancelled: false,
+            capturedSkillName: skillName,
+            thoughtEl: null
+        };
+        state.stream = streamState;
+    } else {
+        // Reuse the slot but reset transient fields
+        streamState.taskId = taskId;
+        streamState.thoughtIdx = null;
+        streamState.thoughtText = '';
+        streamState.allText = '';
+        streamState.pendingRender = false;
+        streamState.done = false;
+        streamState.cancelled = false;
+        streamState.thoughtEl = null;
+    }
+
+    setSkillRunning(skillName, true);
+
     let url = `${BASE}/runs/${taskId}/stream`;
     if (currentUserId) {
         const tokenParam = btoa(currentUserId + ':x');
         url += `?token=${encodeURIComponent(tokenParam)}`;
     }
-    console.log('[subscribeStream] Creating EventSource for taskId=', taskId, 'url=', url);
+    console.log('[subscribeStream] Creating EventSource for taskId=', taskId, 'skill=', skillName);
     const es = new EventSource(url);
-    currentStream = es;
-    console.log('[subscribeStream] EventSource created, readyState=', es.readyState);
+    streamState.es = es;
 
     es.onopen = function() {
-        if (cancelled) return;
-        console.log('[SSE] connection opened, readyState=', es.readyState);
-        showRobotWorking();
+        if (streamState.cancelled) return;
+        console.log('[SSE] connection opened for', skillName);
+        if (activeSkillName === skillName) showRobotWorking();
     };
 
     es.addEventListener('thought', e => {
-        if (cancelled) return;
+        if (streamState.cancelled) return;
         try {
             const data = JSON.parse(e.data);
             if (data.text) {
-                allText += data.text;
-                if (!thoughtEl) {
-                    hideRobotWorking();
-                    thoughtEl = appendMessage('agent', '', true);
-                    thoughtText = '';
+                streamState.allText += data.text;
+                // First thought token: create the streaming transcript entry
+                if (streamState.thoughtIdx === null) {
+                    const entry = { type: 'response', content: '', timestamp: Date.now(), streaming: true };
+                    state.transcript.push(entry);
+                    streamState.thoughtIdx = state.transcript.length - 1;
+                    if (activeSkillName === skillName) {
+                        hideRobotWorking();
+                        const el = renderMessageEl(entry);
+                        document.getElementById('chatMessages').appendChild(el);
+                        streamState.thoughtEl = el;
+                        scrollChat();
+                    }
                 }
-                thoughtText += data.text;
-                thoughtEl.classList.add('stream-cursor');
-                // Debounce DOM updates: re-render at most once per animation frame
-                // (~16ms) instead of on every token, to avoid blocking the EventSource
-                // from consuming subsequent SSE events.
-                if (!pendingRender) {
-                    pendingRender = true;
+                streamState.thoughtText += data.text;
+                // Update transcript content so a later renderTranscript reflects the latest text
+                if (streamState.thoughtIdx !== null) {
+                    state.transcript[streamState.thoughtIdx].content = streamState.thoughtText;
+                }
+                // Debounced live DOM update when visible
+                if (activeSkillName === skillName && streamState.thoughtEl && !streamState.pendingRender) {
+                    streamState.pendingRender = true;
                     requestAnimationFrame(() => {
-                        pendingRender = false;
-                        if (cancelled || !thoughtEl || !thoughtText) return;
+                        streamState.pendingRender = false;
+                        if (streamState.cancelled || !streamState.thoughtEl) return;
+                        const contentEl = streamState.thoughtEl.querySelector('.msg-content');
+                        if (!contentEl) return;
                         try {
-                            thoughtEl.querySelector('.msg-content').innerHTML = renderMarkdown(thoughtText);
-                        } catch (renderErr) {
-                            console.error('[SSE] renderMarkdown error:', renderErr);
-                            thoughtEl.querySelector('.msg-content').textContent = thoughtText;
+                            contentEl.innerHTML = renderMarkdown(streamState.thoughtText);
+                        } catch (err) {
+                            contentEl.textContent = streamState.thoughtText;
                         }
                         scrollChat();
                     });
@@ -479,46 +704,25 @@ function subscribeStream(taskId) {
     });
 
     es.addEventListener('tool_call', e => {
-        if (cancelled) return;
-        if (thoughtEl) {
-            if (pendingRender) {
-                pendingRender = false;
-                if (thoughtText) {
-                    thoughtEl.querySelector('.msg-content').innerHTML = renderMarkdown(thoughtText);
-                }
-            }
-            thoughtEl.classList.remove('stream-cursor');
-            thoughtEl.querySelector('.msg-label').textContent = '思考';
-            thoughtEl.classList.remove('msg-agent');
-            thoughtEl.classList.add('msg-thought');
-            thoughtEl = null;
-            thoughtText = '';
-        }
-        showRobotWorking();
+        if (streamState.cancelled) return;
+        // Finalize any in-progress thought as a "思考" block
+        finalizeStreamingThought(streamState, 'thought');
+        if (activeSkillName === skillName) showRobotWorking();
         try {
             const data = JSON.parse(e.data);
-            appendMessage('tool-call', `🔧 ${data.name}\n${JSON.stringify(data.args, null, 2)}`);
+            appendTranscript(skillName, {
+                type: 'tool-call',
+                content: `🔧 ${data.name}\n${JSON.stringify(data.args, null, 2)}`,
+                timestamp: Date.now()
+            });
         } catch (err) {
-            appendMessage('tool-call', e.data);
+            appendTranscript(skillName, { type: 'tool-call', content: e.data, timestamp: Date.now() });
         }
     });
 
     es.addEventListener('tool_result', e => {
-        if (cancelled) return;
-        if (thoughtEl) {
-            if (pendingRender) {
-                pendingRender = false;
-                if (thoughtText) {
-                    thoughtEl.querySelector('.msg-content').innerHTML = renderMarkdown(thoughtText);
-                }
-            }
-            thoughtEl.classList.remove('stream-cursor');
-            thoughtEl.querySelector('.msg-label').textContent = '思考';
-            thoughtEl.classList.remove('msg-agent');
-            thoughtEl.classList.add('msg-thought');
-            thoughtEl = null;
-            thoughtText = '';
-        }
+        if (streamState.cancelled) return;
+        finalizeStreamingThought(streamState, 'thought');
         try {
             const data = JSON.parse(e.data);
             let display = '';
@@ -529,170 +733,106 @@ function subscribeStream(taskId) {
             } else {
                 display = `📋 ${data.rowCount} 行 (${data.durationMs}ms)`;
             }
-            appendMessage('tool-result', display);
+            appendTranscript(skillName, { type: 'tool-result', content: display, timestamp: Date.now() });
         } catch (err) {
-            appendMessage('tool-result', e.data);
+            appendTranscript(skillName, { type: 'tool-result', content: e.data, timestamp: Date.now() });
         }
-        showRobotWorking();
+        if (activeSkillName === skillName) showRobotWorking();
     });
 
     es.addEventListener('done', e => {
-        console.log('[SSE] done event received, data:', e.data);
-        // If cancelled, the cancel function already saved the conversation
-        if (cancelled) {
-            es.close();
-            currentStream = null;
-            streamCancelFn = null;
+        console.log('[SSE] done event for', skillName, 'data:', e.data);
+        if (streamState.cancelled) {
+            try { es.close(); } catch (err) {}
+            state.stream = null;
+            setSkillRunning(skillName, false);
             return;
         }
-        hideRobotWorking();
+        streamState.done = true;
+        if (activeSkillName === skillName) hideRobotWorking();
         try {
-            if (thoughtEl) {
-                // Flush any pending render before finalizing
-                if (pendingRender) {
-                    pendingRender = false;
-                    if (thoughtText) {
-                        try {
-                            thoughtEl.querySelector('.msg-content').innerHTML = renderMarkdown(thoughtText);
-                        } catch (renderErr) {
-                            console.error('[SSE] renderMarkdown error on done:', renderErr);
-                            thoughtEl.querySelector('.msg-content').textContent = thoughtText;
-                        }
-                    }
-                }
-                // This was the final response — keep it as "agent" style (no "思考" label)
-                thoughtEl.classList.remove('stream-cursor');
-                thoughtEl.querySelector('.msg-label').textContent = '回复';
-                thoughtEl.classList.remove('msg-thought');
-                thoughtEl.classList.add('msg-response');
-                thoughtEl = null;
-                thoughtText = '';
-            }
-            // Subtle completion indicator
+            // Keep the in-progress entry as the final "回复"
+            finalizeStreamingThought(streamState, 'response');
             let status = '完成';
             try {
                 const data = JSON.parse(e.data);
                 status = data.status || '完成';
             } catch (err) {
-                // Data is a plain string (e.g., "SUCCEEDED") — use directly
-                if (e.data && e.data.trim()) {
-                    status = e.data.trim();
-                }
+                if (e.data && e.data.trim()) status = e.data.trim();
             }
-            appendCompletion(status);
-            // Add to per-skill conversation history and save to backend
-            if (allText && streamSkillName) {
-                if (!skillConversations[streamSkillName]) {
-                    skillConversations[streamSkillName] = { conversationId: null, messages: [] };
+            appendTranscript(skillName, { type: 'completion', content: `— ${status} —`, timestamp: Date.now() });
+            // Save assistant content to conversation history
+            if (streamState.allText) {
+                const msgs = state.conversationMessages;
+                if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
+                    msgs.push({ role: 'assistant', content: streamState.allText });
+                    saveConversationToBackend(skillName);
                 }
-                skillConversations[streamSkillName].messages.push({ role: 'assistant', content: allText });
-                saveConversationToBackend(streamSkillName);
             }
         } catch (doneErr) {
             console.error('[SSE] done handler error:', doneErr);
         } finally {
-            streamCancelFn = null;
-            es.close();
-            currentStream = null;
-            updateSendButtonState();
+            try { es.close(); } catch (err) {}
+            state.stream = null;
+            setSkillRunning(skillName, false);
+            if (activeSkillName === skillName) updateSendButtonState();
         }
     });
 
-    // Custom event for task errors (not EventSource connection errors)
     es.addEventListener('task_error', e => {
-        if (cancelled) return;
-        console.log('[SSE] task_error event received');
-        hideRobotWorking();
+        if (streamState.cancelled) return;
+        console.log('[SSE] task_error for', skillName);
+        if (activeSkillName === skillName) hideRobotWorking();
+        finalizeStreamingThought(streamState, 'thought');
         try {
             const data = JSON.parse(e.data);
-            appendMessage('error', data.text || '任务执行出错');
+            appendTranscript(skillName, { type: 'error', content: data.text || '任务执行出错', timestamp: Date.now() });
         } catch (err) {
-            appendMessage('error', e.data || '任务执行出错');
+            appendTranscript(skillName, { type: 'error', content: e.data || '任务执行出错', timestamp: Date.now() });
         }
+        // Save conversation with the error so it's preserved on refresh
+        saveConversationToBackend(skillName);
+        setSkillRunning(skillName, false);
+        state.stream = null;
+        try { es.close(); } catch (err) {}
+        if (activeSkillName === skillName) updateSendButtonState();
     });
 
     es.addEventListener('error', e => {
-        console.log('[SSE] error event, readyState:', es.readyState);
-        if (cancelled) return;
-        hideRobotWorking();
-        // If done handler already cleaned up, currentStream is null — nothing to do
-        if (currentStream === null) return;
-        // Connection dropped before done — clean up and re-enable UI
-        if (thoughtEl) {
-            thoughtEl.classList.remove('stream-cursor');
-            thoughtEl = null;
-        }
-        // Save partial conversation on connection drop
-        if (allText && streamSkillName) {
-            if (!skillConversations[streamSkillName]) {
-                skillConversations[streamSkillName] = { conversationId: null, messages: [] };
-            }
-            var msgs = skillConversations[streamSkillName].messages;
+        console.log('[SSE] error event for', skillName, 'readyState:', es.readyState);
+        if (streamState.cancelled) return;
+        if (streamState.done) return; // already finalized by done handler
+        if (activeSkillName === skillName) hideRobotWorking();
+        // Finalize the in-progress entry as a thought (partial)
+        finalizeStreamingThought(streamState, 'thought');
+        // Save partial conversation
+        if (streamState.allText) {
+            const msgs = state.conversationMessages;
             if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
-                msgs.push({ role: 'assistant', content: allText });
-                saveConversationToBackend(streamSkillName);
+                msgs.push({ role: 'assistant', content: streamState.allText });
+                saveConversationToBackend(skillName);
             }
         }
-        streamCancelFn = null;
-        es.close();
-        currentStream = null;
-        var messages = document.getElementById('chatMessages');
-        var hint = document.createElement('div');
-        hint.className = 'msg-completion';
-        hint.textContent = '— 连接断开，请重新发送消息继续 —';
-        messages.appendChild(hint);
-        scrollChat();
-        updateSendButtonState();
+        appendTranscript(skillName, { type: 'completion', content: '— 连接断开，请重新发送消息继续 —', timestamp: Date.now() });
+        try { es.close(); } catch (err) {}
+        state.stream = null;
+        setSkillRunning(skillName, false);
+        if (activeSkillName === skillName) updateSendButtonState();
     });
 }
 
-// ===== Append Message =====
-function appendMessage(type, content, returnEl = false) {
-    const messages = document.getElementById('chatMessages');
-    const el = document.createElement('div');
-    el.className = `msg msg-${type}`;
-
-    const labelMap = {
-        'thought': '思考',
-        'agent': '回复',
-        'tool-call': '工具调用',
-        'tool-result': '工具结果',
-        'error': '错误',
-        'user': '你',
-    };
-
-    if (labelMap[type]) {
-        const label = document.createElement('div');
-        label.className = 'msg-label';
-        label.textContent = labelMap[type];
-        el.appendChild(label);
-    }
-
-    const contentEl = document.createElement('div');
-    contentEl.className = 'msg-content';
-
-    // Use Markdown rendering for agent/response/thought messages
-    // Use plain text for tool calls, results, errors
-    if (type === 'agent' || type === 'thought' || type === 'response') {
-        contentEl.innerHTML = renderMarkdown(content);
-    } else {
-        contentEl.textContent = content;
-    }
-    el.appendChild(contentEl);
-
-    messages.appendChild(el);
-    scrollChat();
-    return returnEl ? el : null;
-}
-
-// ===== Subtle Completion Indicator =====
-function appendCompletion(status) {
-    const messages = document.getElementById('chatMessages');
-    const el = document.createElement('div');
-    el.className = 'msg-completion';
-    el.textContent = `— ${status} —`;
-    messages.appendChild(el);
-    scrollChat();
+// ===== Sidebar running indicator =====
+function setSkillRunning(skillName, running) {
+    const expanded = document.querySelector(`.skill-list li[data-skill-id="${CSS.escape(skillName)}"]`);
+    const collapsed = document.querySelector(`.skill-icons li[data-skill-id="${CSS.escape(skillName)}"]`);
+    const cls = 'has-running-stream';
+    if (expanded) expanded.classList.toggle(cls, running);
+    if (collapsed) collapsed.classList.toggle(cls, running);
+    [expanded, collapsed].forEach(el => {
+        if (!el) return;
+        const badge = el.querySelector('.skill-item-running');
+        if (badge) badge.style.display = running ? 'inline-flex' : 'none';
+    });
 }
 
 // ===== Scroll =====
@@ -731,7 +871,6 @@ document.getElementById('uploadInput').addEventListener('change', async (e) => {
 document.getElementById('uploadFolderInput').addEventListener('change', async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    // Determine folder name from first file path
     const firstPath = files[0].webkitRelativePath || files[0].name;
     const dirName = firstPath.split('/')[0];
     const formData = new FormData();
@@ -778,31 +917,50 @@ document.getElementById('historyBtn').addEventListener('click', showHistoryModal
 // ===== Conversation History (save, load, list, download, delete) =====
 
 async function saveConversationToBackend(skillName) {
-    const conv = skillConversations[skillName];
-    if (!conv || conv.messages.length === 0) return;
+    const state = skillChatState[skillName];
+    if (!state) return;
+    // Save the full transcript (not just user/assistant messages) so that
+    // tool calls, errors, and completions are restored on page refresh.
+    if (!state.transcript || state.transcript.length === 0) return;
     try {
         const resp = await fetch(`${BASE}/conversations`, {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({
-                conversationId: conv.conversationId,
+                conversationId: state.conversationId,
                 skillId: skillName,
-                messages: conv.messages.map(m => ({
-                    role: m.role,
-                    content: m.content,
-                    timestamp: Date.now()
+                messages: state.transcript.map(t => ({
+                    role: t.type,
+                    content: t.content,
+                    timestamp: t.timestamp || Date.now()
                 }))
             })
         });
         if (resp.ok) {
             const data = await resp.json();
-            conv.conversationId = data.conversationId;
-            activeConversationId = data.conversationId;
+            state.conversationId = data.conversationId;
             console.log('[Conversation] saved:', data.conversationId, 'messages:', data.messageCount);
         }
     } catch (e) {
         console.error('[Conversation] save failed:', e);
     }
+}
+
+// Map stored conversation message roles to transcript types.
+// Handles both new format (role=type) and legacy format (role=assistant).
+function roleToType(role) {
+    if (role === 'assistant') return 'response';
+    return role;
+}
+
+// Reconstruct conversationMessages (user/assistant only, for LLM history) from a loaded transcript
+function transcriptToLlmHistory(transcript) {
+    return (transcript || [])
+        .filter(t => t.type === 'user' || t.type === 'response')
+        .map(t => ({
+            role: t.type === 'user' ? 'user' : 'assistant',
+            content: t.content
+        }));
 }
 
 async function loadLatestConversation(skillId) {
@@ -812,7 +970,6 @@ async function loadLatestConversation(skillId) {
         if (!resp.ok) return null;
         const data = await resp.json();
         if (!data.conversations || data.conversations.length === 0) return null;
-        // Load the first (newest) conversation
         const convId = data.conversations[0].conversationId;
         return await loadConversationById(convId);
     } catch (e) {
@@ -832,7 +989,8 @@ async function loadConversationById(conversationId) {
             skillId: data.skillId,
             messages: (data.messages || []).map(m => ({
                 role: m.role,
-                content: m.content
+                content: m.content,
+                timestamp: m.timestamp
             }))
         };
     } catch (e) {
@@ -842,7 +1000,6 @@ async function loadConversationById(conversationId) {
 }
 
 async function showHistoryModal() {
-    // Remove existing modal
     const existing = document.getElementById('historyModal');
     if (existing) existing.remove();
 
@@ -870,7 +1027,6 @@ async function showHistoryModal() {
     });
     document.getElementById('historyCloseBtn').addEventListener('click', () => overlay.remove());
 
-    // Load conversations filtered by the currently selected skill
     const body = document.getElementById('historyModalBody');
     try {
         let url = `${BASE}/conversations`;
@@ -919,7 +1075,7 @@ async function showHistoryModal() {
             item.querySelector('.history-btn-delete').addEventListener('click', async () => {
                 if (!confirm('确认删除此会话？')) return;
                 await deleteConversationById(conv.conversationId);
-                showHistoryModal(); // refresh
+                showHistoryModal();
             });
             body.appendChild(item);
         });
@@ -929,50 +1085,42 @@ async function showHistoryModal() {
 }
 
 async function restoreConversation(conversationId, skillId) {
-    // Find the skill in the sidebar and select it
-    const skillLi = document.querySelector(`.skill-list li[data-skill-id="${skillId}"]`);
-    let skill = null;
-    if (skillLi) {
-        // Re-fetch skills to get the skill object
-        const resp = await fetch(`${BASE}/skills`, { headers: authHeaders() });
-        if (resp.ok) {
-            const data = await resp.json();
-            skill = data.skills.find(s => s.name === skillId);
-        }
-    }
+    const skill = skillsData.find(s => s.name === skillId);
     if (!skill) {
         toast('找不到对应的 Skill: ' + skillId, 'error');
         return;
     }
-
-    // Load the conversation
     const conv = await loadConversationById(conversationId);
     if (!conv) {
         toast('加载会话失败', 'error');
         return;
     }
-
-    // Set the conversation state
-    skillConversations[skillId] = {
-        conversationId: conv.conversationId,
-        messages: conv.messages
-    };
-
-    // Select the skill (this will render the conversation)
-    if (skillLi) {
-        selectSkill(skill, skillLi);
+    // Cancel any active stream for the target skill before replacing its state
+    if (skillChatState[skillId] && skillChatState[skillId].stream) {
+        cancelSkillStream(skillId, false);
     }
+    // Overwrite the in-memory state with the restored conversation
+    const transcript = (conv.messages || []).map(m => ({
+        type: roleToType(m.role),
+        content: m.content,
+        timestamp: m.timestamp || Date.now()
+    }));
+    skillChatState[skillId] = {
+        conversationId: conv.conversationId,
+        transcript: transcript,
+        conversationMessages: transcriptToLlmHistory(transcript),
+        stream: null
+    };
+    const skillLi = document.querySelector(`.skill-list li[data-skill-id="${CSS.escape(skillId)}"]`);
+    selectSkill(skill, skillLi);
     toast('会话已加载', 'success');
 }
 
 function downloadConversation(conversationId) {
-    // Use a hidden anchor to trigger download with auth header
-    // Since we can't add headers to a direct download link, use fetch + blob
     fetch(`${BASE}/conversations/${conversationId}/download`, {
         headers: authHeaders()
     }).then(resp => {
         if (!resp.ok) throw new Error('Download failed');
-        // Extract filename from Content-Disposition
         const cd = resp.headers.get('Content-Disposition') || '';
         let filename = 'conversation.md';
         const match = cd.match(/filename\*=UTF-8''([^;]+)/);
@@ -1005,14 +1153,11 @@ async function deleteConversationById(conversationId) {
         });
         if (resp.ok) {
             toast('已删除', 'success');
-            // If this was the active conversation, clear it
-            for (const skillName in skillConversations) {
-                if (skillConversations[skillName].conversationId === conversationId) {
-                    skillConversations[skillName] = { conversationId: null, messages: [] };
+            for (const skillName in skillChatState) {
+                if (skillChatState[skillName].conversationId === conversationId) {
+                    skillChatState[skillName] = { conversationId: null, transcript: [], conversationMessages: [], stream: null };
                     if (selectedSkill && selectedSkill.name === skillName) {
-                        activeConversationId = null;
-                        document.getElementById('chatMessages').innerHTML = '';
-                        document.getElementById('chatWelcome').style.display = 'flex';
+                        renderTranscript(skillName);
                     }
                     break;
                 }
@@ -1023,7 +1168,7 @@ async function deleteConversationById(conversationId) {
     }
 }
 
-// ===== Sidebar Toggle =====
+// ===== Sidebar Toggle (button now lives in the footer) =====
 document.getElementById('sidebarToggle').addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
     sidebar.classList.toggle('collapsed');
@@ -1034,7 +1179,6 @@ document.getElementById('sidebarToggle').addEventListener('click', () => {
 // ===== Robot Working Animation =====
 function showRobotWorking() {
     hideRobotWorking();
-    // Hide welcome screen if still visible
     const welcome = document.getElementById('chatWelcome');
     if (welcome) welcome.style.display = 'none';
     const messages = document.getElementById('chatMessages');
@@ -1068,7 +1212,6 @@ function updateSendButtonState() {
 sendBtn.addEventListener('click', runSkill);
 
 msgInput.addEventListener('keydown', (e) => {
-    // Skip during IME composition (Chinese/Japanese/Korean input)
     if (e.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -1080,16 +1223,59 @@ msgInput.addEventListener('input', () => {
     msgInput.style.height = Math.min(msgInput.scrollHeight, 120) + 'px';
     updateSendButtonState();
 });
-// Also update button state when form fields change
 document.getElementById('inputForm').addEventListener('input', updateSendButtonState);
 document.getElementById('inputForm').addEventListener('change', updateSendButtonState);
+
+// ===== Reconnect to running tasks after page refresh =====
+async function reconnectRunningTasks() {
+    try {
+        const resp = await fetch(`${BASE}/runs?status=RUNNING`, { headers: authHeaders() });
+        if (handleAuthError(resp)) return;
+        const data = await resp.json();
+        const tasks = data.tasks || [];
+        if (tasks.length === 0) return;
+        console.log('[reconnect] Found', tasks.length, 'running task(s)');
+        for (const t of tasks) {
+            // Load the latest conversation to recover user messages that
+            // are NOT replayed by the SSE stream endpoint (SSE only replays
+            // agent events: thought, tool_call, tool_result, done).
+            // To avoid duplicates, keep entries up to and including the
+            // last 'user' message — SSE will rebuild everything after it.
+            const conv = await loadLatestConversation(t.skillId);
+            if (conv && conv.messages && conv.messages.length > 0) {
+                const fullTranscript = conv.messages.map(m => ({
+                    type: roleToType(m.role),
+                    content: m.content,
+                    timestamp: m.timestamp || Date.now()
+                }));
+                var lastUserIdx = -1;
+                for (var i = 0; i < fullTranscript.length; i++) {
+                    if (fullTranscript[i].type === 'user') lastUserIdx = i;
+                }
+                var kept = lastUserIdx >= 0 ? fullTranscript.slice(0, lastUserIdx + 1) : [];
+                skillChatState[t.skillId] = {
+                    conversationId: conv.conversationId,
+                    transcript: kept,
+                    conversationMessages: transcriptToLlmHistory(kept),
+                    stream: null
+                };
+            } else {
+                getSkillState(t.skillId);
+            }
+            subscribeStream(t.taskId, t.skillId);
+        }
+    } catch (e) {
+        console.error('[reconnect] Failed to check running tasks:', e);
+    }
+}
 
 // ===== Init =====
 (async function() {
     await loadAuthConfig();
     const ok = await checkUserStatus();
     if (ok) {
-        loadSkills();
+        await loadSkills();
         loadModels();
+        reconnectRunningTasks();
     }
 })();

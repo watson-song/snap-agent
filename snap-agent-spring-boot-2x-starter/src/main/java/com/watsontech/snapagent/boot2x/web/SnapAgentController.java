@@ -181,6 +181,8 @@ public class SnapAgentController {
     @GetMapping("/user-info")
     public ResponseEntity<Object> getUserInfo() {
         UserInfo info = new UserInfo();
+        // Surface the host app's active profiles so the web UI can inject environment context
+        info.setActiveProfilesFromCsv(properties.getAppProfiles());
         if (securityGateway == null) {
             info.setMessage("security not configured");
             return ResponseEntity.ok(info);
@@ -553,6 +555,15 @@ public class SnapAgentController {
             }
         }
 
+        // Auto-inject the host app's active profiles for ALL skills so the LLM knows which
+        // environment it operates on without asking the user each time. Skills reference it as {_app_profile}.
+        if (inputs != null) {
+            String appProfiles = properties.getAppProfiles();
+            if (appProfiles != null && !appProfiles.isEmpty()) {
+                inputs.put("_app_profile", appProfiles);
+            }
+        }
+
         // Validate model — check against dynamic API list first, then static config
         String model = (String) body.get("model");
         if (model != null && !model.isEmpty()) {
@@ -626,6 +637,38 @@ public class SnapAgentController {
         audit(userId, "POST", "/runs", "RUN_SKILL", auditDetails);
 
         return ResponseEntity.accepted().body(result);
+    }
+
+    // ---- GET /runs?status=RUNNING ----
+    @GetMapping("/runs")
+    public ResponseEntity<Object> listRuns(
+            @RequestParam(value = "status", required = false) String status) {
+        String userId = securityGateway.currentUserId();
+        if (userId == null) {
+            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
+        }
+        List<Map<String, Object>> tasks = new ArrayList<Map<String, Object>>();
+        for (AgentTask task : taskStore.all()) {
+            if (!userId.equals(task.getUserId())) continue;
+            if (status != null && !status.isEmpty()) {
+                try {
+                    TaskStatus filter = TaskStatus.valueOf(status.toUpperCase());
+                    if (task.getStatus() != filter) continue;
+                } catch (IllegalArgumentException e) {
+                    return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
+                            "unknown status: " + status);
+                }
+            }
+            Map<String, Object> t = new LinkedHashMap<String, Object>();
+            t.put("taskId", task.getTaskId());
+            t.put("skillId", task.getSkillId());
+            t.put("status", task.getStatus().name());
+            t.put("createdAt", task.getCreatedAt());
+            tasks.add(t);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("tasks", tasks);
+        return ResponseEntity.ok(result);
     }
 
     // ---- GET /runs/{id} ----
@@ -1149,6 +1192,11 @@ public class SnapAgentController {
             if (appLogFile != null && !appLogFile.isEmpty()) {
                 dto.put("appLogFile", appLogFile);
             }
+        }
+        // Surface active profiles so the UI can show the current environment context
+        String appProfiles = properties.getAppProfiles();
+        if (appProfiles != null && !appProfiles.isEmpty()) {
+            dto.put("appProfiles", appProfiles);
         }
         return dto;
     }

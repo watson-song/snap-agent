@@ -1,5 +1,8 @@
 package com.watsontech.snapagent.core.security;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * User information returned by the {@code GET /user-info} endpoint.
  *
@@ -12,6 +15,8 @@ public class UserInfo {
     private String userId;
     private String username;
     private String message;
+    /** Host application's active Spring profiles, surfaced to the web UI as environment context. */
+    private List<String> activeProfiles = new ArrayList<String>();
 
     public UserInfo() {
     }
@@ -62,5 +67,30 @@ public class UserInfo {
 
     public void setMessage(String message) {
         this.message = message;
+    }
+
+    public List<String> getActiveProfiles() {
+        return activeProfiles;
+    }
+
+    public void setActiveProfiles(List<String> activeProfiles) {
+        this.activeProfiles = activeProfiles != null ? activeProfiles : new ArrayList<String>();
+    }
+
+    /**
+     * Convenience setter accepting a comma-joined profile string (as resolved from
+     * {@code environment.getActiveProfiles()}).
+     */
+    public void setActiveProfilesFromCsv(String csv) {
+        this.activeProfiles = new ArrayList<String>();
+        if (csv != null && !csv.isEmpty()) {
+            String[] parts = csv.split(",");
+            for (String p : parts) {
+                String trimmed = p.trim();
+                if (!trimmed.isEmpty()) {
+                    this.activeProfiles.add(trimmed);
+                }
+            }
+        }
     }
 }
