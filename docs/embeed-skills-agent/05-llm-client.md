@@ -42,7 +42,7 @@ public record LlmRequest(
 
 ### OkHttp 版本治理（决策 #17）
 - 不在 pom 写 `<version>`，交 Spring Boot BOM 管控。
-- 冲突兜底：可选 shade/relocate 到 `com.watsontech.snapagent.okhttp.`，仅在宿主已有不兼容 OkHttp 时启用（配置 `snap-agent.llm.shade-okhttp=true`，Phase 3 再做）。
+- 冲突兜底：可选 shade/relocate 到 `cn.watsontech.snapagent.okhttp.`，仅在宿主已有不兼容 OkHttp 时启用（配置 `snap-agent.llm.shade-okhttp=true`，Phase 3 再做）。
 
 ## 3. 配置
 

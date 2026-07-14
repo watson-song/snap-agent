@@ -30,5 +30,8 @@ logs/
 application-local.yml
 application-local.properties
 
+# Runtime conversation data (may contain sensitive query results)
+**/conversations/
+
 # Claude
 .claude/

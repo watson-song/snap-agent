@@ -3,14 +3,14 @@
 ## 1. 模块拆分
 
 ```
-snap-agent-core/                       com.watsontech.snapagent.core
+snap-agent-core/                       cn.watsontech.snapagent.core
   ├─ skill/        SkillRegistry, SkillMeta, frontmatter 解析
   ├─ agent/        AgentExecutor, TaskStore, AgentTask, 限流
   ├─ llm/          LlmClient (OkHttp 流式), LlmRequest/Response
   ├─ tool/         ToolProvider SPI, ToolDispatcher, ToolResult
   └─ security/     SecurityGateway SPI (接口定义, 实现在 starter)
 
-snap-agent-spring-boot-2x-starter/     com.watsontech.snapagent.boot2x
+snap-agent-spring-boot-2x-starter/     cn.watsontech.snapagent.boot2x
   ├─ autoconfig/   SnapAgentAutoConfiguration (条件装配)
   ├─ web/          SnapAgentController (REST+SSE), SnapAgentFilter (javax.servlet)
   ├─ security/     SpringSecurityAdapter, ShiroAdapter, DefaultPrincipalResolver
@@ -78,7 +78,7 @@ core 暴露的 `SnapAgentController` 所需的 web 抽象由 starter 注入；co
 
 ### 依赖治理（决策 #17）
 - **OkHttp 与 snakeyaml 不自带版本**：`<version>` 交给 Spring Boot BOM 管控，避免与宿主冲突。
-- 冲突兜底：OkHttp 可选 shade/relocate（`com.watsontech.snapagent.okhttp.`），仅在宿主版本不兼容时启用。
+- 冲突兜底：OkHttp 可选 shade/relocate（`cn.watsontech.snapagent.okhttp.`），仅在宿主版本不兼容时启用。
 - 所有 optional 依赖用 `optional=true` + `@ConditionalOnClass`，宿主没有该依赖时静默不装配。
 
 ## 4. AutoConfig 默认关闭零影响证明

@@ -26,4 +26,4 @@ snap-agent:
 
 logging:
   level:
-    com.watsontech.snapagent: INFO
+    cn.watsontech.snapagent: INFO

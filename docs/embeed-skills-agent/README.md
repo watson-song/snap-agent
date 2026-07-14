@@ -75,9 +75,9 @@ SkillMeta/frontmatter    LlmClient(OkHttp流式,
 
 | 模块 | 包名 | 职责 | 阶段 |
 |------|------|------|------|
-| `snap-agent-core` | `com.watsontech.snapagent.core` | skill 解析 / agent 循环 / LLM 客户端 / tool SPI，**无 servlet 依赖** | Phase 1 |
-| `snap-agent-spring-boot-2x-starter` | `com.watsontech.snapagent.boot2x` | `javax.servlet` Filter + AutoConfig + `spring.factories` + 静态 UI 资源 | Phase 1 |
-| `snap-agent-spring-boot-3x-starter` | `com.watsontech.snapagent.boot3x` | `jakarta.servlet` 版本 | Phase 3 |
+| `snap-agent-core` | `cn.watsontech.snapagent.core` | skill 解析 / agent 循环 / LLM 客户端 / tool SPI，**无 servlet 依赖** | Phase 1 |
+| `snap-agent-spring-boot-2x-starter` | `cn.watsontech.snapagent.boot2x` | `javax.servlet` Filter + AutoConfig + `spring.factories` + 静态 UI 资源 | Phase 1 |
+| `snap-agent-spring-boot-3x-starter` | `cn.watsontech.snapagent.boot3x` | `jakarta.servlet` 版本 | Phase 3 |
 
 理由：`javax.servlet` 与 `jakarta.servlet` 二进制不兼容，单 artifact 不能同时服务 2.x 与 3.x 宿主。core 模块保持 servlet 无关，两个 starter 各自做容器适配。
 
