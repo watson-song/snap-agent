@@ -233,7 +233,7 @@ snap-agent:
 | `MarkdownKnowledgeSource` | 从 Markdown 文件加载知识，自动分段、建索引 |
 | `ConversationKnowledgeSource` | 从历史诊断对话中提取有价值的问题→结论对，自动摘要入库 |
 | `ExternalApiKnowledgeSource` | 对接外部 Wiki/文档系统，实时检索 |
-| `KnowledgeInjector` | Agent 启动时注入知识摘要到系统提示；运行时按用户问题检索相关知识片段，动态注入 |
+| `KnowledgeInjector` | Agent 启动时注入知识摘要到系统提示；运行时按用户问题检索相关知识片段，动态注入。完整设计见 [知识编排层](#知识编排层--knowledgeinjector横切-v07v08v09) |
 
 ### 知识结构
 
@@ -466,6 +466,530 @@ class IssueClosure {
 
 ---
 
+## 知识编排层 — KnowledgeInjector（横切 v0.7/v0.8/v0.9）
+
+> 本节不是独立版本，而是贯穿 v0.7→v0.8→v0.9 的编排核心。
+> 当三个知识源（业务知识库、代码图谱、问题经验）就绪后，**如何让 Agent 在面对用户问题时自动选择正确的知识源和工具组合**，是整个知识体系能否落地的关键。
+
+### 核心设计原则：不路由，注入
+
+不需要单独的"意图分类层"或"路由器"。现有 `AgentExecutor` 已经是 LLM 驱动的工具选择循环——**LLM 本身就是最好的路由器**。`KnowledgeInjector` 的职责是在 LLM 开始思考之前，把相关知识自动注入到上下文中，让 LLM"天然知道该怎么做"。
+
+```
+用户问题
+    │
+    ▼
+┌──────────────────────────────────────────────────────────┐
+│  第一层：预注入（Pre-injection，自动，LLM 之前）           │
+│                                                          │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────┐ │
+│  │ 业务知识库       │  │ 问题经验库      │  │ 代码结构摘要│ │
+│  │ full-text       │  │ 相似 Q&A      │  │ (条件触发)  │ │
+│  │ search → top-5  │  │ search → top-3│  │             │ │
+│  └───────┬────────┘  └───────┬────────┘  └──────┬─────┘ │
+│          └───────────────────┼───────────────────┘       │
+│                              ▼                           │
+│                   组装到 System Prompt                    │
+└──────────────────────────────┬───────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────┐
+│  第二层：Skill 编排提示（Markdown，场景化引导）            │
+│  Skill body 中的步骤描述引导 LLM 的工具选择顺序            │
+│  e.g. "1. 查参数表 2. 查任务过滤逻辑 3. 参考历史案例"     │
+└──────────────────────────────┬───────────────────────────┘
+                               ▼
+┌──────────────────────────────────────────────────────────┐
+│  第三层：LLM 自主工具选择（AgentExecutor 多轮循环）        │
+│  LLM 看到: 注入的知识 + Skill 步骤 + 可用工具列表         │
+│  自主决策: 调 JDBC? 调 CodeGraph? 调 knowledge_search?   │
+│  多轮循环: think → tool_use → result → think → ...       │
+└──────────────────────────────────────────────────────────┘
+```
+
+### SPI 接口
+
+```java
+package cn.watsontech.snapagent.core.knowledge;
+
+/**
+ * 知识注入器 — 在 LLM 请求发出前，自动检索相关知识并注入到系统提示中。
+ * 宿主可实现此接口替换默认实现（如对接向量数据库、外部知识平台）。
+ */
+public interface KnowledgeInjector {
+
+    /**
+     * 在 AgentExecutor 发起首次 LLM 调用前调用。
+     * 根据用户问题检索各知识源，将结果拼装为上下文段落。
+     *
+     * @param context 包含用户问题、Skill 元数据、可用工具列表
+     * @return 注入到 system prompt 的知识上下文（可能为空字符串）
+     */
+    String inject(InjectionContext context);
+
+    /**
+     * 在 AgentExecutor 多轮循环中，每轮 LLM 调用前可选触发。
+     * 用于根据已有 tool_result 动态补充知识（如发现新表名后补查业务知识）。
+     * 默认实现返回 null（不补充）。
+     */
+    default String injectPerTurn(InjectionContext context) { return null; }
+}
+```
+
+```java
+public class InjectionContext {
+    private String userQuery;           // 用户原始问题
+    private String skillName;           // 当前 Skill 名称
+    private String skillDescription;    // Skill 描述
+    private List<String> toolNames;     // 可用工具名称列表
+    private List<ToolResult> priorResults; // 前序轮次的 tool 结果（仅 perTurn 时有值）
+    private Map<String, Object> skillInputs; // Skill 输入参数
+}
+```
+
+### 预注入策略：各知识源的注入规则
+
+| 知识源 | 注入时机 | 注入策略 | Top-K | Token 预算 | 理由 |
+|--------|---------|---------|-------|-----------|------|
+| 业务知识库 | **每次对话首次 LLM 调用前** | full-text search 用用户原始问题 | 5 | ≤ 600 | 业务规则是理解问题的前提，LLM 需要先知道"该查什么" |
+| 问题经验库 | **每次对话首次 LLM 调用前** | 相似度搜索用用户原始问题 | 3 | ≤ 400 | 类似 few-shot learning，教 LLM "这类问题之前怎么解的" |
+| 代码结构摘要 | **条件触发**（检测到代码关键词） | 仅注入项目结构概览，不注入具体调用链 | 1 | ≤ 300 | 让 LLM 知道项目有哪些模块/关键类，具体查询交给工具 |
+| 代码图谱查询 | **不预注入**，作为工具 | — | — | — | 调用链/影响分析是针对性查询，需要 LLM 先理解问题再决定查什么 |
+| 知识深挖 | **不预注入**，作为工具 | — | — | — | `knowledge_search` 作为工具暴露，LLM 按需深挖 |
+
+#### 代码关键词检测规则
+
+```java
+private static final Set<String> CODE_KEYWORDS = ImmutableSet.of(
+    "代码", "方法", "接口", "实现", "调用", "逻辑",
+    "class", "method", "interface", "impl", "service",
+    "controller", "mapper", "config", "java", "源码",
+    "谁改的", "git", "commit", "blame", "影响"
+);
+
+boolean shouldInjectCodeSummary(String query) {
+    String lower = query.toLowerCase();
+    return CODE_KEYWORDS.stream().anyMatch(lower::contains);
+}
+```
+
+### 默认实现：DefaultKnowledgeInjector
+
+```java
+@Component
+@ConditionalOnMissingBean(KnowledgeInjector.class)
+@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+public class DefaultKnowledgeInjector implements KnowledgeInjector {
+
+    private final KnowledgeBase knowledgeBase;           // v0.7 业务知识库
+    private final IssueExperienceStore issueStore;       // v0.9 问题经验库
+    private final CodeGraphIndex codeGraphIndex;         // v0.8 代码图谱
+    private final KnowledgeInjectorProperties config;    // 配置
+
+    @Override
+    public String inject(InjectionContext ctx) {
+        StringBuilder sb = new StringBuilder();
+        String query = ctx.getUserQuery();
+
+        // 1. 业务知识（始终注入）
+        if (knowledgeBase != null) {
+            List<KnowledgeSnippet> results = knowledgeBase.search(query, config.getBusinessTopK());
+            if (!results.isEmpty()) {
+                sb.append("## 业务知识上下文\n");
+                for (KnowledgeSnippet s : results) {
+                    sb.append("### ").append(s.getTitle()).append("\n")
+                      .append(s.getContent()).append("\n\n");
+                }
+            }
+        }
+
+        // 2. 问题经验（始终注入）
+        if (issueStore != null) {
+            List<IssueQa> similar = issueStore.searchSimilar(query, config.getIssueTopK());
+            if (!similar.isEmpty()) {
+                sb.append("## 历史相似问题\n");
+                for (IssueQa qa : similar) {
+                    sb.append("### 问题: ").append(qa.getQuestion()).append("\n")
+                      .append("根因: ").append(qa.getRootCause()).append("\n")
+                      .append("方案: ").append(qa.getSolution()).append("\n")
+                      .append("(来源: ").append(qa.getIssueId()).append(")\n\n");
+                }
+            }
+        }
+
+        // 3. 代码结构摘要（条件注入）
+        if (codeGraphIndex != null && shouldInjectCodeSummary(query)) {
+            String summary = codeGraphIndex.getProjectSummary();
+            if (summary != null) {
+                sb.append("## 项目代码结构\n").append(summary).append("\n\n");
+            }
+        }
+
+        return sb.length() > 0 ? sb.toString() : "";
+    }
+
+    @Override
+    public String injectPerTurn(InjectionContext ctx) {
+        // 默认不补充。宿主可覆写此方法实现动态知识补充。
+        // 例如: 解析 tool_result 中的表名，自动补查该表的业务知识。
+        return null;
+    }
+}
+```
+
+### 配置
+
+```yaml
+snap-agent:
+  knowledge:
+    enabled: true
+    injector:
+      business-top-k: 5              # 业务知识注入条数
+      issue-top-k: 3                 # 问题经验注入条数
+      inject-code-summary: true      # 是否条件注入代码结构摘要
+      max-injection-tokens: 1500    # 注入内容 token 上限（超限则截断低相关项）
+      per-turn-injection: false     # 是否每轮 LLM 调用前都补充注入（默认仅首次）
+    sources:
+      - type: markdown
+        dir: classpath:/docs/knowledge/
+      - type: file-conversation
+        dir: ${upload-skills-dir}/knowledge/
+      - type: external-api
+        url: https://wiki.internal/api/search
+        token: ${KNOWLEDGE_TOKEN}
+```
+
+### Token 预算管理
+
+预注入会增加 system prompt 的 token 数量。需要控制总量避免成本失控：
+
+```java
+class InjectionBudget {
+    private static final int MAX_INJECTION_TOKENS = 1500;
+
+    String trimToFit(String injection, int maxTokens) {
+        // 1. 估算 token 数（近似: 字符数 / 3.5 for 中文混合英文）
+        int estimatedTokens = (int) (injection.length() / 3.5);
+
+        if (estimatedTokens <= maxTokens) {
+            return injection;
+        }
+
+        // 2. 超限时按优先级截断:
+        //    业务知识 > 问题经验 > 代码结构
+        //    每个知识源内部按相关度分数排序，保留 top-N
+        //    截断时添加 "..." 标记
+        return truncateByPriority(injection, maxTokens);
+    }
+}
+```
+
+| 优先级 | 知识源 | 截断策略 |
+|--------|--------|---------|
+| P0 | 业务知识 | 保留 top-3，每条截断到 200 token |
+| P1 | 问题经验 | 保留 top-2，每条截断到 150 token |
+| P2 | 代码结构 | 保留模块列表，删除类/方法明细 |
+
+### 知识检索也作为工具暴露
+
+除了预注入，知识检索也作为工具暴露给 LLM，允许 LLM 在多轮推理中主动深挖：
+
+```java
+@Component
+@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+public class KnowledgeSearchToolProvider implements ToolProvider {
+
+    @Override
+    public List<ToolDef> getToolDefinitions() {
+        return List.of(
+            ToolDef.builder()
+                .name("knowledge_search")
+                .description("搜索业务知识库，获取业务规则、操作手册、配置说明等。" +
+                             "当预注入的知识不足以回答问题时使用。输入自然语言查询。")
+                .inputSchema(JsonSchema.object()
+                    .property("query", JsonSchema.string("自然语言查询"))
+                    .property("top_k", JsonSchema.integer("返回条数，默认5", 5))
+                    .build())
+                .build()
+        );
+    }
+
+    @Override
+    public ToolResult execute(ToolContext ctx) {
+        String query = ctx.getInput("query");
+        int topK = ctx.getInput("top_k", 5);
+        List<KnowledgeSnippet> results = knowledgeBase.search(query, topK);
+        return ToolResult.success(results.stream()
+            .map(r -> Map.of("title", r.getTitle(), "content", r.getContent()))
+            .collect(Collectors.toList()));
+    }
+}
+```
+
+| 工具 | 输入 | 输出 | 使用场景 |
+|------|------|------|---------|
+| `knowledge_search` | 自然语言查询 + top_k | 业务知识片段列表 | 预注入不够时，LLM 主动深挖特定业务规则 |
+| `issue_search` | 自然语言查询 + top_k | 历史 Q&A 列表 | 查找更多类似问题的处理经验 |
+| `code_graph_call_chain` | 方法签名 | 调用链 | v0.8 工具，LLM 按需调用 |
+| `code_graph_impact_analysis` | 类/方法 | 影响范围 | v0.8 工具，LLM 按需调用 |
+
+### 与 AgentExecutor 的集成
+
+`KnowledgeInjector` 在 `AgentExecutor` 的执行流程中注入点如下：
+
+```java
+public class AgentExecutor {
+
+    private final KnowledgeInjector knowledgeInjector;  // 可为 null
+
+    public AgentTask execute(String userQuery, String skillName, ...) {
+        // ── 注入点 1: 首次 LLM 调用前 ──
+        String knowledgeContext = "";
+        if (knowledgeInjector != null) {
+            InjectionContext ctx = new InjectionContext(userQuery, skillName, toolNames);
+            knowledgeContext = knowledgeInjector.inject(ctx);
+        }
+
+        // 组装 system prompt
+        String systemPrompt = buildSystemPrompt(skillBody, knowledgeContext);
+
+        // 多轮循环
+        for (int turn = 0; turn < maxTurns; turn++) {
+            // ── 注入点 2: 每轮 LLM 调用前（可选）──
+            if (turn > 0 && knowledgeInjector != null && perTurnEnabled) {
+                InjectionContext ctx = new InjectionContext(
+                    userQuery, skillName, toolNames, priorToolResults);
+                String补充 = knowledgeInjector.injectPerTurn(ctx);
+                if (补充 != null) {
+                    messages.add(Message.system(补充));
+                }
+            }
+
+            // LLM 调用 → tool_use 分发 → result 反馈
+            LlmResponse resp = llmClient.call(systemPrompt, messages, tools);
+            ...
+        }
+    }
+}
+```
+
+**两个注入点**：
+
+| 注入点 | 时机 | 默认行为 | 可选行为 |
+|--------|------|---------|---------|
+| **首次注入** | LLM 首次调用前 | 始终执行 | — |
+| **每轮注入** | 每轮 LLM 调用前 | 默认关闭（`per-turn-injection: false`） | 开启后可动态补充（如解析 tool_result 中的表名，补查业务知识） |
+
+### 完整场景演示
+
+```
+用户: "SKU-001 为什么没有生成补货策略？"
+
+═══ 预注入阶段（自动，LLM 之前） ═══
+
+KnowledgeInjector.inject("SKU-001 为什么没有生成补货策略？")
+  │
+  ├─ 业务知识库 search("补货策略 生成规则"):
+  │   → 命中 1: "补货策略依赖 replm_inv_param_sku_wh_input 表"
+  │   → 命中 2: "常见原因: init_replenishment_param 任务未执行"
+  │   → 命中 3: "策略生成后需通过 allocation_score 评分才下发"
+  │
+  ├─ 问题经验库 searchSimilar("补货策略 未生成"):
+  │   → 命中 1: "SKU-999 → 根因: SKU 状态为 INACTIVE 被过滤"
+  │   → 命中 2: "SKU-888 → 根因: 仓库未配置在 warehouse_group 中"
+  │
+  └─ 代码结构: 未触发（"补货策略"不包含代码关键词）
+
+System Prompt 组装:
+  "你是诊断 Agent。Skill 步骤: 1.查参数表 2.查策略表 3.查任务逻辑
+   ## 业务知识上下文
+   补货策略依赖 replm_inv_param_sku_wh_input 表...
+   常见原因: init_replenishment_param 任务未执行...
+   ## 历史相似问题
+   SKU-999: 根因 INACTIVE 被过滤...
+   SKU-888: 根因 仓库未配置..."
+
+═══ LLM 第一轮 ═══
+
+LLM 思考: "业务知识说需要查 replm_inv_param_sku_wh_input 表，
+          历史经验说常见原因是任务未执行或 SKU 被过滤。
+          先查参数表确认 SKU-001 是否有数据。"
+
+→ 调用: jdbc_query("SELECT * FROM replm_inv_param_sku_wh_input
+                     WHERE sku_code = 'SKU-001'")
+← 结果: 空
+
+═══ LLM 第二轮 ═══
+
+LLM 思考: "参数表无数据。历史案例 SKU-999 是因为状态为 INACTIVE。
+          查一下 SKU-001 的状态，同时看看任务的过滤逻辑。
+          这次涉及代码逻辑，调用 code_graph 查调用链。"
+
+→ 并行调用:
+   1. jdbc_query("SELECT status FROM sku_master WHERE sku_code = 'SKU-001'")
+      ← 结果: status = 'INACTIVE'
+   2. code_graph_call_chain("ReplenishmentParamTask.generate")
+      ← 结果: generate() → filterByStatus() → 只处理 ACTIVE 的 SKU
+
+═══ LLM 第三轮 ═══
+
+LLM 思考: "确认: SKU-001 状态 INACTIVE，被 filterByStatus() 过滤。
+          和 SKU-999 案例一致。可以给结论了。"
+
+→ 输出:
+   "## 根因
+    SKU-001 状态为 INACTIVE，被 init_replenishment_param 任务的
+    filterByStatus() 方法过滤，未生成补货参数记录。
+
+    ## 证据
+    1. replm_inv_param_sku_wh_input 表中无 SKU-001 记录
+    2. sku_master.status = 'INACTIVE'
+    3. ReplenishmentParamTask.generate() → filterByStatus() 只处理 ACTIVE
+
+    ## 参考案例
+    SKU-999（2026-07-10），相同根因，已通过修改状态解决。
+
+    ## 建议方案
+    1. 确认 SKU-001 是否应为 ACTIVE
+    2. 修改状态后重新执行 init_replenishment_param
+    3. 建议在 filterByStatus() 中增加告警日志"
+```
+
+### 为什么不预注入代码图谱
+
+| 维度 | 预注入业务知识 | 预注入代码图谱 |
+|------|--------------|--------------|
+| 查询通用性 | 业务规则对大多数同类问题通用（"补货策略依赖什么表"对所有 SKU 都适用） | 调用链是特定方法的，不同问题查不同方法 |
+| 查询精确度 | 用用户原始问题即可命中 | 需要知道具体类/方法名，LLM 需先推理 |
+| Token 效率 | 5 条 ≈ 600 token，信息密度高 | 调用链输出长，可能 1000+ token，但不一定相关 |
+| 结论 | **始终预注入** | **作为工具按需调用** |
+
+### 动态知识补充（可选，per-turn injection）
+
+当 `per-turn-injection: true` 时，宿主可实现更激进的注入策略：
+
+```java
+@Override
+public String injectPerTurn(InjectionContext ctx) {
+    // 示例: 解析前序 tool_result 中的表名，自动补查该表的业务知识
+    List<ToolResult> results = ctx.getPriorResults();
+    for (ToolResult r : results) {
+        String content = r.getContent();
+        // 简单正则提取表名（以 _ 分隔的全小写单词）
+        Matcher m = Pattern.compile("\\b([a-z]+_[a-z_]+)\\b").matcher(content);
+        while (m.find()) {
+            String tableName = m.group(1);
+            List<KnowledgeSnippet> tableKnowledge = knowledgeBase.search(tableName, 2);
+            if (!tableKnowledge.isEmpty()) {
+                return "## 补充知识: 表 " + tableName + "\n" + format(tableKnowledge);
+            }
+        }
+    }
+    return null;
+}
+```
+
+**权衡**：动态补充能提供更精准的知识，但每轮增加 LLM 调用前的检索延迟和 token 消耗。默认关闭，仅在知识库质量高且问题复杂度大时开启。
+
+### 知识注入与 Skill 步骤的协同
+
+Skill Markdown 是第二层编排，它不影响预注入，但影响 LLM 的工具选择顺序：
+
+```markdown
+---
+name: replenishment-strategy-diagnose
+description: 诊断 SKU 补货策略未生成问题
+inputs:
+  - name: skuCode
+    description: SKU 编码
+---
+
+## 诊断步骤
+
+1. **理解业务规则**（已自动注入到上下文）
+   - 确认补货策略的关键依赖表和常见原因
+
+2. **查询参数表** — 调用 jdbc_query
+   - 检查 `replm_inv_param_sku_wh_input` 是否有该 SKU 的记录
+
+3. **查询策略表** — 调用 jdbc_query
+   - 检查 `drp_allocation_plan` 是否有策略记录
+
+4. **代码追踪**（如需要）— 调用 code_graph_call_chain
+   - 查 `init_replenishment_param` 任务的过滤逻辑
+
+5. **参考历史经验**（已自动注入）
+   - 如果有类似案例，参考其根因
+
+6. **输出结论**
+   - 根因 + 证据 + 建议方案
+```
+
+LLM 读到步骤后按顺序推理。这不是强制路由——LLM 可以跳步、增加步骤或回溯——而是**场景化引导**，让 LLM 的推理路径更可预期、更高效。
+
+### 装配方式
+
+```java
+// SnapAgentAutoConfiguration
+@Bean
+@ConditionalOnMissingBean
+@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+public KnowledgeInjector knowledgeInjector(
+        Optional<KnowledgeBase> knowledgeBase,
+        Optional<IssueExperienceStore> issueStore,
+        Optional<CodeGraphIndex> codeGraph,
+        KnowledgeInjectorProperties config) {
+    return new DefaultKnowledgeInjector(
+        knowledgeBase.orElse(null),
+        issueStore.orElse(null),
+        codeGraph.orElse(null),
+        config
+    );
+}
+
+// AgentExecutor 构造时注入（可选）
+@Bean
+public AgentExecutor agentExecutor(
+        LlmClient llmClient,
+        ToolDispatcher toolDispatcher,
+        Optional<KnowledgeInjector> knowledgeInjector) {
+    return new AgentExecutor(llmClient, toolDispatcher, knowledgeInjector.orElse(null));
+}
+```
+
+`KnowledgeInjector` 是 `Optional` 注入——如果知识功能未启用，`AgentExecutor` 行为与当前完全一致，零影响。
+
+### 知识源就绪度矩阵
+
+| 知识源 | 版本 | 预注入 | 工具暴露 | 状态 |
+|--------|------|--------|---------|------|
+| 业务知识库 | v0.7 | ✅ 始终 | ✅ `knowledge_search` | 设计中 |
+| 问题经验库 | v0.9 | ✅ 始终 | ✅ `issue_search` | 设计中 |
+| 代码结构摘要 | v0.8 | ✅ 条件触发 | — | 设计中 |
+| 代码图谱查询 | v0.8 | ❌ 不预注入 | ✅ `code_graph_*` | 设计中 |
+| JDBC/Redis 等工具 | v0.1 | ❌ | ✅ 已有 | ✅ 已交付 |
+
+### 版本演进路径
+
+```
+v0.1-alpha   AgentExecutor + JDBC/Redis 工具               ← 已交付
+    │
+    ▼
+v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入
+    │
+    ▼
+v0.8          CodeGraph + 代码结构摘要条件注入                ← 代码知识按需
+    │
+    ▼
+v0.9          IssueExperienceStore + 问题经验预注入            ← 三源齐备
+    │                                                        KnowledgeInjector 完整版
+    ▼
+v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 编排层完善
+```
+
+每个版本 `KnowledgeInjector` 的行为是渐进增强的：知识源未就绪时自动跳过，不影响已有功能。
+
+---
+
 ## v1.0 — 工具插件生态 & 工作流 & 成本核算
 
 **目标**：建立完整生态——工具插件化、Skill 编排工作流、成本透明化
@@ -672,6 +1196,7 @@ Agent (内置 cost-analysis Skill):
 6. **安全内建** — SqlGuard、限流、审计、SecurityGateway，安全不是后加的。
 7. **成本透明** — 从 v1.0 起，每次 LLM 调用的成本可追溯、可预算、可控制。
 8. **知识沉淀** — 诊断不是一次性的，经验自动提取、人工确认、反哺知识库。
+9. **注入优先于路由** — 知识编排不靠意图分类层，而是在 LLM 调用前自动注入相关知识，让 LLM 天然知道该怎么做。预注入通用知识（业务规则、历史经验），按需调用精确工具（代码图谱、深挖检索）。
 
 ---
 
