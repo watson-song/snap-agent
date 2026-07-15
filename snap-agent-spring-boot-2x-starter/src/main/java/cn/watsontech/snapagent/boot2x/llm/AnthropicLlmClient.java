@@ -8,6 +8,7 @@ import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
+import okhttp3.Call;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -28,6 +29,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -49,6 +51,9 @@ public class AnthropicLlmClient implements LlmClient {
     private final String authToken;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
+
+    private final ConcurrentHashMap<String, Call> activeCalls = new ConcurrentHashMap<String, Call>();
+    private final ThreadLocal<String> currentTaskId = new ThreadLocal<String>();
 
     public AnthropicLlmClient(String baseUrl, String apiKey, int timeoutSeconds) {
         this(baseUrl, apiKey, null, null, timeoutSeconds);
@@ -87,6 +92,18 @@ public class AnthropicLlmClient implements LlmClient {
 
     @Override
     public void stream(LlmRequest req, LlmEventSink events, String taskId) {
+        currentTaskId.set(taskId);
+        try {
+            streamInternal(req, events);
+        } finally {
+            if (taskId != null) {
+                activeCalls.remove(taskId);
+            }
+            currentTaskId.remove();
+        }
+    }
+
+    private void streamInternal(LlmRequest req, LlmEventSink events) {
         try {
             Request httpRequest = buildHttpRequest(req);
             try (Response response = executeCall(httpRequest)) {
@@ -110,7 +127,23 @@ public class AnthropicLlmClient implements LlmClient {
 
     /** Testable seam — overridden in tests to inject canned responses. */
     protected Response executeCall(Request request) throws IOException {
-        return httpClient.newCall(request).execute();
+        Call call = httpClient.newCall(request);
+        String tid = currentTaskId.get();
+        if (tid != null) {
+            activeCalls.put(tid, call);
+        }
+        return call.execute();
+        // NOT removed here — stream() finally cleans up after SSE consumption
+    }
+
+    @Override
+    public void cancel(String taskId) {
+        if (taskId == null) return;
+        Call call = activeCalls.get(taskId);
+        if (call != null) {
+            log.info("Cancelling LLM call for task {}", taskId);
+            call.cancel();
+        }
     }
 
     @Override
