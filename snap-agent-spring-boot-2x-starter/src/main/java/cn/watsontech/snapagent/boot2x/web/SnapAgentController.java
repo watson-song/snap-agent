@@ -921,10 +921,10 @@ public class SnapAgentController {
     // ---- POST /runs/{id}/cancel ----
     @PostMapping("/runs/{id}/cancel")
     public ResponseEntity<Object> cancelRun(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
         String userId = currentUserId();
-        if (userId == null) {
-            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
-        }
 
         AgentTask task = taskStore.get(id);
         if (task == null) {
