@@ -53,7 +53,7 @@ class OpenAiLlmClientE2ETest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 MODEL, 256, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         assertThat(sink.thoughts)
                 .as("Should receive content deltas from LLM")
@@ -88,7 +88,7 @@ class OpenAiLlmClientE2ETest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 MODEL, 256, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         assertThat(sink.errorMessage).isNull();
         assertThat(sink.stopReason).isNotNull();

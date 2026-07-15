@@ -54,7 +54,7 @@ class AnthropicLlmClientE2ETest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 MODEL, 256, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         // Wait for async completion (the stream() method is synchronous)
         Thread.sleep(100);
@@ -96,7 +96,7 @@ class AnthropicLlmClientE2ETest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 MODEL, 256, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
         Thread.sleep(100);
 
         assertThat(sink.errorMessage).isNull();
@@ -124,7 +124,7 @@ class AnthropicLlmClientE2ETest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 MODEL, 100, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
         Thread.sleep(100);
 
         // Should have received thoughts and a stop event

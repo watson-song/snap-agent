@@ -124,9 +124,14 @@ public class AgentExecutor {
                     task.getModel(), maxTokens, true);
 
             try {
-                llmClient.stream(req, collector);
+                llmClient.stream(req, collector, task.getTaskId());
             } catch (RuntimeException e) {
                 log.error("LLM stream failed for task {}: {}", task.getTaskId(), e.getMessage());
+                if (task.getStatus() == TaskStatus.CANCELLED) {
+                    task.addTranscriptEvent(TranscriptEvent.thought("任务已取消"));
+                    taskStore.update(task);
+                    return;
+                }
                 task.addTranscriptEvent(TranscriptEvent.error("LLM error: " + e.getMessage()));
                 task.setStatus(TaskStatus.FAILED);
                 taskStore.update(task);
@@ -136,6 +141,11 @@ public class AgentExecutor {
             // Handle LLM-reported error
             if (collector.errorMessage != null) {
                 log.error("LLM error for task {}: {}", task.getTaskId(), collector.errorMessage);
+                if (task.getStatus() == TaskStatus.CANCELLED) {
+                    task.addTranscriptEvent(TranscriptEvent.thought("任务已取消"));
+                    taskStore.update(task);
+                    return;
+                }
                 task.addTranscriptEvent(TranscriptEvent.error(collector.errorMessage));
                 task.setStatus(TaskStatus.FAILED);
                 taskStore.update(task);
