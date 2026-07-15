@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -577,5 +578,7 @@ class SnapAgentControllerTest {
         mockMvc.perform(post("/snap-agent/runs/" + task.getTaskId() + "/cancel"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SUCCEEDED"));
+
+        verify(llmClient, never()).cancel(any());
     }
 }
