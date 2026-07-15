@@ -1,6 +1,6 @@
 // SnapAgent SPA — per-skill independent chat sessions with parallel streams
-// Version: v19 (fix: collapsed sidebar arrow direction; save user message before stream; load conversation on reconnect)
-console.log('[SnapAgent] app.js v19 loaded');
+// Version: v20 (feat: cancel stream calls POST /runs/{id}/cancel to interrupt in-flight LLM HTTP)
+console.log('[SnapAgent] app.js v20 loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;            // currently active skill object
