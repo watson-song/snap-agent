@@ -78,7 +78,7 @@ class AgentExecutorTest {
             sink.onThought("诊断完成，一切正常。");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
@@ -106,7 +106,7 @@ class AgentExecutorTest {
             sink.onThought("查询结果正常，诊断完成。");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenReturn(ToolResult.success("1", 1, 10L));
@@ -142,7 +142,7 @@ class AgentExecutorTest {
             sink.onThought("两个都查完了。");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenReturn(ToolResult.success("1", 1, 5L));
@@ -176,7 +176,7 @@ class AgentExecutorTest {
             sink.onThought("done");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(captor.capture(), any());
+        }).when(llmClient).stream(captor.capture(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenReturn(ToolResult.success("1", 1, 10L));
@@ -204,7 +204,7 @@ class AgentExecutorTest {
     @Test
     void shouldFailWhenLlmThrowsException() {
         doThrow(new RuntimeException("LLM connection timeout"))
-                .when(llmClient).stream(any(), any());
+                .when(llmClient).stream(any(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
@@ -222,7 +222,7 @@ class AgentExecutorTest {
             LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
             sink.onError("rate limit exceeded");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
@@ -248,7 +248,7 @@ class AgentExecutorTest {
             sink.onThought("工具出错了，但诊断可以继续。");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenThrow(new RuntimeException("DB connection failed"));
@@ -273,7 +273,7 @@ class AgentExecutorTest {
             sink.onToolUse("toolu_01", "mysql_query", input);
             sink.onStop("tool_use");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenReturn(ToolResult.success("1", 1, 5L));
@@ -378,7 +378,7 @@ class AgentExecutorTest {
             sink.onThought("ok");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(captor.capture(), any());
+        }).when(llmClient).stream(captor.capture(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
@@ -402,7 +402,7 @@ class AgentExecutorTest {
             sink.onThought("done");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
@@ -426,7 +426,7 @@ class AgentExecutorTest {
             sink.onThought("done");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(any(), any());
+        }).when(llmClient).stream(any(), any(), any());
 
         when(mysqlProvider.execute(any(), any()))
                 .thenReturn(ToolResult.success("1", 1, 10L));
@@ -450,7 +450,7 @@ class AgentExecutorTest {
             sink.onThought("ok");
             sink.onStop("end_turn");
             return null;
-        }).when(llmClient).stream(captor.capture(), any());
+        }).when(llmClient).stream(captor.capture(), any(), any());
 
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();

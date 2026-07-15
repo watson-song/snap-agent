@@ -17,8 +17,17 @@ public interface LlmClient {
      *
      * @param req    the request payload (messages, tools, model, etc.)
      * @param events the sink that receives streaming events
+     * @param taskId identifier for this task, used for cancellation tracking;
+     *               may be null when cancellation is not needed
      */
-    void stream(LlmRequest req, LlmEventSink events);
+    void stream(LlmRequest req, LlmEventSink events, String taskId);
+
+    /**
+     * Cancel an in-flight stream call for the given task.
+     * Implementations should interrupt the underlying HTTP call.
+     * Default no-op for backward compatibility.
+     */
+    default void cancel(String taskId) {}
 
     /**
      * List available models from the LLM API.

@@ -124,7 +124,7 @@ public class AgentExecutor {
                     task.getModel(), maxTokens, true);
 
             try {
-                llmClient.stream(req, collector);
+                llmClient.stream(req, collector, task.getTaskId());
             } catch (RuntimeException e) {
                 log.error("LLM stream failed for task {}: {}", task.getTaskId(), e.getMessage());
                 task.addTranscriptEvent(TranscriptEvent.error("LLM error: " + e.getMessage()));

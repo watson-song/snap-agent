@@ -86,7 +86,7 @@ public class AnthropicLlmClient implements LlmClient {
     }
 
     @Override
-    public void stream(LlmRequest req, LlmEventSink events) {
+    public void stream(LlmRequest req, LlmEventSink events, String taskId) {
         try {
             Request httpRequest = buildHttpRequest(req);
             try (Response response = executeCall(httpRequest)) {

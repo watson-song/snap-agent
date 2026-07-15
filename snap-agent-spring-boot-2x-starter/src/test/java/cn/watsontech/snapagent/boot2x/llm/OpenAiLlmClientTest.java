@@ -46,7 +46,7 @@ class OpenAiLlmClientTest {
                 + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.thoughts).contains("Hello", " World");
         assertThat(sink.stopReason).isEqualTo("end_turn");
@@ -60,7 +60,7 @@ class OpenAiLlmClientTest {
                 + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.thoughts).contains("Hello ", "World");
         assertThat(sink.stopReason).isEqualTo("end_turn");
@@ -80,7 +80,7 @@ class OpenAiLlmClientTest {
                 + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.toolUses).hasSize(1);
         ToolUseCapture tc = sink.toolUses.get(0);
@@ -109,7 +109,7 @@ class OpenAiLlmClientTest {
                 + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.toolUses).hasSize(2);
         assertThat(sink.toolUses.get(0).name).isEqualTo("mysql_query");
@@ -131,7 +131,7 @@ class OpenAiLlmClientTest {
                 + data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.thoughts).contains("Let me check");
         assertThat(sink.toolUses).hasSize(1);
@@ -142,7 +142,7 @@ class OpenAiLlmClientTest {
     void shouldCallOnErrorWhenHttpStatusNotOk() {
         client.setResponseCode(429);
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.errorMessage).isNotNull();
     }
@@ -151,7 +151,7 @@ class OpenAiLlmClientTest {
     void shouldCallOnErrorWhenIOExceptionThrown() {
         client.setThrowIOException(true);
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.errorMessage).isNotNull();
     }
@@ -162,7 +162,7 @@ class OpenAiLlmClientTest {
                 data("{\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.thoughts).contains("Hi");
         assertThat(sink.stopReason).isEqualTo("end_turn");
@@ -174,7 +174,7 @@ class OpenAiLlmClientTest {
                 data("{\"choices\":[{\"delta\":{\"content\":\"truncated\"},\"finish_reason\":\"length\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         assertThat(sink.stopReason).isEqualTo("max_tokens");
     }
@@ -185,7 +185,7 @@ class OpenAiLlmClientTest {
                 data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         Request captured = client.getLastRequest();
         assertThat(captured).isNotNull();
@@ -201,7 +201,7 @@ class OpenAiLlmClientTest {
                 data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         Request captured = client.getLastRequest();
         assertThat(captured.body()).isNotNull();
@@ -227,7 +227,7 @@ class OpenAiLlmClientTest {
                 Collections.singletonList(tool),
                 "gpt-4", 4096, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         Request captured = client.getLastRequest();
         String bodyStr = readBody(captured);
@@ -249,7 +249,7 @@ class OpenAiLlmClientTest {
                 Collections.<ToolDef>emptyList(),
                 "gpt-4", 8192, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         Request captured = client.getLastRequest();
         String bodyStr = readBody(captured);
@@ -273,7 +273,7 @@ class OpenAiLlmClientTest {
                 Collections.<ToolDef>emptyList(),
                 "gpt-4", 8192, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, null);
 
         Request captured = client.getLastRequest();
         String bodyStr = readBody(captured);
@@ -292,7 +292,7 @@ class OpenAiLlmClientTest {
                 data("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}")
                 + done());
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, null);
 
         Request captured = client.getLastRequest();
         assertThat(captured.header("Authorization")).isEqualTo("Bearer my-jwt-token");
