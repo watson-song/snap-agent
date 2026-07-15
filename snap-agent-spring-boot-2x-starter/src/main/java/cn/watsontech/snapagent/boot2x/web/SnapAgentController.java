@@ -918,6 +918,50 @@ public class SnapAgentController {
         return emitter;
     }
 
+    // ---- POST /runs/{id}/cancel ----
+    @PostMapping("/runs/{id}/cancel")
+    public ResponseEntity<Object> cancelRun(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        String userId = currentUserId();
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "task not found: " + id);
+        }
+
+        if (!userId.equals(task.getUserId())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "not task owner");
+        }
+
+        TaskStatus currentStatus = task.getStatus();
+        if (currentStatus == TaskStatus.SUCCEEDED || currentStatus == TaskStatus.FAILED
+                || currentStatus == TaskStatus.TIMEOUT || currentStatus == TaskStatus.CANCELLED) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("taskId", id);
+            result.put("status", currentStatus.name());
+            result.put("message", "task already in terminal state");
+            return ResponseEntity.ok().body(result);
+        }
+
+        task.setStatus(TaskStatus.CANCELLED);
+        task.addTranscriptEvent(TranscriptEvent.done("CANCELLED", "用户取消任务"));
+        taskStore.update(task);
+
+        if (llmClient != null) {
+            llmClient.cancel(id);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("taskId", id);
+        result.put("status", TaskStatus.CANCELLED.name());
+
+        audit(userId, "POST", "/runs/" + id + "/cancel", "CANCEL_TASK", null);
+
+        return ResponseEntity.ok().body(result);
+    }
+
     // ---- POST /conversations (save/update a conversation) ----
     @PostMapping("/conversations")
     public ResponseEntity<Object> saveConversation(@RequestBody Map<String, Object> body) {

@@ -51,7 +51,7 @@ class AnthropicLlmClientTest {
                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}")
                 + sse("message_stop", "{\"type\":\"message_stop\"}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.thoughts).contains("Hello");
         assertThat(sink.stopReason).isEqualTo("end_turn");
@@ -73,7 +73,7 @@ class AnthropicLlmClientTest {
                 + sse("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}")
                 + sse("message_stop", "{\"type\":\"message_stop\"}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.thoughts).contains("Hello ", "World");
     }
@@ -95,7 +95,7 @@ class AnthropicLlmClientTest {
                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}")
                 + sse("message_stop", "{\"type\":\"message_stop\"}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.toolUseId).isEqualTo("toolu_01");
         assertThat(sink.toolUseName).isEqualTo("mysql_query");
@@ -109,7 +109,7 @@ class AnthropicLlmClientTest {
                 sse("error", "{\"type\":\"error\","
                 + "\"error\":{\"type\":\"rate_limit_error\",\"message\":\"rate_limit\"}}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.errorMessage).contains("rate_limit");
     }
@@ -118,7 +118,7 @@ class AnthropicLlmClientTest {
     void shouldCallOnErrorWhenHttpStatusNotOk() {
         client.setResponseCode(429);
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.errorMessage).isNotNull();
     }
@@ -127,7 +127,7 @@ class AnthropicLlmClientTest {
     void shouldCallOnErrorWhenIOExceptionThrown() {
         client.setThrowIOException(true);
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.errorMessage).isNotNull();
     }
@@ -158,7 +158,7 @@ class AnthropicLlmClientTest {
                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}")
                 + sse("message_stop", "{\"type\":\"message_stop\"}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         assertThat(sink.thoughts).contains("thinking");
         assertThat(sink.toolUseId).isEqualTo("t2");
@@ -170,7 +170,7 @@ class AnthropicLlmClientTest {
     void shouldBuildCorrectHttpRequest() {
         client.setSseResponse(sse("message_stop", "{\"type\":\"message_stop\"}"));
 
-        client.stream(simpleRequest(), sink);
+        client.stream(simpleRequest(), sink, "test-task");
 
         Request captured = client.getLastRequest();
         assertThat(captured).isNotNull();
@@ -192,7 +192,7 @@ class AnthropicLlmClientTest {
                 Collections.singletonList(tool),
                 "claude-sonnet-4-6", 4096, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, "test-task");
 
         Request captured = client.getLastRequest();
         assertThat(captured.body()).isNotNull();
@@ -221,7 +221,7 @@ class AnthropicLlmClientTest {
                 Collections.<cn.watsontech.snapagent.core.llm.ToolDef>emptyList(),
                 "claude-sonnet-4-6", 8192, true);
 
-        client.stream(req, sink);
+        client.stream(req, sink, "test-task");
 
         Request captured = client.getLastRequest();
         assertThat(captured).isNotNull();
@@ -234,6 +234,23 @@ class AnthropicLlmClientTest {
         } catch (java.io.IOException e) {
             throw new AssertionError("Failed to read request body", e);
         }
+    }
+
+    @Test
+    void shouldNotThrowWhenCancellingWithNoActiveCall() {
+        client.cancel("nonexistent-task-id");
+        // No exception expected, test passes if it doesn't throw
+    }
+
+    @Test
+    void shouldInvokeCallCancelWhenCancellingRegisteredTask() {
+        // Directly register a mock Call as executeCall() would in production
+        okhttp3.Call mockCall = mock(okhttp3.Call.class);
+        client.activeCalls.put("task-active", mockCall);
+
+        client.cancel("task-active");
+
+        verify(mockCall).cancel();
     }
 
     // ---- helpers ----
