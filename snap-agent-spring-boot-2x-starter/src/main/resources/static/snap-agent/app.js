@@ -590,6 +590,17 @@ function cancelSkillStream(skillName, savePartial) {
     const state = getSkillState(skillName);
     const streamState = state.stream;
     if (!streamState) return;
+
+    // Call server to cancel the task (interrupts in-flight LLM HTTP call)
+    if (streamState.taskId) {
+        fetch(`${BASE}/runs/${streamState.taskId}/cancel`, {
+            method: 'POST',
+            headers: authHeaders()
+        }).catch(function(e) {
+            console.error('[cancel] Failed to cancel task:', e);
+        });
+    }
+
     streamState.cancelled = true;
     // Finalize any streaming thought to stop the blinking cursor
     finalizeStreamingThought(streamState, 'thought');
