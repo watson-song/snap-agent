@@ -62,6 +62,7 @@ class SnapAgentControllerTest {
     @Mock private SecurityGateway securityGateway;
     @Mock private AsyncTaskExecutor taskExecutor;
     @Mock private RateLimiter rateLimiter;
+    @Mock private cn.watsontech.snapagent.core.llm.LlmClient llmClient;
 
     private SnapAgentProperties properties;
     private SnapAgentController controller;
@@ -74,7 +75,8 @@ class SnapAgentControllerTest {
         objectMapper = new ObjectMapper();
         controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
-                properties, securityGateway, rateLimiter, taskExecutor);
+                properties, securityGateway, rateLimiter, taskExecutor,
+                null, llmClient, null, null);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         lenient().when(securityGateway.currentUserId()).thenReturn("user001");
         lenient().when(securityGateway.hasPermission(anyString())).thenReturn(true);
@@ -525,5 +527,55 @@ class SnapAgentControllerTest {
                 .andExpect(jsonPath("$.skills[0].shortcuts[0].message").value("列出当前数据库的所有表"))
                 .andExpect(jsonPath("$.skills[0].shortcuts[1].label").value("表数据量"))
                 .andExpect(jsonPath("$.skills[0].shortcuts[1].message").value("查看当前数据库各表的数据量"));
+    }
+
+    // ---- POST /runs/{id}/cancel tests ----
+
+    @Test
+    void shouldCancelRunningTaskAndReturn200() throws Exception {
+        AgentTask task = AgentTask.create("user001", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.setStatus(TaskStatus.RUNNING);
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        mockMvc.perform(post("/snap-agent/runs/" + task.getTaskId() + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CANCELLED"));
+
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        verify(llmClient).cancel(task.getTaskId());
+    }
+
+    @Test
+    void shouldReturn404WhenCancellingNonExistentTask() throws Exception {
+        when(taskStore.get("nonexistent")).thenReturn(null);
+
+        mockMvc.perform(post("/snap-agent/runs/nonexistent/cancel"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("TASK_NOT_FOUND"));
+    }
+
+    @Test
+    void shouldReturn403WhenCancellingOtherUserTask() throws Exception {
+        AgentTask task = AgentTask.create("other-user", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.setStatus(TaskStatus.RUNNING);
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        mockMvc.perform(post("/snap-agent/runs/" + task.getTaskId() + "/cancel"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    @Test
+    void shouldReturn200WhenCancellingAlreadyFinishedTask() throws Exception {
+        AgentTask task = AgentTask.create("user001", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.setStatus(TaskStatus.SUCCEEDED);
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        mockMvc.perform(post("/snap-agent/runs/" + task.getTaskId() + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUCCEEDED"));
     }
 }
