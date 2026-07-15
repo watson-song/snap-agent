@@ -300,6 +300,102 @@ class AgentExecutorTest {
     }
 
     @Test
+    void shouldKeepCancelledStatusWhenLlmThrowsAfterCancel() {
+        // Simulate Call.cancel() causing a RuntimeException during stream:
+        // the task is cancelled mid-stream, then the stream throws.
+        // We set CANCELLED inside the mock (not before execute) so the
+        // early-return guard at line 90 is bypassed and the catch block
+        // at line 128 is the code path under test.
+        AgentTask task = newTask();
+        doAnswer(invocation -> {
+            task.setStatus(TaskStatus.CANCELLED);
+            throw new RuntimeException("Canceled");
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        executor.execute(task, skill);
+
+        // Status should remain CANCELLED, not be overridden to FAILED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        // Should NOT have an error transcript event
+        List<TranscriptEvent> transcript = task.getTranscript();
+        assertThat(transcript).extracting(TranscriptEvent::getType)
+                .doesNotContain(TranscriptEvent.TYPE_ERROR);
+    }
+
+    @Test
+    void shouldKeepCancelledStatusWhenLlmReportsErrorAfterCancel() {
+        // Simulate Call.cancel() causing LLM to report an error mid-stream.
+        // We set CANCELLED inside the mock (not before execute) so the
+        // early-return guard at line 90 is bypassed and the error check
+        // at line 137 is the code path under test.
+        AgentTask task = newTask();
+        doAnswer(invocation -> {
+            task.setStatus(TaskStatus.CANCELLED);
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onError("Canceled");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        executor.execute(task, skill);
+
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        assertThat(task.getTranscript()).extracting(TranscriptEvent::getType)
+                .doesNotContain(TranscriptEvent.TYPE_ERROR);
+    }
+
+    @Test
+    void shouldStopWhenCancelledBetweenTurns() {
+        // First turn: normal tool_use; Second turn: should never be called (task cancelled).
+        // Cancellation happens during tool dispatch (simulating POST /runs/{id}/cancel
+        // called while the first turn's tool is executing). The between-turn check
+        // at line 116 catches it on the next iteration.
+        AgentTask task = newTask();
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("查一下。");
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("sql", "SELECT 1");
+            sink.onToolUse("toolu_01", "mysql_query", input);
+            sink.onStop("tool_use");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        // During tool dispatch, simulate cancel (as if POST /runs/{id}/cancel was called)
+        when(mysqlProvider.execute(any(), any())).thenAnswer(invocation -> {
+            task.setStatus(TaskStatus.CANCELLED);
+            return ToolResult.success("1", 1, 10L);
+        });
+
+        AgentExecutor executor = newExecutor();
+        executor.execute(task, skill);
+
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.CANCELLED);
+        // Should have a "任务已取消" thought, NOT error
+        assertThat(task.getTranscript()).extracting(TranscriptEvent::getType)
+                .doesNotContain(TranscriptEvent.TYPE_ERROR);
+    }
+
+    @Test
+    void shouldNotOverrideFailedWithCancelledGuard() {
+        // Task FAILED (not cancelled) — RuntimeException should set FAILED, not be caught
+        doThrow(new RuntimeException("real connection error"))
+                .when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        task.setStatus(TaskStatus.RUNNING);  // NOT cancelled
+
+        executor.execute(task, skill);
+
+        // Should be FAILED, not CANCELLED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.FAILED);
+        assertThat(task.getTranscript()).extracting(TranscriptEvent::getType)
+                .contains(TranscriptEvent.TYPE_ERROR);
+    }
+
+    @Test
     void shouldBuildSystemPromptWithReadOnlyPrefix() {
         AgentExecutor executor = newExecutor();
         AgentTask task = newTask();
