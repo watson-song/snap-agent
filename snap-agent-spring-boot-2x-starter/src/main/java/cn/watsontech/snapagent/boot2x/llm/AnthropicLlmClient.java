@@ -52,7 +52,7 @@ public class AnthropicLlmClient implements LlmClient {
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    private final ConcurrentHashMap<String, Call> activeCalls = new ConcurrentHashMap<String, Call>();
+    final ConcurrentHashMap<String, Call> activeCalls = new ConcurrentHashMap<String, Call>();
     private final ThreadLocal<String> currentTaskId = new ThreadLocal<String>();
 
     public AnthropicLlmClient(String baseUrl, String apiKey, int timeoutSeconds) {
@@ -125,7 +125,8 @@ public class AnthropicLlmClient implements LlmClient {
         }
     }
 
-    /** Testable seam — overridden in tests to inject canned responses. */
+    /** Testable seam — registers the Call for cancellation tracking, then executes.
+     *  Override in tests to inject canned responses (note: overrides skip registration). */
     protected Response executeCall(Request request) throws IOException {
         Call call = httpClient.newCall(request);
         String tid = currentTaskId.get();

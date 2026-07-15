@@ -243,16 +243,14 @@ class AnthropicLlmClientTest {
     }
 
     @Test
-    void shouldCleanUpActiveCallsAfterStreamCompletes() {
-        client.setSseResponse(
-                sse("message_start", "{\"type\":\"message_start\"}")
-                + sse("message_stop", "{\"type\":\"message_stop\"}"));
+    void shouldInvokeCallCancelWhenCancellingRegisteredTask() {
+        // Directly register a mock Call as executeCall() would in production
+        okhttp3.Call mockCall = mock(okhttp3.Call.class);
+        client.activeCalls.put("task-active", mockCall);
 
-        client.stream(simpleRequest(), sink, "task-123");
+        client.cancel("task-active");
 
-        // After stream completes, cancel should be a no-op (Call was cleaned up)
-        client.cancel("task-123");
-        // No exception expected
+        verify(mockCall).cancel();
     }
 
     // ---- helpers ----
