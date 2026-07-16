@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
@@ -72,15 +73,17 @@ class SnapAgentControllerTest {
     private SnapAgentController controller;
     private MockMvc mockMvc;
     private ObjectMapper objectMapper;
+    private InMemoryAuditStore auditStore;
 
     @BeforeEach
     void setUp() {
         properties = new SnapAgentProperties();
         objectMapper = new ObjectMapper();
+        auditStore = new InMemoryAuditStore(100);
         controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor,
-                null, llmClient, null, null);
+                null, llmClient, null, null, auditStore);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         lenient().when(securityGateway.currentUserId()).thenReturn("user001");
         lenient().when(securityGateway.hasPermission(anyString())).thenReturn(true);
@@ -645,5 +648,17 @@ class SnapAgentControllerTest {
                 .andExpect(jsonPath("$.total").value(1))
                 .andExpect(jsonPath("$.tasks[0].skillId").value("db-check"))
                 .andExpect(jsonPath("$.tasks[0].status").value("SUCCEEDED"));
+    }
+
+    // ---- GET /audit tests ----
+
+    @Test
+    void shouldReturnAuditEntriesForCurrentUser() throws Exception {
+        mockMvc.perform(get("/snap-agent/audit")
+                        .param("page", "0")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries").isArray())
+                .andExpect(jsonPath("$.total").exists());
     }
 }

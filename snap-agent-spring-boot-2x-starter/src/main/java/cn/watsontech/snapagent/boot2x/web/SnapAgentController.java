@@ -14,6 +14,8 @@ import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.security.AuditEntry;
+import cn.watsontech.snapagent.core.security.AuditStore;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.security.UserInfo;
@@ -85,6 +87,7 @@ public class SnapAgentController {
     private final LlmClient llmClient;
     private final SecurityAuditLogger auditLogger;
     private final ConversationStore conversationStore;
+    private final AuditStore auditStore;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -153,6 +156,24 @@ public class SnapAgentController {
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor,
+                peerSseRelay, llmClient, auditLogger, conversationStore, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                AuditStore auditStore) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -165,6 +186,7 @@ public class SnapAgentController {
         this.llmClient = llmClient;
         this.auditLogger = auditLogger;
         this.conversationStore = conversationStore;
+        this.auditStore = auditStore;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -1003,6 +1025,46 @@ public class SnapAgentController {
         audit(userId, "POST", "/runs/" + id + "/cancel", "CANCEL_TASK", null);
 
         return ResponseEntity.ok().body(result);
+    }
+
+    // ---- GET /audit (paginated audit entries for current user) ----
+    @GetMapping("/audit")
+    public ResponseEntity<Object> listAudit(
+            @RequestParam(value = "action", required = false) String action,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (auditStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_DISABLED", "audit store not configured");
+        }
+
+        String userId = currentUserId();
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AuditEntry> entries = auditStore.query(userId, action, size, page * size);
+        int total = auditStore.count(userId, action);
+
+        List<Map<String, Object>> entryList = new ArrayList<Map<String, Object>>();
+        for (AuditEntry e : entries) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("userId", e.getUserId());
+            dto.put("method", e.getMethod());
+            dto.put("path", e.getPath());
+            dto.put("action", e.getAction());
+            dto.put("timestamp", e.getTimestamp());
+            entryList.add(dto);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("entries", entryList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+
+        return ResponseEntity.ok(result);
     }
 
     // ---- POST /conversations (save/update a conversation) ----
