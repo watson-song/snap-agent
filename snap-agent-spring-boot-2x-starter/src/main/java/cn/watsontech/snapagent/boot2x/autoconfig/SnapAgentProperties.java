@@ -55,6 +55,9 @@ public class SnapAgentProperties {
     private Knowledge knowledge = new Knowledge();
     private CodeGraph codeGraph = new CodeGraph();
     private IssueTracking issueTracking = new IssueTracking();
+    private ToolPlugins toolPlugins = new ToolPlugins();
+    private Workflows workflows = new Workflows();
+    private Cost cost = new Cost();
 
     // ---- getters / setters ----
 
@@ -240,6 +243,30 @@ public class SnapAgentProperties {
 
     public void setIssueTracking(IssueTracking issueTracking) {
         this.issueTracking = issueTracking;
+    }
+
+    public ToolPlugins getToolPlugins() {
+        return toolPlugins;
+    }
+
+    public void setToolPlugins(ToolPlugins toolPlugins) {
+        this.toolPlugins = toolPlugins;
+    }
+
+    public Workflows getWorkflows() {
+        return workflows;
+    }
+
+    public void setWorkflows(Workflows workflows) {
+        this.workflows = workflows;
+    }
+
+    public Cost getCost() {
+        return cost;
+    }
+
+    public void setCost(Cost cost) {
+        this.cost = cost;
     }
 
     // ---- nested classes ----
@@ -1293,5 +1320,120 @@ public class SnapAgentProperties {
         public void setAutoSuggest(boolean autoSuggest) { this.autoSuggest = autoSuggest; }
         public boolean isAutoVerify() { return autoVerify; }
         public void setAutoVerify(boolean autoVerify) { this.autoVerify = autoVerify; }
+    }
+
+    /**
+     * Tool plugin introspection configuration (v1.0).
+     *
+     * <p>When {@code enabled=true}, a {@link cn.watsontech.snapagent.boot2x.plugin.SimpleToolPluginRegistry}
+     * is assembled to collect all {@link cn.watsontech.snapagent.core.plugin.ToolPlugin}
+     * beans and expose them for introspection via {@code GET /tool-plugins}.</p>
+     */
+    public static class ToolPlugins {
+        private boolean enabled = false;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    }
+
+    /**
+     * Workflow orchestration configuration (v1.0).
+     *
+     * <p>When {@code enabled=true}, workflow definitions are loaded from the
+     * {@code definitions} list and a {@link cn.watsontech.snapagent.boot2x.workflow.SimpleWorkflowExecutor}
+     * is assembled to run multi-skill pipelines.</p>
+     */
+    public static class Workflows {
+        private boolean enabled = false;
+        private List<WorkflowDef> definitions = new ArrayList<WorkflowDef>();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<WorkflowDef> getDefinitions() { return definitions; }
+        public void setDefinitions(List<WorkflowDef> definitions) { this.definitions = definitions; }
+    }
+
+    /** Individual workflow definition (v1.0). */
+    public static class WorkflowDef {
+        private String id;
+        private String description;
+        private List<StepDef> steps = new ArrayList<StepDef>();
+
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public List<StepDef> getSteps() { return steps; }
+        public void setSteps(List<StepDef> steps) { this.steps = steps; }
+    }
+
+    /** Individual workflow step definition (v1.0). */
+    public static class StepDef {
+        private String name;
+        private String skill;
+        private Map<String, String> inputs = new LinkedHashMap<String, String>();
+        private String condition;
+        private String onFailure = "ABORT";
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getSkill() { return skill; }
+        public void setSkill(String skill) { this.skill = skill; }
+        public Map<String, String> getInputs() { return inputs; }
+        public void setInputs(Map<String, String> inputs) { this.inputs = inputs; }
+        public String getCondition() { return condition; }
+        public void setCondition(String condition) { this.condition = condition; }
+        public String getOnFailure() { return onFailure; }
+        public void setOnFailure(String onFailure) { this.onFailure = onFailure; }
+    }
+
+    /**
+     * Cost accounting configuration (v1.0).
+     *
+     * <p>When {@code enabled=true}, LLM token usage and monetary cost are
+     * tracked per call. Budgets can be configured per user, per skill, and globally.</p>
+     */
+    public static class Cost {
+        private boolean enabled = false;
+        private Pricing pricing = new Pricing();
+        private Budgets budgets = new Budgets();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public Pricing getPricing() { return pricing; }
+        public void setPricing(Pricing pricing) { this.pricing = pricing; }
+        public Budgets getBudgets() { return budgets; }
+        public void setBudgets(Budgets budgets) { this.budgets = budgets; }
+    }
+
+    /** LLM token pricing (v1.0). */
+    public static class Pricing {
+        private double inputPerMillion = 3.00;
+        private double outputPerMillion = 15.00;
+        private double cacheReadPerMillion = 0.30;
+        private String currency = "CNY";
+
+        public double getInputPerMillion() { return inputPerMillion; }
+        public void setInputPerMillion(double inputPerMillion) { this.inputPerMillion = inputPerMillion; }
+        public double getOutputPerMillion() { return outputPerMillion; }
+        public void setOutputPerMillion(double outputPerMillion) { this.outputPerMillion = outputPerMillion; }
+        public double getCacheReadPerMillion() { return cacheReadPerMillion; }
+        public void setCacheReadPerMillion(double cacheReadPerMillion) { this.cacheReadPerMillion = cacheReadPerMillion; }
+        public String getCurrency() { return currency; }
+        public void setCurrency(String currency) { this.currency = currency; }
+    }
+
+    /** Cost budgets (v1.0). */
+    public static class Budgets {
+        private double perUserDaily = 0;
+        private double perSkillDaily = 0;
+        private double globalDaily = 0;
+
+        public double getPerUserDaily() { return perUserDaily; }
+        public void setPerUserDaily(double perUserDaily) { this.perUserDaily = perUserDaily; }
+        public double getPerSkillDaily() { return perSkillDaily; }
+        public void setPerSkillDaily(double perSkillDaily) { this.perSkillDaily = perSkillDaily; }
+        public double getGlobalDaily() { return globalDaily; }
+        public void setGlobalDaily(double globalDaily) { this.globalDaily = globalDaily; }
     }
 }

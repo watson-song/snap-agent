@@ -805,6 +805,91 @@ public class SnapAgentAutoConfiguration {
                 taskStore, agentExecutor, skillRegistry);
     }
 
+    // ---- Tool Plugin Registry (v1.0) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.tool-plugins", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.plugin.SimpleToolPluginRegistry simpleToolPluginRegistry(
+            ObjectProvider<cn.watsontech.snapagent.core.plugin.ToolPlugin> pluginProvider) {
+        List<cn.watsontech.snapagent.core.plugin.ToolPlugin> plugins =
+                new ArrayList<cn.watsontech.snapagent.core.plugin.ToolPlugin>(
+                        pluginProvider.orderedStream()
+                                .collect(java.util.stream.Collectors.toList()));
+        return new cn.watsontech.snapagent.boot2x.plugin.SimpleToolPluginRegistry(plugins);
+    }
+
+    // ---- Workflow Orchestration (v1.0) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.workflow.WorkflowRegistry workflowRegistry(
+            SnapAgentProperties props) {
+        List<cn.watsontech.snapagent.core.workflow.Workflow> workflows =
+                new ArrayList<cn.watsontech.snapagent.core.workflow.Workflow>();
+        for (SnapAgentProperties.WorkflowDef def : props.getWorkflows().getDefinitions()) {
+            List<Map<String, Object>> stepDefs = new ArrayList<Map<String, Object>>();
+            for (SnapAgentProperties.StepDef sd : def.getSteps()) {
+                Map<String, Object> stepMap = new LinkedHashMap<String, Object>();
+                stepMap.put("name", sd.getName());
+                stepMap.put("skill", sd.getSkill());
+                stepMap.put("inputs", sd.getInputs());
+                stepMap.put("condition", sd.getCondition());
+                stepMap.put("onFailure", sd.getOnFailure());
+                stepDefs.add(stepMap);
+            }
+            workflows.add(cn.watsontech.snapagent.boot2x.workflow.WorkflowRegistry.fromConfig(
+                    def.getId(), def.getDescription(), stepDefs));
+        }
+        log.info("WorkflowRegistry assembled with {} workflow(s)", workflows.size());
+        return new cn.watsontech.snapagent.boot2x.workflow.WorkflowRegistry(workflows);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.workflow.WorkflowExecutor simpleWorkflowExecutor(
+            AgentExecutor agentExecutor,
+            cn.watsontech.snapagent.core.skill.SkillRegistry skillRegistry) {
+        log.info("SimpleWorkflowExecutor assembled");
+        return new cn.watsontech.snapagent.boot2x.workflow.SimpleWorkflowExecutor(
+                agentExecutor, skillRegistry);
+    }
+
+    // ---- Cost Accounting (v1.0) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.cost.CostCalculator costCalculator(
+            SnapAgentProperties props) {
+        SnapAgentProperties.Pricing p = props.getCost().getPricing();
+        log.info("CostCalculator assembled (currency={}, input={}, output={}, cacheRead={})",
+                p.getCurrency(), p.getInputPerMillion(), p.getOutputPerMillion(),
+                p.getCacheReadPerMillion());
+        return new cn.watsontech.snapagent.boot2x.cost.CostCalculator(
+                p.getInputPerMillion(), p.getOutputPerMillion(),
+                p.getCacheReadPerMillion(), p.getCurrency());
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.cost.CostTracker inMemoryCostTracker(
+            SnapAgentProperties props) {
+        SnapAgentProperties.Budgets b = props.getCost().getBudgets();
+        log.info("InMemoryCostTracker assembled (budgets: user={}, skill={}, global={})",
+                b.getPerUserDaily(), b.getPerSkillDaily(), b.getGlobalDaily());
+        return new cn.watsontech.snapagent.boot2x.cost.InMemoryCostTracker(
+                b.getPerUserDaily(), b.getPerSkillDaily(), b.getGlobalDaily());
+    }
+
     // ---- helpers ----
 
     private Path resolveUploadDir(String uploadSkillsDir) {
