@@ -172,4 +172,22 @@ class TaskStoreTest {
 
         assertThat(store.countByUser("user2")).isEqualTo(0);
     }
+
+    @Test
+    void shouldCountWithFilters() {
+        AgentTask t1 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "m");
+        t1.setStatus(TaskStatus.SUCCEEDED);
+        store.save(t1);
+        AgentTask t2 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "m");
+        t2.setStatus(TaskStatus.FAILED);
+        store.save(t2);
+        AgentTask t3 = AgentTask.create("user1", "skill-b", new HashMap<String, String>(), "m");
+        t3.setStatus(TaskStatus.SUCCEEDED);
+        store.save(t3);
+
+        assertThat(store.count("user1", "skill-a", null)).isEqualTo(2);
+        assertThat(store.count("user1", null, TaskStatus.SUCCEEDED)).isEqualTo(2);
+        assertThat(store.count("user1", "skill-a", TaskStatus.SUCCEEDED)).isEqualTo(1);
+        assertThat(store.count("user1", "skill-b", TaskStatus.FAILED)).isEqualTo(0);
+    }
 }

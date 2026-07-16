@@ -100,4 +100,23 @@ public class TaskStore {
         }
         return count;
     }
+
+    /**
+     * Count tasks matching the given filters (same semantics as {@link #query}).
+     *
+     * @param userId  required user filter (must not be null)
+     * @param skillId optional skill filter, null = all skills
+     * @param status  optional status filter, null = all statuses
+     * @return count of matching tasks
+     */
+    public int count(String userId, String skillId, TaskStatus status) {
+        int count = 0;
+        for (AgentTask task : tasks.values()) {
+            if (!userId.equals(task.getUserId())) continue;
+            if (skillId != null && !skillId.equals(task.getSkillId())) continue;
+            if (status != null && task.getStatus() != status) continue;
+            count++;
+        }
+        return count;
+    }
 }
