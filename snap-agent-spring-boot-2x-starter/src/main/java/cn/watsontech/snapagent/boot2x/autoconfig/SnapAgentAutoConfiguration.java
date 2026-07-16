@@ -2,6 +2,11 @@ package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
+import cn.watsontech.snapagent.boot2x.cost.BudgetEnforcer;
+import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
+import cn.watsontech.snapagent.boot2x.cost.CostTrackingLlmClient;
+import cn.watsontech.snapagent.boot2x.cost.DefaultCostTracker;
+import cn.watsontech.snapagent.boot2x.cost.FileCostStore;
 import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.issue.KnowledgeSedimentationExtractor;
@@ -41,6 +46,8 @@ import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
+import cn.watsontech.snapagent.core.cost.CostStore;
+import cn.watsontech.snapagent.core.cost.CostTracker;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -67,6 +74,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import javax.servlet.Filter;
 import javax.sql.DataSource;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -446,10 +454,20 @@ public class SnapAgentAutoConfiguration {
             ToolDispatcher toolDispatcher,
             TaskStore taskStore,
             SnapAgentProperties props,
-            ObjectProvider<SystemPromptExtender> extenderProvider) {
+            ObjectProvider<SystemPromptExtender> extenderProvider,
+            ObjectProvider<CostTracker> costTrackerProvider) {
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         if (llmClient == null) {
             log.warn("LlmClient not available; AgentExecutor will not function");
+        }
+        // Wrap LlmClient with CostTrackingLlmClient when cost tracking is enabled
+        CostTracker costTracker = costTrackerProvider.getIfAvailable();
+        if (llmClient != null && costTracker != null && props.getCost().isEnabled()) {
+            SnapAgentProperties.Cost.Pricing pricing = props.getCost().getPricing();
+            llmClient = new CostTrackingLlmClient(llmClient, costTracker,
+                    pricing.getInput(), pricing.getOutput(), pricing.getCacheRead(),
+                    props.getIssueClosure().getSystemUserId(), "");
+            log.info("LlmClient wrapped with CostTrackingLlmClient (cost tracking enabled)");
         }
         List<SystemPromptExtender> extenders = extenderProvider.orderedStream()
                 .collect(java.util.stream.Collectors.toList());
@@ -547,6 +565,7 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
             ObjectProvider<cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester> bugfixSuggesterProvider,
             ObjectProvider<cn.watsontech.snapagent.boot2x.issue.IssueClosureService> issueClosureServiceProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.cost.CostSummaryService> costSummaryServiceProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
@@ -557,6 +576,7 @@ public class SnapAgentAutoConfiguration {
         cn.watsontech.snapagent.core.patrol.AlertConverger alertConverger = alertConvergerProvider.getIfAvailable();
         cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester bugfixSuggester = bugfixSuggesterProvider.getIfAvailable();
         cn.watsontech.snapagent.boot2x.issue.IssueClosureService issueClosureService = issueClosureServiceProvider.getIfAvailable();
+        cn.watsontech.snapagent.boot2x.cost.CostSummaryService costSummaryService = costSummaryServiceProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -579,7 +599,8 @@ public class SnapAgentAutoConfiguration {
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
-                patrolScheduler, alertConverger, bugfixSuggester, issueClosureService);
+                patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
+                costSummaryService);
     }
 
     // ---- SnapAgentFilter ----
@@ -865,6 +886,57 @@ public class SnapAgentAutoConfiguration {
                 solutionSuggesterProvider.getIfAvailable(),
                 verificationRunnerProvider.getIfAvailable(),
                 properties.getIssueClosure().getSystemUserId());
+    }
+
+    // ---- Cost Accounting (v1.0) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(CostStore.class)
+    public FileCostStore fileCostStore(SnapAgentProperties props) {
+        String storageDir = props.getCost().getStorageDir();
+        if (storageDir == null || storageDir.isEmpty()) {
+            storageDir = props.getUploadSkillsDir() + "/cost";
+        }
+        log.info("FileCostStore assembled with storage dir: {}", storageDir);
+        return new FileCostStore(storageDir);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public BudgetEnforcer budgetEnforcer(CostStore costStore, SnapAgentProperties props) {
+        SnapAgentProperties.Cost.Budgets budgets = props.getCost().getBudgets();
+        BigDecimal perUser = budgets != null ? budgets.getPerUserDaily() : null;
+        BigDecimal perSkill = budgets != null ? budgets.getPerSkillDaily() : null;
+        BigDecimal global = budgets != null ? budgets.getGlobalDaily() : null;
+        log.info("BudgetEnforcer assembled (perUserDaily={}, perSkillDaily={}, globalDaily={})",
+                perUser, perSkill, global);
+        return new BudgetEnforcer(costStore, perUser, perSkill, global);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(CostTracker.class)
+    public DefaultCostTracker defaultCostTracker(CostStore costStore, BudgetEnforcer budgetEnforcer) {
+        log.info("DefaultCostTracker assembled");
+        return new DefaultCostTracker(costStore, budgetEnforcer);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public CostSummaryService costSummaryService(CostStore costStore, SnapAgentProperties props) {
+        SnapAgentProperties.Cost.Budgets budgets = props.getCost().getBudgets();
+        BigDecimal perUser = budgets != null ? budgets.getPerUserDaily() : null;
+        BigDecimal perSkill = budgets != null ? budgets.getPerSkillDaily() : null;
+        BigDecimal global = budgets != null ? budgets.getGlobalDaily() : null;
+        log.info("CostSummaryService assembled");
+        return new CostSummaryService(costStore, perUser, perSkill, global);
     }
 
     // ---- file system helpers ----

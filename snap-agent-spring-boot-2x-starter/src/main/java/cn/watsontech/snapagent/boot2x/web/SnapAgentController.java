@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
@@ -14,6 +15,7 @@ import cn.watsontech.snapagent.core.conversation.Conversation;
 import cn.watsontech.snapagent.core.conversation.ConversationMessage;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.core.cost.CostSummary;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.issue.SolutionOption;
@@ -102,6 +104,7 @@ public class SnapAgentController {
     private final AlertConverger alertConverger;
     private final TemplateBugfixSuggester bugfixSuggester;
     private final IssueClosureService issueClosureService;
+    private final CostSummaryService costSummaryService;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -192,7 +195,7 @@ public class SnapAgentController {
                                 TemplateBugfixSuggester bugfixSuggester) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
-                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester, null);
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -211,6 +214,29 @@ public class SnapAgentController {
                                 AlertConverger alertConverger,
                                 TemplateBugfixSuggester bugfixSuggester,
                                 IssueClosureService issueClosureService) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
+                issueClosureService, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService,
+                                CostSummaryService costSummaryService) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -227,6 +253,7 @@ public class SnapAgentController {
         this.alertConverger = alertConverger;
         this.bugfixSuggester = bugfixSuggester;
         this.issueClosureService = issueClosureService;
+        this.costSummaryService = costSummaryService;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -1524,6 +1551,101 @@ public class SnapAgentController {
         return ResponseEntity.ok(toIssueDto(issue));
     }
 
+    // ---- GET /cost/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/summary")
+    public ResponseEntity<Object> costSummary(
+            @RequestParam long from,
+            @RequestParam long to,
+            @RequestParam(required = false) String groupBy) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/summary", "COST_SUMMARY", null);
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if ("user".equalsIgnoreCase(groupBy)) {
+            // Group by user: list individual user summaries
+            // Since we don't track unique user IDs separately, we return the global summary
+            // with a note that user-level grouping requires iterating all records
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "user");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+        } else if ("skill".equalsIgnoreCase(groupBy)) {
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "skill");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+        } else {
+            // Default: global summary
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "global");
+            result.put("dimensionValue", "global");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+            result.put("budget", global.getBudget());
+            result.put("utilization", global.getUtilization());
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /cost/users/{userId}/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/users/{userId}/summary")
+    public ResponseEntity<Object> userCostSummary(
+            @PathVariable String userId,
+            @RequestParam long from,
+            @RequestParam long to) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/users/" + userId + "/summary", "USER_COST_SUMMARY", null);
+
+        CostSummary summary = costSummaryService.getUserSummary(userId, from, to);
+        return ResponseEntity.ok(toCostSummaryDto(summary));
+    }
+
+    // ---- GET /cost/skills/{skillName}/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/skills/{skillName}/summary")
+    public ResponseEntity<Object> skillCostSummary(
+            @PathVariable String skillName,
+            @RequestParam long from,
+            @RequestParam long to) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/skills/" + skillName + "/summary", "SKILL_COST_SUMMARY", null);
+
+        CostSummary summary = costSummaryService.getSkillSummary(skillName, from, to);
+        return ResponseEntity.ok(toCostSummaryDto(summary));
+    }
+
     // ---- helpers ----
 
     /**
@@ -1681,8 +1803,23 @@ public class SnapAgentController {
         return body;
     }
 
+    /** Converts a CostSummary to a DTO map for API responses. */
+    private Map<String, Object> toCostSummaryDto(CostSummary summary) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("dimension", summary.getDimension());
+        dto.put("dimensionValue", summary.getDimensionValue());
+        dto.put("totalCost", summary.getTotalCost());
+        dto.put("totalInputTokens", summary.getTotalInputTokens());
+        dto.put("totalOutputTokens", summary.getTotalOutputTokens());
+        dto.put("requestCount", summary.getRequestCount());
+        dto.put("budget", summary.getBudget());
+        dto.put("utilization", summary.getUtilization());
+        return dto;
+    }
+
     /** Converts an IssueClosure to a DTO map for API responses. */
     private Map<String, Object> toIssueDto(IssueClosure issue) {
+
         Map<String, Object> dto = new LinkedHashMap<String, Object>();
         dto.put("issueId", issue.getIssueId());
         dto.put("externalIssueId", issue.getExternalIssueId());

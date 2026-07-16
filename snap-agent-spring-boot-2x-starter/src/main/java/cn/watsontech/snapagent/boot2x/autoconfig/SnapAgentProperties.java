@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,6 +56,7 @@ public class SnapAgentProperties {
     private Knowledge knowledge = new Knowledge();
     private CodeGraph codeGraph = new CodeGraph();
     private IssueClosure issueClosure = new IssueClosure();
+    private Cost cost = new Cost();
 
     // ---- getters / setters ----
 
@@ -240,6 +242,14 @@ public class SnapAgentProperties {
 
     public void setIssueClosure(IssueClosure issueClosure) {
         this.issueClosure = issueClosure;
+    }
+
+    public Cost getCost() {
+        return cost;
+    }
+
+    public void setCost(Cost cost) {
+        this.cost = cost;
     }
 
     // ---- nested classes ----
@@ -1298,5 +1308,79 @@ public class SnapAgentProperties {
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
         public String getTrackerType() { return trackerType; }
         public void setTrackerType(String trackerType) { this.trackerType = trackerType; }
+    }
+
+    /**
+     * Cost accounting configuration (v1.0).
+     *
+     * <p>When {@code enabled=true}, cost tracking infrastructure (FileCostStore,
+     * BudgetEnforcer, DefaultCostTracker, CostSummaryService) is assembled, and
+     * the LlmClient is wrapped in a CostTrackingLlmClient so every LLM call
+     * records token usage and cost.</p>
+     */
+    public static class Cost {
+        /** Master switch. Default false — zero cost beans when disabled. */
+        private boolean enabled = false;
+
+        /** Pricing configuration. */
+        private Pricing pricing = new Pricing();
+
+        /** Budget limits. */
+        private Budgets budgets = new Budgets();
+
+        /** Storage directory for cost records. Empty = default to {upload-skills-dir}/cost/. */
+        private String storageDir = "";
+
+        /** Budget utilization ratio at which to emit a warning (0.0-1.0). */
+        private double warnThreshold = 0.8;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public Pricing getPricing() { return pricing; }
+        public void setPricing(Pricing pricing) { this.pricing = pricing; }
+        public Budgets getBudgets() { return budgets; }
+        public void setBudgets(Budgets budgets) { this.budgets = budgets; }
+        public String getStorageDir() { return storageDir; }
+        public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
+        public double getWarnThreshold() { return warnThreshold; }
+        public void setWarnThreshold(double warnThreshold) { this.warnThreshold = warnThreshold; }
+
+        /** Per-million-token pricing. */
+        public static class Pricing {
+            /** Price per 1M input tokens. */
+            private BigDecimal input = new BigDecimal("3.00");
+            /** Price per 1M output tokens. */
+            private BigDecimal output = new BigDecimal("15.00");
+            /** Price per 1M cache-read tokens. */
+            private BigDecimal cacheRead = new BigDecimal("0.30");
+            /** Currency code (e.g. CNY, USD). */
+            private String currency = "CNY";
+
+            public BigDecimal getInput() { return input; }
+            public void setInput(BigDecimal input) { this.input = input; }
+            public BigDecimal getOutput() { return output; }
+            public void setOutput(BigDecimal output) { this.output = output; }
+            public BigDecimal getCacheRead() { return cacheRead; }
+            public void setCacheRead(BigDecimal cacheRead) { this.cacheRead = cacheRead; }
+            public String getCurrency() { return currency; }
+            public void setCurrency(String currency) { this.currency = currency; }
+        }
+
+        /** Daily budget limits (null = no limit for that dimension). */
+        public static class Budgets {
+            /** Per-user daily cost limit. Null = no limit. */
+            private BigDecimal perUserDaily;
+            /** Per-skill daily cost limit. Null = no limit. */
+            private BigDecimal perSkillDaily;
+            /** Global daily cost limit. Null = no limit. */
+            private BigDecimal globalDaily;
+
+            public BigDecimal getPerUserDaily() { return perUserDaily; }
+            public void setPerUserDaily(BigDecimal perUserDaily) { this.perUserDaily = perUserDaily; }
+            public BigDecimal getPerSkillDaily() { return perSkillDaily; }
+            public void setPerSkillDaily(BigDecimal perSkillDaily) { this.perSkillDaily = perSkillDaily; }
+            public BigDecimal getGlobalDaily() { return globalDaily; }
+            public void setGlobalDaily(BigDecimal globalDaily) { this.globalDaily = globalDaily; }
+        }
     }
 }
