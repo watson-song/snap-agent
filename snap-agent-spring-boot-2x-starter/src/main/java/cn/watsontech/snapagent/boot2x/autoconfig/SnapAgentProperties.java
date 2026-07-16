@@ -53,6 +53,7 @@ public class SnapAgentProperties {
     private Patrol patrol = new Patrol();
     private Alert alert = new Alert();
     private Knowledge knowledge = new Knowledge();
+    private CodeGraph codeGraph = new CodeGraph();
 
     // ---- getters / setters ----
 
@@ -222,6 +223,14 @@ public class SnapAgentProperties {
 
     public void setKnowledge(Knowledge knowledge) {
         this.knowledge = knowledge;
+    }
+
+    public CodeGraph getCodeGraph() {
+        return codeGraph;
+    }
+
+    public void setCodeGraph(CodeGraph codeGraph) {
+        this.codeGraph = codeGraph;
     }
 
     // ---- nested classes ----
@@ -1219,5 +1228,36 @@ public class SnapAgentProperties {
         public void setType(String type) { this.type = type; }
         public String getDir() { return dir; }
         public void setDir(String dir) { this.dir = dir; }
+    }
+
+    /**
+     * Code knowledge graph configuration (v0.8).
+     *
+     * <p>When {@code enabled=true} and {@code code.enabled=true} (shares the v0.3
+     * {@link cn.watsontech.snapagent.boot2x.tool.CodePathGuard}), a code graph is
+     * built from the project's Java source files and a {@code CodeGraphToolProvider}
+     * is assembled so the LLM can query call chains, impact analysis, etc.</p>
+     */
+    public static class CodeGraph {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Package prefixes to scan (empty = scan all .java files under project root). */
+        private List<String> scanPackages = new ArrayList<String>();
+
+        /** Maximum depth for call chain queries (forward and reverse). */
+        private int maxDepth = 5;
+
+        /** Maximum depth for impact analysis queries. */
+        private int maxImpactDepth = 3;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<String> getScanPackages() { return scanPackages; }
+        public void setScanPackages(List<String> scanPackages) { this.scanPackages = scanPackages; }
+        public int getMaxDepth() { return maxDepth; }
+        public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
+        public int getMaxImpactDepth() { return maxImpactDepth; }
+        public void setMaxImpactDepth(int maxImpactDepth) { this.maxImpactDepth = maxImpactDepth; }
     }
 }

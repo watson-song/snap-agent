@@ -728,6 +728,50 @@ public class SnapAgentAutoConfiguration {
                 knowledgeBase, maxFrag, minScore);
     }
 
+    // ---- Code Graph (v0.8) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder simpleCodeGraphBuilder(
+            CodePathGuard codePathGuard,
+            SnapAgentProperties props) {
+        log.info("SimpleCodeGraphBuilder assembled (scanPackages={})",
+                props.getCodeGraph().getScanPackages());
+        return new cn.watsontech.snapagent.boot2x.codegraph.SimpleCodeGraphBuilder(
+                codePathGuard, props.getCodeGraph().getScanPackages());
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder.class)
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.codegraph.CodeGraphIndex inMemoryCodeGraphIndex(
+            cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder builder) {
+        cn.watsontech.snapagent.core.codegraph.CodeGraph graph = builder.build();
+        log.info("InMemoryCodeGraphIndex assembled ({} nodes, {} edges)",
+                graph.nodeCount(), graph.edgeCount());
+        return new cn.watsontech.snapagent.boot2x.codegraph.InMemoryCodeGraphIndex(graph);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(cn.watsontech.snapagent.core.codegraph.CodeGraphIndex.class)
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider codeGraphToolProvider(
+            cn.watsontech.snapagent.core.codegraph.CodeGraphIndex index,
+            SnapAgentProperties props) {
+        log.info("CodeGraphToolProvider assembled (maxDepth={}, maxImpactDepth={})",
+                props.getCodeGraph().getMaxDepth(), props.getCodeGraph().getMaxImpactDepth());
+        return new cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider(
+                index, props.getCodeGraph().getMaxDepth(),
+                props.getCodeGraph().getMaxImpactDepth());
+    }
+
     // ---- helpers ----
 
     private Path resolveUploadDir(String uploadSkillsDir) {
