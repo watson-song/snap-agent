@@ -46,23 +46,29 @@
 
 ---
 
-## v0.3 — 代码理解能力
+## v0.3 — 代码理解能力（已交付）
 
 **目标**：Agent 不止能查数据，还能读懂项目代码，回答更精准
 
-### 新增工具
+### 已完成
 
 | 工具 | 能力 |
 |------|------|
-| `CodeReaderToolProvider` | 读取项目源码文件，Agent 可回答"这个接口在哪实现""这段逻辑为什么这样写" |
-| `ProjectStructureToolProvider` | 扫描项目结构（模块、包、关键类、接口列表），Agent 理解项目全貌 |
-| `GitLogToolProvider` | 读取 git log / blame，Agent 可回答"这段代码是谁改的、什么时候改的、改了什么" |
+| `code_read` | 读取项目源码文件，支持行范围和关键词过滤（带上下文 ±2 行） |
+| `project_structure` | 扫描项目目录结构，返回树形布局，支持深度控制和 pattern 过滤 |
+| `git_log` | 读取 git log/blame/show，查看代码变更历史 |
 
-### 增强
+| 增强 | 说明 |
+|------|------|
+| SystemPromptExtender SPI | 新增单方法 SPI，启动时注入项目结构摘要到 system prompt |
+| ProjectContextExtender | 启动时扫描模块/Java文件数/关键目录，缓存摘要注入 LLM |
+| CodePathGuard | 路径安全守卫，project-root 限制 + 扩展名白名单 + 大小限制 |
+| code-analysis 内置 skill | 引导 LLM 五阶段分析代码（理解→定位→读取→追溯→结论） |
+
+### 延后到 v0.3.1 / v0.4
 
 | 项 | 说明 |
 |----|------|
-| 项目上下文注入 | Agent 启动时扫描项目结构，生成摘要作为系统提示注入 LLM，让回答自带项目背景 |
 | Skill 自动生成 | Agent 分析项目代码 + 数据库结构，自动生成候选 Skill Markdown 供开发者确认 |
 | 代码引用渲染 | Agent 回答中引用代码文件时，前端渲染为可点击链接，跳转到源码 |
 

@@ -40,6 +40,14 @@ snap-agent:
     max-lines: 500                       # 单次最多返回行数
     max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件（10MB）
     app-log-file: ""                     # 应用日志文件路径；空=自动从 logging.file.name 解析
+  code:
+    enabled: false                       # 代码理解工具（code_read/project_structure/git_log），默认关
+    project-root: ""                     # 宿主项目根目录，为空则工具不启用
+    allowed-extensions: [".java",".xml",".yml",".yaml",".properties",".sql",".md",".txt",".json",".csv"]
+    max-lines: 500                       # 单次读取最大行数
+    max-file-bytes: 524288               # 单个文件最大 512KB
+    structure-depth: 3                  # project_structure 默认扫描深度
+    context-injection: true              # 是否注入项目结构摘要到 system prompt
   mcp:
     enabled: false                    # Phase 2
     servers: {}                       # {name: {transport: sse, url, auth-header, auth-header-value}}
