@@ -82,7 +82,11 @@ public class TaskStore {
             if (status != null && task.getStatus() != status) continue;
             matched.add(task);
         }
-        matched.sort((a, b) -> Long.compare(b.getCreatedAt(), a.getCreatedAt()));
+        matched.sort((a, b) -> {
+            int cmp = Long.compare(b.getCreatedAt(), a.getCreatedAt());
+            if (cmp != 0) return cmp;
+            return b.getTaskId().compareTo(a.getTaskId());
+        });
         if (offset >= matched.size()) return Collections.emptyList();
         int end = Math.min(offset + limit, matched.size());
         return new ArrayList<AgentTask>(matched.subList(offset, end));
