@@ -8,8 +8,9 @@ import cn.watsontech.snapagent.boot2x.routing.NoopPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.PeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
+import cn.watsontech.snapagent.boot2x.security.AuditStoreAuditLogger;
 import cn.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
-import cn.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
+import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import cn.watsontech.snapagent.boot2x.skill.SkillHotReloader;
@@ -26,6 +27,7 @@ import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.security.AuditStore;
 import cn.watsontech.snapagent.core.security.PrincipalResolver;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
@@ -98,14 +100,24 @@ public class SnapAgentAutoConfiguration {
         return new DefaultPrincipalResolver();
     }
 
-    // ---- SecurityAuditLogger ----
+    // ---- AuditStore (in-memory ring buffer) ----
     @Bean
     @ConditionalOnMissingBean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.security", name = "audit-log", havingValue = "true", matchIfMissing = true)
-    public SecurityAuditLogger securityAuditLogger() {
-        log.info("Using LoggingSecurityAuditLogger (default SLF4J audit logger)");
-        return new LoggingSecurityAuditLogger();
+    public AuditStore auditStore() {
+        log.info("Using InMemoryAuditStore (capacity=1000) for audit entries");
+        return new InMemoryAuditStore(1000);
+    }
+
+    // ---- SecurityAuditLogger (bridged to AuditStore + SLF4J) ----
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.security", name = "audit-log", havingValue = "true", matchIfMissing = true)
+    public SecurityAuditLogger securityAuditLogger(AuditStore auditStore) {
+        log.info("Using AuditStoreAuditLogger (audit store + SLF4J)");
+        return new AuditStoreAuditLogger(auditStore);
     }
 
     // ---- SecurityGateway: Spring Security adapter ----
