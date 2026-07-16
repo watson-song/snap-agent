@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -580,5 +581,23 @@ class SnapAgentControllerTest {
                 .andExpect(jsonPath("$.status").value("SUCCEEDED"));
 
         verify(llmClient, never()).cancel(any());
+    }
+
+    // ---- GET /runs/{id}/report tests ----
+
+    @Test
+    void shouldReturnMarkdownReportForTask() throws Exception {
+        AgentTask task = AgentTask.create("user001", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.addTranscriptEvent(TranscriptEvent.thought("诊断中..."));
+        task.addTranscriptEvent(TranscriptEvent.done("SUCCEEDED", "完成"));
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        mockMvc.perform(get("/snap-agent/runs/" + task.getTaskId() + "/report")
+                        .param("format", "md"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("诊断报告")))
+                .andExpect(content().string(containsString("诊断中...")))
+                .andExpect(content().string(containsString("SUCCEEDED")));
     }
 }

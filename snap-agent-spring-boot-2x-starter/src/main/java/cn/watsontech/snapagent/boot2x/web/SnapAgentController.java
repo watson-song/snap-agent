@@ -727,6 +727,32 @@ public class SnapAgentController {
         return ResponseEntity.ok(result);
     }
 
+    // ---- GET /runs/{id}/report ----
+    @GetMapping("/runs/{id}/report")
+    public ResponseEntity<Object> getReport(@PathVariable String id,
+                                            @RequestParam(value = "format", defaultValue = "md") String format) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "task not found: " + id);
+        }
+        if (!currentUserId().equals(task.getUserId())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "not task owner");
+        }
+
+        String title = task.getSkillId() != null ? task.getSkillId() + " 诊断报告" : "诊断报告";
+        String report = cn.watsontech.snapagent.core.agent.ReportGenerator.generate(title, task.getTranscript());
+
+        audit(currentUserId(), "GET", "/runs/" + id + "/report", "GET_REPORT", null);
+
+        return ResponseEntity.ok()
+                .contentType(new MediaType(MediaType.TEXT_PLAIN, java.nio.charset.StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"report-" + id + ".md\"")
+                .body(report);
+    }
+
     // ---- GET /runs/{id}/stream (SSE) ----
     @GetMapping("/runs/{id}/stream")
     public SseEmitter streamRun(@PathVariable String id,
