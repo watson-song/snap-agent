@@ -443,13 +443,18 @@ public class SnapAgentAutoConfiguration {
         if (llmClient == null) {
             log.warn("LlmClient not available; AgentExecutor will not function");
         }
-        SystemPromptExtender extender = extenderProvider.getIfAvailable();
-        if (extender != null) {
-            log.info("AgentExecutor assembled with SystemPromptExtender: {}", extender.getClass().getSimpleName());
+        List<SystemPromptExtender> extenders = extenderProvider.orderedStream()
+                .collect(java.util.stream.Collectors.toList());
+        if (!extenders.isEmpty()) {
+            log.info("AgentExecutor assembled with {} SystemPromptExtender(s): {}",
+                    extenders.size(),
+                    extenders.stream()
+                            .map(e -> e.getClass().getSimpleName())
+                            .collect(java.util.stream.Collectors.joining(", ")));
         }
         return new AgentExecutor(llmClient, toolDispatcher, taskStore,
                 props.getAgent().getMaxTurns(), props.getLlm().getMaxTokens(),
-                extender);
+                extenders);
     }
 
     // ---- ThreadPoolTaskExecutor ----
@@ -655,6 +660,72 @@ public class SnapAgentAutoConfiguration {
     public cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester templateBugfixSuggester() {
         log.info("TemplateBugfixSuggester assembled");
         return new cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester();
+    }
+
+    // ---- Knowledge Base (v0.7) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.knowledge.KnowledgeSearcher simpleKeywordSearcher() {
+        log.info("SimpleKeywordSearcher assembled");
+        return new cn.watsontech.snapagent.boot2x.knowledge.SimpleKeywordSearcher();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase(
+            SnapAgentProperties props,
+            cn.watsontech.snapagent.core.knowledge.KnowledgeSearcher searcher,
+            ObjectProvider<cn.watsontech.snapagent.core.knowledge.KnowledgeSource> sourceProvider) {
+        List<cn.watsontech.snapagent.core.knowledge.KnowledgeSource> sources =
+                new ArrayList<cn.watsontech.snapagent.core.knowledge.KnowledgeSource>();
+        // Collect any custom KnowledgeSource beans declared by the host application.
+        sources.addAll(sourceProvider.orderedStream()
+                .collect(java.util.stream.Collectors.toList()));
+        // Add configured markdown sources; default to the builtin knowledge directory
+        // when the host did not configure any sources.
+        List<SnapAgentProperties.KnowledgeSourceConfig> configs =
+                props.getKnowledge().getSources();
+        if (configs == null || configs.isEmpty()) {
+            log.info("No knowledge sources configured; using default classpath:/docs/knowledge/");
+            sources.add(new cn.watsontech.snapagent.boot2x.knowledge.MarkdownKnowledgeSource(
+                    "classpath:/docs/knowledge/"));
+        } else {
+            for (SnapAgentProperties.KnowledgeSourceConfig srcCfg : configs) {
+                if ("markdown".equalsIgnoreCase(srcCfg.getType()) && !srcCfg.getDir().isEmpty()) {
+                    log.info("MarkdownKnowledgeSource assembled (dir={})", srcCfg.getDir());
+                    sources.add(new cn.watsontech.snapagent.boot2x.knowledge.MarkdownKnowledgeSource(
+                            srcCfg.getDir()));
+                } else {
+                    log.warn("Skipping knowledge source with unknown type or empty dir: type={}, dir={}",
+                            srcCfg.getType(), srcCfg.getDir());
+                }
+            }
+        }
+        cn.watsontech.snapagent.core.knowledge.KnowledgeBase kb =
+                new cn.watsontech.snapagent.core.knowledge.KnowledgeBase(sources, searcher);
+        log.info("KnowledgeBase assembled ({} fragments)", kb.size());
+        return kb;
+    }
+
+    // KnowledgeInjector coexists with ProjectContextExtender as separate beans —
+    // do NOT use @ConditionalOnMissingBean(SystemPromptExtender.class) here, since
+    // that would suppress whichever extender is evaluated second (spec §5).
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
+            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class)
+    public cn.watsontech.snapagent.core.agent.SystemPromptExtender knowledgeInjector(
+            SnapAgentProperties props,
+            cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase) {
+        int maxFrag = props.getKnowledge().getMaxFragments();
+        double minScore = props.getKnowledge().getMinScore();
+        log.info("KnowledgeInjector assembled (maxFragments={}, minScore={})", maxFrag, minScore);
+        return new cn.watsontech.snapagent.boot2x.knowledge.KnowledgeInjector(
+                knowledgeBase, maxFrag, minScore);
     }
 
     // ---- helpers ----

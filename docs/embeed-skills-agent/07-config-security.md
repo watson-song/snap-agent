@@ -109,6 +109,13 @@ snap-agent:
     enabled: false            # 告警收敛子系统（v0.5），默认关
     buffer-size: 1000         # 内存中保留的最大告警数
     auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+  knowledge:                   # 嵌入式业务知识库（v0.7），默认关
+    enabled: false
+    sources:                   # 知识源列表
+      - type: markdown         # 目前仅支持 markdown
+        dir: classpath:/docs/knowledge/  # classpath: 前缀=JAR 内资源；否则文件系统路径
+    max-fragments: 3           # 每次查询注入的最大知识片段数
+    min-score: 0.1             # 最小相关度阈值 [0.0, 1.0]
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -435,3 +442,63 @@ public class KafkaAnomalyBridge {
 ```
 
 事件进入后，`DefaultAnomalyEventListener` 会自动触发对应的诊断 Skill，并将结果写入巡检报告和告警收敛。
+
+## 12. 嵌入式业务知识库配置（v0.7）
+
+```yaml
+snap-agent:
+  knowledge:
+    enabled: true                    # 知识库总开关，默认 false（零 bean）
+    sources:
+      - type: markdown
+        dir: classpath:/docs/knowledge/  # JAR 内置知识
+      - type: markdown
+        dir: /data/snap-agent/knowledge/ # 文件系统知识（可热更新）
+    max-fragments: 3                 # 每次查询注入的最大片段数
+    min-score: 0.1                   # 最小相关度 [0.0, 1.0]
+```
+
+### 知识加载与分段
+
+`MarkdownKnowledgeSource` 从指定目录递归扫描 `.md` 文件，按 `## ` 标题自动分段：
+- 文件级 `# ` 标题 → 存为每个片段的 `category` 元数据
+- `## ` 之前的内容 → 一个 "概述" 片段
+- 每个 `## ` 标题 → 一个独立知识片段（标题=片段标题，正文=片段内容）
+- 无 `## ` 的文件 → 整个文件作为一个片段
+
+### 检索算法
+
+`SimpleKeywordSearcher` 基于词频重叠评分：
+- 英文：按空格/标点分词，转小写，过滤 <2 字符的词
+- 中文：2 字符 bigram 分词（"补货策略" → ["补货","货策","策略"]）
+- 评分 = `(标题命中数 × 2 + 正文命中数) / (查询词数 × 2)`，截断到 [0.0, 1.0]
+- 标题命中权重 ×2，确保标题直接相关的片段排名更高
+
+### 知识注入
+
+`KnowledgeInjector` 实现 `SystemPromptExtender`，与 v0.3 的 `ProjectContextExtender` 并行生效：
+- 运行时从 `AgentTask` 的输入值构建查询
+- 调用 `KnowledgeBase.search(query, maxFragments, minScore)` 检索相关片段
+- 将匹配片段格式化为 Markdown 注入 system prompt
+- 无匹配时返回空字符串（不影响 LLM）
+
+### 自定义知识源
+
+宿主可实现 `KnowledgeSource` SPI 接入 Confluence / 语雀 / 自定义 API：
+
+```java
+@Component
+public class ConfluenceKnowledgeSource implements KnowledgeSource {
+    @Override
+    public List<KnowledgeFragment> load() {
+        // 从 Confluence API 加载文档，分割为片段
+        return fetchAndSplit();
+    }
+    @Override
+    public void reload() { /* 重新加载 */ }
+    @Override
+    public String type() { return "confluence"; }
+}
+```
+
+自定义 `KnowledgeSource` bean 会被 `KnowledgeBase` 自动收集。

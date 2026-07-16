@@ -52,6 +52,7 @@ public class SnapAgentProperties {
     private ConfigRead configRead = new ConfigRead();
     private Patrol patrol = new Patrol();
     private Alert alert = new Alert();
+    private Knowledge knowledge = new Knowledge();
 
     // ---- getters / setters ----
 
@@ -213,6 +214,14 @@ public class SnapAgentProperties {
 
     public void setAlert(Alert alert) {
         this.alert = alert;
+    }
+
+    public Knowledge getKnowledge() {
+        return knowledge;
+    }
+
+    public void setKnowledge(Knowledge knowledge) {
+        this.knowledge = knowledge;
     }
 
     // ---- nested classes ----
@@ -1162,5 +1171,53 @@ public class SnapAgentProperties {
         public void setBufferSize(int bufferSize) { this.bufferSize = bufferSize; }
         public int getAutoResolveMinutes() { return autoResolveMinutes; }
         public void setAutoResolveMinutes(int autoResolveMinutes) { this.autoResolveMinutes = autoResolveMinutes; }
+    }
+
+    /**
+     * Embedded business knowledge base configuration (v0.7).
+     *
+     * <p>When {@code enabled=true}, a {@link cn.watsontech.snapagent.core.knowledge.KnowledgeBase}
+     * is assembled from the configured {@code sources} (Markdown directories by default),
+     * and a {@link cn.watsontech.snapagent.boot2x.knowledge.KnowledgeInjector} is registered
+     * as a {@link cn.watsontech.snapagent.core.agent.SystemPromptExtender} so that relevant
+     * business knowledge is injected into the system prompt at runtime.</p>
+     */
+    public static class Knowledge {
+        /** Master switch. Default false — zero knowledge beans when disabled. */
+        private boolean enabled = false;
+
+        /** Knowledge source configurations. Each entry defines a directory to load .md files from. */
+        private List<KnowledgeSourceConfig> sources = new ArrayList<KnowledgeSourceConfig>();
+
+        /** Maximum number of fragments injected per query. */
+        private int maxFragments = 3;
+
+        /** Minimum relevance score [0.0, 1.0] for a fragment to be injected. */
+        private double minScore = 0.1;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public List<KnowledgeSourceConfig> getSources() { return sources; }
+        public void setSources(List<KnowledgeSourceConfig> sources) { this.sources = sources; }
+        public int getMaxFragments() { return maxFragments; }
+        public void setMaxFragments(int maxFragments) { this.maxFragments = maxFragments; }
+        public double getMinScore() { return minScore; }
+        public void setMinScore(double minScore) { this.minScore = minScore; }
+    }
+
+    /**
+     * Individual knowledge source configuration (v0.7).
+     */
+    public static class KnowledgeSourceConfig {
+        /** Source type. Currently only "markdown" is supported. */
+        private String type = "markdown";
+
+        /** Directory path: classpath: prefix for classpath resources, or filesystem path. */
+        private String dir = "";
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getDir() { return dir; }
+        public void setDir(String dir) { this.dir = dir; }
     }
 }

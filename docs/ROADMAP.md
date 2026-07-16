@@ -219,7 +219,7 @@ Agent 自动执行:
 
 ---
 
-## v0.7 — 嵌入式业务知识库
+## v0.7 — 嵌入式业务知识库（已交付）
 
 **目标**：让 Agent 具备业务领域知识，从"查数据"升级为"懂业务"，回答不再脱离上下文
 
@@ -1008,7 +1008,7 @@ v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
 v0.6          多环境数据源 + Skill 级权限控制                ← 已交付（部分）
     │                                                        平台化
     ▼
-v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入
+v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 已交付（业务知识预注入）
     │
     ▼
 v0.8          CodeGraph + 代码结构摘要条件注入                ← 代码知识按需
