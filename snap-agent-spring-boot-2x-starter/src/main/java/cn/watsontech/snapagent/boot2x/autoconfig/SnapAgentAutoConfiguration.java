@@ -19,6 +19,10 @@ import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
 import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
@@ -38,6 +42,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -48,6 +53,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import okhttp3.OkHttpClient;
+
 import javax.servlet.Filter;
 import javax.sql.DataSource;
 import java.nio.file.Files;
@@ -55,6 +62,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Auto-configuration for the embedded SnapAgent.
@@ -221,12 +230,68 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public ToolDispatcher toolDispatcher(
             ObjectProvider<ToolProvider> toolProviders,
+            ObjectProvider<McpBootstrap> mcpBootstrapProvider,
             SnapAgentProperties props) {
         // Collect every ToolProvider bean in the context (Jdbc, Redis, custom).
         List<ToolProvider> providers = new ArrayList<ToolProvider>(
                 toolProviders.orderedStream().collect(java.util.stream.Collectors.toList()));
+        // Add MCP providers that were registered as singletons on the bean factory.
+        // They may also be visible via ObjectProvider<ToolProvider> depending on
+        // creation order, but adding them explicitly here guarantees inclusion
+        // regardless of timing (see mcpBootstrap bean below).
+        McpBootstrap mcpBootstrap = mcpBootstrapProvider.getIfAvailable();
+        if (mcpBootstrap != null) {
+            providers.addAll(mcpBootstrap.getProviders());
+        }
         log.info("ToolDispatcher assembled with {} provider(s)", providers.size());
         return new ToolDispatcher(providers, props.getAgent().getMaxToolResultChars());
+    }
+
+    // ---- McpBootstrap (MCP server discovery) ----
+    // When snap-agent.mcp.enabled=true, connect to each configured MCP server,
+    // discover tools, register each McpToolProvider as an individual singleton on
+    // the bean factory (so ObjectProvider<ToolProvider> can see them), and hold
+    // them in McpBootstrap so toolDispatcher can add them explicitly too. When
+    // MCP is disabled (the default), this bean is not created and toolDispatcher
+    // behaves exactly as before.
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.mcp", name = "enabled", havingValue = "true")
+    public McpBootstrap mcpBootstrap(SnapAgentProperties props,
+                                     ConfigurableListableBeanFactory beanFactory) {
+        McpBootstrap bootstrap = new McpBootstrap();
+        OkHttpClient httpClient = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build();
+
+        for (Map.Entry<String, SnapAgentProperties.McpServer> entry
+                : props.getMcp().getServers().entrySet()) {
+            String serverName = entry.getKey();
+            SnapAgentProperties.McpServer server = entry.getValue();
+            if (server.getTransport() != null && !"sse".equals(server.getTransport())) {
+                log.warn("MCP server {} uses unsupported transport '{}', skipping",
+                        serverName, server.getTransport());
+                continue;
+            }
+            try {
+                McpSseClient client = new McpSseClient(
+                        server.getUrl(), server.getAuthHeader(),
+                        server.getAuthHeaderValue(), httpClient);
+                List<McpToolInfo> tools = client.connect();
+                for (McpToolInfo tool : tools) {
+                    McpToolProvider provider = new McpToolProvider(
+                            serverName, tool.getName(), tool.getDescription(),
+                            tool.getInputSchema(), client);
+                    String beanName = "mcpTool_" + serverName + "_" + tool.getName();
+                    beanFactory.registerSingleton(beanName, provider);
+                    bootstrap.addProvider(provider);
+                }
+                log.info("Registered {} MCP tools from server '{}'", tools.size(), serverName);
+            } catch (Exception e) {
+                log.error("Failed to connect to MCP server '{}': {}", serverName, e.getMessage());
+            }
+        }
+        return bootstrap;
     }
 
     // ---- ClasspathSkillScanner (builtin skills) ----
