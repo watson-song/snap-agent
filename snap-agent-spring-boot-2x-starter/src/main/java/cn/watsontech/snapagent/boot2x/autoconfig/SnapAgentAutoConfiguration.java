@@ -54,6 +54,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import javax.servlet.Filter;
 import javax.sql.DataSource;
@@ -459,12 +460,18 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<LlmClient> llmClientProvider,
             ObjectProvider<SecurityAuditLogger> auditLoggerProvider,
             ObjectProvider<ConversationStore> conversationStoreProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.PatrolScheduler> patrolSchedulerProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester> bugfixSuggesterProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         SecurityAuditLogger auditLogger = auditLoggerProvider.getIfAvailable();
         ConversationStore conversationStore = conversationStoreProvider.getIfAvailable();
+        cn.watsontech.snapagent.core.patrol.PatrolScheduler patrolScheduler = patrolSchedulerProvider.getIfAvailable();
+        cn.watsontech.snapagent.core.patrol.AlertConverger alertConverger = alertConvergerProvider.getIfAvailable();
+        cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester bugfixSuggester = bugfixSuggesterProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -486,7 +493,8 @@ public class SnapAgentAutoConfiguration {
         return new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
-                auditLogger, conversationStore);
+                auditLogger, conversationStore,
+                patrolScheduler, alertConverger, bugfixSuggester);
     }
 
     // ---- SnapAgentFilter ----
@@ -503,6 +511,80 @@ public class SnapAgentAutoConfiguration {
         registration.setOrder(props.getSecurity().getFilterOrder());
         registration.setName("snapAgentFilter");
         return registration;
+    }
+
+    // ---- PatrolReportStore (v0.5) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore(SnapAgentProperties props) {
+        log.info("PatrolReportStore assembled (buffer-size={})", props.getPatrol().getReportBufferSize());
+        return new cn.watsontech.snapagent.core.patrol.PatrolReportStore(
+                props.getPatrol().getReportBufferSize());
+    }
+
+    // ---- Patrol TaskScheduler (v0.5) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(name = "patrolTaskScheduler")
+    public org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler patrolTaskScheduler(
+            SnapAgentProperties props) {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(props.getPatrol().getSchedulerPoolSize());
+        scheduler.setThreadNamePrefix("patrol-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.initialize();
+        log.info("patrolTaskScheduler initialized (pool-size={})", props.getPatrol().getSchedulerPoolSize());
+        return scheduler;
+    }
+
+    // ---- ScheduledPatrolScheduler (v0.5) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler scheduledPatrolScheduler(
+            org.springframework.scheduling.TaskScheduler patrolTaskScheduler,
+            AgentExecutor agentExecutor,
+            SkillRegistry skillRegistry,
+            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore) {
+        log.info("ScheduledPatrolScheduler assembled");
+        return new cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler(
+                patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore);
+    }
+
+    // ---- InMemoryAlertConverger (v0.5) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.alert", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.patrol.InMemoryAlertConverger inMemoryAlertConverger(
+            SnapAgentProperties props) {
+        log.info("InMemoryAlertConverger assembled (buffer-size={}, auto-resolve-minutes={})",
+                props.getAlert().getBufferSize(), props.getAlert().getAutoResolveMinutes());
+        return new cn.watsontech.snapagent.boot2x.patrol.InMemoryAlertConverger(
+                props.getAlert().getBufferSize(),
+                props.getAlert().getAutoResolveMinutes());
+    }
+
+    // ---- DefaultAnomalyEventListener (v0.5) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.patrol.DefaultAnomalyEventListener defaultAnomalyEventListener(
+            AgentExecutor agentExecutor,
+            SkillRegistry skillRegistry,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
+            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore) {
+        log.info("DefaultAnomalyEventListener assembled");
+        return new cn.watsontech.snapagent.boot2x.patrol.DefaultAnomalyEventListener(
+                agentExecutor, skillRegistry, alertConvergerProvider.getIfAvailable(), patrolReportStore);
+    }
+
+    // ---- TemplateBugfixSuggester (v0.5) ----
+    @Bean
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester templateBugfixSuggester() {
+        log.info("TemplateBugfixSuggester assembled");
+        return new cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester();
     }
 
     // ---- helpers ----

@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
@@ -14,6 +15,12 @@ import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.patrol.AlertConvergence;
+import cn.watsontech.snapagent.core.patrol.AlertConverger;
+import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
+import cn.watsontech.snapagent.core.patrol.PatrolReport;
+import cn.watsontech.snapagent.core.patrol.PatrolScheduler;
+import cn.watsontech.snapagent.core.patrol.PatrolTask;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.security.UserInfo;
@@ -85,6 +92,9 @@ public class SnapAgentController {
     private final LlmClient llmClient;
     private final SecurityAuditLogger auditLogger;
     private final ConversationStore conversationStore;
+    private final PatrolScheduler patrolScheduler;
+    private final AlertConverger alertConverger;
+    private final TemplateBugfixSuggester bugfixSuggester;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -153,6 +163,26 @@ public class SnapAgentController {
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, null, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -165,6 +195,9 @@ public class SnapAgentController {
         this.llmClient = llmClient;
         this.auditLogger = auditLogger;
         this.conversationStore = conversationStore;
+        this.patrolScheduler = patrolScheduler;
+        this.alertConverger = alertConverger;
+        this.bugfixSuggester = bugfixSuggester;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -1161,6 +1194,182 @@ public class SnapAgentController {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("deleted", id);
         return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /patrol/tasks ----
+    @PostMapping("/patrol/tasks")
+    public ResponseEntity<Object> createPatrolTask(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+
+        String skillName = (String) body.get("skillName");
+        String cron = (String) body.get("cron");
+        String userId = currentUserId();
+        @SuppressWarnings("unchecked")
+        Map<String, String> inputs = (Map<String, String>) body.get("inputs");
+        if (inputs == null) inputs = new LinkedHashMap<String, String>();
+
+        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs);
+        scheduler.schedule(task);
+
+        audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
+                Collections.singletonMap("patrolId", task.getId()));
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", task.getId());
+        result.put("skillName", task.getSkillName());
+        result.put("cron", task.getCron());
+        result.put("enabled", task.isEnabled());
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /patrol/tasks ----
+    @GetMapping("/patrol/tasks")
+    public ResponseEntity<Object> listPatrolTasks() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+        return ResponseEntity.ok(scheduler.listTasks());
+    }
+
+    // ---- DELETE /patrol/tasks/{id} ----
+    @DeleteMapping("/patrol/tasks/{id}")
+    public ResponseEntity<Object> deletePatrolTask(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        scheduler.cancel(id);
+        return ResponseEntity.ok(Collections.singletonMap("deleted", true));
+    }
+
+    // ---- GET /patrol/reports ----
+    @GetMapping("/patrol/reports")
+    public ResponseEntity<Object> listPatrolReports(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("reports", Collections.emptyList());
+            empty.put("total", 0L);
+            empty.put("page", page);
+            empty.put("size", size);
+            return ResponseEntity.ok(empty);
+        }
+        List<? extends PatrolReport> reports = scheduler.getReports(currentUserId(), size, page);
+        long total = scheduler.countReports(currentUserId());
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("reports", reports);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /patrol/reports/{id} ----
+    @GetMapping("/patrol/reports/{id}")
+    public ResponseEntity<Object> getPatrolReport(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        // Search recent reports for the requested id
+        List<? extends PatrolReport> reports = scheduler.getReports(currentUserId(), 500, 0);
+        for (PatrolReport report : reports) {
+            if (id.equals(report.getId())) {
+                return ResponseEntity.ok(report);
+            }
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Collections.singletonMap("error", "report not found"));
+    }
+
+    // ---- GET /alerts ----
+    @GetMapping("/alerts")
+    public ResponseEntity<Object> listAlerts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String status) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AlertConverger converger = alertConverger;
+        if (converger == null) {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("alerts", Collections.emptyList());
+            empty.put("total", 0L);
+            empty.put("page", page);
+            empty.put("size", size);
+            return ResponseEntity.ok(empty);
+        }
+        List<? extends AlertConvergence> alerts = converger.query(currentUserId(), type, size, page);
+        long total = converger.count(currentUserId(), type);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("alerts", alerts);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /alerts/{id}/resolve ----
+    @PostMapping("/alerts/{id}/resolve")
+    public ResponseEntity<Object> resolveAlert(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AlertConverger converger = alertConverger;
+        if (converger == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "alert is not enabled"));
+        }
+        converger.resolve(id);
+        return ResponseEntity.ok(Collections.singletonMap("resolved", true));
+    }
+
+    // ---- POST /runs/{id}/bugfix-suggestion ----
+    @PostMapping("/runs/{id}/bugfix-suggestion")
+    public ResponseEntity<Object> generateBugfixSuggestion(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        TemplateBugfixSuggester suggester = bugfixSuggester;
+        if (suggester == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "bugfix suggester is not available"));
+        }
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Collections.singletonMap("error", "task not found"));
+        }
+
+        BugfixSuggestion suggestion = suggester.suggest(id, task.getTranscript());
+        return ResponseEntity.ok(suggestion);
     }
 
     // ---- helpers ----

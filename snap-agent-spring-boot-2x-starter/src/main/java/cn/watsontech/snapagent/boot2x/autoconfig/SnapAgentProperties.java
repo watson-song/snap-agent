@@ -50,6 +50,8 @@ public class SnapAgentProperties {
     private LogSearch logSearch = new LogSearch();
     private Trace trace = new Trace();
     private ConfigRead configRead = new ConfigRead();
+    private Patrol patrol = new Patrol();
+    private Alert alert = new Alert();
 
     // ---- getters / setters ----
 
@@ -195,6 +197,22 @@ public class SnapAgentProperties {
 
     public void setConfigRead(ConfigRead configRead) {
         this.configRead = configRead;
+    }
+
+    public Patrol getPatrol() {
+        return patrol;
+    }
+
+    public void setPatrol(Patrol patrol) {
+        this.patrol = patrol;
+    }
+
+    public Alert getAlert() {
+        return alert;
+    }
+
+    public void setAlert(Alert alert) {
+        this.alert = alert;
     }
 
     // ---- nested classes ----
@@ -1047,5 +1065,42 @@ public class SnapAgentProperties {
         public void setSensitiveKeyPatterns(List<String> sensitiveKeyPatterns) {
             this.sensitiveKeyPatterns = sensitiveKeyPatterns;
         }
+    }
+
+    /**
+     * Active monitoring patrol configuration (v0.5).
+     *
+     * <p>When {@code enabled=true}, a {@link cn.watsontech.snapagent.core.patrol.PatrolScheduler}
+     * is assembled so that skills can be run on cron schedules to proactively
+     * detect anomalies.</p>
+     */
+    public static class Patrol {
+        private boolean enabled = false;
+        private int schedulerPoolSize = 2;
+        private int reportBufferSize = 500;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getSchedulerPoolSize() { return schedulerPoolSize; }
+        public void setSchedulerPoolSize(int schedulerPoolSize) { this.schedulerPoolSize = schedulerPoolSize; }
+        public int getReportBufferSize() { return reportBufferSize; }
+        public void setReportBufferSize(int reportBufferSize) { this.reportBufferSize = reportBufferSize; }
+    }
+
+    /**
+     * Alert convergence configuration (v0.5).
+     *
+     * <p>When {@code enabled=true}, an {@link cn.watsontech.snapagent.core.patrol.AlertConverger}
+     * is assembled to deduplicate repeated anomaly events into converged alert records.</p>
+     */
+    public static class Alert {
+        private boolean enabled = false;
+        private int bufferSize = 1000;
+        private int autoResolveMinutes = 30;
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getBufferSize() { return bufferSize; }
+        public void setBufferSize(int bufferSize) { this.bufferSize = bufferSize; }
+        public int getAutoResolveMinutes() { return autoResolveMinutes; }
+        public void setAutoResolveMinutes(int autoResolveMinutes) { this.autoResolveMinutes = autoResolveMinutes; }
     }
 }
