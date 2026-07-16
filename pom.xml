@@ -50,6 +50,7 @@
     <modules>
         <module>snap-agent-core</module>
         <module>snap-agent-spring-boot-2x-starter</module>
+        <module>snap-agent-client</module>
     </modules>
 
     <properties>
