@@ -54,6 +54,7 @@ public class SnapAgentProperties {
     private Alert alert = new Alert();
     private Knowledge knowledge = new Knowledge();
     private CodeGraph codeGraph = new CodeGraph();
+    private IssueClosure issueClosure = new IssueClosure();
 
     // ---- getters / setters ----
 
@@ -231,6 +232,14 @@ public class SnapAgentProperties {
 
     public void setCodeGraph(CodeGraph codeGraph) {
         this.codeGraph = codeGraph;
+    }
+
+    public IssueClosure getIssueClosure() {
+        return issueClosure;
+    }
+
+    public void setIssueClosure(IssueClosure issueClosure) {
+        this.issueClosure = issueClosure;
     }
 
     // ---- nested classes ----
@@ -1259,5 +1268,35 @@ public class SnapAgentProperties {
         public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
         public int getMaxImpactDepth() { return maxImpactDepth; }
         public void setMaxImpactDepth(int maxImpactDepth) { this.maxImpactDepth = maxImpactDepth; }
+    }
+
+    /**
+     * Issue closure configuration (v0.9).
+     *
+     * <p>When {@code enabled=true}, issue closure infrastructure (FileIssueStore,
+     * NoopIssueTracker, KnowledgeSedimentationExtractor) is assembled, enabling
+     * the "diagnose -> solution -> fix -> verify -> sediment" lifecycle.</p>
+     */
+    public static class IssueClosure {
+        /** Master switch. Default false — zero issue beans when disabled. */
+        private boolean enabled = false;
+
+        /** System user ID used when executing solution-suggest/verify-fix skills. */
+        private String systemUserId = "system";
+
+        /** Storage directory for issue JSON files. Empty = default to {upload-skills-dir}/issues/. */
+        private String storageDir = "";
+
+        /** IssueTracker type identifier (noop/jira/github). */
+        private String trackerType = "noop";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getSystemUserId() { return systemUserId; }
+        public void setSystemUserId(String systemUserId) { this.systemUserId = systemUserId; }
+        public String getStorageDir() { return storageDir; }
+        public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
+        public String getTrackerType() { return trackerType; }
+        public void setTrackerType(String trackerType) { this.trackerType = trackerType; }
     }
 }

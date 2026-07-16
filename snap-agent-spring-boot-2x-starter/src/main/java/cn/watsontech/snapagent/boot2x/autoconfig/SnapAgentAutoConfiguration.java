@@ -2,6 +2,9 @@ package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
+import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
+import cn.watsontech.snapagent.boot2x.issue.KnowledgeSedimentationExtractor;
+import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import cn.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -35,6 +38,8 @@ import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
+import cn.watsontech.snapagent.core.issue.IssueStore;
+import cn.watsontech.snapagent.core.issue.IssueTracker;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.security.PrincipalResolver;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
@@ -773,6 +778,41 @@ public class SnapAgentAutoConfiguration {
     }
 
     // ---- helpers ----
+
+    // ---- Issue Closure (v0.9) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(IssueStore.class)
+    public FileIssueStore fileIssueStore(SnapAgentProperties props) {
+        String storageDir = props.getIssueClosure().getStorageDir();
+        if (storageDir == null || storageDir.isEmpty()) {
+            storageDir = props.getUploadSkillsDir() + "/issues";
+        }
+        log.info("FileIssueStore assembled with storage dir: {}", storageDir);
+        return new FileIssueStore(storageDir);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(IssueTracker.class)
+    public NoopIssueTracker noopIssueTracker() {
+        log.info("NoopIssueTracker assembled (tracker-type=noop)");
+        return new NoopIssueTracker();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public KnowledgeSedimentationExtractor knowledgeSedimentationExtractor() {
+        log.info("KnowledgeSedimentationExtractor assembled");
+        return new KnowledgeSedimentationExtractor();
+    }
+
+    // ---- file system helpers ----
 
     private Path resolveUploadDir(String uploadSkillsDir) {
         if (uploadSkillsDir == null || uploadSkillsDir.isEmpty()) {
