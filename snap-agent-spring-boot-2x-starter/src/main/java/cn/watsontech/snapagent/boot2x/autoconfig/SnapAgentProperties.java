@@ -45,6 +45,7 @@ public class SnapAgentProperties {
     private Mcp mcp = new Mcp();
     private Security security = new Security();
     private Routing routing = new Routing();
+    private Code code = new Code();
 
     // ---- getters / setters ----
 
@@ -150,6 +151,14 @@ public class SnapAgentProperties {
 
     public void setRouting(Routing routing) {
         this.routing = routing;
+    }
+
+    public Code getCode() {
+        return code;
+    }
+
+    public void setCode(Code code) {
+        this.code = code;
     }
 
     // ---- nested classes ----
@@ -611,6 +620,95 @@ public class SnapAgentProperties {
 
         public void setAuthTokenLocalStorageKey(String authTokenLocalStorageKey) {
             this.authTokenLocalStorageKey = authTokenLocalStorageKey;
+        }
+    }
+
+    /**
+     * Code understanding tool configuration (v0.3).
+     *
+     * <p>When {@code enabled=true} and {@code project-root} points to a valid
+     * directory, three read-only tools ({@code code_read}, {@code project_structure},
+     * {@code git_log}) are assembled, and the project structure summary is injected
+     * into the system prompt.</p>
+     */
+    public static class Code {
+        /** Code understanding tools master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Host project root directory (absolute path). When empty, tools are not assembled. */
+        private String projectRoot = "";
+
+        /** Allowed file extensions whitelist (lowercase, with leading dot). */
+        private List<String> allowedExtensions = new ArrayList<String>(java.util.Arrays.asList(
+                ".java", ".xml", ".yml", ".yaml", ".properties",
+                ".sql", ".md", ".txt", ".json", ".csv"));
+
+        /** Max lines returned by a single code_read call. */
+        private int maxLines = 500;
+
+        /** Max file size in bytes (rejects larger files to prevent OOM). */
+        private long maxFileBytes = 512L * 1024; // 512 KB
+
+        /** Default scan depth for project_structure tool. */
+        private int structureDepth = 3;
+
+        /** Whether to inject project structure summary into system prompt. */
+        private boolean contextInjection = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getProjectRoot() {
+            return projectRoot;
+        }
+
+        public void setProjectRoot(String projectRoot) {
+            this.projectRoot = projectRoot;
+        }
+
+        public List<String> getAllowedExtensions() {
+            return allowedExtensions;
+        }
+
+        public void setAllowedExtensions(List<String> allowedExtensions) {
+            this.allowedExtensions = allowedExtensions;
+        }
+
+        public int getMaxLines() {
+            return maxLines;
+        }
+
+        public void setMaxLines(int maxLines) {
+            this.maxLines = maxLines;
+        }
+
+        public long getMaxFileBytes() {
+            return maxFileBytes;
+        }
+
+        public void setMaxFileBytes(long maxFileBytes) {
+            this.maxFileBytes = maxFileBytes;
+        }
+
+        public int getStructureDepth() {
+            return structureDepth;
+        }
+
+        public void setStructureDepth(int structureDepth) {
+            this.structureDepth = structureDepth;
+        }
+
+        public boolean isContextInjection() {
+            return contextInjection;
+        }
+
+        public void setContextInjection(boolean contextInjection) {
+            this.contextInjection = contextInjection;
         }
     }
 }
