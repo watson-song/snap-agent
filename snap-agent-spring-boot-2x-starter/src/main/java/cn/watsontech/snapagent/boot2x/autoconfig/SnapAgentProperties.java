@@ -45,6 +45,7 @@ public class SnapAgentProperties {
     private Mcp mcp = new Mcp();
     private Security security = new Security();
     private Routing routing = new Routing();
+    private Skill skill = new Skill();
 
     // ---- getters / setters ----
 
@@ -150,6 +151,14 @@ public class SnapAgentProperties {
 
     public void setRouting(Routing routing) {
         this.routing = routing;
+    }
+
+    public Skill getSkill() {
+        return skill;
+    }
+
+    public void setSkill(Skill skill) {
+        this.skill = skill;
     }
 
     // ---- nested classes ----
@@ -611,6 +620,31 @@ public class SnapAgentProperties {
 
         public void setAuthTokenLocalStorageKey(String authTokenLocalStorageKey) {
             this.authTokenLocalStorageKey = authTokenLocalStorageKey;
+        }
+    }
+
+    /**
+     * Skill subsystem configuration.
+     *
+     * <p>Controls the {@link cn.watsontech.snapagent.boot2x.skill.SkillHotReloader}
+     * which watches the upload-skills directory for {@code .md} file changes and
+     * triggers {@link cn.watsontech.snapagent.core.skill.SkillRegistry#refresh()}
+     * automatically.</p>
+     */
+    public static class Skill {
+        /**
+         * When true (default), the upload-skills directory is watched for file
+         * changes and the skill registry is auto-refreshed. Set
+         * {@code snap-agent.skill.hot-reload=false} to disable.
+         */
+        private boolean hotReload = true;
+
+        public boolean isHotReload() {
+            return hotReload;
+        }
+
+        public void setHotReload(boolean hotReload) {
+            this.hotReload = hotReload;
         }
     }
 }

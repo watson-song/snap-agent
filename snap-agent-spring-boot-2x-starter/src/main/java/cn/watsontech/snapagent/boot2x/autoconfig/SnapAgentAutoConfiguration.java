@@ -12,6 +12,7 @@ import cn.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
 import cn.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
 import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
+import cn.watsontech.snapagent.boot2x.skill.SkillHotReloader;
 import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
 import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
@@ -245,6 +246,17 @@ public class SnapAgentAutoConfiguration {
         Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
 
         return new SkillRegistry(uploadDir, builtinSkills, toolDispatcher);
+    }
+
+    // ---- SkillHotReloader (auto-refresh on file change) ----
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "snap-agent.skill", name = "hot-reload",
+            havingValue = "true", matchIfMissing = true)
+    public SkillHotReloader skillHotReloader(SkillRegistry skillRegistry, SnapAgentProperties props) {
+        Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
+        log.info("SkillHotReloader assembled, watching upload-skills-dir: {}", uploadDir);
+        return new SkillHotReloader(uploadDir, skillRegistry, 1000);
     }
 
     // ---- AgentExecutor ----
