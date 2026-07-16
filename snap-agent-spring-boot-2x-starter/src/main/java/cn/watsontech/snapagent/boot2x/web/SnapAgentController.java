@@ -5,6 +5,8 @@ import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
+import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
@@ -37,6 +39,11 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolPlugin;
+import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.core.workflow.WorkflowResult;
+import cn.watsontech.snapagent.core.workflow.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -105,6 +112,9 @@ public class SnapAgentController {
     private final TemplateBugfixSuggester bugfixSuggester;
     private final IssueClosureService issueClosureService;
     private final CostSummaryService costSummaryService;
+    private final YamlWorkflowLoader workflowLoader;
+    private final WorkflowEngine workflowEngine;
+    private final ToolPluginRegistry toolPluginRegistry;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -217,7 +227,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, null);
+                issueClosureService, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -237,6 +247,32 @@ public class SnapAgentController {
                                 TemplateBugfixSuggester bugfixSuggester,
                                 IssueClosureService issueClosureService,
                                 CostSummaryService costSummaryService) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
+                issueClosureService, costSummaryService, null, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService,
+                                CostSummaryService costSummaryService,
+                                YamlWorkflowLoader workflowLoader,
+                                WorkflowEngine workflowEngine,
+                                ToolPluginRegistry toolPluginRegistry) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -254,6 +290,9 @@ public class SnapAgentController {
         this.bugfixSuggester = bugfixSuggester;
         this.issueClosureService = issueClosureService;
         this.costSummaryService = costSummaryService;
+        this.workflowLoader = workflowLoader;
+        this.workflowEngine = workflowEngine;
+        this.toolPluginRegistry = toolPluginRegistry;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -1646,6 +1685,106 @@ public class SnapAgentController {
         return ResponseEntity.ok(toCostSummaryDto(summary));
     }
 
+    // ---- GET /workflows (v1.0 workflow engine) ----
+    @GetMapping("/workflows")
+    public ResponseEntity<Object> listWorkflows() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/workflows", "LIST_WORKFLOWS", null);
+
+        List<WorkflowDefinition> workflows = workflowLoader.loadAll();
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (WorkflowDefinition wf : workflows) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("name", wf.getName());
+            dto.put("description", wf.getDescription());
+            dto.put("stepCount", wf.getSteps().size());
+            result.add(dto);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /workflows/{name} (v1.0 workflow engine) ----
+    @GetMapping("/workflows/{name}")
+    public ResponseEntity<Object> getWorkflow(@PathVariable String name) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        WorkflowDefinition wf = workflowLoader.load(name);
+        if (wf == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND",
+                    "workflow not found: " + name);
+        }
+
+        audit(currentUserId(), "GET", "/workflows/" + name, "GET_WORKFLOW", null);
+        return ResponseEntity.ok(toWorkflowDto(wf));
+    }
+
+    // ---- POST /workflows/{name}/run (v1.0 workflow engine) ----
+    @PostMapping("/workflows/{name}/run")
+    public ResponseEntity<Object> runWorkflow(
+            @PathVariable String name,
+            @RequestBody Map<String, String> triggerInputs) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowEngine == null || workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        WorkflowDefinition wf = workflowLoader.load(name);
+        if (wf == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND",
+                    "workflow not found: " + name);
+        }
+
+        if (triggerInputs == null) {
+            triggerInputs = new HashMap<String, String>();
+        }
+
+        audit(currentUserId(), "POST", "/workflows/" + name + "/run", "RUN_WORKFLOW",
+                Collections.<String, Object>singletonMap("workflowName", wf.getName()));
+
+        WorkflowResult result = workflowEngine.execute(wf, triggerInputs);
+        return ResponseEntity.ok(toWorkflowResultDto(result));
+    }
+
+    // ---- GET /tools/plugins (v1.0 tool plugin metadata) ----
+    @GetMapping("/tools/plugins")
+    public ResponseEntity<Object> listToolPlugins() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (toolPluginRegistry == null) {
+            return ResponseEntity.ok(new ArrayList<Object>());
+        }
+
+        audit(currentUserId(), "GET", "/tools/plugins", "LIST_TOOL_PLUGINS", null);
+
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (ToolPlugin plugin : toolPluginRegistry.getPlugins()) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("name", plugin.name());
+            dto.put("version", plugin.version());
+            dto.put("description", plugin.description());
+            dto.put("toolNames", plugin.toolNames());
+            result.add(dto);
+        }
+        return ResponseEntity.ok(result);
+    }
+
     // ---- helpers ----
 
     /**
@@ -1814,6 +1953,37 @@ public class SnapAgentController {
         dto.put("requestCount", summary.getRequestCount());
         dto.put("budget", summary.getBudget());
         dto.put("utilization", summary.getUtilization());
+        return dto;
+    }
+
+    /** Converts a WorkflowDefinition to a DTO map for API responses. */
+    private Map<String, Object> toWorkflowDto(WorkflowDefinition wf) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("name", wf.getName());
+        dto.put("description", wf.getDescription());
+        List<Map<String, Object>> steps = new ArrayList<Map<String, Object>>();
+        for (WorkflowStep step : wf.getSteps()) {
+            Map<String, Object> stepDto = new LinkedHashMap<String, Object>();
+            stepDto.put("name", step.getName());
+            stepDto.put("skill", step.getSkill());
+            stepDto.put("condition", step.getCondition());
+            stepDto.put("inputs", step.getInputs());
+            stepDto.put("onFailure", step.getOnFailure());
+            steps.add(stepDto);
+        }
+        dto.put("steps", steps);
+        return dto;
+    }
+
+    /** Converts a WorkflowResult to a DTO map for API responses. */
+    private Map<String, Object> toWorkflowResultDto(WorkflowResult result) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("workflowName", result.getWorkflowName());
+        dto.put("success", result.isSuccess());
+        dto.put("failedStep", result.getFailedStep());
+        dto.put("errorMessage", result.getErrorMessage());
+        dto.put("stepResults", result.getStepResults());
+        dto.put("durationMs", result.getDurationMs());
         return dto;
     }
 

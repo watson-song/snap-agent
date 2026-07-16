@@ -1,0 +1,28 @@
+name: full-diagnose
+description: "全链路诊断工作流 — 健康检查 → 错误排查 → 代码分析 → 解决方案建议"
+steps:
+  - name: health-check
+    skill: health-check
+    inputs:
+      service: "${trigger.service}"
+    onFailure: STOP
+  - name: find-root-cause
+    skill: error-spike-investigation
+    condition: "${health-check.result.contains('error')}"
+    inputs:
+      timeWindow: "1h"
+      service: "${trigger.service}"
+    onFailure: STOP
+  - name: code-analysis
+    skill: code-analysis
+    condition: "${find-root-cause.result != null}"
+    inputs:
+      rootCause: "${find-root-cause.result}"
+    onFailure: SKIP
+  - name: solution-suggest
+    skill: solution-suggest
+    condition: "${code-analysis.result.size > 0}"
+    inputs:
+      rootCause: "${find-root-cause.result}"
+      codeAnalysis: "${code-analysis.result}"
+    onFailure: SKIP

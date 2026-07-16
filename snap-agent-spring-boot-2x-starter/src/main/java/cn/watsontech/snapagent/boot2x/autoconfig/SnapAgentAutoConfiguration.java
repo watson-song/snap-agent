@@ -37,10 +37,13 @@ import cn.watsontech.snapagent.boot2x.tool.MetricsToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
+import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
 import cn.watsontech.snapagent.boot2x.tool.TraceSearchToolProvider;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
+import cn.watsontech.snapagent.boot2x.workflow.SimpleWorkflowEngine;
+import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
@@ -56,7 +59,9 @@ import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolPlugin;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -566,6 +571,9 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester> bugfixSuggesterProvider,
             ObjectProvider<cn.watsontech.snapagent.boot2x.issue.IssueClosureService> issueClosureServiceProvider,
             ObjectProvider<cn.watsontech.snapagent.boot2x.cost.CostSummaryService> costSummaryServiceProvider,
+            ObjectProvider<YamlWorkflowLoader> workflowLoaderProvider,
+            ObjectProvider<WorkflowEngine> workflowEngineProvider,
+            ObjectProvider<ToolPluginRegistry> toolPluginRegistryProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
@@ -577,6 +585,9 @@ public class SnapAgentAutoConfiguration {
         cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester bugfixSuggester = bugfixSuggesterProvider.getIfAvailable();
         cn.watsontech.snapagent.boot2x.issue.IssueClosureService issueClosureService = issueClosureServiceProvider.getIfAvailable();
         cn.watsontech.snapagent.boot2x.cost.CostSummaryService costSummaryService = costSummaryServiceProvider.getIfAvailable();
+        YamlWorkflowLoader workflowLoader = workflowLoaderProvider.getIfAvailable();
+        WorkflowEngine workflowEngine = workflowEngineProvider.getIfAvailable();
+        ToolPluginRegistry toolPluginRegistry = toolPluginRegistryProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -600,7 +611,7 @@ public class SnapAgentAutoConfiguration {
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
-                costSummaryService);
+                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry);
     }
 
     // ---- SnapAgentFilter ----
@@ -937,6 +948,60 @@ public class SnapAgentAutoConfiguration {
         BigDecimal global = budgets != null ? budgets.getGlobalDaily() : null;
         log.info("CostSummaryService assembled");
         return new CostSummaryService(costStore, perUser, perSkill, global);
+    }
+
+    // ---- Tool Plugin Registry (v1.0) ----
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPluginProvider) {
+        java.util.List<ToolPlugin> plugins = toolPluginProvider.orderedStream()
+                .collect(java.util.stream.Collectors.toList());
+        log.info("ToolPluginRegistry assembled with {} plugin(s)", plugins.size());
+        return new ToolPluginRegistry(plugins);
+    }
+
+    // ---- Workflow Engine (v1.0) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public YamlWorkflowLoader yamlWorkflowLoader(SnapAgentProperties props) {
+        String dir = props.getWorkflows().getDir();
+        Path workflowsDir;
+        if (dir == null || dir.isEmpty()) {
+            workflowsDir = Paths.get(props.getUploadSkillsDir()).resolve("workflows");
+        } else {
+            String path = dir;
+            if (path.startsWith("file:")) {
+                path = path.substring(5);
+            }
+            workflowsDir = Paths.get(path);
+        }
+        try {
+            if (!Files.isDirectory(workflowsDir)) {
+                Files.createDirectories(workflowsDir);
+                log.info("Created workflows dir: {}", workflowsDir);
+            }
+        } catch (java.io.IOException e) {
+            log.warn("Failed to create workflows dir {}: {}", workflowsDir, e.getMessage());
+        }
+        log.info("YamlWorkflowLoader assembled with dir: {}", workflowsDir);
+        return new YamlWorkflowLoader(workflowsDir);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(WorkflowEngine.class)
+    public SimpleWorkflowEngine simpleWorkflowEngine(
+            AgentExecutor agentExecutor,
+            SkillRegistry skillRegistry,
+            SnapAgentProperties props) {
+        String systemUserId = props.getIssueClosure().getSystemUserId();
+        log.info("SimpleWorkflowEngine assembled (systemUserId={})", systemUserId);
+        return new SimpleWorkflowEngine(agentExecutor, skillRegistry, systemUserId);
     }
 
     // ---- file system helpers ----

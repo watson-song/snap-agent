@@ -57,6 +57,7 @@ public class SnapAgentProperties {
     private CodeGraph codeGraph = new CodeGraph();
     private IssueClosure issueClosure = new IssueClosure();
     private Cost cost = new Cost();
+    private Workflows workflows = new Workflows();
 
     // ---- getters / setters ----
 
@@ -250,6 +251,14 @@ public class SnapAgentProperties {
 
     public void setCost(Cost cost) {
         this.cost = cost;
+    }
+
+    public Workflows getWorkflows() {
+        return workflows;
+    }
+
+    public void setWorkflows(Workflows workflows) {
+        this.workflows = workflows;
     }
 
     // ---- nested classes ----
@@ -1382,5 +1391,22 @@ public class SnapAgentProperties {
             public BigDecimal getGlobalDaily() { return globalDaily; }
             public void setGlobalDaily(BigDecimal globalDaily) { this.globalDaily = globalDaily; }
         }
+    }
+
+    /** Workflow engine configuration (v1.0). */
+    public static class Workflows {
+        /** Master switch. Default false — zero workflow beans when disabled. */
+        private boolean enabled = false;
+
+        /**
+         * Directory on the filesystem for workflow {@code .yml} files.
+         * Empty = default to {upload-skills-dir}/workflows/.
+         */
+        private String dir = "";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getDir() { return dir; }
+        public void setDir(String dir) { this.dir = dir; }
     }
 }
