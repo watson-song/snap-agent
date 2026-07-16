@@ -195,20 +195,27 @@ Agent 自动执行:
 
 ---
 
-## v0.6 — 平台化
+## v0.6 — 平台化（部分已交付）
 
 **目标**：从框架升级为平台，支持更多语言生态和社区协作
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| 多环境数据源 | `snap-agent.jdbc.datasources: {sit: ..., uat: ...}`，Skill `inputs.env` 选 DSN；`DataSourceRegistry` 多环境路由 + 默认回退 |
+| 权限细化 | Skill 级别权限控制：`required-permission` frontmatter 字段 + `SecurityGateway.hasPermission()` 运行时校验；无权限返回 403 |
+| 多 LLM 适配 | 文档化配置指南（通义/文心/智谱），LlmClient SPI 可插拔 |
+
+### 待实现
 
 | 项 | 说明 |
 |----|------|
 | Spring Boot 3.x | `jakarta.servlet` 版本 starter |
-| 多 LLM 适配 | OpenAI / 国产大模型 (通义/文心/智谱) |
-| 多环境数据源 | `jdbc.datasources: {sit: ..., uat: ...}`，Skill `inputs.env` 选 DSN |
 | Skill 市场 | 社区共享 Skill 模板，一行配置导入 |
 | 工具市场 | 开箱即用的 ToolProvider 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
 | REST API 增强 | SDK 化，非 Web 场景也能调用 Agent |
 | 多租户 | Agent 对话隔离，Skill/工具按租户配置 |
-| 权限细化 | Skill 级别权限控制，不同角色可用不同 Skill |
 
 ---
 
@@ -997,6 +1004,9 @@ v0.4          Metrics/LogSearch/Trace/ConfigRead            ← 已交付
     ▼
 v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
     │                                                        主动监控 & 智能推送
+    ▼
+v0.6          多环境数据源 + Skill 级权限控制                ← 已交付（部分）
+    │                                                        平台化
     ▼
 v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入
     │

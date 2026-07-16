@@ -29,7 +29,20 @@ snap-agent:
     transcript-event-limit: 500       # 单 task transcript 事件上限
   jdbc:
     enabled: true
-    datasource-bean-name: snapAgentReadOnlyDataSource   # 独立只读 DSN
+    datasource-bean-name: snapAgentReadOnlyDataSource   # 独立只读 DSN（旧: 单环境）
+    # 多环境数据源 (v0.6): 配置后覆盖单 DSN 模式, mysql_query 工具 schema 新增 env 参数
+    datasources:
+      sit:
+        url: "jdbc:mysql://sit-db:3306/orders"
+        username: "readonly_user"
+        password: "${SIT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+      uat:
+        url: "jdbc:mysql://uat-db:3306/orders"
+        username: "readonly_user"
+        password: "${UAT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+    default-env: ""    # 默认环境名, 空=第一个 datasources 条目
   redis:
     enabled: true
     redis-template-bean-name: redisTemplate
@@ -214,6 +227,29 @@ List<GrantedAuthority> authorities = loginUser.getPermissionList().stream()
 ```
 
 这是 Spring Security 的"标准做法"，但可能影响宿主其他模块的权限逻辑。自定义 `SecurityGateway` 更安全、影响面最小。
+
+### 3.6 Skill 级别权限控制（v0.6）
+
+除了全局 `security.required-permission`，v0.6 支持在 Skill frontmatter 中声明 `required-permission`，实现细粒度权限控制：
+
+```yaml
+# skill markdown frontmatter
+---
+name: database-query
+description: "执行只读 SQL 查询"
+tools: [mysql_query]
+required-permission: snap-agent:db-query   # 运行此 skill 需要的权限码
+---
+```
+
+**安全语义：**
+- `required-permission` 为空 → 继承全局 `security.required-permission`（向后兼容）
+- `required-permission` 非空 → 覆盖全局权限，仅检查 skill 级别权限码
+- 宿主可同时配置全局和 skill 级权限：用户需同时拥有全局 access 权限 + 具体 skill 权限
+
+**运行时检查：** `POST /runs` 时，Controller 从 SkillRegistry 获取 skill，如果 skill 声明了 `required-permission` 且用户无此权限 → 返回 403。
+
+**GET /skills 响应：** skill DTO 包含 `requiredPermission` 字段（仅在非空时出现），前端可据此显示权限标识。
 
 ## 4. Filter 可配序、鉴权委托宿主（决策 #4）
 

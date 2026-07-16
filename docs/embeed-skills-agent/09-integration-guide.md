@@ -619,3 +619,81 @@ if (requestUri != null && requestUri.contains("/stream")) {
 
 - 仅 `/stream` 路径需豁免；`/skills`、`/runs` 等 REST 端点被包装无影响（前端按包装格式解析即可）。
 - 若宿主用 `@ControllerAdvice` / ResponseBodyAdvice 做统一包装，同理需排除 SSE 返回类型（`text/event-stream`）。
+
+## 多环境数据源（v0.6）
+
+当应用部署在多环境（SIT/UAT/PROD）时，可配置多数据源让 LLM 选择目标环境查询：
+
+```yaml
+snap-agent:
+  jdbc:
+    enabled: true
+    datasources:
+      sit:
+        url: "jdbc:mysql://sit-db:3306/orders"
+        username: "readonly_user"
+        password: "${SIT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+      uat:
+        url: "jdbc:mysql://uat-db:3306/orders"
+        username: "readonly_user"
+        password: "${UAT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+    default-env: "sit"    # 默认环境, 空=第一个 datasources 条目
+```
+
+配置 `datasources` 后：
+- `mysql_query` 工具 schema 自动新增 `env` 参数（LLM 可选 sit/uat）
+- 不传 `env` → 使用 `default-env`（或第一个条目）
+- 未知环境名 → 返回错误（不静默回退）
+- **向后兼容**：不配 `datasources` 时，行为与旧版一致（单 DataSource）
+
+**注意**：多环境模式使用 `SimpleDriverDataSource`（无连接池），适合只读诊断场景。如需连接池，可在宿主中声明自定义 `DataSourceRegistry` bean 覆盖默认实现。
+
+## Skill 级别权限控制（v0.6）
+
+在 Skill frontmatter 中声明 `required-permission` 实现细粒度权限：
+
+```yaml
+---
+name: database-query
+description: "执行只读 SQL 查询"
+tools: [mysql_query]
+required-permission: snap-agent:db-query
+---
+```
+
+- `required-permission` 为空 → 继承全局 `security.required-permission`（向后兼容）
+- `required-permission` 非空 → 用户需同时拥有全局权限和 skill 级权限
+- 无权限用户运行该 skill → 403 "You don't have permission to run skill: X"
+
+## 多 LLM 适配（v0.6）
+
+现有代码已支持 `api-type: anthropic | openai`。通义千问/文心一言/智谱 GLM 均提供 OpenAI 兼容 API：
+
+```yaml
+# 通义千问 (阿里云百炼)
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: qwen-plus
+
+# 文心一言 (百度千帆)
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://qianfan.baidubce.com/v2
+    api-key: ${QIANFAN_API_KEY:}
+    model: ernie-4.0
+
+# 智谱 GLM
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    api-key: ${ZHIPU_API_KEY:}
+    model: glm-4
+```
+
