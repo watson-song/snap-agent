@@ -639,35 +639,52 @@ public class SnapAgentController {
         return ResponseEntity.accepted().body(result);
     }
 
-    // ---- GET /runs?status=RUNNING ----
+    // ---- GET /runs (paginated, filterable) ----
     @GetMapping("/runs")
     public ResponseEntity<Object> listRuns(
-            @RequestParam(value = "status", required = false) String status) {
-        String userId = securityGateway.currentUserId();
-        if (userId == null) {
-            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
-        }
-        List<Map<String, Object>> tasks = new ArrayList<Map<String, Object>>();
-        for (AgentTask task : taskStore.all()) {
-            if (!userId.equals(task.getUserId())) continue;
-            if (status != null && !status.isEmpty()) {
-                try {
-                    TaskStatus filter = TaskStatus.valueOf(status.toUpperCase());
-                    if (task.getStatus() != filter) continue;
-                } catch (IllegalArgumentException e) {
-                    return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
-                            "unknown status: " + status);
-                }
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "skillId", required = false) String skillId,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        String userId = currentUserId();
+        TaskStatus statusFilter = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                statusFilter = TaskStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "unknown status: " + status);
             }
-            Map<String, Object> t = new LinkedHashMap<String, Object>();
-            t.put("taskId", task.getTaskId());
-            t.put("skillId", task.getSkillId());
-            t.put("status", task.getStatus().name());
-            t.put("createdAt", task.getCreatedAt());
-            tasks.add(t);
         }
+
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AgentTask> tasks = taskStore.query(userId, skillId, statusFilter, size, page * size);
+        int total = taskStore.countByUser(userId);
+        int totalPages = (total + size - 1) / size;
+
+        List<Map<String, Object>> taskList = new ArrayList<Map<String, Object>>();
+        for (AgentTask task : tasks) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("taskId", task.getTaskId());
+            dto.put("skillId", task.getSkillId());
+            dto.put("status", task.getStatus().name());
+            dto.put("createdAt", task.getCreatedAt());
+            taskList.add(dto);
+        }
+
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("tasks", tasks);
+        result.put("tasks", taskList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", totalPages);
+
+        audit(userId, "GET", "/runs", "LIST_RUNS", null);
+
         return ResponseEntity.ok(result);
     }
 

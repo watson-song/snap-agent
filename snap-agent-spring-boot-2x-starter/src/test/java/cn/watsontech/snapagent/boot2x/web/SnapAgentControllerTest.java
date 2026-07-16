@@ -37,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -599,5 +601,30 @@ class SnapAgentControllerTest {
                 .andExpect(content().string(containsString("诊断报告")))
                 .andExpect(content().string(containsString("诊断中...")))
                 .andExpect(content().string(containsString("SUCCEEDED")));
+    }
+
+    // ---- GET /runs (paginated) tests ----
+
+    @Test
+    void shouldReturnPaginatedRunsByUserId() throws Exception {
+        List<AgentTask> mockPage = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            AgentTask task = AgentTask.create("user001", "test-skill",
+                    new HashMap<String, String>(), "claude-sonnet-4-6");
+            task.setStatus(TaskStatus.SUCCEEDED);
+            mockPage.add(task);
+        }
+        when(taskStore.query(eq("user001"), isNull(), isNull(), eq(5), eq(0))).thenReturn(mockPage);
+        when(taskStore.countByUser("user001")).thenReturn(12);
+
+        mockMvc.perform(get("/snap-agent/runs")
+                        .param("page", "0")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tasks").isArray())
+                .andExpect(jsonPath("$.total").value(12))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.totalPages").value(3));
     }
 }
