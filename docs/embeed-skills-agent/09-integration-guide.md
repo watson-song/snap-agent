@@ -539,6 +539,58 @@ public class DbConversationStore implements ConversationStore {
 
 > 这些端点挂在 `snap-agent.base-path` 下，与其他 API 遵循相同的鉴权规则。
 
+## 主动监控集成（v0.5）
+
+### 启用巡检
+
+在 `application.yml` 中设置 `snap-agent.patrol.enabled=true`。创建巡检任务：
+
+```
+POST /snap-agent/patrol/tasks
+{"skillName": "health-patrol", "cron": "0 */5 * * * *", "inputs": {"service": "order-service"}}
+```
+
+巡检任务会按 cron 定时执行指定的 Skill，执行结果存入 `PatrolReportStore`，可通过 `GET /snap-agent/patrol/reports` 查询。
+
+### 异常事件桥接
+
+实现 `AnomalyEventListener` 将外部 MQ 的异常事件接入 SnapAgent，自动触发诊断 Skill：
+
+```java
+@Component
+public class KafkaAnomalyBridge {
+    @Autowired
+    private AnomalyEventListener listener;
+
+    @KafkaListener(topics = "anomaly-events")
+    public void onMessage(ConsumerRecord<String, String> record) {
+        AnomalyEvent event = parse(record.value());
+        listener.onEvent(event);
+    }
+}
+```
+
+事件进入后，`DefaultAnomalyEventListener` 自动触发诊断 Skill，结果写入巡检报告和告警收敛。
+
+### 告警管理
+
+查看和 resolve 告警：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /snap-agent/alerts?page=&size=&type=&status=` | 分页查询告警 |
+| `POST /snap-agent/alerts/{id}/resolve` | 手动 resolve 告警 |
+
+### Bugfix 建议
+
+诊断完成后，基于 transcript 中的 `code_read` 和 `git_log` 工具调用，自动生成修复建议：
+
+```
+POST /snap-agent/runs/{taskId}/bugfix-suggestion
+```
+
+返回 `BugfixSuggestion`，包含根因、受影响文件、关联 commit、置信度（HIGH/MEDIUM/LOW）。
+
 ## 安全检查清单（集成前）
 
 - [ ] 只读 DB 用户仅授诊断表 SELECT，无敏感表/列

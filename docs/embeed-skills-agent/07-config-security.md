@@ -88,6 +88,14 @@ snap-agent:
     auth-token-header: ""             # 前后端分离 token 鉴权：HTTP header 名称（如 token）
     auth-token-cookie: ""             # token 存 cookie 时：cookie 名称
     auth-token-local-storage-key: ""  # token 存 localStorage 时：key 名称（如 TOKEN）
+  patrol:
+    enabled: false          # 主动监控巡检子系统（v0.5），默认关
+    scheduler-pool-size: 2  # 定时巡检线程池大小
+    report-buffer-size: 500 # 内存中保留的最大巡检报告数
+  alert:
+    enabled: false            # 告警收敛子系统（v0.5），默认关
+    buffer-size: 1000         # 内存中保留的最大告警数
+    auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -312,3 +320,82 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 - 未登录：`SecurityContextHolder.authentication == null` → `currentUserId()` 返回 null → 401。
 - 已登录无权限：`hasPermission` false → 403。
 - principal 解析失败：resolver 返回 null → 401 + WARN 日志提示配 `principal-resolver-class`。
+
+## 10. 主动监控 — 巡检配置（v0.5）
+
+SnapAgent v0.5 引入主动健康巡检调度，按 cron 定时执行诊断 Skill，发现异常自动生成报告。
+
+```yaml
+snap-agent:
+  patrol:
+    enabled: false          # 巡检子系统总开关
+    scheduler-pool-size: 2  # 定时巡检线程池大小
+    report-buffer-size: 500 # 内存中保留的最大巡检报告数（ring buffer）
+```
+
+当 `enabled=true` 时，自动装配以下 Bean：
+
+| Bean | 职责 |
+|------|------|
+| `PatrolReportStore` | 内存 ring buffer，存储巡检报告，支持按用户分页查询 |
+| `ThreadPoolTaskScheduler` | Spring 调度器，驱动 cron 触发的巡检任务 |
+| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务的生命周期（创建/取消/列表/报告查询） |
+| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill |
+
+### 巡检 API
+
+| 端点 | 说明 |
+|------|------|
+| `POST /patrol/tasks` | 创建巡检任务（body: `skillName`, `cron`, `inputs`） |
+| `GET /patrol/tasks` | 列出所有巡检任务 |
+| `DELETE /patrol/tasks/{id}` | 取消巡检任务 |
+| `GET /patrol/reports?page=&size=` | 分页查询巡检报告 |
+| `GET /patrol/reports/{id}` | 获取单个巡检报告详情 |
+
+### Cron 表达式
+
+使用 Spring 6 字段 cron（秒 分 时 日 月 周），例如：
+- `0 */5 * * * *` — 每 5 分钟
+- `0 0 */1 * * *` — 每小时整点
+- `0 30 9 * * MON-FRI` — 工作日 9:30
+
+## 11. 告警收敛配置（v0.5）
+
+告警收敛将重复的同类异常事件聚合为单条告警记录，减少噪声。
+
+```yaml
+snap-agent:
+  alert:
+    enabled: false            # 告警子系统总开关
+    buffer-size: 1000         # 内存中保留的最大告警数
+    auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+```
+
+当 `enabled=true` 时，自动装配 `InMemoryAlertConverger`，使用 SHA-256 指纹对同类型+同来源的异常事件去重，按计数递增。
+
+### 告警 API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /alerts?page=&size=&type=&status=` | 分页查询告警（可选按 type/status 过滤） |
+| `POST /alerts/{id}/resolve` | 手动 resolve 告警 |
+
+### 异常事件桥接
+
+宿主可通过 `AnomalyEventListener` SPI 将外部消息队列（Kafka/RabbitMQ）的异常事件接入：
+
+```java
+@Component
+public class KafkaAnomalyBridge {
+    @Autowired
+    private AnomalyEventListener listener;
+
+    @KafkaListener(topics = "anomaly-events")
+    public void onMessage(ConsumerRecord<String, String> record) {
+        AnomalyEvent event = parse(record.value());
+        listener.onEvent(event);
+    }
+}
+```
+
+事件进入后，`DefaultAnomalyEventListener` 会自动触发对应的诊断 Skill，并将结果写入巡检报告和告警收敛。

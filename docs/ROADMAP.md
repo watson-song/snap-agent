@@ -116,7 +116,7 @@ Agent:
 | Elasticsearch 后端（日志搜索） | v0.4.1 |
 | SkyWalking 后端（链路追踪） | v0.4.1 |
 | Apollo 配置源 | v0.4.1 |
-| 主动监听异常事件 + 自动触发诊断 | v0.5 |
+| 主动监听异常事件 + 自动触发诊断 | v0.5 已交付 |
 | 跨环境配置实时 diff（多环境同时拉取） | v0.5 |
 
 ### 场景示例
@@ -139,11 +139,11 @@ Agent:
 
 ---
 
-## v0.5 — 主动监控 & 智能推送
+## v0.5 — 主动监控 & 智能推送（已交付）
 
 **目标**：从"用户提问才诊断"升级为"Agent 主动发现问题并推送"
 
-### 核心能力
+### 已完成
 
 | 能力 | 说明 |
 |------|------|
@@ -988,6 +988,15 @@ public AgentExecutor agentExecutor(
 ```
 v0.1-alpha   AgentExecutor + JDBC/Redis 工具               ← 已交付
     │
+    ▼
+v0.3          CodeReader/GitLog/ProjectStructure             ← 已交付
+    │
+    ▼
+v0.4          Metrics/LogSearch/Trace/ConfigRead            ← 已交付
+    │
+    ▼
+v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
+    │                                                        主动监控 & 智能推送
     ▼
 v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入
     │
