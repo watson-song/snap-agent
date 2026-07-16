@@ -62,4 +62,38 @@ public class TaskStore {
     public void clear() {
         tasks.clear();
     }
+
+    /**
+     * Query tasks with optional filters and pagination.
+     * Results are sorted by createdAt descending (newest first).
+     *
+     * @param userId  required user filter (must not be null)
+     * @param skillId optional skill filter, null = all skills
+     * @param status  optional status filter, null = all statuses
+     * @param limit   max results per page
+     * @param offset  zero-based offset
+     * @return list of matching tasks, sorted newest first
+     */
+    public List<AgentTask> query(String userId, String skillId, TaskStatus status, int limit, int offset) {
+        List<AgentTask> matched = new ArrayList<AgentTask>();
+        for (AgentTask task : tasks.values()) {
+            if (!userId.equals(task.getUserId())) continue;
+            if (skillId != null && !skillId.equals(task.getSkillId())) continue;
+            if (status != null && task.getStatus() != status) continue;
+            matched.add(task);
+        }
+        matched.sort((a, b) -> Long.compare(b.getCreatedAt(), a.getCreatedAt()));
+        if (offset >= matched.size()) return Collections.emptyList();
+        int end = Math.min(offset + limit, matched.size());
+        return new ArrayList<AgentTask>(matched.subList(offset, end));
+    }
+
+    /** Count total tasks for a user (all skills, all statuses). */
+    public int countByUser(String userId) {
+        int count = 0;
+        for (AgentTask task : tasks.values()) {
+            if (userId.equals(task.getUserId())) count++;
+        }
+        return count;
+    }
 }
