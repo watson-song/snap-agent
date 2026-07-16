@@ -563,6 +563,14 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "skill not found: " + skillId);
         }
 
+        // Skill-level permission check (v0.6): if the skill declares a required-permission,
+        // the caller must have it in addition to the global required-permission.
+        if (!skill.getRequiredPermission().isEmpty()
+                && !securityGateway.hasPermission(skill.getRequiredPermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN",
+                    "You don't have permission to run skill: " + skillId);
+        }
+
         if (skill.getAvailability() != SkillAvailability.AVAILABLE) {
             return errorResponse(HttpStatus.CONFLICT, "SKILL_UNAVAILABLE",
                     "skill unavailable: " + skill.getUnavailableReason());
@@ -1413,6 +1421,10 @@ public class SnapAgentController {
         dto.put("tools", skill.getTools());
         dto.put("source", skill.getSource());
         dto.put("overridesBuiltin", skill.isOverridesBuiltin());
+        // Skill-level required permission (v0.6); empty means inherit global
+        if (!skill.getRequiredPermission().isEmpty()) {
+            dto.put("requiredPermission", skill.getRequiredPermission());
+        }
         if (skill.getUnavailableReason() != null) {
             dto.put("unavailableReason", skill.getUnavailableReason());
         }

@@ -318,7 +318,7 @@ public class SkillRegistry {
                     meta.getInputs(), meta.getShortcuts(), meta.getBody(),
                     SkillAvailability.UNAVAILABLE,
                     "tool dispatcher not configured", meta.getSource(),
-                    meta.isOverridesBuiltin());
+                    meta.isOverridesBuiltin(), meta.getRequiredPermission());
         }
         Set<String> available = dispatcher.availableToolNames();
         List<String> missing = new ArrayList<String>();
@@ -334,6 +334,6 @@ public class SkillRegistry {
                 meta.getInputs(), meta.getShortcuts(), meta.getBody(),
                 SkillAvailability.UNAVAILABLE,
                 "tool(s) not available: " + missing, meta.getSource(),
-                meta.isOverridesBuiltin());
+                meta.isOverridesBuiltin(), meta.getRequiredPermission());
     }
 }
