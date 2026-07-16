@@ -581,4 +581,84 @@ class SnapAgentControllerTest {
 
         verify(llmClient, never()).cancel(any());
     }
+
+    // ---- Skill-level permission tests (v0.6) ----
+
+    @Test
+    void shouldReturn403WhenSkillRequiresPermissionAndUserLacksIt() throws Exception {
+        SkillMeta skill = new SkillMeta("admin-skill", "admin",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null,
+                "custom", false, "snap-agent:admin");
+        when(skillRegistry.get("admin-skill")).thenReturn(skill);
+        // Global permission is OK, but skill-level permission is denied
+        when(securityGateway.hasPermission("snap-agent:access")).thenReturn(true);
+        when(securityGateway.hasPermission("snap-agent:admin")).thenReturn(false);
+
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "admin-skill");
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value(
+                        "You don't have permission to run skill: admin-skill"));
+    }
+
+    @Test
+    void shouldReturn202WhenSkillRequiresPermissionAndUserHasIt() throws Exception {
+        SkillMeta skill = new SkillMeta("admin-skill", "admin",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null,
+                "custom", false, "snap-agent:admin");
+        when(skillRegistry.get("admin-skill")).thenReturn(skill);
+        when(rateLimiter.tryAcquire("user001")).thenReturn(true);
+        doAnswer(invocation -> null).when(taskExecutor).execute(any(Runnable.class));
+        // Both global and skill-level permissions granted
+        when(securityGateway.hasPermission(anyString())).thenReturn(true);
+
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "admin-skill");
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.taskId").isNotEmpty());
+    }
+
+    @Test
+    void shouldExposeRequiredPermissionInSkillDto() throws Exception {
+        SkillMeta skill = new SkillMeta("db-skill", "desc",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null,
+                "custom", false, "snap-agent:db-query");
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(skill));
+
+        mockMvc.perform(get("/snap-agent/skills"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skills[0].requiredPermission").value("snap-agent:db-query"));
+    }
+
+    @Test
+    void shouldNotExposeRequiredPermissionWhenEmpty() throws Exception {
+        SkillMeta skill = new SkillMeta("plain-skill", "desc",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null, "custom", false);
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(skill));
+
+        mockMvc.perform(get("/snap-agent/skills"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.skills[0].requiredPermission").doesNotExist());
+    }
 }
