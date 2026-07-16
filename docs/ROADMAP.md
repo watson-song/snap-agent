@@ -195,7 +195,7 @@ Agent 自动执行:
 
 ---
 
-## v0.6 — 平台化（部分已交付）
+## v0.6 — 平台化（已交付）
 
 **目标**：从框架升级为平台，支持更多语言生态和社区协作
 
@@ -205,7 +205,8 @@ Agent 自动执行:
 |----|------|
 | 多环境数据源 | `snap-agent.jdbc.datasources: {sit: ..., uat: ...}`，Skill `inputs.env` 选 DSN；`DataSourceRegistry` 多环境路由 + 默认回退 |
 | 权限细化 | Skill 级别权限控制：`required-permission` frontmatter 字段 + `SecurityGateway.hasPermission()` 运行时校验；无权限返回 403 |
-| 多 LLM 适配 | 文档化配置指南（通义/文心/智谱），LlmClient SPI 可插拔 |
+| 多 LLM 适配 | 文档化配置指南（通义/文心/智谱），LlmClient SPI 可插拔，`api-type: openai` 支持 OpenAI 兼容端点 |
+| REST API SDK | `snap-agent-client` 模块：轻量 Java 客户端（HttpURLConnection，无 Spring 依赖），覆盖 Skills/Runs/Transcript/Cancel/UserInfo 端点；REST API 参考文档 [10-rest-api.md](embeed-skills-agent/10-rest-api.md) |
 
 ### 待实现
 
@@ -214,7 +215,6 @@ Agent 自动执行:
 | Spring Boot 3.x | `jakarta.servlet` 版本 starter |
 | Skill 市场 | 社区共享 Skill 模板，一行配置导入 |
 | 工具市场 | 开箱即用的 ToolProvider 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
-| REST API 增强 | SDK 化，非 Web 场景也能调用 Agent |
 | 多租户 | Agent 对话隔离，Skill/工具按租户配置 |
 
 ---
@@ -1005,7 +1005,7 @@ v0.4          Metrics/LogSearch/Trace/ConfigRead            ← 已交付
 v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
     │                                                        主动监控 & 智能推送
     ▼
-v0.6          多环境数据源 + Skill 级权限控制                ← 已交付（部分）
+v0.6          多环境数据源 + Skill 级权限控制 + 多 LLM + REST SDK  ← 已交付
     │                                                        平台化
     ▼
 v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入

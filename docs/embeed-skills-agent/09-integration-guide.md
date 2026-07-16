@@ -667,28 +667,35 @@ required-permission: snap-agent:db-query
 - `required-permission` 非空 → 用户需同时拥有全局权限和 skill 级权限
 - 无权限用户运行该 skill → 403 "You don't have permission to run skill: X"
 
-## 多 LLM 适配（v0.6）
+## 多 LLM 配置（v0.6）
 
-现有代码已支持 `api-type: anthropic | openai`。通义千问/文心一言/智谱 GLM 均提供 OpenAI 兼容 API：
+SnapAgent 支持 OpenAI 兼容 API（`api-type: openai`）。以下国产大模型均提供 OpenAI 兼容端点，配置后即可使用：
+
+### 通义千问（阿里云百炼）
 
 ```yaml
-# 通义千问 (阿里云百炼)
 snap-agent:
   llm:
     api-type: openai
     base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
     api-key: ${DASHSCOPE_API_KEY:}
     model: qwen-plus
+```
 
-# 文心一言 (百度千帆)
+### 文心一言（百度千帆）
+
+```yaml
 snap-agent:
   llm:
     api-type: openai
     base-url: https://qianfan.baidubce.com/v2
     api-key: ${QIANFAN_API_KEY:}
     model: ernie-4.0
+```
 
-# 智谱 GLM
+### 智谱 GLM
+
+```yaml
 snap-agent:
   llm:
     api-type: openai
@@ -696,4 +703,6 @@ snap-agent:
     api-key: ${ZHIPU_API_KEY:}
     model: glm-4
 ```
+
+> 默认 `api-type: anthropic`（使用 Anthropic Messages API）。切换到国产模型只需改 `api-type: openai` 并配对应的 `base-url` / `api-key` / `model`。`allowed-models` 白名单需同步更新，否则前端选模型会被拒绝。
 

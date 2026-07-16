@@ -103,7 +103,8 @@ SkillMeta/frontmatter    LlmClient(OkHttp流式,
 | [06-api-and-ui.md](06-api-and-ui.md) | REST 与 SSE 接口、单页 SPA、localStorage 缓存、实时渲染 |
 | [07-config-security.md](07-config-security.md) | 完整 `snap-agent.*` 配置树、SecurityGateway 双 Adapter、PrincipalResolver SPI、Filter 可配序、只读 DSN、审计、限流、租户绕过风险 |
 | [08-roadmap.md](08-roadmap.md) | MVP → Phase2（MCP SSE）→ Phase3（3.x / OpenAI / 热重载 / 报告渲染） |
-| [09-integration-guide.md](09-integration-guide.md) | 宿主集成 5 步详述 + 故障排查 |
+| [09-integration-guide.md](09-integration-guide.md) | 宿主集成 5 步详述 + 故障排查 + 多 LLM 配置 + 多环境数据源 |
+| [10-rest-api.md](10-rest-api.md) | REST + SSE 接口完整参考 + Java SDK（snap-agent-client） |
 
 ## 8. 验证方式
 
