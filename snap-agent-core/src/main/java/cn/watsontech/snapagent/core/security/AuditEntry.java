@@ -19,7 +19,7 @@ public final class AuditEntry {
         this.method = method;
         this.path = path;
         this.action = action;
-        this.details = details;
+        this.details = details != null ? java.util.Collections.unmodifiableMap(new java.util.HashMap<>(details)) : null;
         this.timestamp = timestamp;
     }
 

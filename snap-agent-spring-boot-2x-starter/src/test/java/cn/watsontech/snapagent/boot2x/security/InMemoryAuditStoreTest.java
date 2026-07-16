@@ -27,7 +27,9 @@ class InMemoryAuditStoreTest {
         }
         List<AuditEntry> all = store.query(null, null, 100, 0);
         assertThat(all).hasSize(3);
-        assertThat(all.get(0).getTimestamp()).isGreaterThanOrEqualTo(2L);
+        // Newest 3 entries (timestamps 2, 3, 4) should remain; oldest 2 (0, 1) evicted
+        assertThat(all.get(0).getTimestamp()).isEqualTo(4L);
+        assertThat(all).extracting(AuditEntry::getTimestamp).doesNotContain(0L, 1L);
     }
 
     @Test
