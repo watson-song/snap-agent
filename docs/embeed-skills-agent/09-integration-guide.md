@@ -52,6 +52,7 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
                 <exclude>skills/database-query.md</exclude>
                 <exclude>skills/redis-query.md</exclude>
                 <exclude>skills/log-analysis.md</exclude>
+                <exclude>skills/code-analysis.md</exclude>
             </excludes>
         </resource>
     </resources>
@@ -85,6 +86,9 @@ snap-agent:
       - /opt/app/logs
     max-lines: 500                       # 单次最多返回行数
     max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件
+  code:
+    enabled: false                      # 代码理解工具（code_read/project_structure/git_log），默认关
+    project-root: ""                    # 宿主项目根目录（含 pom.xml 的目录），为空则工具不启用
   security:
     required-permission: ""              # 已登录即可；建议配 admin 权限码
 ```
@@ -133,6 +137,47 @@ snap-agent:
   logs:
     app-log-file: /opt/app/logs/application.log
 ```
+
+### 代码理解工具配置（v0.3 新增）
+
+SnapAgent 可以读取宿主项目源码，让 LLM 回答"这段逻辑为什么这样写""这个接口在哪实现"等问题。启用后提供三个只读工具：
+
+| 工具 | 功能 |
+|------|------|
+| `code_read` | 读取源码文件内容，支持行范围和关键词过滤 |
+| `project_structure` | 扫描项目目录结构，返回树形布局 |
+| `git_log` | 查看 git 提交历史、blame、show |
+
+同时，启动时会自动扫描项目结构并生成摘要注入 system prompt，让 LLM 了解项目布局。
+
+```yaml
+snap-agent:
+  code:
+    enabled: true
+    project-root: /app                    # 宿主项目根目录（含 pom.xml 或 build.gradle）
+    allowed-extensions:                    # 允许读取的文件扩展名白名单
+      - .java
+      - .xml
+      - .yml
+      - .properties
+      - .sql
+      - .md
+    max-lines: 500                         # 单次读取最大行数
+    max-file-bytes: 524288                 # 单个文件最大 512KB
+    structure-depth: 3                    # project_structure 默认扫描深度
+    context-injection: true               # 是否注入项目结构摘要到 system prompt
+```
+
+**前提条件**：
+- `project-root` 必须指向实际存在的目录，否则工具不启用（仅 WARN 日志）
+- `git_log` 工具需要宿主环境安装 git（其他两个工具不需要）
+- `project-root` 建议指向含 `pom.xml` 或 `build.gradle` 的目录
+
+**安全保证**：
+- 所有文件路径经 `CodePathGuard` 校验，必须在 `project-root` 下
+- 扩展名白名单防止读取 `.env`、`.key`、`.pem` 等敏感文件
+- `git_log` 使用 `ProcessBuilder(List)` 调用 git，不走 shell，commit_hash 正则校验
+- 三个工具均为只读，不写入/删除/修改任何文件
 
 GET `/skills` 响应中，含 `log_read` 工具的 skill 会额外返回 `appLogFile` 和 `logPaths` 字段，前端据此显示日志路径信息。
 
