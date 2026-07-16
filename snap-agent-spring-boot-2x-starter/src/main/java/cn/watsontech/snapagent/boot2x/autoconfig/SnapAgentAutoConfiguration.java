@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
+import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import cn.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -12,9 +13,13 @@ import cn.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
 import cn.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
 import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
+import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
+import cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
 import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
@@ -22,6 +27,7 @@ import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
+import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -203,6 +209,66 @@ public class SnapAgentAutoConfiguration {
         return new LogReadToolProvider(logPathGuard);
     }
 
+    // ---- CodePathGuard (v0.3) ----
+    // Created only when code.enabled=true AND project-root is non-empty AND is a real directory.
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+            "'${snap-agent.code.enabled:false}' == 'true' "
+            + "and !'${snap-agent.code.project-root:}'.trim().isEmpty()")
+    @ConditionalOnMissingBean
+    public CodePathGuard codePathGuard(SnapAgentProperties props) {
+        String root = props.getCode().getProjectRoot();
+        Path rootPath = Paths.get(root).toAbsolutePath().normalize();
+        if (!Files.isDirectory(rootPath)) {
+            log.warn("CodePathGuard not assembled: project-root {} is not a directory", rootPath);
+            return null;
+        }
+        log.info("CodePathGuard assembled with project-root: {}", rootPath);
+        return new CodePathGuard(root, props.getCode().getAllowedExtensions(),
+                props.getCode().getMaxLines(), props.getCode().getMaxFileBytes());
+    }
+
+    // ---- ProjectContextExtender (v0.3) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.code", name = "context-injection",
+            havingValue = "true", matchIfMissing = true)
+    @ConditionalOnMissingBean
+    public SystemPromptExtender projectContextExtender(CodePathGuard codePathGuard,
+                                                        SnapAgentProperties props) {
+        log.info("ProjectContextExtender assembled (structure-depth={})",
+                props.getCode().getStructureDepth());
+        return new ProjectContextExtender(codePathGuard, props.getCode().getStructureDepth());
+    }
+
+    // ---- CodeReaderToolProvider (v0.3) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
+    @ConditionalOnMissingBean
+    public CodeReaderToolProvider codeReaderToolProvider(CodePathGuard codePathGuard) {
+        log.info("CodeReaderToolProvider assembled");
+        return new CodeReaderToolProvider(codePathGuard);
+    }
+
+    // ---- ProjectStructureToolProvider (v0.3) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
+    @ConditionalOnMissingBean
+    public ProjectStructureToolProvider projectStructureToolProvider(CodePathGuard codePathGuard) {
+        log.info("ProjectStructureToolProvider assembled");
+        return new ProjectStructureToolProvider(codePathGuard);
+    }
+
+    // ---- GitLogToolProvider (v0.3) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
+    @ConditionalOnMissingBean
+    public GitLogToolProvider gitLogToolProvider(CodePathGuard codePathGuard) {
+        log.info("GitLogToolProvider assembled");
+        return new GitLogToolProvider(codePathGuard);
+    }
+
     // ---- ToolDispatcher ----
     @Bean
     @ConditionalOnMissingBean
@@ -254,13 +320,19 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<LlmClient> llmClientProvider,
             ToolDispatcher toolDispatcher,
             TaskStore taskStore,
-            SnapAgentProperties props) {
+            SnapAgentProperties props,
+            ObjectProvider<SystemPromptExtender> extenderProvider) {
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         if (llmClient == null) {
             log.warn("LlmClient not available; AgentExecutor will not function");
         }
+        SystemPromptExtender extender = extenderProvider.getIfAvailable();
+        if (extender != null) {
+            log.info("AgentExecutor assembled with SystemPromptExtender: {}", extender.getClass().getSimpleName());
+        }
         return new AgentExecutor(llmClient, toolDispatcher, taskStore,
-                props.getAgent().getMaxTurns(), props.getLlm().getMaxTokens());
+                props.getAgent().getMaxTurns(), props.getLlm().getMaxTokens(),
+                extender);
     }
 
     // ---- ThreadPoolTaskExecutor ----
