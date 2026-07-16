@@ -395,6 +395,10 @@ public class SnapAgentProperties {
     public static class Jdbc {
         private boolean enabled = true;
         private String datasourceBeanName = "snapAgentReadOnlyDataSource";
+        /** Multi-environment datasources (v0.6). When non-empty, overrides single-DataSource mode. */
+        private Map<String, Datasource> datasources = new LinkedHashMap<String, Datasource>();
+        /** Default environment name when the skill does not specify one. Empty = first entry. */
+        private String defaultEnv = "";
 
         public boolean isEnabled() {
             return enabled;
@@ -410,6 +414,62 @@ public class SnapAgentProperties {
 
         public void setDatasourceBeanName(String datasourceBeanName) {
             this.datasourceBeanName = datasourceBeanName;
+        }
+
+        public Map<String, Datasource> getDatasources() {
+            return datasources;
+        }
+
+        public void setDatasources(Map<String, Datasource> datasources) {
+            this.datasources = datasources;
+        }
+
+        public String getDefaultEnv() {
+            return defaultEnv;
+        }
+
+        public void setDefaultEnv(String defaultEnv) {
+            this.defaultEnv = defaultEnv;
+        }
+
+        /** Individual multi-environment datasource entry (v0.6). */
+        public static class Datasource {
+            private String url;
+            private String username = "";
+            private String password = "";
+            private String driverClassName = "com.mysql.cj.jdbc.Driver";
+
+            public String getUrl() {
+                return url;
+            }
+
+            public void setUrl(String url) {
+                this.url = url;
+            }
+
+            public String getUsername() {
+                return username;
+            }
+
+            public void setUsername(String username) {
+                this.username = username;
+            }
+
+            public String getPassword() {
+                return password;
+            }
+
+            public void setPassword(String password) {
+                this.password = password;
+            }
+
+            public String getDriverClassName() {
+                return driverClassName;
+            }
+
+            public void setDriverClassName(String driverClassName) {
+                this.driverClassName = driverClassName;
+            }
         }
     }
 

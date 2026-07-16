@@ -16,6 +16,7 @@ import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
 import cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.ConfigReadToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.DataSourceRegistry;
 import cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
@@ -62,7 +63,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Auto-configuration for the embedded SnapAgent.
@@ -161,6 +164,67 @@ public class SnapAgentAutoConfiguration {
                 props.getLlm().getTimeoutSeconds());
     }
 
+    // ---- DataSourceRegistry (multi-env, v0.6) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.jdbc", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public DataSourceRegistry dataSourceRegistry(SnapAgentProperties props) {
+        Map<String, SnapAgentProperties.Jdbc.Datasource> dsConfig = props.getJdbc().getDatasources();
+        if (dsConfig == null || dsConfig.isEmpty()) {
+            return null;
+        }
+        Map<String, DataSource> registry = new LinkedHashMap<String, DataSource>();
+        for (Map.Entry<String, SnapAgentProperties.Jdbc.Datasource> entry : dsConfig.entrySet()) {
+            SnapAgentProperties.Jdbc.Datasource cfg = entry.getValue();
+            if (cfg.getUrl() == null || cfg.getUrl().isEmpty()) {
+                log.warn("Skipping datasource env '{}': url is empty", entry.getKey());
+                continue;
+            }
+            try {
+                DataSource ds = createSimpleDataSource(cfg);
+                registry.put(entry.getKey(), ds);
+                log.info("Registered datasource env '{}': url={}", entry.getKey(), cfg.getUrl());
+            } catch (RuntimeException e) {
+                log.error("Failed to create datasource for env '{}': {}", entry.getKey(), e.getMessage());
+            }
+        }
+        if (registry.isEmpty()) {
+            log.warn("No valid datasource environments configured; falling back to single DataSource mode");
+            return null;
+        }
+        log.info("DataSourceRegistry assembled with {} env(s): {}", registry.size(), registry.keySet());
+        return new DataSourceRegistry(registry, props.getJdbc().getDefaultEnv());
+    }
+
+    /**
+     * Creates a simple DataSource from config properties.
+     * Uses Spring's SimpleDriverDataSource (no pool overhead, suitable for read-only diagnostics).
+     */
+    private DataSource createSimpleDataSource(SnapAgentProperties.Jdbc.Datasource cfg) {
+        String driverClassName = cfg.getDriverClassName();
+        if (driverClassName == null || driverClassName.isEmpty()) {
+            driverClassName = "com.mysql.cj.jdbc.Driver";
+        }
+        try {
+            Class<?> driverClass = Class.forName(driverClassName);
+            java.sql.Driver driver = (java.sql.Driver) driverClass.getDeclaredConstructor().newInstance();
+            org.springframework.jdbc.datasource.SimpleDriverDataSource ds =
+                    new org.springframework.jdbc.datasource.SimpleDriverDataSource();
+            ds.setDriver(driver);
+            ds.setUrl(cfg.getUrl());
+            ds.setUsername(cfg.getUsername());
+            ds.setPassword(cfg.getPassword());
+            return ds;
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException("JDBC driver class not found: " + driverClassName
+                    + " — add the driver dependency to your project", e);
+        } catch (RuntimeException e) {
+            throw new RuntimeException("Failed to instantiate JDBC driver: " + driverClassName, e);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to instantiate JDBC driver: " + driverClassName, e);
+        }
+    }
+
     // ---- JdbcQueryToolProvider ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.jdbc", name = "enabled", havingValue = "true")
@@ -168,10 +232,16 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public JdbcQueryToolProvider jdbcQueryToolProvider(
             ObjectProvider<DataSource> dataSourceProvider,
+            ObjectProvider<DataSourceRegistry> registryProvider,
             SnapAgentProperties props,
             SqlGuard sqlGuard) {
+        DataSourceRegistry registry = registryProvider.getIfAvailable();
+        if (registry != null) {
+            log.info("JdbcQueryToolProvider assembled with DataSourceRegistry ({} envs)", registry.size());
+            return new JdbcQueryToolProvider(registry, sqlGuard);
+        }
         DataSource ds = dataSourceProvider.getIfAvailable();
-        log.info("JdbcQueryToolProvider assembled with DataSource: {}",
+        log.info("JdbcQueryToolProvider assembled with single DataSource: {}",
                 props.getJdbc().getDatasourceBeanName());
         return new JdbcQueryToolProvider(ds, sqlGuard);
     }
