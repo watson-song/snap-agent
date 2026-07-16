@@ -46,6 +46,10 @@ public class SnapAgentProperties {
     private Security security = new Security();
     private Routing routing = new Routing();
     private Code code = new Code();
+    private Metrics metrics = new Metrics();
+    private LogSearch logSearch = new LogSearch();
+    private Trace trace = new Trace();
+    private ConfigRead configRead = new ConfigRead();
 
     // ---- getters / setters ----
 
@@ -159,6 +163,38 @@ public class SnapAgentProperties {
 
     public void setCode(Code code) {
         this.code = code;
+    }
+
+    public Metrics getMetrics() {
+        return metrics;
+    }
+
+    public void setMetrics(Metrics metrics) {
+        this.metrics = metrics;
+    }
+
+    public LogSearch getLogSearch() {
+        return logSearch;
+    }
+
+    public void setLogSearch(LogSearch logSearch) {
+        this.logSearch = logSearch;
+    }
+
+    public Trace getTrace() {
+        return trace;
+    }
+
+    public void setTrace(Trace trace) {
+        this.trace = trace;
+    }
+
+    public ConfigRead getConfigRead() {
+        return configRead;
+    }
+
+    public void setConfigRead(ConfigRead configRead) {
+        this.configRead = configRead;
     }
 
     // ---- nested classes ----
@@ -709,6 +745,307 @@ public class SnapAgentProperties {
 
         public void setContextInjection(boolean contextInjection) {
             this.contextInjection = contextInjection;
+        }
+    }
+
+    /**
+     * Prometheus metrics query tool configuration (v0.4).
+     *
+     * <p>When {@code enabled=true} and {@code base-url} is non-empty, the
+     * {@code metrics_query} tool is assembled.</p>
+     */
+    public static class Metrics {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Prometheus base URL, e.g. {@code http://prometheus:9090}. */
+        private String baseUrl = "";
+
+        /** HTTP header name for authentication (e.g. "Authorization"). */
+        private String authHeader = "";
+
+        /** HTTP header value for authentication (e.g. "Bearer xxx"). */
+        private String authHeaderValue = "";
+
+        /** HTTP call timeout in seconds (connect + read share this budget). */
+        private int timeoutSeconds = 15;
+
+        /** Max data points returned per series; user-supplied values are clamped to this. */
+        private int maxPoints = 200;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getAuthHeader() {
+            return authHeader;
+        }
+
+        public void setAuthHeader(String authHeader) {
+            this.authHeader = authHeader;
+        }
+
+        public String getAuthHeaderValue() {
+            return authHeaderValue;
+        }
+
+        public void setAuthHeaderValue(String authHeaderValue) {
+            this.authHeaderValue = authHeaderValue;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+
+        public int getMaxPoints() {
+            return maxPoints;
+        }
+
+        public void setMaxPoints(int maxPoints) {
+            this.maxPoints = maxPoints;
+        }
+    }
+
+    /**
+     * Loki log search tool configuration (v0.4).
+     *
+     * <p>When {@code enabled=true} and {@code base-url} is non-empty, the
+     * {@code log_search} tool is assembled.</p>
+     */
+    public static class LogSearch {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Loki base URL, e.g. {@code http://loki:3100}. */
+        private String baseUrl = "";
+
+        /** HTTP header name for authentication. */
+        private String authHeader = "";
+
+        /** HTTP header value for authentication. */
+        private String authHeaderValue = "";
+
+        /** HTTP call timeout in seconds. */
+        private int timeoutSeconds = 15;
+
+        /** Max log lines returned by a single call; user-supplied values are clamped to this. */
+        private int maxLines = 500;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getAuthHeader() {
+            return authHeader;
+        }
+
+        public void setAuthHeader(String authHeader) {
+            this.authHeader = authHeader;
+        }
+
+        public String getAuthHeaderValue() {
+            return authHeaderValue;
+        }
+
+        public void setAuthHeaderValue(String authHeaderValue) {
+            this.authHeaderValue = authHeaderValue;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+
+        public int getMaxLines() {
+            return maxLines;
+        }
+
+        public void setMaxLines(int maxLines) {
+            this.maxLines = maxLines;
+        }
+    }
+
+    /**
+     * Jaeger distributed trace search tool configuration (v0.4).
+     *
+     * <p>When {@code enabled=true} and {@code base-url} is non-empty, the
+     * {@code trace_search} tool is assembled.</p>
+     */
+    public static class Trace {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Jaeger base URL, e.g. {@code http://jaeger:16686}. */
+        private String baseUrl = "";
+
+        /** HTTP header name for authentication. */
+        private String authHeader = "";
+
+        /** HTTP header value for authentication. */
+        private String authHeaderValue = "";
+
+        /** HTTP call timeout in seconds. */
+        private int timeoutSeconds = 15;
+
+        /** Max traces returned by a single search; user-supplied values are clamped to this. */
+        private int maxTraces = 20;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getAuthHeader() {
+            return authHeader;
+        }
+
+        public void setAuthHeader(String authHeader) {
+            this.authHeader = authHeader;
+        }
+
+        public String getAuthHeaderValue() {
+            return authHeaderValue;
+        }
+
+        public void setAuthHeaderValue(String authHeaderValue) {
+            this.authHeaderValue = authHeaderValue;
+        }
+
+        public int getTimeoutSeconds() {
+            return timeoutSeconds;
+        }
+
+        public void setTimeoutSeconds(int timeoutSeconds) {
+            this.timeoutSeconds = timeoutSeconds;
+        }
+
+        public int getMaxTraces() {
+            return maxTraces;
+        }
+
+        public void setMaxTraces(int maxTraces) {
+            this.maxTraces = maxTraces;
+        }
+    }
+
+    /**
+     * Configuration read tool configuration (v0.4).
+     *
+     * <p>When {@code enabled=true}, the {@code config_read} tool is assembled.
+     * Local mode reads the Spring {@code Environment} (no network); Nacos mode
+     * reads from {@code nacos-base-url} and is validated at runtime.</p>
+     */
+    public static class ConfigRead {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Nacos base URL for remote config reads. */
+        private String nacosBaseUrl = "";
+
+        /** Default Nacos namespace ID. */
+        private String nacosNamespace = "";
+
+        /** Nacos authentication token. */
+        private String nacosAuthToken = "";
+
+        /** Max local properties returned by a single call. */
+        private int maxKeys = 100;
+
+        /**
+         * Property key patterns (lowercase substring match) whose values are
+         * masked to {@code ****} in local-mode output.
+         */
+        private List<String> sensitiveKeyPatterns = new ArrayList<String>(java.util.Arrays.asList(
+                "password", "secret", "token", "credential", "key"));
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getNacosBaseUrl() {
+            return nacosBaseUrl;
+        }
+
+        public void setNacosBaseUrl(String nacosBaseUrl) {
+            this.nacosBaseUrl = nacosBaseUrl;
+        }
+
+        public String getNacosNamespace() {
+            return nacosNamespace;
+        }
+
+        public void setNacosNamespace(String nacosNamespace) {
+            this.nacosNamespace = nacosNamespace;
+        }
+
+        public String getNacosAuthToken() {
+            return nacosAuthToken;
+        }
+
+        public void setNacosAuthToken(String nacosAuthToken) {
+            this.nacosAuthToken = nacosAuthToken;
+        }
+
+        public int getMaxKeys() {
+            return maxKeys;
+        }
+
+        public void setMaxKeys(int maxKeys) {
+            this.maxKeys = maxKeys;
+        }
+
+        public List<String> getSensitiveKeyPatterns() {
+            return sensitiveKeyPatterns;
+        }
+
+        public void setSensitiveKeyPatterns(List<String> sensitiveKeyPatterns) {
+            this.sensitiveKeyPatterns = sensitiveKeyPatterns;
         }
     }
 }
