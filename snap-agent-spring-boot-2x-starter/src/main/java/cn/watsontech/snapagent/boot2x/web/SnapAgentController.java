@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
@@ -13,6 +14,8 @@ import cn.watsontech.snapagent.core.conversation.Conversation;
 import cn.watsontech.snapagent.core.conversation.ConversationMessage;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.core.issue.IssueClosure;
+import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
@@ -95,6 +98,7 @@ public class SnapAgentController {
     private final PatrolScheduler patrolScheduler;
     private final AlertConverger alertConverger;
     private final TemplateBugfixSuggester bugfixSuggester;
+    private final IssueClosureService issueClosureService;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -165,7 +169,7 @@ public class SnapAgentController {
                                 ConversationStore conversationStore) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
-                auditLogger, conversationStore, null, null, null);
+                auditLogger, conversationStore, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -183,6 +187,27 @@ public class SnapAgentController {
                                 PatrolScheduler patrolScheduler,
                                 AlertConverger alertConverger,
                                 TemplateBugfixSuggester bugfixSuggester) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -198,6 +223,7 @@ public class SnapAgentController {
         this.patrolScheduler = patrolScheduler;
         this.alertConverger = alertConverger;
         this.bugfixSuggester = bugfixSuggester;
+        this.issueClosureService = issueClosureService;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -1380,6 +1406,121 @@ public class SnapAgentController {
         return ResponseEntity.ok(suggestion);
     }
 
+    // ---- POST /runs/{taskId}/solution (v0.9 issue closure) ----
+    @PostMapping("/runs/{taskId}/solution")
+    public ResponseEntity<Object> proposeSolution(@PathVariable String taskId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.proposeSolution(taskId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND",
+                    "task or skill not found: " + taskId);
+        }
+
+        audit(currentUserId(), "POST", "/runs/" + taskId + "/solution", "PROPOSE_SOLUTION",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /runs/{taskId}/issue (v0.9 issue closure) ----
+    @PostMapping("/runs/{taskId}/issue")
+    public ResponseEntity<Object> createIssue(@PathVariable String taskId,
+                                               @RequestBody Map<String, String> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        String selectedSolution = body != null ? body.get("selected_solution") : null;
+        IssueClosure issue = issueClosureService.createExternalIssue(taskId, selectedSolution);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "no issue closure found for task: " + taskId);
+        }
+
+        audit(currentUserId(), "POST", "/runs/" + taskId + "/issue", "CREATE_EXTERNAL_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- GET /issues/{issueId} (v0.9 issue closure) ----
+    @GetMapping("/issues/{issueId}")
+    public ResponseEntity<Object> getIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        // Delegate to the service which has access to IssueStore
+        IssueClosure issue = issueClosureService.loadIssue(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue not found: " + issueId);
+        }
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /issues/{issueId}/verify (v0.9 issue closure) ----
+    @PostMapping("/issues/{issueId}/verify")
+    public ResponseEntity<Object> verifyIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.verify(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue or skill not found: " + issueId);
+        }
+
+        audit(currentUserId(), "POST", "/issues/" + issueId + "/verify", "VERIFY_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /issues/{issueId}/close (v0.9 issue closure) ----
+    @PostMapping("/issues/{issueId}/close")
+    public ResponseEntity<Object> closeIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.close(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue not found: " + issueId);
+        }
+
+        audit(currentUserId(), "POST", "/issues/" + issueId + "/close", "CLOSE_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
     // ---- helpers ----
 
     /**
@@ -1535,6 +1676,26 @@ public class SnapAgentController {
         body.put("error", error);
         body.put("message", message);
         return body;
+    }
+
+    /** Converts an IssueClosure to a DTO map for API responses. */
+    private Map<String, Object> toIssueDto(IssueClosure issue) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("issueId", issue.getIssueId());
+        dto.put("externalIssueId", issue.getExternalIssueId());
+        dto.put("taskId", issue.getTaskId());
+        dto.put("conversationId", issue.getConversationId());
+        dto.put("userQuery", issue.getUserQuery());
+        dto.put("rootCause", issue.getRootCause());
+        dto.put("solutions", issue.getSolutions());
+        dto.put("selectedSolution", issue.getSelectedSolution());
+        dto.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
+        dto.put("fixCommitId", issue.getFixCommitId());
+        dto.put("verificationResult", issue.getVerificationResult());
+        dto.put("knowledgeEntryId", issue.getKnowledgeEntryId());
+        dto.put("createdAt", issue.getCreatedAt());
+        dto.put("updatedAt", issue.getUpdatedAt());
+        return dto;
     }
 
     @SuppressWarnings("unchecked")

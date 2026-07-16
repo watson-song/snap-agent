@@ -184,6 +184,26 @@ public final class IssueClosure {
     }
 
     /**
+     * 返回一个外部 Issue ID、选择方案、状态和更新时间变更后的新实例, 其余字段不变。
+     *
+     * @param externalIssueId  外部 Issue ID
+     * @param selectedSolution 用户选择的方案
+     * @param status            新状态
+     * @param updatedAt         新的更新时间 (epoch millis)
+     * @return new {@link IssueClosure} with updated externalIssueId, selectedSolution, status and updatedAt
+     */
+    public IssueClosure withExternalIssue(String externalIssueId, String selectedSolution,
+                                          IssueStatus status, long updatedAt) {
+        return new IssueClosure(
+                this.issueId, externalIssueId, this.taskId,
+                this.conversationId, this.userQuery, this.rootCause,
+                this.solutions, selectedSolution,
+                status, this.fixCommitId,
+                this.verificationResult, this.knowledgeEntryId,
+                this.createdAt, updatedAt);
+    }
+
+    /**
      * 返回一个验证结果和更新时间变更后的新实例, 其余字段不变。
      *
      * @param verificationResult 验证结果摘要

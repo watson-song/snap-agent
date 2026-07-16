@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.autoconfig;
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
 import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
+import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.issue.KnowledgeSedimentationExtractor;
 import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
@@ -543,6 +544,7 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<cn.watsontech.snapagent.core.patrol.PatrolScheduler> patrolSchedulerProvider,
             ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
             ObjectProvider<cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester> bugfixSuggesterProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.issue.IssueClosureService> issueClosureServiceProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
@@ -552,6 +554,7 @@ public class SnapAgentAutoConfiguration {
         cn.watsontech.snapagent.core.patrol.PatrolScheduler patrolScheduler = patrolSchedulerProvider.getIfAvailable();
         cn.watsontech.snapagent.core.patrol.AlertConverger alertConverger = alertConvergerProvider.getIfAvailable();
         cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester bugfixSuggester = bugfixSuggesterProvider.getIfAvailable();
+        cn.watsontech.snapagent.boot2x.issue.IssueClosureService issueClosureService = issueClosureServiceProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -574,7 +577,7 @@ public class SnapAgentAutoConfiguration {
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
-                patrolScheduler, alertConverger, bugfixSuggester);
+                patrolScheduler, alertConverger, bugfixSuggester, issueClosureService);
     }
 
     // ---- SnapAgentFilter ----
@@ -810,6 +813,28 @@ public class SnapAgentAutoConfiguration {
     public KnowledgeSedimentationExtractor knowledgeSedimentationExtractor() {
         log.info("KnowledgeSedimentationExtractor assembled");
         return new KnowledgeSedimentationExtractor();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public IssueClosureService issueClosureService(
+            AgentExecutor agentExecutor,
+            TaskStore taskStore,
+            SkillRegistry skillRegistry,
+            IssueStore issueStore,
+            IssueTracker issueTracker,
+            ObjectProvider<cn.watsontech.snapagent.core.knowledge.KnowledgeBase> knowledgeBaseProvider,
+            KnowledgeSedimentationExtractor sedimentationExtractor,
+            SnapAgentProperties properties) {
+        log.info("IssueClosureService assembled (system-user-id={})",
+                properties.getIssueClosure().getSystemUserId());
+        return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
+                issueStore, issueTracker,
+                knowledgeBaseProvider.getIfAvailable(),
+                sedimentationExtractor,
+                properties.getIssueClosure().getSystemUserId());
     }
 
     // ---- file system helpers ----
