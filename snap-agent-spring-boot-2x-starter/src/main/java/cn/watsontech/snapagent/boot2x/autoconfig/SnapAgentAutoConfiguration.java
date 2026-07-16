@@ -365,12 +365,14 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<LlmClient> llmClientProvider,
             ObjectProvider<SecurityAuditLogger> auditLoggerProvider,
             ObjectProvider<ConversationStore> conversationStoreProvider,
+            ObjectProvider<AuditStore> auditStoreProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         SecurityAuditLogger auditLogger = auditLoggerProvider.getIfAvailable();
         ConversationStore conversationStore = conversationStoreProvider.getIfAvailable();
+        AuditStore auditStore = auditStoreProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -392,7 +394,7 @@ public class SnapAgentAutoConfiguration {
         return new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
-                auditLogger, conversationStore);
+                auditLogger, conversationStore, auditStore);
     }
 
     // ---- SnapAgentFilter ----
