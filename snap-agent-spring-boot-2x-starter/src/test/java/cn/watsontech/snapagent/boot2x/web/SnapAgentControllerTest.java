@@ -615,7 +615,7 @@ class SnapAgentControllerTest {
             mockPage.add(task);
         }
         when(taskStore.query(eq("user001"), isNull(), isNull(), eq(5), eq(0))).thenReturn(mockPage);
-        when(taskStore.countByUser("user001")).thenReturn(12);
+        when(taskStore.count(eq("user001"), isNull(), isNull())).thenReturn(12);
 
         mockMvc.perform(get("/snap-agent/runs")
                         .param("page", "0")
@@ -626,5 +626,24 @@ class SnapAgentControllerTest {
                 .andExpect(jsonPath("$.page").value(0))
                 .andExpect(jsonPath("$.size").value(5))
                 .andExpect(jsonPath("$.totalPages").value(3));
+    }
+
+    @Test
+    void shouldFilterRunsByStatusAndSkillId() throws Exception {
+        List<AgentTask> mockPage = new ArrayList<>();
+        AgentTask task = AgentTask.create("user001", "db-check",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.setStatus(TaskStatus.SUCCEEDED);
+        mockPage.add(task);
+        when(taskStore.query(eq("user001"), eq("db-check"), eq(TaskStatus.SUCCEEDED), eq(20), eq(0))).thenReturn(mockPage);
+        when(taskStore.count(eq("user001"), eq("db-check"), eq(TaskStatus.SUCCEEDED))).thenReturn(1);
+
+        mockMvc.perform(get("/snap-agent/runs")
+                        .param("status", "SUCCEEDED")
+                        .param("skillId", "db-check"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.tasks[0].skillId").value("db-check"))
+                .andExpect(jsonPath("$.tasks[0].status").value("SUCCEEDED"));
     }
 }

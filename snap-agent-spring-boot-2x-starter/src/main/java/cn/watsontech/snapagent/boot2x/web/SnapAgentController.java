@@ -663,7 +663,7 @@ public class SnapAgentController {
         if (size <= 0 || size > 100) size = 20;
 
         List<AgentTask> tasks = taskStore.query(userId, skillId, statusFilter, size, page * size);
-        int total = taskStore.countByUser(userId);
+        int total = taskStore.count(userId, skillId, statusFilter);
         int totalPages = (total + size - 1) / size;
 
         List<Map<String, Object>> taskList = new ArrayList<Map<String, Object>>();
