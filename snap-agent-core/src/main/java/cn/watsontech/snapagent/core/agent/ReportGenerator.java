@@ -17,7 +17,7 @@ public final class ReportGenerator {
     public static String generate(String title, List<TranscriptEvent> events) {
         StringBuilder sb = new StringBuilder();
         sb.append("# ").append(title != null ? title : "诊断报告").append("\n\n");
-        sb.append("> 生成时间: ").append(DATE_FMT.format(new Date())).append("\n\n---\n\n");
+        sb.append("> 生成时间: ").append(formatDate(System.currentTimeMillis())).append("\n\n---\n\n");
 
         if (events == null || events.isEmpty()) {
             sb.append("无诊断记录。\n");
@@ -25,7 +25,7 @@ public final class ReportGenerator {
         }
 
         for (TranscriptEvent e : events) {
-            String time = DATE_FMT.format(new Date(e.getTimestamp()));
+            String time = formatDate(e.getTimestamp());
             switch (e.getType()) {
                 case TranscriptEvent.TYPE_THOUGHT:
                     sb.append("### 💭 思考 (").append(time).append(")\n\n")
@@ -67,6 +67,10 @@ public final class ReportGenerator {
             }
         }
         return sb.toString();
+    }
+
+    private static synchronized String formatDate(long timestamp) {
+        return DATE_FMT.format(new Date(timestamp));
     }
 
     @SuppressWarnings("unchecked")
