@@ -88,27 +88,36 @@ Agent:
 
 ---
 
-## v0.4 — 运营诊断能力
+## v0.4 — 运营诊断能力（已交付）
 
 **目标**：Agent 对接可观测性平台，从"被动问答"升级为"主动运营诊断"
 
-### 新增工具
+### 已完成
 
 | 工具 | 能力 |
 |------|------|
-| `MetricsToolProvider` | 对接 Prometheus API，Agent 实时查询指标（QPS、延迟、错误率、CPU/Mem） |
-| `LogAnalysisToolProvider` | 对接 ELK / Loki API，Agent 搜索日志、分析错误模式、统计频率 |
-| `TraceAnalysisToolProvider` | 对接 Jaeger / SkyWalking，Agent 分析调用链、定位慢节点 |
-| `ConfigToolProvider` | 读取应用配置（Apollo / Nacos / 本地 yml），Agent 对比环境配置差异 |
+| `metrics_query` | 对接 Prometheus API，Agent 实时查询指标（QPS、延迟、错误率、CPU/Mem），支持即时查询和范围查询 |
+| `log_search` | 对接 Loki API，Agent 搜索日志、分析错误模式、统计频率（LogQL） |
+| `trace_search` | 对接 Jaeger API，Agent 分析调用链、定位慢 span（按 service/operation/traceId 搜索） |
+| `config_read` | 读取本地 Spring Environment 配置 + Nacos 远程配置，Agent 对比环境配置差异 |
 
-### 内置 Skill 模板
+| 增强 | 说明 |
+|------|------|
+| ObservabilityHttpClient | 共享 HTTP 客户端（JDK HttpURLConnection，零外部依赖），protected 方法可子类化测试 |
+| TimeRangeParser | 相对时间解析（"1h"/"30m"/"2d"/"300s"/epoch/ISO-8601 → epoch 秒） |
+| 结果限制 | max-points/max-lines/max-traces/max-keys 硬上限，超限静默截断 + truncated 标志 |
+| 敏感字段脱敏 | config_read 本地模式自动脱敏 password/secret/token/credential/key |
+| 4 个内置 Skill 模板 | ops-health-check / slow-query-analysis / error-spike-investigation / config-diff |
 
-| Skill | 流程 |
-|-------|------|
-| `health-check` | 全面健康检查：CPU/Mem/延迟/错误率 → 异常指标 → 根因分析 |
-| `slow-query-analysis` | 慢查询排查：查慢日志 → 分析执行计划 → 索引建议 |
-| `error-spike-investigation` | 错误率突增：定位时间窗口 → 查日志 → 关联部署 → 根因 |
-| `config-diff` | 环境配置对比：sit vs prod 配置差异 → 识别风险项 |
+### 延后到 v0.4.1 / v0.5
+
+| 项 | 说明 |
+|----|------|
+| Elasticsearch 后端（日志搜索） | v0.4.1 |
+| SkyWalking 后端（链路追踪） | v0.4.1 |
+| Apollo 配置源 | v0.4.1 |
+| 主动监听异常事件 + 自动触发诊断 | v0.5 |
+| 跨环境配置实时 diff（多环境同时拉取） | v0.5 |
 
 ### 场景示例
 

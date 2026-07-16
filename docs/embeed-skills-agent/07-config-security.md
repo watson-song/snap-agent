@@ -48,6 +48,34 @@ snap-agent:
     max-file-bytes: 524288               # 单个文件最大 512KB
     structure-depth: 3                  # project_structure 默认扫描深度
     context-injection: true              # 是否注入项目结构摘要到 system prompt
+  metrics:
+    enabled: false                       # 可观测性指标工具（metrics_query），默认关
+    base-url: ""                         # Prometheus URL, e.g. http://prometheus:9090
+    auth-header: ""                      # HTTP header name (e.g. "Authorization")
+    auth-header-value: ""               # Header value (e.g. "Bearer xxx")
+    timeout-seconds: 15
+    max-points: 200                      # 最大数据点数/series
+  log-search:
+    enabled: false                       # 日志搜索工具（log_search），默认关
+    base-url: ""                         # Loki URL, e.g. http://loki:3100
+    auth-header: ""
+    auth-header-value: ""
+    timeout-seconds: 15
+    max-lines: 500                       # 单次返回最大行数
+  trace:
+    enabled: false                       # 链路追踪工具（trace_search），默认关
+    base-url: ""                         # Jaeger URL, e.g. http://jaeger:16686
+    auth-header: ""
+    auth-header-value: ""
+    timeout-seconds: 15
+    max-traces: 20                       # 单次返回最大 trace 数
+  config-read:
+    enabled: false                       # 配置读取工具（config_read），默认关
+    nacos-base-url: ""                   # Nacos URL
+    nacos-namespace: ""                  # 默认 namespace
+    nacos-auth-token: ""                 # Nacos 鉴权 token
+    max-keys: 100                        # 本地属性最大返回数
+    sensitive-key-patterns: ["password", "secret", "token", "credential", "key"]
   mcp:
     enabled: false                    # Phase 2
     servers: {}                       # {name: {transport: sse, url, auth-header, auth-header-value}}
@@ -79,6 +107,12 @@ snap-agent:
 | `agent.transcript-event-limit` | TaskStore | 03 §5 |
 | `jdbc.*` | JdbcQueryToolProvider | 04 §2 |
 | `redis.*` | RedisReadToolProvider | 04 §3 |
+| `logs.*` | LogReadToolProvider | 04 §2.3 |
+| `code.*` | CodeReadToolProvider / GitLogToolProvider / ProjectStructureToolProvider | 04 §4 |
+| `metrics.*` | MetricsToolProvider（Prometheus 查询） | 04 §5 |
+| `log-search.*` | LogSearchToolProvider（Loki 日志搜索） | 04 §5 |
+| `trace.*` | TraceSearchToolProvider（Jaeger 链路追踪） | 04 §5 |
+| `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |

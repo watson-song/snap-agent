@@ -53,6 +53,10 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
                 <exclude>skills/redis-query.md</exclude>
                 <exclude>skills/log-analysis.md</exclude>
                 <exclude>skills/code-analysis.md</exclude>
+                <exclude>skills/ops-health-check.md</exclude>
+                <exclude>skills/slow-query-analysis.md</exclude>
+                <exclude>skills/error-spike-investigation.md</exclude>
+                <exclude>skills/config-diff.md</exclude>
             </excludes>
         </resource>
     </resources>
@@ -180,6 +184,77 @@ snap-agent:
 - 三个工具均为只读，不写入/删除/修改任何文件
 
 GET `/skills` 响应中，含 `log_read` 工具的 skill 会额外返回 `appLogFile` 和 `logPaths` 字段，前端据此显示日志路径信息。
+
+### 可观测性工具配置（v0.4 新增）
+
+SnapAgent 可对接可观测性平台（Prometheus / Loki / Jaeger / Nacos），让 Agent 实时查询指标、搜索日志、分析调用链、读取配置，从"被动问答"升级为"主动运营诊断"。启用后提供四个只读工具：
+
+| 工具 | 后端 | 功能 |
+|------|------|------|
+| `metrics_query` | Prometheus | 查询 PromQL 指标（QPS、延迟、错误率、CPU/Mem） |
+| `log_search` | Loki | 搜索 LogQL 日志，分析错误模式、统计频率 |
+| `trace_search` | Jaeger | 搜索分布式 trace，分析调用链、定位慢 span |
+| `config_read` | Spring Environment + Nacos | 读取本地配置或远程 Nacos 配置，对比环境差异 |
+
+所有工具默认 `enabled=false`，未配置时零 bean 创建，零影响。各工具独立装配，互不依赖。
+
+**最小可用配置（启用 Prometheus 指标 + Loki 日志搜索）：**
+
+```yaml
+snap-agent:
+  metrics:
+    enabled: true
+    base-url: http://prometheus:9090        # Prometheus URL
+    # auth-header: Authorization           # 如需鉴权，配 header name
+    # auth-header-value: ${PROM_TOKEN}     # header value（建议用环境变量）
+    timeout-seconds: 15
+    max-points: 200                         # 单 series 最大数据点数
+  log-search:
+    enabled: true
+    base-url: http://loki:3100              # Loki URL
+    # auth-header: Authorization
+    # auth-header-value: ${LOKI_TOKEN}
+    timeout-seconds: 15
+    max-lines: 500                          # 单次返回最大行数
+  # trace:
+  #   enabled: true
+  #   base-url: http://jaeger:16686        # Jaeger URL
+  #   timeout-seconds: 15
+  #   max-traces: 20
+  # config-read:
+  #   enabled: true                         # 本地模式无 URL 要求
+  #   nacos-base-url: http://nacos:8848    # 如需读 Nacos 远程配置
+  #   nacos-namespace: ""
+  #   nacos-auth-token: ${NACOS_TOKEN}
+  #   max-keys: 100
+  #   sensitive-key-patterns: ["password", "secret", "token", "credential", "key"]
+```
+
+**装配条件：**
+
+| 工具 | 装配条件 |
+|------|---------|
+| `metrics_query` | `metrics.enabled=true` AND `base-url` 非空 |
+| `log_search` | `log-search.enabled=true` AND `base-url` 非空 |
+| `trace_search` | `trace.enabled=true` AND `base-url` 非空 |
+| `config_read` | `config-read.enabled=true`（本地模式无 URL 要求；Nacos 模式运行时校验） |
+
+**安全保证：**
+- 所有工具仅发 HTTP GET 请求，不提供 POST/PUT/DELETE
+- `config_read` 本地模式只读 `Environment`，不修改任何 property source
+- 敏感配置字段（password/secret/token/credential/key）自动脱敏为 `****`
+- `auth-header-value` 支持环境变量占位（如 `${PROM_TOKEN:}`），不硬编码
+- 超时强制（默认 15s），防止后端不可达时拖垮 Agent 线程池
+- 结果数量限制（max-points/max-lines/max-traces/max-keys），超限静默截断 + truncated 标志
+
+**配套内置 Skill：**
+
+| Skill | 工具组合 | 场景 |
+|-------|---------|------|
+| `ops-health-check` | metrics_query + log_search + mysql_query | 全面健康检查：指标快照 → 异常识别 → 根因下钻 |
+| `slow-query-analysis` | mysql_query + log_search + metrics_query | 慢查询排查：发现 → 执行计划 → 索引建议 |
+| `error-spike-investigation` | metrics_query + log_search + trace_search + code_read + git_log | 错误突增：定位窗口 → 日志 → 变更 → 调用链 → 代码 |
+| `config-diff` | config_read + metrics_query | 环境配置对比：读取 → 差异 → 风险评估 |
 
 运维在 DB 上建受限只读账号：
 ```sql
