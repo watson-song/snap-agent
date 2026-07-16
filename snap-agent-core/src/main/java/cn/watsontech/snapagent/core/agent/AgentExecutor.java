@@ -64,30 +64,56 @@ public class AgentExecutor {
     private final int maxTurns;
     private final int maxTokens;
     private final ObjectMapper objectMapper;
-    private final SystemPromptExtender promptExtender;
+    private final List<SystemPromptExtender> promptExtenders;
 
     public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
                          TaskStore taskStore, int maxTurns, int maxTokens) {
-        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, null);
+        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens,
+                Collections.<SystemPromptExtender>emptyList());
     }
 
     /**
-     * Full constructor with an optional {@link SystemPromptExtender}.
+     * Full constructor with an optional single {@link SystemPromptExtender}.
      *
      * <p>When {@code promptExtender} is non-null, its {@link SystemPromptExtender#extend}
      * output is appended to the system prompt, enabling context injection (e.g.
      * project structure summary) without modifying skill bodies.</p>
+     *
+     * @deprecated use {@link #AgentExecutor(LlmClient, ToolDispatcher, TaskStore, int, int, List)}
+     *             to support multiple extenders (v0.7).
      */
+    @Deprecated
     public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
                          TaskStore taskStore, int maxTurns, int maxTokens,
                          SystemPromptExtender promptExtender) {
+        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens,
+                promptExtender != null
+                        ? Collections.singletonList(promptExtender)
+                        : Collections.<SystemPromptExtender>emptyList());
+    }
+
+    /**
+     * Full constructor with a list of {@link SystemPromptExtender} instances.
+     *
+     * <p>Each extender's {@link SystemPromptExtender#extend} output is appended
+     * to the system prompt in iteration order. This enables multiple context
+     * injectors (e.g. project structure summary + business knowledge) to
+     * coexist.</p>
+     *
+     * @since v0.7
+     */
+    public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
+                         TaskStore taskStore, int maxTurns, int maxTokens,
+                         List<SystemPromptExtender> promptExtenders) {
         this.llmClient = llmClient;
         this.toolDispatcher = toolDispatcher;
         this.taskStore = taskStore;
         this.maxTurns = maxTurns;
         this.maxTokens = maxTokens;
         this.objectMapper = new ObjectMapper();
-        this.promptExtender = promptExtender;
+        this.promptExtenders = promptExtenders != null
+                ? new ArrayList<SystemPromptExtender>(promptExtenders)
+                : new ArrayList<SystemPromptExtender>();
     }
 
     /**
@@ -255,9 +281,10 @@ public class AgentExecutor {
         // User context
         sb.append("userId: ").append(task.getUserId()).append("\n");
 
-        // Project context injection (v0.3): append extender output if present
-        if (promptExtender != null) {
-            String context = promptExtender.extend(skill, task);
+        // Context injection (v0.3+): append each extender's output in order.
+        // v0.7 extends this to multiple extenders (e.g. project context + knowledge).
+        for (SystemPromptExtender extender : promptExtenders) {
+            String context = extender.extend(skill, task);
             if (context != null && !context.isEmpty()) {
                 sb.append("\n").append(context);
             }

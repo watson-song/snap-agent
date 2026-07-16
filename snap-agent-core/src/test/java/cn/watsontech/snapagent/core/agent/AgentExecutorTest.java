@@ -555,13 +555,14 @@ class AgentExecutorTest {
         assertThat(captor.getValue().getModel()).isEqualTo("claude-sonnet-4-6");
     }
 
-    // ---- SystemPromptExtender integration (v0.3) ----
+    // ---- SystemPromptExtender integration (v0.3, multi-extender v0.7) ----
 
     @Test
     void shouldAppendExtenderContextToSystemPrompt() {
         SystemPromptExtender extender = (s, t) ->
                 "## 项目结构\n模块: snap-agent-core";
-        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
         AgentTask task = newTask();
 
         String prompt = executor.buildSystemPrompt(skill, task);
@@ -575,7 +576,8 @@ class AgentExecutorTest {
     @Test
     void shouldNotAppendAnythingWhenExtenderReturnsEmpty() {
         SystemPromptExtender extender = (s, t) -> "";
-        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
         AgentTask task = newTask();
 
         String prompt = executor.buildSystemPrompt(skill, task);
@@ -587,12 +589,39 @@ class AgentExecutorTest {
     @Test
     void shouldNotAppendAnythingWhenExtenderReturnsNull() {
         SystemPromptExtender extender = (s, t) -> null;
-        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
         AgentTask task = newTask();
 
         String prompt = executor.buildSystemPrompt(skill, task);
 
         assertThat(prompt.trim()).endsWith("user-1");
+    }
+
+    @Test
+    void shouldAppendMultipleExtendersToSystemPrompt() {
+        // v0.7: multiple extenders (e.g. project context + knowledge) coexist
+        SystemPromptExtender projectExtender = (s, t) ->
+                "## 项目结构\n模块: snap-agent-core";
+        SystemPromptExtender knowledgeExtender = (s, t) ->
+                "## 业务知识参考\n补货策略: 最低库存阈值";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Arrays.asList(projectExtender, knowledgeExtender));
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        // Both extenders' output should be present
+        assertThat(prompt).contains("项目结构");
+        assertThat(prompt).contains("snap-agent-core");
+        assertThat(prompt).contains("业务知识参考");
+        assertThat(prompt).contains("补货策略");
+        // project context comes before knowledge (insertion order)
+        assertThat(prompt.indexOf("snap-agent-core")).isLessThan(prompt.indexOf("补货策略"));
+        // Both come after userId
+        assertThat(prompt.indexOf("user-1"))
+                .isLessThan(prompt.indexOf("snap-agent-core"))
+                .isLessThan(prompt.indexOf("补货策略"));
     }
 
     @Test
