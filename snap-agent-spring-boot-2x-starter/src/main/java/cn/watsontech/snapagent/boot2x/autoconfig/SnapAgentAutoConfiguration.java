@@ -15,13 +15,17 @@ import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
 import cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.ConfigReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
 import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.LogSearchToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.MetricsToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
+import cn.watsontech.snapagent.boot2x.tool.TraceSearchToolProvider;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
@@ -267,6 +271,48 @@ public class SnapAgentAutoConfiguration {
     public GitLogToolProvider gitLogToolProvider(CodePathGuard codePathGuard) {
         log.info("GitLogToolProvider assembled");
         return new GitLogToolProvider(codePathGuard);
+    }
+
+    // ---- MetricsToolProvider (v0.4) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.metrics", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public MetricsToolProvider metricsToolProvider(SnapAgentProperties props) {
+        log.info("MetricsToolProvider assembled (base-url={})", props.getMetrics().getBaseUrl());
+        return new MetricsToolProvider(props.getMetrics());
+    }
+
+    // ---- LogSearchToolProvider (v0.4) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.log-search", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public LogSearchToolProvider logSearchToolProvider(SnapAgentProperties props) {
+        log.info("LogSearchToolProvider assembled (base-url={})", props.getLogSearch().getBaseUrl());
+        return new LogSearchToolProvider(props.getLogSearch());
+    }
+
+    // ---- TraceSearchToolProvider (v0.4) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.trace", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public TraceSearchToolProvider traceSearchToolProvider(SnapAgentProperties props) {
+        log.info("TraceSearchToolProvider assembled (base-url={})", props.getTrace().getBaseUrl());
+        return new TraceSearchToolProvider(props.getTrace());
+    }
+
+    // ---- ConfigReadToolProvider (v0.4) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.config-read", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public ConfigReadToolProvider configReadToolProvider(
+            SnapAgentProperties props,
+            org.springframework.core.env.Environment environment) {
+        log.info("ConfigReadToolProvider assembled");
+        return new ConfigReadToolProvider(props.getConfigRead(), environment);
     }
 
     // ---- ToolDispatcher ----
