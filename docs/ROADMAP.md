@@ -389,7 +389,7 @@ Agent:
 
 ---
 
-## v0.9 — 问题问答闭环
+## v0.9 — 问题问答闭环（已交付）
 
 **目标**：从"一次性诊断"升级为"问题→诊断→方案→修复→验证→沉淀"的完整闭环
 
@@ -401,6 +401,20 @@ Agent:
 3. 追踪修复进度
 4. 验证修复是否生效
 5. 把经验沉淀下来
+
+### 已完成
+
+| 组件 | 说明 |
+|------|------|
+| `IssueClosure` | 全生命周期数据模型：诊断→方案→修复→验证→关闭，含状态机 (DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED) |
+| `SolutionSuggester` (SPI) | 基于根因关键词生成候选解决方案，含推荐选项和相关代码引用 |
+| `TemplateSolutionSuggester` | 默认实现：5 类根因模板（参数缺失/连接超时/数据为空/权限/通用），每类 2-3 方案选项含 effort 和 temporary 标志 |
+| `IssueTracker` (SPI) | Issue 存储 SPI：创建/查询/更新状态/分页列表/保存 |
+| `InMemoryIssueStore` | 默认实现：LinkedHashMap 存储，自动生成 ID，按 createdAt 降序 |
+| `VerificationRunner` (SPI) | 验证 SPI：重跑诊断 Skill，比对前后状态 |
+| `SimpleVerificationRunner` | 默认实现：用相同输入重跑 AgentExecutor，比对 task status |
+| `IssueStatus` 枚举 | DIAGNOSED, SOLUTION_PROPOSED, ISSUE_CREATED, FIX_IN_PROGRESS, VERIFIED, CLOSED, FAILED |
+| `SolutionOption` / `SolutionSuggestion` / `VerificationResult` | 闭环数据载体 |
 
 ### 闭环设计
 
@@ -1014,8 +1028,8 @@ v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 已交付（
 v0.8          CodeGraph + 代码结构摘要条件注入                ← 已交付（代码知识按需）
     │
     ▼
-v0.9          IssueExperienceStore + 问题经验预注入            ← 三源齐备
-    │                                                        KnowledgeInjector 完整版
+v0.9          IssueClosure + SolutionSuggester + VerificationRunner ← 已交付
+    │                                                        问题问答闭环
     ▼
 v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 编排层完善
 ```

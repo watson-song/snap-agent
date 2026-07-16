@@ -772,6 +772,39 @@ public class SnapAgentAutoConfiguration {
                 props.getCodeGraph().getMaxImpactDepth());
     }
 
+    // ---- Q&A Closed Loop (v0.9) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-tracking", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.closure.SolutionSuggester templateSolutionSuggester() {
+        log.info("TemplateSolutionSuggester assembled");
+        return new cn.watsontech.snapagent.boot2x.closure.TemplateSolutionSuggester();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-tracking", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.closure.IssueTracker inMemoryIssueStore() {
+        log.info("InMemoryIssueStore assembled");
+        return new cn.watsontech.snapagent.boot2x.closure.InMemoryIssueStore();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-tracking", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.closure.VerificationRunner simpleVerificationRunner(
+            TaskStore taskStore,
+            AgentExecutor agentExecutor,
+            cn.watsontech.snapagent.core.skill.SkillRegistry skillRegistry) {
+        log.info("SimpleVerificationRunner assembled");
+        return new cn.watsontech.snapagent.boot2x.closure.SimpleVerificationRunner(
+                taskStore, agentExecutor, skillRegistry);
+    }
+
     // ---- helpers ----
 
     private Path resolveUploadDir(String uploadSkillsDir) {

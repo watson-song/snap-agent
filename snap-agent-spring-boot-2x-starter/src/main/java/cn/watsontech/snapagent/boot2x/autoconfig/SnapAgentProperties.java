@@ -54,6 +54,7 @@ public class SnapAgentProperties {
     private Alert alert = new Alert();
     private Knowledge knowledge = new Knowledge();
     private CodeGraph codeGraph = new CodeGraph();
+    private IssueTracking issueTracking = new IssueTracking();
 
     // ---- getters / setters ----
 
@@ -231,6 +232,14 @@ public class SnapAgentProperties {
 
     public void setCodeGraph(CodeGraph codeGraph) {
         this.codeGraph = codeGraph;
+    }
+
+    public IssueTracking getIssueTracking() {
+        return issueTracking;
+    }
+
+    public void setIssueTracking(IssueTracking issueTracking) {
+        this.issueTracking = issueTracking;
     }
 
     // ---- nested classes ----
@@ -1259,5 +1268,30 @@ public class SnapAgentProperties {
         public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
         public int getMaxImpactDepth() { return maxImpactDepth; }
         public void setMaxImpactDepth(int maxImpactDepth) { this.maxImpactDepth = maxImpactDepth; }
+    }
+
+    /**
+     * Q&A closed loop configuration (v0.9).
+     *
+     * <p>When {@code enabled=true}, solution suggestion, issue tracking, and
+     * verification runner beans are assembled so that diagnostic results can
+     * flow into a structured "diagnose → solution → fix → verify → close" cycle.</p>
+     */
+    public static class IssueTracking {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+
+        /** Auto-generate solution suggestions after a diagnostic run completes. */
+        private boolean autoSuggest = true;
+
+        /** Auto-run verification after issue is marked as fixed. */
+        private boolean autoVerify = false;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public boolean isAutoSuggest() { return autoSuggest; }
+        public void setAutoSuggest(boolean autoSuggest) { this.autoSuggest = autoSuggest; }
+        public boolean isAutoVerify() { return autoVerify; }
+        public void setAutoVerify(boolean autoVerify) { this.autoVerify = autoVerify; }
     }
 }
