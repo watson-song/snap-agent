@@ -554,4 +554,58 @@ class AgentExecutorTest {
 
         assertThat(captor.getValue().getModel()).isEqualTo("claude-sonnet-4-6");
     }
+
+    // ---- SystemPromptExtender integration (v0.3) ----
+
+    @Test
+    void shouldAppendExtenderContextToSystemPrompt() {
+        SystemPromptExtender extender = (s, t) ->
+                "## 项目结构\n模块: snap-agent-core";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt).contains("项目结构");
+        assertThat(prompt).contains("snap-agent-core");
+        // The extender content should be near the end, after userId
+        assertThat(prompt.indexOf("user-1")).isLessThan(prompt.indexOf("snap-agent-core"));
+    }
+
+    @Test
+    void shouldNotAppendAnythingWhenExtenderReturnsEmpty() {
+        SystemPromptExtender extender = (s, t) -> "";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        // Prompt should end with the userId line (no extra context)
+        assertThat(prompt.trim()).endsWith("user-1");
+    }
+
+    @Test
+    void shouldNotAppendAnythingWhenExtenderReturnsNull() {
+        SystemPromptExtender extender = (s, t) -> null;
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192, extender);
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt.trim()).endsWith("user-1");
+    }
+
+    @Test
+    void shouldWorkWithoutExtenderForBackwardCompat() {
+        // Old 5-arg constructor — no extender, no context injection
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt).startsWith("你是只读诊断 agent");
+        assertThat(prompt).contains("user-1");
+        // No project structure context should be present
+        assertThat(prompt).doesNotContain("项目结构");
+    }
 }

@@ -64,15 +64,30 @@ public class AgentExecutor {
     private final int maxTurns;
     private final int maxTokens;
     private final ObjectMapper objectMapper;
+    private final SystemPromptExtender promptExtender;
 
     public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
                          TaskStore taskStore, int maxTurns, int maxTokens) {
+        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, null);
+    }
+
+    /**
+     * Full constructor with an optional {@link SystemPromptExtender}.
+     *
+     * <p>When {@code promptExtender} is non-null, its {@link SystemPromptExtender#extend}
+     * output is appended to the system prompt, enabling context injection (e.g.
+     * project structure summary) without modifying skill bodies.</p>
+     */
+    public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
+                         TaskStore taskStore, int maxTurns, int maxTokens,
+                         SystemPromptExtender promptExtender) {
         this.llmClient = llmClient;
         this.toolDispatcher = toolDispatcher;
         this.taskStore = taskStore;
         this.maxTurns = maxTurns;
         this.maxTokens = maxTokens;
         this.objectMapper = new ObjectMapper();
+        this.promptExtender = promptExtender;
     }
 
     /**
@@ -239,6 +254,14 @@ public class AgentExecutor {
 
         // User context
         sb.append("userId: ").append(task.getUserId()).append("\n");
+
+        // Project context injection (v0.3): append extender output if present
+        if (promptExtender != null) {
+            String context = promptExtender.extend(skill, task);
+            if (context != null && !context.isEmpty()) {
+                sb.append("\n").append(context);
+            }
+        }
 
         return sb.toString();
     }
