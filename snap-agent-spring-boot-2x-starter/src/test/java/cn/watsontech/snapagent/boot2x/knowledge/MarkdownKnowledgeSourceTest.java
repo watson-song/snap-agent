@@ -93,6 +93,24 @@ class MarkdownKnowledgeSourceTest {
     }
 
     @Test
+    void load_fromClasspath_loadsBuiltinKnowledge() {
+        // The starter packages business-overview.md at classpath:/docs/knowledge/
+        MarkdownKnowledgeSource source = new MarkdownKnowledgeSource("classpath:/docs/knowledge/");
+
+        List<KnowledgeFragment> fragments = source.load();
+
+        assertThat(fragments).isNotEmpty();
+        // business-overview.md has H1 + 4 H2 sections
+        // → 1 overview + 4 section fragments (at least 4 section fragments)
+        assertThat(fragments.size()).isGreaterThanOrEqualTo(4);
+        // Every fragment carries the H1 title as category metadata
+        for (KnowledgeFragment f : fragments) {
+            assertThat(f.getMetadata().get("category"))
+                    .isEqualTo("SnapAgent 业务知识示例");
+        }
+    }
+
+    @Test
     void load_nonexistentDir_returnsEmptyList() {
         MarkdownKnowledgeSource source = new MarkdownKnowledgeSource("/nonexistent/path/xyz");
         List<KnowledgeFragment> fragments = source.load();

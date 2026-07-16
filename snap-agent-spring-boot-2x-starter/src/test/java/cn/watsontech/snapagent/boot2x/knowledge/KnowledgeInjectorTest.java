@@ -104,7 +104,7 @@ class KnowledgeInjectorTest {
 
     @Test
     void extend_respectsMaxFragmentsLimit() {
-        // Create 5 fragments all matching "database"
+        // Create 5 fragments all matching "database content"
         List<KnowledgeFragment> frags = new ArrayList<KnowledgeFragment>();
         for (int i = 1; i <= 5; i++) {
             frags.add(makeFragment("Database Topic " + i,
@@ -113,7 +113,7 @@ class KnowledgeInjectorTest {
         KnowledgeBase kb = makeKnowledgeBase(frags);
         KnowledgeInjector injector = new KnowledgeInjector(kb, 2, 0.01);
 
-        String result = injector.extend(makeSkill(), makeTask("database"));
+        String result = injector.extend(makeSkill(), makeTask("database content"));
 
         // Should only inject 2 fragments (maxFragments=2)
         assertThat(result).contains("知识片段 1");
