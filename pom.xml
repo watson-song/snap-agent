@@ -6,7 +6,7 @@
 
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-parent</artifactId>
-    <version>0.4-SNAPSHOT</version>
+    <version>0.5-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>SnapAgent Parent</name>
