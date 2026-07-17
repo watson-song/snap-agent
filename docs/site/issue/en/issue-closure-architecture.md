@@ -537,7 +537,7 @@ When a user asks a similar question in the future, `KnowledgeInjector` retrieves
 
 ## 6. REST API
 
-All endpoints are mounted under the SnapAgent basePath (default `/skills-agent`) and require `requireAuth()` permission checks. When `IssueClosureService` is not assembled (issue-closure disabled), returns **503** + `ISSUE_CLOSURE_DISABLED`.
+All endpoints are mounted under the SnapAgent basePath (default `/snap-agent`) and require `requireAuth()` permission checks. When `IssueClosureService` is not assembled (issue-closure disabled), returns **503** + `ISSUE_CLOSURE_DISABLED`.
 
 ### Endpoint Overview
 

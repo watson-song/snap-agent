@@ -723,7 +723,7 @@ snap-agent:
 
 ```bash
 # Register a daily 8 AM health patrol
-curl -X POST http://localhost:8080/skills-agent/patrol/tasks \
+curl -X POST http://localhost:8080/snap-agent/patrol/tasks \
   -H "Content-Type: application/json" \
   -u admin:password \
   -d '{
@@ -734,14 +734,14 @@ curl -X POST http://localhost:8080/skills-agent/patrol/tasks \
 
 # Query patrol reports
 curl -u admin:password \
-  "http://localhost:8080/skills-agent/patrol/reports?page=0&size=20"
+  "http://localhost:8080/snap-agent/patrol/reports?page=0&size=20"
 
 # Manually trigger an anomaly event (via external system calling onEvent)
 # View converged alerts
 curl -u admin:password \
-  "http://localhost:8080/skills-agent/alerts?type=error-spike"
+  "http://localhost:8080/snap-agent/alerts?type=error-spike"
 
 # Generate a bugfix suggestion from a diagnostic task
 curl -X POST -u admin:password \
-  "http://localhost:8080/skills-agent/runs/{taskId}/bugfix-suggestion"
+  "http://localhost:8080/snap-agent/runs/{taskId}/bugfix-suggestion"
 ```

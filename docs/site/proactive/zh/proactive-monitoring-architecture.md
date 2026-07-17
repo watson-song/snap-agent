@@ -706,7 +706,7 @@ snap-agent:
 
 ```bash
 # 注册每天早 8 点的健康巡检
-curl -X POST http://localhost:8080/skills-agent/patrol/tasks \
+curl -X POST http://localhost:8080/snap-agent/patrol/tasks \
   -H "Content-Type: application/json" \
   -u admin:password \
   -d '{
@@ -717,14 +717,14 @@ curl -X POST http://localhost:8080/skills-agent/patrol/tasks \
 
 # 查询巡检报告
 curl -u admin:password \
-  "http://localhost:8080/skills-agent/patrol/reports?page=0&size=20"
+  "http://localhost:8080/snap-agent/patrol/reports?page=0&size=20"
 
 # 手动触发异常事件（通过外部系统调用 onEvent）
 # 查看收敛后的告警
 curl -u admin:password \
-  "http://localhost:8080/skills-agent/alerts?type=error-spike"
+  "http://localhost:8080/snap-agent/alerts?type=error-spike"
 
 # 从诊断任务生成修复建议
 curl -X POST -u admin:password \
-  "http://localhost:8080/skills-agent/runs/{taskId}/bugfix-suggestion"
+  "http://localhost:8080/snap-agent/runs/{taskId}/bugfix-suggestion"
 ```

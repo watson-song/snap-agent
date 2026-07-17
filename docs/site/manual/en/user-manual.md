@@ -104,9 +104,9 @@ SnapAgent ships an embedded single-page app at `{base-path}/`. The layout is:
 │          │  ┌─ Streaming thought ───────────────────────────────────┐  │
 │ ▾ Host   │  │ Agentic: Let me verify DB connectivity first...      │  │
 │   Skills │  └────────────────────────────────────────────────────────┘  │
-│ ▸ Builtin │  ┌─ Tool call: mysql_query ─────────────────────────────┐  │
-│   Skills │  │ args: {"sql":"SELECT 1 AS ok"}                         │  │
-│          │  │ result: ok=1 (1 row, 12ms)                            │  │
+│  • ...   │  ┌─ Tool call: mysql_query ─────────────────────────────┐  │
+│ ▸ Builtin │  │ args: {"sql":"SELECT 1 AS ok"}                         │  │
+│   Skills │  │ result: ok=1 (1 row, 12ms)                            │  │
 │ [🔧 📋 💰 │  └────────────────────────────────────────────────────────┘  │
 │  🐛 🛡️ 🔔 │  ┌─ Final response ─────────────────────────────────────┐  │
 │  📚]     │  │ ✅ System healthy: DB reachable, 47 tables...         │  │

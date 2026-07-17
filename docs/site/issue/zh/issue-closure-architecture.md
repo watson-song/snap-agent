@@ -533,7 +533,7 @@ passed: true
 
 ## 6. REST API
 
-所有端点挂载在 SnapAgent basePath 下 (默认 `/skills-agent`), 需通过 `requireAuth()` 权限校验。`IssueClosureService` 未装配时 (issue-closure disabled) 返回 **503** + `ISSUE_CLOSURE_DISABLED`。
+所有端点挂载在 SnapAgent basePath 下 (默认 `/snap-agent`), 需通过 `requireAuth()` 权限校验。`IssueClosureService` 未装配时 (issue-closure disabled) 返回 **503** + `ISSUE_CLOSURE_DISABLED`。
 
 ### 端点概览
 

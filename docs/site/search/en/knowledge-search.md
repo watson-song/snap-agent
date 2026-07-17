@@ -90,7 +90,52 @@ public final class SearchResult {
 - When CJK appears mid-Latin-word, flush the Latin word first, then process CJK
 - e.g. "SnapAgent 是嵌入式" → `["snapagent", "是嵌", "嵌式"]`
 
-### 2.2 Tokenization Examples
+### 2.2 Tokenization Code
+
+```java
+List<String> tokenize(String text) {
+    List<String> tokens = new ArrayList<>();
+    StringBuilder currentWord = new StringBuilder();
+    for (int i = 0; i < text.length(); i++) {
+        char c = text.charAt(i);
+        if (isCjk(c)) {
+            // Flush pending Latin word
+            if (currentWord.length() > 0) {
+                addToken(tokens, currentWord.toString());
+                currentWord = new StringBuilder();
+            }
+            // CJK bigram: combine with next char if also CJK
+            if (i + 1 < text.length() && isCjk(text.charAt(i + 1))) {
+                tokens.add(text.substring(i, i + 2));  // add directly, no filter
+            } else {
+                tokens.add(String.valueOf(c));  // standalone CJK char
+            }
+        } else if (Character.isLetterOrDigit(c)) {
+            currentWord.append(Character.toLowerCase(c));
+        } else {
+            // Whitespace/punctuation — flush Latin word
+            if (currentWord.length() > 0) {
+                addToken(tokens, currentWord.toString());
+                currentWord = new StringBuilder();
+            }
+        }
+    }
+    if (currentWord.length() > 0) {
+        addToken(tokens, currentWord.toString());
+    }
+    return tokens;
+}
+
+private void addToken(List<String> tokens, String token) {
+    // Latin tokens: drop < 2 chars (stopword filter)
+    // CJK bigrams: always >= 2 chars, standalone CJK: 1 char
+    if (token.length() >= 2) {
+        tokens.add(token);
+    }
+}
+```
+
+### 2.3 Tokenization Examples
 
 | Input | Tokens | Notes |
 |-------|--------|-------|
@@ -98,6 +143,7 @@ public final class SearchResult {
 | `数据库` | `["数据", "据库", "库"]` | 3 CJK chars → 3 tokens (2 bigrams + 1 standalone) |
 | `补货策略` | `["补货", "货策", "策略"]` | 4 CJK chars → 3 overlapping bigrams |
 | `系统` | `["系统", "统"]` | 2 CJK chars → 1 bigram + 1 standalone |
+| `SnapAgent 数据库诊断` | `["snapagent", "数据", "据库", "库", "诊", "诊断", "断"]` | Mixed text |
 
 ---
 
@@ -115,7 +161,34 @@ score = (titleHits × 2 + contentHits) / (queryTokenCount × 2)
 - Title hits weighted 2× (title directly describes topic)
 - Result clamped to `[0.0, 1.0]`
 
-### 3.2 Scoring Examples
+### 3.2 Scoring Code
+
+```java
+public double score(String query, KnowledgeFragment fragment) {
+    if (query == null || query.isEmpty() || fragment == null) {
+        return 0.0;
+    }
+    List<String> queryTokens = tokenize(query);
+    if (queryTokens.isEmpty()) {
+        return 0.0;  // at least 1 token required
+    }
+    Set<String> querySet = new HashSet<>(queryTokens);
+    Set<String> titleSet = new HashSet<>(tokenize(fragment.getTitle()));
+    Set<String> contentSet = new HashSet<>(tokenize(fragment.getContent()));
+
+    int titleHits = 0, contentHits = 0;
+    for (String token : querySet) {
+        if (titleSet.contains(token)) titleHits++;
+        if (contentSet.contains(token)) contentHits++;
+    }
+
+    int queryTokenCount = querySet.size();
+    double raw = (double) (titleHits * 2 + contentHits) / (queryTokenCount * 2.0);
+    return Math.max(0.0, Math.min(1.0, raw));
+}
+```
+
+### 3.3 Scoring Examples
 
 **Query: "数据库" (database)**
 
@@ -145,6 +218,7 @@ Fragment "SnapAgent 业务知识示例" (title contains SnapAgent):
 ```yaml
 snap-agent:
   knowledge:
+    enabled: true
     min-score: 0.1   # Default 0.1; fragments below this score are excluded
 ```
 
@@ -160,6 +234,13 @@ snap-agent:
 **Bug 1: minScore hardcoded to 0.0**
 
 `KnowledgeController.search()` hardcoded `0.0` instead of using configured `minScore`, causing all fragments (including zero-score non-matches) to be returned for any query.
+
+```java
+// Bug: hardcoded 0.0
+List<KnowledgeFragment> fragments = knowledgeBase.search(q, searchTopK, 0.0);
+// Fix: use configured minScore
+List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minScore);
+```
 
 **Bug 2: 2-token minimum restriction**
 
@@ -240,13 +321,13 @@ Returns matching fragments with relevance scores:
 
 ## 7. Knowledge Sources
 
-### MarkdownKnowledgeSource (built-in)
+### 7.1 MarkdownKnowledgeSource (built-in)
 
 - Splits Markdown by `##` headings; each section becomes a `KnowledgeFragment`
 - H1 title becomes `metadata.category`
 - Supports `classpath:/` and filesystem paths
 
-### Custom Knowledge Source
+### 7.2 Custom Knowledge Source
 
 Implement `KnowledgeSource` + `@Component` for auto-discovery (database, external API, Confluence, etc.).
 
