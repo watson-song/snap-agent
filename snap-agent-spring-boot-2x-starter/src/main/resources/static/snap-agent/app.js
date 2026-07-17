@@ -1,6 +1,6 @@
 // SnapAgent SPA — per-skill independent chat sessions with parallel streams
-// Version: v20 (feat: cancel stream calls POST /runs/{id}/cancel to interrupt in-flight LLM HTTP)
-console.log('[SnapAgent] app.js v20 loaded');
+// Version: v22 (feat: split builtin/host skills, hide disabled by default, skill detail modal)
+console.log('[SnapAgent] app.js v22 loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;            // currently active skill object
@@ -150,55 +150,222 @@ function profileLabel() {
 }
 
 // ===== Load Skills =====
+let showDisabledSkills = false;
+
 async function loadSkills() {
     const resp = await fetch(`${BASE}/skills`, { headers: authHeaders() });
     if (handleAuthError(resp)) return;
     const data = await resp.json();
     skillsData = data.skills || [];
-    const ul = document.getElementById('skills');
-    const iconsUl = document.getElementById('skillIcons');
-    ul.innerHTML = '';
+
+    // Split: available vs unavailable, then by source (custom/host vs builtin)
+    var available = skillsData.filter(s => s.availability === 'AVAILABLE');
+    var unavailable = skillsData.filter(s => s.availability !== 'AVAILABLE');
+
+    var hostSkills = available.filter(s => s.source !== 'builtin');
+    var builtinSkills = available.filter(s => s.source === 'builtin');
+
+    var hostUl = document.getElementById('hostSkills');
+    var builtinUl = document.getElementById('builtinSkills');
+    var disabledUl = document.getElementById('disabledSkills');
+    var iconsUl = document.getElementById('skillIcons');
+    hostUl.innerHTML = '';
+    builtinUl.innerHTML = '';
+    disabledUl.innerHTML = '';
     iconsUl.innerHTML = '';
-    document.getElementById('skillCount').textContent = skillsData.length;
-    skillsData.forEach(skill => {
-        // Expanded list item
-        const li = document.createElement('li');
+
+    document.getElementById('skillCount').textContent = available.length;
+    document.getElementById('hostCount').textContent = hostSkills.length;
+    document.getElementById('builtinCount').textContent = builtinSkills.length;
+
+    // Render a skill item into a <ul>
+    function renderSkillItem(ul, skill) {
+        var li = document.createElement('li');
         li.dataset.skillId = skill.name;
-        const badge = skill.availability === 'AVAILABLE'
+        var badge = skill.availability === 'AVAILABLE'
             ? '<span class="skill-badge available">可用</span>'
             : '<span class="skill-badge unavailable">不可用</span>';
-        li.innerHTML = `
-            <div class="skill-item-name">${skill.name}${badge}<span class="skill-item-running" style="display:none">运行中</span></div>
-            <div class="skill-item-desc">${skill.description || ''}</div>
-        `;
+        li.innerHTML =
+            '<div class="skill-item-name">' + escapeHtml(skill.name) + badge +
+            '<button class="skill-detail-btn" title="查看 Skill 详情">ℹ️</button>' +
+            '<span class="skill-item-running" style="display:none">运行中</span></div>' +
+            '<div class="skill-item-desc">' + escapeHtml(skill.description || '') + '</div>';
         if (skill.availability !== 'AVAILABLE') {
             li.title = skill.unavailableReason || skill.availability;
             li.style.opacity = '0.5';
         }
-        li.addEventListener('click', () => selectSkill(skill, li));
+        li.addEventListener('click', function(e) {
+            // Don't trigger selectSkill when clicking the detail button
+            if (e.target.classList.contains('skill-detail-btn')) return;
+            selectSkill(skill, li);
+        });
+        // Detail button
+        var detailBtn = li.querySelector('.skill-detail-btn');
+        detailBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showSkillDetail(skill);
+        });
         ul.appendChild(li);
 
-        // Collapsed letter-icon item
-        const iconLi = document.createElement('li');
+        // Collapsed letter-icon item (only for available skills)
+        var iconLi = document.createElement('li');
         iconLi.dataset.skillId = skill.name;
         iconLi.dataset.name = skill.name;
         iconLi.textContent = (skill.name.charAt(0) || '?').toUpperCase();
         iconLi.title = skill.name;
-        if (skill.availability !== 'AVAILABLE') {
-            iconLi.classList.add('unavailable');
-        }
-        iconLi.addEventListener('click', () => {
-            // Ensure sidebar expanded view exists for the matching li
-            const expandedLi = document.querySelector(`.skill-list li[data-skill-id="${CSS.escape(skill.name)}"]`);
-            selectSkill(skill, expandedLi || iconLi);
+        iconLi.addEventListener('click', function() {
+            selectSkill(skill, li);
         });
         iconsUl.appendChild(iconLi);
+    }
+
+    // Render host skills (top section, expanded by default)
+    hostSkills.forEach(s => renderSkillItem(hostUl, s));
+
+    // Render builtin skills (bottom section, collapsed by default)
+    builtinSkills.forEach(s => renderSkillItem(builtinUl, s));
+
+    // Render disabled skills (hidden by default)
+    unavailable.forEach(s => {
+        var li = document.createElement('li');
+        li.dataset.skillId = s.name;
+        var badge = '<span class="skill-badge unavailable">不可用</span>';
+        li.innerHTML =
+            '<div class="skill-item-name">' + escapeHtml(s.name) + badge +
+            '<button class="skill-detail-btn" title="查看 Skill 详情">ℹ️</button></div>' +
+            '<div class="skill-item-desc">' + escapeHtml(s.description || '') + '</div>';
+        li.style.opacity = '0.5';
+        li.title = s.unavailableReason || s.availability;
+        li.addEventListener('click', function(e) {
+            if (e.target.classList.contains('skill-detail-btn')) return;
+            selectSkill(s, li);
+        });
+        var detailBtn = li.querySelector('.skill-detail-btn');
+        detailBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showSkillDetail(s);
+        });
+        disabledUl.appendChild(li);
     });
+
+    // Section toggle handlers
+    document.getElementById('hostSectionHeader').addEventListener('click', function() {
+        toggleSection('hostSectionHeader', 'hostSkills');
+    });
+    document.getElementById('builtinSectionHeader').addEventListener('click', function() {
+        toggleSection('builtinSectionHeader', 'builtinSkills');
+    });
+
+    // Toggle disabled skills visibility
+    document.getElementById('toggleDisabledBtn').addEventListener('click', function() {
+        showDisabledSkills = !showDisabledSkills;
+        document.getElementById('disabledSkills').style.display = showDisabledSkills ? 'block' : 'none';
+        this.classList.toggle('active', showDisabledSkills);
+    });
+
     // Re-apply running indicators for any stream already in progress
     Object.keys(skillChatState).forEach(name => {
-        const st = skillChatState[name];
+        var st = skillChatState[name];
         if (st.stream && !st.stream.done && !st.stream.cancelled) {
             setSkillRunning(name, true);
+        }
+    });
+}
+
+function toggleSection(headerId, listId) {
+    var header = document.getElementById(headerId);
+    var list = document.getElementById(listId);
+    var collapsed = header.dataset.collapsed === 'true';
+    if (collapsed) {
+        header.dataset.collapsed = 'false';
+        header.classList.remove('collapsed');
+        header.querySelector('.section-toggle').textContent = '▾';
+        list.style.display = 'block';
+    } else {
+        header.dataset.collapsed = 'true';
+        header.classList.add('collapsed');
+        header.querySelector('.section-toggle').textContent = '▸';
+        list.style.display = 'none';
+    }
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showSkillDetail(skill) {
+    // Remove existing modal if any
+    var existing = document.getElementById('skillDetailModal');
+    if (existing) existing.remove();
+
+    var modal = document.createElement('div');
+    modal.className = 'history-modal';
+    modal.id = 'skillDetailModal';
+
+    // Build info section
+    var infoHtml = '<div class="skill-detail-info">' +
+        '<div class="skill-detail-row"><span class="detail-label">名称</span><span class="detail-value">' + escapeHtml(skill.name) + '</span></div>' +
+        '<div class="skill-detail-row"><span class="detail-label">来源</span><span class="detail-value">' + escapeHtml(skill.source || 'unknown') + '</span></div>' +
+        '<div class="skill-detail-row"><span class="detail-label">状态</span><span class="detail-value">' +
+            (skill.availability === 'AVAILABLE'
+                ? '<span style="color:var(--green)">可用</span>'
+                : '<span style="color:var(--red)">不可用 — ' + escapeHtml(skill.unavailableReason || '') + '</span>') +
+            '</span></div>' +
+        '<div class="skill-detail-row"><span class="detail-label">描述</span><span class="detail-value">' + escapeHtml(skill.description || '') + '</span></div>' +
+        '<div class="skill-detail-row"><span class="detail-label">工具</span><span class="detail-value">' +
+            (skill.tools && skill.tools.length > 0 ? escapeHtml(skill.tools.join(', ')) : '无') + '</span></div>';
+
+    // Inputs
+    if (skill.inputs && skill.inputs.length > 0) {
+        infoHtml += '<div class="skill-detail-row"><span class="detail-label">输入参数</span><div class="detail-inputs">';
+        skill.inputs.forEach(function(input) {
+            var req = input.required ? '<span class="input-required">必填</span>' : '<span class="input-optional">选填</span>';
+            infoHtml += '<div class="detail-input-item">' +
+                '<code>' + escapeHtml(input.key) + '</code>' + req +
+                ' <span class="input-type">' + escapeHtml(input.type || 'string') + '</span>' +
+                ' — ' + escapeHtml(input.label || '') + '</div>';
+        });
+        infoHtml += '</div></div>';
+    }
+
+    // Shortcuts
+    if (skill.shortcuts && skill.shortcuts.length > 0) {
+        infoHtml += '<div class="skill-detail-row"><span class="detail-label">快捷方式</span><div class="detail-shortcuts">';
+        skill.shortcuts.forEach(function(sc) {
+            infoHtml += '<div class="detail-shortcut-item"><span class="shortcut-label">' + escapeHtml(sc.label) + '</span>' +
+                ' <span class="shortcut-msg">' + escapeHtml(sc.message) + '</span></div>';
+        });
+        infoHtml += '</div></div>';
+    }
+    infoHtml += '</div>';
+
+    // Body (original markdown content)
+    var bodyHtml = '';
+    if (skill.body) {
+        bodyHtml = '<div class="skill-detail-body">' +
+            '<div class="skill-detail-body-header">📄 Skill 原文 (Markdown)</div>' +
+            '<pre class="skill-detail-code">' + escapeHtml(skill.body) + '</pre>' +
+            '</div>';
+    }
+
+    modal.innerHTML =
+        '<div class="history-modal-card" style="width:700px;max-width:90vw;max-height:80vh;">' +
+            '<div class="history-modal-header">' +
+                '<span class="history-modal-title">Skill 详情: ' + escapeHtml(skill.name) + '</span>' +
+                '<button class="history-modal-close" id="skillDetailClose">✕</button>' +
+            '</div>' +
+            '<div class="history-modal-body">' +
+                infoHtml + bodyHtml +
+            '</div>' +
+        '</div>';
+
+    document.body.appendChild(modal);
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal || e.target.id === 'skillDetailClose') {
+            modal.remove();
         }
     });
 }

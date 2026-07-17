@@ -1971,6 +1971,10 @@ public class SnapAgentController {
             shortcuts.add(scDto);
         }
         dto.put("shortcuts", shortcuts);
+        // Skill body (markdown after frontmatter) — used by UI detail modal
+        if (skill.getBody() != null) {
+            dto.put("body", skill.getBody());
+        }
         // Log paths for log_read skills
         if (skill.getTools().contains("log_read")) {
             dto.put("logPaths", properties.getLogs().getAllowedPaths());
