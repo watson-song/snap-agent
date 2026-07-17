@@ -29,9 +29,11 @@ class CostTrackingLlmClientTest {
     void setUp() {
         delegate = mock(LlmClient.class);
         costTracker = mock(CostTracker.class);
-        trackingClient = new CostTrackingLlmClient(delegate, costTracker,
+        CostCalculator costCalculator = new CostCalculator(
                 new BigDecimal("3.00"), new BigDecimal("15.00"),
-                new BigDecimal("0.30"), "default-user", "default-skill");
+                new BigDecimal("0.30"));
+        trackingClient = new CostTrackingLlmClient(delegate, costTracker,
+                costCalculator, "default-user", "default-skill");
     }
 
     private LlmRequest newRequest() {

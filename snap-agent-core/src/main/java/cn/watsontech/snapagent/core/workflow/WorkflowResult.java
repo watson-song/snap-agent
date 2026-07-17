@@ -11,54 +11,60 @@ import java.util.Map;
  * The {@code stepResults} map is defensively copied on both input and
  * output to prevent external mutation. A null {@code stepResults} is
  * treated as an empty map.</p>
+ *
+ * <p>The {@link #getStatus()} method returns a structured
+ * {@link WorkflowStatus}; the legacy {@link #isSuccess()} method is
+ * retained for backward compatibility and returns {@code true} iff the
+ * status is {@link WorkflowStatus#COMPLETED}.</p>
  */
 public final class WorkflowResult {
 
     private final String workflowName;
-    private final boolean success;
+    private final WorkflowStatus status;
     private final String failedStep;
     private final String errorMessage;
-    private final Map<String, String> stepResults;
+    private final Map<String, StepResult> stepResults;
     private final long durationMs;
 
     /**
      * Full-argument constructor.
      *
      * @param workflowName 工作流名
-     * @param success      是否成功
-     * @param failedStep   失败步骤名 (可空, 仅 success=false 时有意义)
+     * @param status       工作流最终状态 (null 视为 {@link WorkflowStatus#FAILED})
+     * @param failedStep   失败步骤名 (可空, 仅 status=FAILED/ABORTED 时有意义)
      * @param errorMessage 失败原因 (可空)
-     * @param stepResults   stepName → result text (null → empty map)
+     * @param stepResults   stepName → {@link StepResult} (null → empty map)
      * @param durationMs    执行耗时 (毫秒)
      */
-    public WorkflowResult(String workflowName, boolean success, String failedStep,
-                          String errorMessage, Map<String, String> stepResults,
+    public WorkflowResult(String workflowName, WorkflowStatus status, String failedStep,
+                          String errorMessage, Map<String, StepResult> stepResults,
                           long durationMs) {
         this.workflowName = workflowName;
-        this.success = success;
+        this.status = status != null ? status : WorkflowStatus.FAILED;
         this.failedStep = failedStep;
         this.errorMessage = errorMessage;
         this.stepResults = stepResults != null
-                ? new LinkedHashMap<String, String>(stepResults)
-                : new LinkedHashMap<String, String>();
+                ? new LinkedHashMap<String, StepResult>(stepResults)
+                : new LinkedHashMap<String, StepResult>();
         this.durationMs = durationMs;
     }
 
     /**
-     * 工厂方法: 构造成功结果。
+     * 工厂方法: 构造成功结果 (status = {@link WorkflowStatus#COMPLETED})。
      *
      * @param name        工作流名
-     * @param stepResults  各步骤结果 (stepName → result text)
+     * @param stepResults  各步骤结果 (stepName → {@link StepResult})
      * @param durationMs   执行耗时 (毫秒)
      * @return a successful {@link WorkflowResult}
      */
-    public static WorkflowResult success(String name, Map<String, String> stepResults,
+    public static WorkflowResult success(String name, Map<String, StepResult> stepResults,
                                          long durationMs) {
-        return new WorkflowResult(name, true, null, null, stepResults, durationMs);
+        return new WorkflowResult(name, WorkflowStatus.COMPLETED, null, null,
+                stepResults, durationMs);
     }
 
     /**
-     * 工厂方法: 构造失败结果。
+     * 工厂方法: 构造失败结果 (status = {@link WorkflowStatus#FAILED})。
      *
      * @param name        工作流名
      * @param failedStep  失败步骤名
@@ -68,8 +74,9 @@ public final class WorkflowResult {
      * @return a failed {@link WorkflowResult}
      */
     public static WorkflowResult failure(String name, String failedStep, String error,
-                                         Map<String, String> stepResults, long durationMs) {
-        return new WorkflowResult(name, false, failedStep, error, stepResults, durationMs);
+                                         Map<String, StepResult> stepResults, long durationMs) {
+        return new WorkflowResult(name, WorkflowStatus.FAILED, failedStep, error,
+                stepResults, durationMs);
     }
 
     /** 工作流名。 */
@@ -77,9 +84,20 @@ public final class WorkflowResult {
         return workflowName;
     }
 
-    /** 是否成功。 */
+    /**
+     * 是否成功 (向后兼容)。
+     *
+     * <p>Equivalent to {@code getStatus() == WorkflowStatus.COMPLETED}.</p>
+     */
     public boolean isSuccess() {
-        return success;
+        return status == WorkflowStatus.COMPLETED;
+    }
+
+    /**
+     * 工作流最终状态。
+     */
+    public WorkflowStatus getStatus() {
+        return status;
     }
 
     /** 失败步骤名 (可空)。 */
@@ -95,9 +113,9 @@ public final class WorkflowResult {
     /**
      * 各步骤结果 (不可变视图, 永不为 null)。
      *
-     * @return unmodifiable map of stepName → result text
+     * @return unmodifiable map of stepName → {@link StepResult}
      */
-    public Map<String, String> getStepResults() {
+    public Map<String, StepResult> getStepResults() {
         return Collections.unmodifiableMap(stepResults);
     }
 
@@ -108,9 +126,9 @@ public final class WorkflowResult {
 
     @Override
     public String toString() {
-        return "WorkflowResult{workflowName='" + workflowName + "', success="
-                + success + ", failedStep='" + failedStep + "', errorMessage='"
-                + errorMessage + "', stepResults=" + stepResults.keySet()
+        return "WorkflowResult{workflowName='" + workflowName + "', status=" + status
+                + ", success=" + isSuccess() + ", failedStep='" + failedStep
+                + "', errorMessage='" + errorMessage + "', stepResults=" + stepResults.keySet()
                 + ", durationMs=" + durationMs + "}";
     }
 }

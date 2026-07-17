@@ -40,6 +40,7 @@ import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
+import cn.watsontech.snapagent.core.workflow.StepResult;
 import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
 import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
 import cn.watsontech.snapagent.core.workflow.WorkflowResult;
@@ -1980,9 +1981,24 @@ public class SnapAgentController {
         Map<String, Object> dto = new LinkedHashMap<String, Object>();
         dto.put("workflowName", result.getWorkflowName());
         dto.put("success", result.isSuccess());
+        dto.put("status", result.getStatus() != null ? result.getStatus().name() : null);
         dto.put("failedStep", result.getFailedStep());
         dto.put("errorMessage", result.getErrorMessage());
-        dto.put("stepResults", result.getStepResults());
+        // Serialize StepResult values into plain maps so callers don't need
+        // the StepResult class on their classpath.
+        Map<String, Object> stepResultsDto = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, StepResult> entry : result.getStepResults().entrySet()) {
+            StepResult sr = entry.getValue();
+            Map<String, Object> srDto = new LinkedHashMap<String, Object>();
+            if (sr != null) {
+                srDto.put("stepName", sr.getStepName());
+                srDto.put("taskId", sr.getTaskId());
+                srDto.put("status", sr.getStatus());
+                srDto.put("report", sr.getReport());
+            }
+            stepResultsDto.put(entry.getKey(), srDto);
+        }
+        dto.put("stepResults", stepResultsDto);
         dto.put("durationMs", result.getDurationMs());
         return dto;
     }

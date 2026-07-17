@@ -6,8 +6,10 @@ import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
+import cn.watsontech.snapagent.core.workflow.StepResult;
 import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
 import cn.watsontech.snapagent.core.workflow.WorkflowResult;
+import cn.watsontech.snapagent.core.workflow.WorkflowStatus;
 import cn.watsontech.snapagent.core.workflow.WorkflowStep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,9 +103,17 @@ class SimpleWorkflowEngineTest {
         WorkflowResult result = engine.execute(wf, triggerInputs);
 
         assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(result.getStepResults()).hasSize(2);
-        assertThat(result.getStepResults().get("s1")).isEqualTo("result-1");
-        assertThat(result.getStepResults().get("s2")).isEqualTo("result-2");
+
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s1.getReport()).isEqualTo("result-1");
+        assertThat(s1.getTaskId()).isNotNull();
+
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s2.getReport()).isEqualTo("result-2");
     }
 
     @Test
@@ -119,9 +129,16 @@ class SimpleWorkflowEngineTest {
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getStepResults()).hasSize(2);
-        assertThat(result.getStepResults().get("s1")).isEqualTo("found-error");
-        // s2 should be skipped (null result)
-        assertThat(result.getStepResults().get("s2")).isNull();
+
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1.getReport()).isEqualTo("found-error");
+
+        // s2 should be skipped — null status and null report
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2).isNotNull();
+        assertThat(s2.getStatus()).isNull();
+        assertThat(s2.getReport()).isNull();
+        assertThat(s2.getTaskId()).isNull();
     }
 
     @Test
@@ -137,7 +154,9 @@ class SimpleWorkflowEngineTest {
 
         assertThat(result.isSuccess()).isTrue();
         // s2 should execute because result contains "error"
-        assertThat(result.getStepResults().get("s2")).isEqualTo("error detected in system");
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getReport()).isEqualTo("error detected in system");
+        assertThat(s2.getStatus()).isEqualTo("SUCCEEDED");
     }
 
     @Test
@@ -152,6 +171,7 @@ class SimpleWorkflowEngineTest {
         WorkflowResult result = engine.execute(wf, triggerInputs);
 
         assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.FAILED);
         assertThat(result.getFailedStep()).isEqualTo("s1");
         assertThat(result.getErrorMessage()).contains("step execution failed");
     }
@@ -180,8 +200,16 @@ class SimpleWorkflowEngineTest {
         WorkflowResult result = engine.execute(wf, triggerInputs);
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getStepResults().get("s1")).isNull();
-        assertThat(result.getStepResults().get("s2")).isEqualTo("recovered");
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        // s1 was skipped after failure — StepResult present with FAILED status
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1).isNotNull();
+        assertThat(s1.getStatus()).isEqualTo("FAILED");
+        assertThat(s1.getReport()).isNull();
+
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getReport()).isEqualTo("recovered");
     }
 
     @Test
@@ -207,7 +235,9 @@ class SimpleWorkflowEngineTest {
         WorkflowResult result = engine.execute(wf, triggerInputs);
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getStepResults().get("s1")).isEqualTo("retry-success");
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1.getReport()).isEqualTo("retry-success");
+        assertThat(s1.getStatus()).isEqualTo("SUCCEEDED");
     }
 
     @Test
@@ -265,12 +295,48 @@ class SimpleWorkflowEngineTest {
         assertThat(capturedInputs[0]).isEqualTo("root-cause-found");
     }
 
+    @Test
+    void shouldResolveStatusAndTaskIdPlaceholders() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        // Reference both status and taskId of a prior step
+        inputs.put("priorStatus", "${s1.status}");
+        inputs.put("priorTaskId", "${s1.taskId}");
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "skill-a", null, null, null),
+                step("s2", "skill-b", null, inputs, null));
+
+        final String[] capturedStatus = new String[1];
+        final String[] capturedTaskId = new String[1];
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            if (task.getSkillId().equals("skill-a")) {
+                task.setStatus(TaskStatus.SUCCEEDED);
+                task.setReport("done");
+            } else {
+                capturedStatus[0] = task.getInputs().get("priorStatus");
+                capturedTaskId[0] = task.getInputs().get("priorTaskId");
+                task.setStatus(TaskStatus.SUCCEEDED);
+                task.setReport("analysis");
+            }
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        assertThat(result.isSuccess()).isTrue();
+        // s1.status == SUCCEEDED and s1.taskId is non-empty
+        assertThat(capturedStatus[0]).isEqualTo("SUCCEEDED");
+        assertThat(capturedTaskId[0]).isNotEmpty();
+    }
+
     // ---- Condition evaluation tests ----
 
     @Test
     void shouldEvaluateNotNullCondition() {
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
-        stepResults.put("s1", "some-result");
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "some-result"));
 
         assertThat(engine.evaluateCondition("${s1.result != null}", stepResults)).isTrue();
         assertThat(engine.evaluateCondition("${s2.result != null}", stepResults)).isFalse();
@@ -278,8 +344,8 @@ class SimpleWorkflowEngineTest {
 
     @Test
     void shouldEvaluateContainsCondition() {
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
-        stepResults.put("s1", "error in system");
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "error in system"));
 
         assertThat(engine.evaluateCondition("${s1.result.contains('error')}", stepResults)).isTrue();
         assertThat(engine.evaluateCondition("${s1.result.contains('timeout')}", stepResults)).isFalse();
@@ -287,18 +353,55 @@ class SimpleWorkflowEngineTest {
 
     @Test
     void shouldEvaluateSizeCondition() {
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
-        stepResults.put("s1", "non-empty");
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "non-empty"));
 
         assertThat(engine.evaluateCondition("${s1.result.size > 0}", stepResults)).isTrue();
 
-        stepResults.put("s1", "");
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", ""));
         assertThat(engine.evaluateCondition("${s1.result.size > 0}", stepResults)).isFalse();
     }
 
     @Test
+    void shouldEvaluateStatusEqualsCondition() {
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "ok"));
+
+        assertThat(engine.evaluateCondition("${s1.status == 'SUCCEEDED'}", stepResults)).isTrue();
+        assertThat(engine.evaluateCondition("${s1.status == 'FAILED'}", stepResults)).isFalse();
+
+        // Skipped step with null status — equality should be false
+        stepResults.put("s1", new StepResult("s1", null, null, null));
+        assertThat(engine.evaluateCondition("${s1.status == 'SUCCEEDED'}", stepResults)).isFalse();
+    }
+
+    @Test
+    void shouldEvaluateTruthyStatusCondition() {
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "ok"));
+
+        assertThat(engine.evaluateCondition("${s1.status}", stepResults)).isTrue();
+
+        // Null status → falsy
+        stepResults.put("s1", new StepResult("s1", null, null, null));
+        assertThat(engine.evaluateCondition("${s1.status}", stepResults)).isFalse();
+    }
+
+    @Test
+    void shouldEvaluateTruthyTaskIdCondition() {
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "ok"));
+
+        assertThat(engine.evaluateCondition("${s1.taskId}", stepResults)).isTrue();
+
+        // Null taskId → falsy
+        stepResults.put("s1", new StepResult("s1", null, null, null));
+        assertThat(engine.evaluateCondition("${s1.taskId}", stepResults)).isFalse();
+    }
+
+    @Test
     void shouldReturnTrueForNullCondition() {
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
         assertThat(engine.evaluateCondition(null, stepResults)).isTrue();
         assertThat(engine.evaluateCondition("", stepResults)).isTrue();
     }
@@ -316,7 +419,7 @@ class SimpleWorkflowEngineTest {
         triggerInputs.put("env", "prod");
 
         Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs,
-                new LinkedHashMap<String, String>());
+                new LinkedHashMap<String, StepResult>());
 
         assertThat(resolved.get("service")).isEqualTo("api-gateway");
         assertThat(resolved.get("env")).isEqualTo("prod");
@@ -327,13 +430,30 @@ class SimpleWorkflowEngineTest {
         Map<String, String> inputs = new LinkedHashMap<String, String>();
         inputs.put("rootCause", "${s1.result}");
 
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
-        stepResults.put("s1", "database-connection-pool-exhausted");
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED",
+                "database-connection-pool-exhausted"));
 
         Map<String, String> resolved = engine.resolveInputs(inputs,
                 new HashMap<String, String>(), stepResults);
 
         assertThat(resolved.get("rootCause")).isEqualTo("database-connection-pool-exhausted");
+    }
+
+    @Test
+    void shouldResolveStatusAndTaskIdInputPlaceholders() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("priorStatus", "${s1.status}");
+        inputs.put("priorTaskId", "${s1.taskId}");
+
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-99", "SUCCEEDED", "ok"));
+
+        Map<String, String> resolved = engine.resolveInputs(inputs,
+                new HashMap<String, String>(), stepResults);
+
+        assertThat(resolved.get("priorStatus")).isEqualTo("SUCCEEDED");
+        assertThat(resolved.get("priorTaskId")).isEqualTo("task-99");
     }
 
     @Test
@@ -344,11 +464,23 @@ class SimpleWorkflowEngineTest {
         Map<String, String> triggerInputs = new HashMap<String, String>();
         triggerInputs.put("service", "api");
 
-        Map<String, String> stepResults = new LinkedHashMap<String, String>();
-        stepResults.put("s1", "error");
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-1", "SUCCEEDED", "error"));
 
         Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs, stepResults);
 
         assertThat(resolved.get("combined")).isEqualTo("api-error");
+    }
+
+    @Test
+    void shouldHandleMissingStepInConditionGracefully() {
+        // Step not present in map — all condition checks should be false
+        Map<String, StepResult> empty = new LinkedHashMap<String, StepResult>();
+
+        assertThat(engine.evaluateCondition("${missing.result != null}", empty)).isFalse();
+        assertThat(engine.evaluateCondition("${missing.result.contains('x')}", empty)).isFalse();
+        assertThat(engine.evaluateCondition("${missing.status == 'SUCCEEDED'}", empty)).isFalse();
+        assertThat(engine.evaluateCondition("${missing.status}", empty)).isFalse();
+        assertThat(engine.evaluateCondition("${missing.taskId}", empty)).isFalse();
     }
 }

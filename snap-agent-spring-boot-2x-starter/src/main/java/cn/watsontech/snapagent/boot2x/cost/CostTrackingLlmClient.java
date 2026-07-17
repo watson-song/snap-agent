@@ -8,8 +8,6 @@ import cn.watsontech.snapagent.core.llm.LlmRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
 
@@ -27,31 +25,37 @@ import java.util.Map;
  * <p>If the underlying LlmClient implementation does not emit usage information
  * (i.e. {@link LlmEventSink#onUsage} is never called), the decorator skips
  * recording — it does not crash or create zero-cost records.</p>
+ *
+ * <p>Cost computation is delegated to a {@link CostCalculator} instance
+ * passed in the constructor, allowing the same pricing logic to be shared
+ * with other components (budget enforcers, summary services).</p>
  */
 public class CostTrackingLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(CostTrackingLlmClient.class);
-    private static final BigDecimal ONE_MILLION = new BigDecimal("1000000");
 
     private final LlmClient delegate;
     private final CostTracker costTracker;
-    private final BigDecimal inputPricePerMillion;
-    private final BigDecimal outputPricePerMillion;
-    private final BigDecimal cacheReadPricePerMillion;
+    private final CostCalculator costCalculator;
     private final String defaultUserId;
     private final String defaultSkillName;
 
+    /**
+     * Construct a tracking decorator.
+     *
+     * @param delegate        the underlying LLM client to wrap
+     * @param costTracker     where to record {@link CostRecord}s
+     * @param costCalculator  the calculator that maps token usage to cost
+     * @param defaultUserId   user id to attribute runs to when none is available
+     * @param defaultSkillName skill name to attribute runs to when none is available
+     */
     public CostTrackingLlmClient(LlmClient delegate, CostTracker costTracker,
-                                  BigDecimal inputPricePerMillion,
-                                  BigDecimal outputPricePerMillion,
-                                  BigDecimal cacheReadPricePerMillion,
+                                  CostCalculator costCalculator,
                                   String defaultUserId,
                                   String defaultSkillName) {
         this.delegate = delegate;
         this.costTracker = costTracker;
-        this.inputPricePerMillion = inputPricePerMillion;
-        this.outputPricePerMillion = outputPricePerMillion;
-        this.cacheReadPricePerMillion = cacheReadPricePerMillion;
+        this.costCalculator = costCalculator;
         this.defaultUserId = defaultUserId;
         this.defaultSkillName = defaultSkillName;
     }
@@ -115,7 +119,8 @@ public class CostTrackingLlmClient implements LlmClient {
             // Record cost if usage information was received
             if (usageReceived) {
                 try {
-                    BigDecimal cost = computeCost(inputTokens, outputTokens, cacheReadTokens);
+                    java.math.BigDecimal cost = costCalculator.computeCost(
+                            inputTokens, outputTokens, cacheReadTokens);
                     CostRecord record = new CostRecord(
                             null,
                             defaultUserId,
@@ -152,26 +157,5 @@ public class CostTrackingLlmClient implements LlmClient {
             // Forward to the delegate in case it also wants to observe usage
             delegate.onUsage(inputTokens, outputTokens, cacheReadTokens);
         }
-    }
-
-    /**
-     * Computes the total cost from token counts and per-million pricing.
-     *
-     * @param inputTokens     input token count
-     * @param outputTokens    output token count
-     * @param cacheReadTokens cache-read token count
-     * @return the computed cost
-     */
-    BigDecimal computeCost(long inputTokens, long outputTokens, long cacheReadTokens) {
-        BigDecimal inputCost = new BigDecimal(inputTokens)
-                .multiply(inputPricePerMillion)
-                .divide(ONE_MILLION, 6, RoundingMode.HALF_UP);
-        BigDecimal outputCost = new BigDecimal(outputTokens)
-                .multiply(outputPricePerMillion)
-                .divide(ONE_MILLION, 6, RoundingMode.HALF_UP);
-        BigDecimal cacheCost = new BigDecimal(cacheReadTokens)
-                .multiply(cacheReadPricePerMillion)
-                .divide(ONE_MILLION, 6, RoundingMode.HALF_UP);
-        return inputCost.add(outputCost).add(cacheCost);
     }
 }

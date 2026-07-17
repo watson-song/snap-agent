@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.autoconfig;
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
 import cn.watsontech.snapagent.boot2x.cost.BudgetEnforcer;
+import cn.watsontech.snapagent.boot2x.cost.CostCalculator;
 import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.cost.CostTrackingLlmClient;
 import cn.watsontech.snapagent.boot2x.cost.DefaultCostTracker;
@@ -460,7 +461,8 @@ public class SnapAgentAutoConfiguration {
             TaskStore taskStore,
             SnapAgentProperties props,
             ObjectProvider<SystemPromptExtender> extenderProvider,
-            ObjectProvider<CostTracker> costTrackerProvider) {
+            ObjectProvider<CostTracker> costTrackerProvider,
+            ObjectProvider<CostCalculator> costCalculatorProvider) {
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         if (llmClient == null) {
             log.warn("LlmClient not available; AgentExecutor will not function");
@@ -468,9 +470,17 @@ public class SnapAgentAutoConfiguration {
         // Wrap LlmClient with CostTrackingLlmClient when cost tracking is enabled
         CostTracker costTracker = costTrackerProvider.getIfAvailable();
         if (llmClient != null && costTracker != null && props.getCost().isEnabled()) {
-            SnapAgentProperties.Cost.Pricing pricing = props.getCost().getPricing();
+            CostCalculator costCalculator = costCalculatorProvider.getIfAvailable();
+            if (costCalculator == null) {
+                // Fall back to a default calculator if the bean is missing
+                SnapAgentProperties.Cost.Pricing pricing = props.getCost().getPricing();
+                BigDecimal input = pricing != null ? pricing.getInput() : BigDecimal.ZERO;
+                BigDecimal output = pricing != null ? pricing.getOutput() : BigDecimal.ZERO;
+                BigDecimal cacheRead = pricing != null ? pricing.getCacheRead() : BigDecimal.ZERO;
+                costCalculator = new CostCalculator(input, output, cacheRead);
+            }
             llmClient = new CostTrackingLlmClient(llmClient, costTracker,
-                    pricing.getInput(), pricing.getOutput(), pricing.getCacheRead(),
+                    costCalculator,
                     props.getIssueClosure().getSystemUserId(), "");
             log.info("LlmClient wrapped with CostTrackingLlmClient (cost tracking enabled)");
         }
@@ -948,6 +958,20 @@ public class SnapAgentAutoConfiguration {
         BigDecimal global = budgets != null ? budgets.getGlobalDaily() : null;
         log.info("CostSummaryService assembled");
         return new CostSummaryService(costStore, perUser, perSkill, global);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.cost", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(CostCalculator.class)
+    public CostCalculator costCalculator(SnapAgentProperties props) {
+        SnapAgentProperties.Cost.Pricing pricing = props.getCost().getPricing();
+        BigDecimal input = pricing != null ? pricing.getInput() : BigDecimal.ZERO;
+        BigDecimal output = pricing != null ? pricing.getOutput() : BigDecimal.ZERO;
+        BigDecimal cacheRead = pricing != null ? pricing.getCacheRead() : BigDecimal.ZERO;
+        log.info("CostCalculator assembled (input={}, output={}, cacheRead={})",
+                input, output, cacheRead);
+        return new CostCalculator(input, output, cacheRead);
     }
 
     // ---- Tool Plugin Registry (v1.0) ----

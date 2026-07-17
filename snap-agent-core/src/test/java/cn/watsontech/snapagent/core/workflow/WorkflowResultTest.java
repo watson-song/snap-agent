@@ -13,29 +13,40 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class WorkflowResultTest {
 
+    private StepResult stepResult(String stepName, String taskId, String status, String report) {
+        return new StepResult(stepName, taskId, status, report);
+    }
+
     @Test
-    void successFactoryShouldCreateSuccessfulResult() {
-        Map<String, String> stepResults = new HashMap<>();
-        stepResults.put("health-check", "all green");
-        stepResults.put("db-check", "pool ok");
+    void successFactoryShouldCreateCompletedResult() {
+        Map<String, StepResult> stepResults = new HashMap<>();
+        stepResults.put("health-check",
+                stepResult("health-check", "task-1", "SUCCEEDED", "all green"));
+        stepResults.put("db-check",
+                stepResult("db-check", "task-2", "SUCCEEDED", "pool ok"));
 
         WorkflowResult result = WorkflowResult.success(
                 "full-diagnose", stepResults, 1500L);
 
         assertThat(result.getWorkflowName()).isEqualTo("full-diagnose");
         assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
         assertThat(result.getFailedStep()).isNull();
         assertThat(result.getErrorMessage()).isNull();
-        assertThat(result.getStepResults()).containsEntry("health-check", "all green");
-        assertThat(result.getStepResults()).containsEntry("db-check", "pool ok");
+        assertThat(result.getStepResults()).containsKey("health-check");
+        assertThat(result.getStepResults().get("health-check").getReport())
+                .isEqualTo("all green");
+        assertThat(result.getStepResults().get("db-check").getReport())
+                .isEqualTo("pool ok");
         assertThat(result.getStepResults()).hasSize(2);
         assertThat(result.getDurationMs()).isEqualTo(1500L);
     }
 
     @Test
     void failureFactoryShouldCreateFailedResult() {
-        Map<String, String> stepResults = new HashMap<>();
-        stepResults.put("health-check", "error detected");
+        Map<String, StepResult> stepResults = new HashMap<>();
+        stepResults.put("health-check",
+                stepResult("health-check", "task-1", "SUCCEEDED", "error detected"));
 
         WorkflowResult result = WorkflowResult.failure(
                 "full-diagnose", "find-root-cause",
@@ -43,36 +54,40 @@ class WorkflowResultTest {
 
         assertThat(result.getWorkflowName()).isEqualTo("full-diagnose");
         assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.FAILED);
         assertThat(result.getFailedStep()).isEqualTo("find-root-cause");
         assertThat(result.getErrorMessage()).isEqualTo("skill execution timed out");
-        assertThat(result.getStepResults()).containsEntry("health-check", "error detected");
+        assertThat(result.getStepResults()).containsKey("health-check");
+        assertThat(result.getStepResults().get("health-check").getReport())
+                .isEqualTo("error detected");
         assertThat(result.getDurationMs()).isEqualTo(3000L);
     }
 
     @Test
     void shouldDefensivelyCopyStepResultsOnConstruction() {
-        Map<String, String> original = new HashMap<>();
-        original.put("step1", "result1");
+        Map<String, StepResult> original = new HashMap<>();
+        original.put("step1", stepResult("step1", "task-1", "SUCCEEDED", "result1"));
 
         WorkflowResult result = WorkflowResult.success("wf", original, 100L);
 
         // Mutate the original map — result's copy should be unaffected
-        original.put("step1", "hacked");
-        original.put("step2", "new");
+        original.put("step1", stepResult("step1", "task-x", "FAILED", "hacked"));
+        original.put("step2", stepResult("step2", "task-y", "SUCCEEDED", "new"));
 
-        assertThat(result.getStepResults().get("step1")).isEqualTo("result1");
+        assertThat(result.getStepResults().get("step1").getReport()).isEqualTo("result1");
         assertThat(result.getStepResults()).doesNotContainKey("step2");
         assertThat(result.getStepResults()).hasSize(1);
     }
 
     @Test
     void shouldReturnUnmodifiableStepResultsFromGetter() {
-        Map<String, String> stepResults = new HashMap<>();
-        stepResults.put("step1", "result1");
+        Map<String, StepResult> stepResults = new HashMap<>();
+        stepResults.put("step1", stepResult("step1", "task-1", "SUCCEEDED", "result1"));
 
         WorkflowResult result = WorkflowResult.success("wf", stepResults, 100L);
 
-        assertThatThrownBy(() -> result.getStepResults().put("hack", "x"))
+        assertThatThrownBy(() -> result.getStepResults().put("hack",
+                stepResult("hack", "task-h", "SUCCEEDED", "x")))
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
@@ -88,9 +103,23 @@ class WorkflowResultTest {
     }
 
     @Test
+    void isSuccessShouldBeBackwardCompatible() {
+        // success → COMPLETED → isSuccess true
+        WorkflowResult ok = WorkflowResult.success("wf", null, 1L);
+        assertThat(ok.isSuccess()).isTrue();
+        assertThat(ok.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        // failure → FAILED → isSuccess false
+        WorkflowResult fail = WorkflowResult.failure("wf", "step1", "err", null, 2L);
+        assertThat(fail.isSuccess()).isFalse();
+        assertThat(fail.getStatus()).isEqualTo(WorkflowStatus.FAILED);
+    }
+
+    @Test
     void shouldHaveMeaningfulToString() {
-        Map<String, String> stepResults = new HashMap<>();
-        stepResults.put("health-check", "ok");
+        Map<String, StepResult> stepResults = new HashMap<>();
+        stepResults.put("health-check",
+                stepResult("health-check", "task-1", "SUCCEEDED", "ok"));
 
         WorkflowResult ok = WorkflowResult.success("full-diagnose", stepResults, 1000L);
         WorkflowResult fail = WorkflowResult.failure(
@@ -99,9 +128,12 @@ class WorkflowResultTest {
         String okStr = ok.toString();
         assertThat(okStr).contains("WorkflowResult");
         assertThat(okStr).contains("full-diagnose");
+        assertThat(okStr).contains("COMPLETED");
+        // Backward-compat: still surfaces the success boolean
         assertThat(okStr).contains("success=true");
 
         String failStr = fail.toString();
+        assertThat(failStr).contains("FAILED");
         assertThat(failStr).contains("success=false");
         assertThat(failStr).contains("step-x");
         assertThat(failStr).contains("boom");
