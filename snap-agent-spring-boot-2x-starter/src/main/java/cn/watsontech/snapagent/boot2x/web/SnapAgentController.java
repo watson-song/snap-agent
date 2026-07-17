@@ -909,11 +909,20 @@ public class SnapAgentController {
                                 .data(toSseData(event)));
                     }
 
-                    // 2. If already terminal, send done and return
+                    // 2. If already terminal, send error info (if any) then done and return
                     if (isTerminal(task.getStatus())) {
                         log.info("SSE task {} already terminal, sending done", id);
+                        // Replay any error transcript events as task_error SSE events
+                        for (int i = replayStart; i < existing.size(); i++) {
+                            TranscriptEvent event = existing.get(i);
+                            if (TranscriptEvent.TYPE_ERROR.equals(event.getType())) {
+                                emitter.send(SseEmitter.event()
+                                        .name("task_error")
+                                        .data(toSseData(event)));
+                            }
+                        }
                         emitter.send(SseEmitter.event().name("done")
-                                .data(task.getStatus().name()));
+                                .data(buildDoneData(task)));
                         emitter.complete();
                         return;
                     }
@@ -966,7 +975,7 @@ public class SnapAgentController {
                                         .data(toSseData(re)));
                             }
                             emitter.send(SseEmitter.event().name("done")
-                                    .data(task.getStatus().name()));
+                                    .data(buildDoneData(task)));
                             emitter.complete();
                             log.info("SSE streaming completed for task {}", id);
                             return;
@@ -1406,6 +1415,16 @@ public class SnapAgentController {
         }
         if (event.getData() != null && !event.getData().isEmpty()) {
             data.putAll(event.getData());
+        }
+        return data;
+    }
+
+    /** Build the terminal SSE 'done' event payload with status and optional report. */
+    private Object buildDoneData(AgentTask task) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("status", task.getStatus().name());
+        if (task.getReport() != null && !task.getReport().isEmpty()) {
+            data.put("report", task.getReport());
         }
         return data;
     }
