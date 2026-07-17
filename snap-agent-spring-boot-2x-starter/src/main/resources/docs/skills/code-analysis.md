@@ -1,10 +1,10 @@
 ---
 name: code-analysis
-description: "分析项目代码，回答"这段逻辑为什么这样写""这个接口在哪实现"等问题。调用 project_structure 定位文件，code_read 读取源码，git_log 查看变更历史。"
+description: "分析项目代码，回答“这段逻辑为什么这样写”“这个接口在哪实现”等问题。调用 project_structure 定位文件，code_read 读取源码，git_log 查看变更历史。"
 tools: [project_structure, code_read, git_log]
 inputs:
-  - name: question
-    description: 代码相关问题（如"OrderService.createOrder 为什么跳过校验"）
+  - key: question
+    label: 代码相关问题（如”OrderService.createOrder 为什么跳过校验”）
 ---
 
 # 代码分析

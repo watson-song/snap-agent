@@ -3,8 +3,8 @@ name: health-patrol
 description: "Comprehensive health check using observability metrics. Queries CPU, memory, error rate, and latency from Prometheus, checks for anomalies, and generates a summary report. Use when proactively monitoring system health."
 tools: [metrics_query]
 inputs:
-  - name: service
-    description: "Service name to check"
+  - key: service
+    label: "Service name to check"
     required: true
 ---
 

@@ -3,8 +3,8 @@ name: trend-prediction
 description: "Predicts trends from historical metrics and warns about potential issues. Queries 7-day metric trends, detects if current growth rate is unsustainable, estimates time-to-threshold, and generates early warnings. Use for proactive capacity planning."
 tools: [metrics_query]
 inputs:
-  - name: metric
-    description: "PromQL expression for the metric to analyze"
+  - key: metric
+    label: "PromQL expression for the metric to analyze"
     required: true
 ---
 
