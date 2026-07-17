@@ -45,8 +45,25 @@ public class KnowledgeBase {
      * @return ranked list of matching fragments (may be empty, never null)
      */
     public List<KnowledgeFragment> search(String query, int topK, double minScore) {
+        List<SearchResult> scored = searchWithScores(query, topK, minScore);
+        List<KnowledgeFragment> result = new ArrayList<KnowledgeFragment>();
+        for (SearchResult sr : scored) {
+            result.add(sr.getFragment());
+        }
+        return result;
+    }
+
+    /**
+     * 检索 (with scores): 返回与 query 最相关的 topK 个片段及其分数 (score >= minScore)。
+     *
+     * @param query    the user's query text
+     * @param topK     maximum number of fragments to return
+     * @param minScore minimum relevance score threshold
+     * @return ranked list of search results (may be empty, never null)
+     */
+    public List<SearchResult> searchWithScores(String query, int topK, double minScore) {
         if (query == null || query.isEmpty() || allFragments.isEmpty()) {
-            return new ArrayList<KnowledgeFragment>();
+            return new ArrayList<SearchResult>();
         }
         List<ScoredFragment> scored = new ArrayList<ScoredFragment>();
         for (KnowledgeFragment f : allFragments) {
@@ -56,9 +73,9 @@ public class KnowledgeBase {
             }
         }
         Collections.sort(scored, (a, b) -> Double.compare(b.score, a.score));
-        List<KnowledgeFragment> result = new ArrayList<KnowledgeFragment>();
+        List<SearchResult> result = new ArrayList<SearchResult>();
         for (int i = 0; i < Math.min(topK, scored.size()); i++) {
-            result.add(scored.get(i).fragment);
+            result.add(new SearchResult(scored.get(i).fragment, scored.get(i).score));
         }
         return result;
     }

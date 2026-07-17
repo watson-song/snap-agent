@@ -1,6 +1,6 @@
 // SnapAgent SPA — per-skill independent chat sessions with parallel streams
-// Version: v24 (feat: knowledge base modal with status + search)
-console.log('[SnapAgent] app.js v24 loaded');
+// Version: v25 (fix: knowledge search uses configured minScore, shows relevance score)
+console.log('[SnapAgent] app.js v25 loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;            // currently active skill object
@@ -1906,8 +1906,12 @@ async function showKnowledgeModal() {
                 }
                 var fHtml = '';
                 fragments.forEach(function(f) {
+                    var scoreText = f.score != null ? (Math.round(f.score * 100) + '%') : 'N/A';
                     fHtml += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
-                        '<div style="font-weight:600;color:var(--accent);margin-bottom:4px;">' + escapeHtml(f.title) + '</div>' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+                        '<span style="font-weight:600;color:var(--accent);">' + escapeHtml(f.title) + '</span>' +
+                        '<span class="feature-badge" style="background:var(--accent);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;">相关度 ' + scoreText + '</span>' +
+                        '</div>' +
                         '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">来源: ' + escapeHtml(f.source) + '</div>' +
                         '<pre style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content) + '</pre>' +
                         '</div>';

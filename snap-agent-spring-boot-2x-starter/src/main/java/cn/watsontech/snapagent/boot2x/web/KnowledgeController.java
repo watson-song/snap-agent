@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
+import cn.watsontech.snapagent.core.knowledge.SearchResult;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -57,15 +58,17 @@ public class KnowledgeController {
         double minScore = knowledgeConfig.getMinScore();
         // For UI search, return more results than the injection limit
         int searchTopK = Math.max(topK * 3, 10);
-        List<KnowledgeFragment> fragments = knowledgeBase.search(q, searchTopK, 0.0);
+        List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minScore);
 
         List<Map<String, Object>> fragmentList = new ArrayList<Map<String, Object>>();
-        for (KnowledgeFragment f : fragments) {
+        for (SearchResult sr : results) {
+            KnowledgeFragment f = sr.getFragment();
             Map<String, Object> dto = new LinkedHashMap<String, Object>();
             dto.put("title", f.getTitle());
             dto.put("content", f.getContent());
             dto.put("source", f.getSource());
             dto.put("metadata", f.getMetadata());
+            dto.put("score", sr.getScore());
             fragmentList.add(dto);
         }
 
