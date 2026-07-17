@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力">
+    <title>SnapAgent — 嵌入式 LLM 诊断 Agent</title>
+    <style>
+        /* ===== CSS Variables (matches embedded UI) ===== */
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #16213e;
+            --bg-card: #1e2a4a;
+            --bg-input: #0d1b2a;
+            --bg-hover: #264080;
+            --text-primary: #e8e8f0;
+            --text-secondary: #8892b0;
+            --text-muted: #4a5568;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --accent-light: rgba(59, 130, 246, 0.15);
+            --green: #22c55e;
+            --green-light: rgba(34, 197, 94, 0.15);
+            --red: #ef4444;
+            --red-light: rgba(239, 68, 68, 0.15);
+            --orange: #f59e0b;
+            --orange-light: rgba(245, 158, 11, 0.15);
+            --purple: #8b5cf6;
+            --purple-light: rgba(139, 92, 246, 0.15);
+            --cyan: #06b6d4;
+            --cyan-light: rgba(6, 182, 212, 0.15);
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(255, 255, 255, 0.15);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+            --mono: "SF Mono", "Fira Code", "JetBrains Mono", Consolas, monospace;
+        }
+
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        a { color: var(--accent); text-decoration: none; transition: color 0.2s; }
+        a:hover { color: var(--accent-hover); }
+
+        /* ===== Container ===== */
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+        /* ===== Top Nav ===== */
+        .nav {
+            position: sticky; top: 0; z-index: 100;
+            background: rgba(15, 15, 26, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+        .nav-inner {
+            display: flex; align-items: center; justify-content: space-between;
+            height: 64px;
+        }
+        .nav-logo {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 18px; font-weight: 600; color: var(--text-primary);
+        }
+        .nav-logo .logo-icon { font-size: 22px; }
+        .nav-right { display: flex; align-items: center; gap: 16px; }
+        .nav-link {
+            color: var(--text-secondary); font-size: 14px;
+            padding: 6px 12px; border-radius: var(--radius-sm);
+            transition: color 0.2s, background 0.2s;
+        }
+        .nav-link:hover { color: var(--text-primary); background: var(--accent-light); }
+        .nav-lang-toggle {
+            background: var(--bg-card); border: 1px solid var(--border);
+            color: var(--text-secondary); padding: 6px 14px; border-radius: 999px;
+            font-size: 13px; cursor: pointer; font-family: var(--font);
+            transition: all 0.2s;
+        }
+        .nav-lang-toggle:hover { border-color: var(--accent); color: var(--text-primary); }
+        .nav-cta {
+            background: var(--accent); color: #fff;
+            padding: 8px 18px; border-radius: var(--radius-sm);
+            font-size: 14px; font-weight: 500; border: none; cursor: pointer;
+            font-family: var(--font);
+            transition: background 0.2s, transform 0.1s;
+        }
+        .nav-cta:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+        /* ===== Hero ===== */
+        .hero {
+            position: relative; padding: 120px 0 100px;
+            background: radial-gradient(ellipse at top, rgba(59, 130, 246, 0.15), transparent 50%),
+                        radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.1), transparent 50%),
+                        var(--bg-primary);
+            overflow: hidden;
+        }
+        .hero::before {
+            content: ""; position: absolute; inset: 0;
+            background-image:
+                linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+            -webkit-mask-image: radial-gradient(ellipse at center, black 30%, transparent 70%);
+        }
+        .hero-content { position: relative; text-align: center; }
+        .hero-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--accent-light); color: var(--accent);
+            padding: 6px 14px; border-radius: 999px; font-size: 13px;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            margin-bottom: 24px;
+        }
+        .hero-badge .dot {
+            width: 6px; height: 6px; background: var(--green); border-radius: 50%;
+            box-shadow: 0 0 8px var(--green);
+        }
+        .hero h1 {
+            font-size: clamp(36px, 6vw, 64px); font-weight: 800; line-height: 1.1;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, #fff 0%, #8892b0 100%);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero h1 .accent {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-sub {
+            font-size: clamp(16px, 2vw, 20px); color: var(--text-secondary);
+            max-width: 720px; margin: 0 auto 40px; line-height: 1.6;
+        }
+        .hero-cta { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+        .btn-primary, .btn-secondary {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 14px 28px; border-radius: var(--radius); font-size: 15px;
+            font-weight: 500; cursor: pointer; font-family: var(--font);
+            transition: all 0.2s; border: 1px solid transparent;
+        }
+        .btn-primary {
+            background: var(--accent); color: #fff; border-color: var(--accent);
+        }
+        .btn-primary:hover { background: var(--accent-hover); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(59, 130, 246, 0.4); }
+        .btn-secondary {
+            background: transparent; color: var(--text-primary); border-color: var(--border-hover);
+        }
+        .btn-secondary:hover { background: var(--bg-card); border-color: var(--accent); }
+        .hero-stats {
+            display: flex; justify-content: center; gap: 48px;
+            margin-top: 64px; flex-wrap: wrap;
+        }
+        .stat { text-align: center; }
+        .stat-num {
+            font-size: 32px; font-weight: 700; color: var(--accent);
+            font-family: var(--mono);
+        }
+        .stat-label { font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+
+        /* ===== Section ===== */
+        .section { padding: 96px 0; }
+        .section-header { text-align: center; margin-bottom: 64px; }
+        .section-tag {
+            display: inline-block; color: var(--accent); font-size: 13px; font-weight: 500;
+            text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: clamp(28px, 4vw, 40px); font-weight: 700; margin-bottom: 16px;
+            background: linear-gradient(135deg, #fff 0%, #8892b0 100%);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .section-desc { color: var(--text-secondary); font-size: 16px; max-width: 640px; margin: 0 auto; }
+
+        /* ===== Features Grid ===== */
+        .features-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .feature-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 28px;
+            transition: all 0.25s; position: relative; overflow: hidden;
+        }
+        .feature-card::before {
+            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0; transition: opacity 0.25s;
+        }
+        .feature-card:hover { border-color: var(--border-hover); transform: translateY(-4px); }
+        .feature-card:hover::before { opacity: 1; }
+        .feature-icon {
+            font-size: 28px; margin-bottom: 16px;
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 52px; height: 52px; border-radius: var(--radius-sm);
+            background: var(--accent-light);
+        }
+        .feature-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+        .feature-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
+        .feature-meta {
+            margin-top: 14px; font-size: 12px; color: var(--text-muted);
+            font-family: var(--mono);
+        }
+
+        /* color variants */
+        .feature-card.c-blue .feature-icon { background: var(--accent-light); }
+        .feature-card.c-green .feature-icon { background: var(--green-light); }
+        .feature-card.c-orange .feature-icon { background: var(--orange-light); }
+        .feature-card.c-purple .feature-icon { background: var(--purple-light); }
+        .feature-card.c-cyan .feature-icon { background: var(--cyan-light); }
+        .feature-card.c-red .feature-icon { background: var(--red-light); }
+
+        /* ===== Architecture Section ===== */
+        .arch-section { background: var(--bg-secondary); }
+        .arch-diagram {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 32px; overflow-x: auto;
+            font-family: var(--mono); font-size: 13px; line-height: 1.5;
+            color: var(--text-secondary); white-space: pre;
+        }
+
+        /* ===== Quick Start ===== */
+        .qs-tabs {
+            display: flex; gap: 4px; background: var(--bg-input);
+            border: 1px solid var(--border); border-radius: var(--radius) var(--radius) 0 0;
+            padding: 4px; margin-bottom: 0;
+        }
+        .qs-tab {
+            background: transparent; color: var(--text-secondary);
+            border: none; padding: 8px 16px; border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+            font-family: var(--font); font-size: 13px; cursor: pointer;
+            transition: all 0.2s;
+        }
+        .qs-tab.active { background: var(--bg-card); color: var(--text-primary); }
+        .code-block {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 var(--radius) var(--radius);
+            padding: 24px; overflow-x: auto;
+            font-family: var(--mono); font-size: 13px; line-height: 1.6;
+            color: var(--text-primary);
+        }
+        .code-block .c-key { color: #c792ea; }
+        .code-block .c-str { color: #c3e88d; }
+        .code-block .c-num { color: #f78c6c; }
+        .code-block .c-com { color: var(--text-muted); }
+        .code-block .c-tag { color: #f07178; }
+        .code-block .c-attr { color: #ffcb6b; }
+
+        /* ===== Docs Grid ===== */
+        .docs-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+        }
+        .doc-card {
+            display: flex; align-items: flex-start; gap: 16px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px;
+            transition: all 0.25s;
+        }
+        .doc-card:hover { border-color: var(--accent); transform: translateY(-2px); background: var(--bg-tertiary); }
+        .doc-icon { font-size: 24px; flex-shrink: 0; }
+        .doc-body h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
+        .doc-body p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+        .doc-links { display: flex; gap: 12px; font-size: 12px; }
+        .doc-links a { display: inline-flex; align-items: center; gap: 4px; }
+
+        /* ===== Footer ===== */
+        .footer {
+            border-top: 1px solid var(--border);
+            background: var(--bg-secondary);
+            padding: 48px 0 32px;
+        }
+        .footer-inner {
+            display: flex; justify-content: space-between; align-items: center;
+            flex-wrap: wrap; gap: 24px;
+        }
+        .footer-brand { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
+        .footer-brand .logo-icon { font-size: 20px; }
+        .footer-meta { font-size: 13px; color: var(--text-muted); }
+        .footer-meta a { color: var(--text-secondary); }
+        .footer-meta a:hover { color: var(--text-primary); }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero { padding: 80px 0 60px; }
+            .hero-stats { gap: 32px; }
+            .section { padding: 64px 0; }
+            .nav-link { display: none; }
+        }
+
+        /* ===== Bilingual ===== */
+        [data-lang="en"] { display: none; }
+        html[data-lang="en"] [data-lang="en"] { display: block; }
+        html[data-lang="en"] [data-lang="zh"] { display: none; }
+        html[data-lang="zh"] [data-lang="zh"] { display: block; }
+        html[data-lang="zh"] [data-lang="en"] { display: none; }
+        .lang-block { display: inline; }
+    </style>
+</head>
+<body data-lang="zh">
+
+<!-- ===== Top Nav ===== -->
+<nav class="nav">
+    <div class="container nav-inner">
+        <div class="nav-logo">
+            <span class="logo-icon">⚡</span>
+            <span>SnapAgent</span>
+        </div>
+        <div class="nav-right">
+            <a href="#features" class="nav-link">
+                <span data-lang="zh">特性</span><span data-lang="en">Features</span>
+            </a>
+            <a href="#quickstart" class="nav-link">
+                <span data-lang="zh">快速开始</span><span data-lang="en">Quick Start</span>
+            </a>
+            <a href="#docs" class="nav-link">
+                <span data-lang="zh">文档</span><span data-lang="en">Docs</span>
+            </a>
+            <button class="nav-lang-toggle" id="langToggle">中文 / EN</button>
+            <a href="#quickstart" class="nav-cta">
+                <span data-lang="zh">开始使用</span><span data-lang="en">Get Started</span>
+            </a>
+        </div>
+    </div>
+</nav>
+
+<!-- ===== Hero ===== -->
+<section class="hero">
+    <div class="container hero-content">
+        <div class="hero-badge">
+            <span class="dot"></span>
+            <span data-lang="zh">v1.0 已发布 · 工具插件 + 工作流 + 成本核算</span>
+            <span data-lang="en">v1.0 Released · Tool Plugins + Workflows + Cost Tracking</span>
+        </div>
+        <h1>
+            <span data-lang="zh">让 Spring Boot 应用<br>获得内嵌的 <span class="accent">LLM 诊断</span> 能力</span>
+            <span data-lang="en">Give your Spring Boot app<br>an embedded <span class="accent">LLM diagnostician</span></span>
+        </h1>
+        <p class="hero-sub">
+            <span data-lang="zh">SnapAgent 是一个嵌入式诊断 Agent 库。Spring Boot 2.x 应用引入一行 Maven 依赖，即可获得：自然语言诊断对话、只读工具调用（JDBC / Redis / 代码 / 日志 / 指标 / 链路）、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。</span>
+            <span data-lang="en">SnapAgent is an embeddable diagnostic Agent library. Add one Maven dependency to your Spring Boot 2.x app and gain: natural-language diagnostic chat, read-only tool calls (JDBC / Redis / code / logs / metrics / traces), auto-injected business knowledge, code graph, multi-step workflows, issue closure loops, and proactive patrols.</span>
+        </p>
+        <div class="hero-cta">
+            <a href="#quickstart" class="btn-primary">
+                ⚡ <span data-lang="zh">5 分钟集成</span><span data-lang="en">Get Started in 5 min</span>
+            </a>
+            <a href="#docs" class="btn-secondary">
+                📚 <span data-lang="zh">阅读文档</span><span data-lang="en">Read the Docs</span>
+            </a>
+        </div>
+        <div class="hero-stats">
+            <div class="stat">
+                <div class="stat-num">v1.0</div>
+                <div class="stat-label" data-lang="zh">当前版本</div>
+                <div class="stat-label" data-lang="en">Current version</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">11+</div>
+                <div class="stat-label" data-lang="zh">内置只读工具</div>
+                <div class="stat-label" data-lang="en">Built-in tools</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">13</div>
+                <div class="stat-label" data-lang="zh">内置 Skills</div>
+                <div class="stat-label" data-lang="en">Built-in skills</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">4</div>
+                <div class="stat-label" data-lang="zh">支持 LLM 厂商</div>
+                <div class="stat-label" data-lang="en">LLM providers</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">930</div>
+                <div class="stat-label" data-lang="zh">测试用例</div>
+                <div class="stat-label" data-lang="en">Test cases</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ===== Features ===== -->
+<section class="section" id="features">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">核心能力</span><span data-lang="en">Capabilities</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">一个库，覆盖完整诊断闭环</span>
+                <span data-lang="en">One library, the full diagnostic loop</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">从代码理解到运营诊断，从知识注入到问题闭环 — SnapAgent 把诊断 Agent 该有的能力都做成了可插拔的 SPI。</span>
+                <span data-lang="en">From code understanding to ops diagnostics, from knowledge injection to issue closure — SnapAgent ships every diagnostic Agent capability as a pluggable SPI.</span>
+            </p>
+        </div>
+        <div class="features-grid">
+
+            <div class="feature-card c-blue">
+                <div class="feature-icon">⚡</div>
+                <h3 data-lang="zh">嵌入式 Spring Boot Starter</h3>
+                <h3 data-lang="en" style="display:none">Embedded Spring Boot Starter</h3>
+                <p data-lang="zh">一行 Maven 依赖 + 一段 YAML，5 分钟让宿主应用获得诊断 Agent。与宿主共享 Spring Security、数据源、日志路径。</p>
+                <p data-lang="en" style="display:none">One Maven dependency + a YAML block: 5 minutes to a diagnostic Agent. Shares the host's Spring Security, datasources, and log paths.</p>
+                <div class="feature-meta">v0.1 · spring-boot-2x-starter</div>
+            </div>
+
+            <div class="feature-card c-purple">
+                <div class="feature-icon">🧠</div>
+                <h3 data-lang="zh">多 LLM 对接</h3>
+                <h3 data-lang="en" style="display:none">Multi-LLM Support</h3>
+                <p data-lang="zh">Anthropic Claude 原生支持；通义千问、文心一言、智谱清言通过 OpenAI 兼容 base-url 接入。一套 API，自由切换。</p>
+                <p data-lang="en" style="display:none">Anthropic Claude native; Tongyi, Wenxin, Zhipu via OpenAI-compatible base-url. One API, switch freely.</p>
+                <div class="feature-meta">v0.2 · LlmClient SPI</div>
+            </div>
+
+            <div class="feature-card c-cyan">
+                <div class="feature-icon">🔧</div>
+                <h3 data-lang="zh">工具插件生态</h3>
+                <h3 data-lang="en" style="display:none">Tool Plugin Ecosystem</h3>
+                <p data-lang="zh">11+ 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph_tools。</p>
+                <p data-lang="en" style="display:none">11+ built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph_tools.</p>
+                <div class="feature-meta">v0.1-v0.4 · ToolProvider SPI</div>
+            </div>
+
+            <div class="feature-card c-orange">
+                <div class="feature-icon">📖</div>
+                <h3 data-lang="zh">业务知识库</h3>
+                <h3 data-lang="en" style="display:none">Business Knowledge Base</h3>
+                <p data-lang="zh">Markdown 文件按 ## 标题分段，混合中英文分词（Latin + CJK 2-gram），相关度评分 + minScore 阈值，自动注入到 LLM system prompt。</p>
+                <p data-lang="en" style="display:none">Markdown files split by ## headings, hybrid tokenization (Latin + CJK 2-gram), relevance scoring + minScore threshold, auto-injected into LLM system prompt.</p>
+                <div class="feature-meta">v0.7 · KnowledgeBase SPI</div>
+            </div>
+
+            <div class="feature-card c-blue">
+                <div class="feature-icon">🗺️</div>
+                <h3 data-lang="zh">代码知识图谱</h3>
+                <h3 data-lang="en" style="display:none">Code Knowledge Graph</h3>
+                <p data-lang="zh">扫描 Java 源码构建调用图谱：调用链 / 反向调用链 / 影响范围分析。LLM 不再"瞎猜"，而是沿着真实调用边追溯。</p>
+                <p data-lang="en" style="display:none">Scans Java sources to build a call graph: call chain / reverse chain / impact analysis. The LLM traces real call edges instead of guessing.</p>
+                <div class="feature-meta">v0.8 · CodeGraph SPI</div>
+            </div>
+
+            <div class="feature-card c-purple">
+                <div class="feature-icon">📋</div>
+                <h3 data-lang="zh">工作流引擎</h3>
+                <h3 data-lang="en" style="display:none">Workflow Engine</h3>
+                <p data-lang="zh">YAML 定义多步诊断流水线：health-check → error-spike-investigation → code-analysis → solution-suggest。条件分支 + onFailure 策略。</p>
+                <p data-lang="en" style="display:none">YAML-defined multi-step diagnostic pipelines: health-check → error-spike → code-analysis → solution-suggest. Conditions + onFailure policies.</p>
+                <div class="feature-meta">v1.0 · WorkflowEngine SPI</div>
+            </div>
+
+            <div class="feature-card c-red">
+                <div class="feature-icon">🐛</div>
+                <h3 data-lang="zh">问题闭环</h3>
+                <h3 data-lang="en" style="display:none">Issue Closure Loop</h3>
+                <p data-lang="zh">诊断 → 建议方案 → 创建外部 Issue → 修复 → 验证 → 关闭 → 知识沉淀。每次闭环都把经验回灌到知识库，越用越聪明。</p>
+                <p data-lang="en" style="display:none">Diagnose → suggest → create external issue → fix → verify → close → sediment knowledge. Each loop feeds lessons back into the knowledge base.</p>
+                <div class="feature-meta">v0.9 · IssueStore / IssueTracker SPI</div>
+            </div>
+
+            <div class="feature-card c-orange">
+                <div class="feature-icon">🛡️</div>
+                <h3 data-lang="zh">主动巡检 + 告警</h3>
+                <h3 data-lang="en" style="display:none">Proactive Patrol + Alerts</h3>
+                <p data-lang="zh">定时跑 ops-health-check skill 巡检；外部告警经 AlertConverger 滑动窗口去重后触发 auto-diagnose skill，自动产出 DiagnosticReport 并推送 Webhook。</p>
+                <p data-lang="en" style="display:none">Scheduled ops-health-check patrols; external alerts deduped via AlertConverger sliding window, then auto-diagnose skill produces a DiagnosticReport pushed to webhooks.</p>
+                <div class="feature-meta">v0.5 · PatrolScheduler / PushChannel SPI</div>
+            </div>
+
+            <div class="feature-card c-green">
+                <div class="feature-icon">💰</div>
+                <h3 data-lang="zh">成本核算与预算</h3>
+                <h3 data-lang="en" style="display:none">Cost Tracking & Budgets</h3>
+                <p data-lang="zh">按 token 用量记账（input / output / cache-read），per-user / per-skill / global daily 预算管控。超预算直接拒绝，80% 阈值预警。</p>
+                <p data-lang="en" style="display:none">Per-token accounting (input / output / cache-read), per-user / per-skill / global daily budget enforcement. Over-budget requests rejected, 80% threshold warning.</p>
+                <div class="feature-meta">v1.0 · CostTracker SPI</div>
+            </div>
+
+            <div class="feature-card c-cyan">
+                <div class="feature-icon">🌐</div>
+                <h3 data-lang="zh">多集群跨 Pod 路由</h3>
+                <h3 data-lang="en" style="display:none">Multi-Cluster Cross-Pod Routing</h3>
+                <p data-lang="zh">K8s 多副本无状态部署，任意 Pod 可接收任意请求。PeerRouter 降级链：k8s-api → headless-dns → static → none。SSE 中继透明。</p>
+                <p data-lang="en" style="display:none">Stateless K8s multi-replica deployment, any pod serves any request. PeerRouter fallback chain: k8s-api → headless-dns → static → none. Transparent SSE relay.</p>
+                <div class="feature-meta">v0.2 · PeerRouter SPI</div>
+            </div>
+
+            <div class="feature-card c-green">
+                <div class="feature-icon">🔐</div>
+                <h3 data-lang="zh">只读安全模型</h3>
+                <h3 data-lang="en" style="display:none">Read-Only Security Model</h3>
+                <p data-lang="zh">所有工具只读：SQL 强制 SELECT、Redis 禁写、代码 / 日志路径白名单、配置脱敏。Skill 级权限校验，复用宿主 Spring Security。</p>
+                <p data-lang="en" style="display:none">Every tool is read-only: SQL forced SELECT, Redis read-only, code/log path whitelisting, config masking. Skill-level permission checks reuse host Spring Security.</p>
+                <div class="feature-meta">v0.1 · SecurityGateway SPI</div>
+            </div>
+
+            <div class="feature-card c-purple">
+                <div class="feature-icon">💬</div>
+                <h3 data-lang="zh">会话历史 + SSE 流式</h3>
+                <h3 data-lang="en" style="display:none">Conversation History + SSE Streaming</h3>
+                <p data-lang="zh">每条诊断对话自动保存为可下载的 Markdown；切换 skill 不丢失上下文；多 skill 并行流式输出思考过程、工具调用与最终结论。</p>
+                <p data-lang="en" style="display:none">Each diagnostic chat auto-saved as downloadable Markdown; switching skills keeps context; multi-skill parallel streaming of thoughts, tool calls, and final answer.</p>
+                <div class="feature-meta">v0.1-v1.0 · ConversationStore</div>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<!-- ===== Architecture ===== -->
+<section class="section arch-section" id="architecture">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">架构</span><span data-lang="en">Architecture</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">三层 SPI · 完全解耦</span>
+                <span data-lang="en">Three-layer SPI · Fully decoupled</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">Core 模块只定义 SPI，Starter 模块提供 Spring Boot 自动装配与内置实现。宿主可以替换任何一个 SPI bean。</span>
+                <span data-lang="en">Core module defines only SPIs; Starter module provides Spring Boot auto-configuration and built-in implementations. Hosts can replace any SPI bean.</span>
+            </p>
+        </div>
+        <div class="arch-diagram">┌──────────────────────────────────────────────────────────────────┐
+│                    宿主 Spring Boot 应用                          │
+│   ┌──────────────────────────────────────────────────────────┐    │
+│   │   业务逻辑 + 数据源 + Spring Security + 日志              │    │
+│   └───────────────────────┬──────────────────────────────────┘    │
+│                           │ (auto-configuration)                    │
+│   ┌───────────────────────▼──────────────────────────────────┐    │
+│   │              SnapAgent Spring Boot Starter                │    │
+│   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
+│   │  │ Skills  │ │ Tools   │ │ Know-   │ │ Code    │  ...    │    │
+│   │  │ Registry│ │ Dispat. │ │ ledgeBase│ │ Graph   │         │    │
+│   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │    │
+│   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
+│   │  │ Issue   │ │ Cost    │ │ Workflow│ │ Patrol  │         │    │
+│   │  │ Closure │ │ Tracker │ │ Engine  │ │ + Alert │         │    │
+│   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │    │
+│   │  ┌──────────────────────────────────────────────────┐     │    │
+│   │  │  AgentExecutor · SSE Controller · SecurityGateway│     │    │
+│   │  └──────────────────────┬───────────────────────────┘     │    │
+│   └─────────────────────────┼────────────────────────────────┘    │
+└─────────────────────────────┼────────────────────────────────────┘
+                              │
+                     ┌────────▼────────┐
+                     │   LLM Provider  │  Anthropic · 通义 · 文心 · 智谱
+                     └─────────────────┘</div>
+    </div>
+</section>
+
+<!-- ===== Quick Start ===== -->
+<section class="section" id="quickstart">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">快速开始</span><span data-lang="en">Quick Start</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">两步集成，立即诊断</span>
+                <span data-lang="en">Two steps to integrate, diagnose instantly</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">在你的 Spring Boot 2.x 应用 pom.xml 中加入依赖，配置 LLM 凭证即可。</span>
+                <span data-lang="en">Add the dependency to your Spring Boot 2.x app's pom.xml, configure LLM credentials, done.</span>
+            </p>
+        </div>
+
+        <div class="qs-tabs">
+            <button class="qs-tab active" data-qs="maven">Maven</button>
+            <button class="qs-tab" data-qs="yaml">application.yml</button>
+            <button class="qs-tab" data-qs="run">
+                <span data-lang="zh">启动</span><span data-lang="en">Run</span>
+            </button>
+        </div>
+
+        <div class="code-block" id="qs-maven">
+<span class="c-com">&lt;!-- 1. 添加 SnapAgent starter 依赖（含 core） --&gt;</span>
+<span class="c-tag">&lt;dependency&gt;</span>
+    <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
+    <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-spring-boot-2x-starter</span><span class="c-tag">&lt;/artifactId&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">1.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
+<span class="c-tag">&lt;/dependency&gt;</span>
+
+<span class="c-com">&lt;!-- 2. (可选) REST API SDK 用于外部调用 --&gt;</span>
+<span class="c-tag">&lt;dependency&gt;</span>
+    <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
+    <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-client</span><span class="c-tag">&lt;/artifactId&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">1.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
+<span class="c-tag">&lt;/dependency&gt;</span>
+        </div>
+
+        <div class="code-block" id="qs-yaml" style="display:none">
+<span class="c-com"># application.yml — 最小配置</span>
+<span class="c-key">snap-agent:</span>
+  <span class="c-key">enabled:</span> <span class="c-num">true</span>
+  <span class="c-key">base-path:</span> <span class="c-str">/snap-agent</span>           <span class="c-com"># web UI + REST API 挂载路径</span>
+  <span class="c-key">llm:</span>
+    <span class="c-key">api-type:</span> <span class="c-str">anthropic</span>            <span class="c-com"># 或 openai (通义/文心/智谱)</span>
+    <span class="c-key">base-url:</span> <span class="c-str">https://api.anthropic.com</span>
+    <span class="c-key">auth-token:</span> <span class="c-str">${ANTHROPIC_API_KEY}</span>
+    <span class="c-key">model:</span> <span class="c-str">claude-sonnet-4-6</span>
+    <span class="c-key">timeout-seconds:</span> <span class="c-num">60</span>
+  <span class="c-key">security:</span>
+    <span class="c-key">required-permission:</span> <span class="c-str">snapagent:use</span>   <span class="c-com"># 复用宿主 Spring Security</span>
+  <span class="c-com"># 可选功能模块（默认 disabled）</span>
+  <span class="c-key">code:</span>
+    <span class="c-key">enabled:</span> <span class="c-num">true</span>
+    <span class="c-key">project-root:</span> <span class="c-str">${user.dir}</span>
+  <span class="c-key">knowledge:</span>
+    <span class="c-key">enabled:</span> <span class="c-num">true</span>
+    <span class="c-key">sources:</span>
+      - <span class="c-key">type:</span> <span class="c-str">markdown</span>
+        <span class="c-key">dir:</span> <span class="c-str">classpath:/docs/knowledge/</span>
+        </div>
+
+        <div class="code-block" id="qs-run" style="display:none">
+<span class="c-com"># 启动你的 Spring Boot 应用，打开浏览器访问：</span>
+<span class="c-com"># http://localhost:8080/snap-agent/  (使用宿主应用的登录凭证)</span>
+
+<span class="c-com"># 或用 REST API 直接调用：</span>
+curl -u <span class="c-str">demo:demo</span> -X POST http://localhost:8080/snap-agent/runs \
+  -H <span class="c-str">"Content-Type: application/json"</span> \
+  -d <span class="c-str">'{"skillName":"health-check","inputs":{"time_range":"1h"}}'</span>
+
+<span class="c-com"># 响应：</span>
+{ <span class="c-str">"taskId"</span>: <span class="c-str">"task-abc123"</span>, <span class="c-str">"status"</span>: <span class="c-str">"running"</span> }
+
+<span class="c-com"># 订阅 SSE 流式输出：</span>
+curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent/runs/task-abc123/stream
+        </div>
+    </div>
+</section>
+
+<!-- ===== Documentation ===== -->
+<section class="section" id="docs">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">文档</span><span data-lang="en">Documentation</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">中英双语 · 9 篇技术文档</span>
+                <span data-lang="en">Bilingual · 9 technical docs</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">从系统架构到用户手册，每个主题都有中英文对照的深度文档。</span>
+                <span data-lang="en">From system architecture to user manual — every topic has in-depth bilingual documentation.</span>
+            </p>
+        </div>
+        <div class="docs-grid">
+
+            <a href="architecture/zh/system-architecture.md" class="doc-card">
+                <div class="doc-icon">🏛️</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">系统架构总览</span><span data-lang="en">System Architecture</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">三层 SPI 架构、模块划分、执行循环、Web 层、安全模型、自动装配、v0.1→v1.0 路线图。</span>
+                        <span data-lang="en">Three-layer SPI, module split, execution loop, web layer, security model, auto-config, v0.1→v1.0 roadmap.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="architecture/zh/system-architecture.md">中文</a>
+                        <a href="architecture/en/system-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="search/zh/knowledge-search.md" class="doc-card">
+                <div class="doc-icon">🔍</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">知识搜索算法</span><span data-lang="en">Knowledge Search Algorithm</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">混合分词（Latin + CJK 2-gram）、打分公式、minScore 阈值、KnowledgeInjector 自动注入。</span>
+                        <span data-lang="en">Hybrid tokenization (Latin + CJK 2-gram), scoring formula, minScore threshold, KnowledgeInjector.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="search/zh/knowledge-search.md">中文</a>
+                        <a href="search/en/knowledge-search.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="integration/zh/host-integration-guide.md" class="doc-card">
+                <div class="doc-icon">🔌</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">宿主集成指南</span><span data-lang="en">Host Integration Guide</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">Maven 依赖、配置项全表、启动流程、自定义工具 / Skill、安全集成、多 LLM 对接、部署清单。</span>
+                        <span data-lang="en">Maven deps, full config reference, startup flow, custom tools / skills, security, multi-LLM, deploy checklist.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="integration/zh/host-integration-guide.md">中文</a>
+                        <a href="integration/en/host-integration-guide.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="deployment/zh/multi-cluster-architecture.md" class="doc-card">
+                <div class="doc-icon">🌐</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">多集群部署架构</span><span data-lang="en">Multi-Cluster Deployment</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">K8s 多副本无状态部署、PeerRouter 降级链（k8s-api / headless-dns / static / none）、SSE 中继、RBAC。</span>
+                        <span data-lang="en">K8s stateless multi-replica, PeerRouter fallback chain, SSE relay, RBAC.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="deployment/zh/multi-cluster-architecture.md">中文</a>
+                        <a href="deployment/en/multi-cluster-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="plugins/zh/tool-plugin-architecture.md" class="doc-card">
+                <div class="doc-icon">🔧</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">工具插件架构</span><span data-lang="en">Tool Plugin Architecture</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">ToolProvider SPI、ToolPlugin 元数据层、11+ 内置工具、安全约束（SqlGuard / CodePathGuard）、自定义插件示例。</span>
+                        <span data-lang="en">ToolProvider SPI, ToolPlugin metadata, 11+ built-in tools, security constraints, custom plugin example.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="plugins/zh/tool-plugin-architecture.md">中文</a>
+                        <a href="plugins/en/tool-plugin-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="workflow/zh/workflow-engine-architecture.md" class="doc-card">
+                <div class="doc-icon">📋</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">工作流引擎架构</span><span data-lang="en">Workflow Engine Architecture</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">YAML 定义、条件表达式（${step.*.result}）、onFailure 策略、内置 full-diagnose 工作流。</span>
+                        <span data-lang="en">YAML format, condition expressions, onFailure policies, built-in full-diagnose workflow.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="workflow/zh/workflow-engine-architecture.md">中文</a>
+                        <a href="workflow/en/workflow-engine-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="issue/zh/issue-closure-architecture.md" class="doc-card">
+                <div class="doc-icon">🐛</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">问题闭环架构</span><span data-lang="en">Issue Closure Architecture</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">IssueStatus 状态机、FileIssueStore、NoopIssueTracker、知识沉淀提取器、REST API。</span>
+                        <span data-lang="en">IssueStatus state machine, FileIssueStore, NoopIssueTracker, knowledge sedimentation, REST API.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="issue/zh/issue-closure-architecture.md">中文</a>
+                        <a href="issue/en/issue-closure-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="proactive/zh/proactive-monitoring-architecture.md" class="doc-card">
+                <div class="doc-icon">🛡️</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">主动监控架构</span><span data-lang="en">Proactive Monitoring Architecture</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">巡检（ScheduledPatrolScheduler）+ 告警（AlertConverger / AnomalyEventListener）双模式、推送渠道、生命周期。</span>
+                        <span data-lang="en">Patrol (ScheduledPatrolScheduler) + Alert (AlertConverger / AnomalyEventListener) dual mode, push channels, lifecycle.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="proactive/zh/proactive-monitoring-architecture.md">中文</a>
+                        <a href="proactive/en/proactive-monitoring-architecture.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="manual/zh/user-manual.md" class="doc-card">
+                <div class="doc-icon">📖</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">用户手册</span><span data-lang="en">User Manual</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">快速开始、Web UI 使用、运行 Skill、会话历史、知识库、工具与 Skill 全景、工作流、问题闭环、成本、REST API 参考。</span>
+                        <span data-lang="en">Quick start, web UI, running skills, conversation history, knowledge base, tools & skills, workflows, issue closure, cost, REST API reference.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="manual/zh/user-manual.md">中文</a>
+                        <a href="manual/en/user-manual.md">English</a>
+                    </div>
+                </div>
+            </a>
+
+        </div>
+    </div>
+</section>
+
+<!-- ===== Footer ===== -->
+<footer class="footer">
+    <div class="container footer-inner">
+        <div class="footer-brand">
+            <span class="logo-icon">⚡</span>
+            <span>SnapAgent v1.0</span>
+            <span style="margin-left: 16px;" data-lang="zh">嵌入式 LLM 诊断 Agent</span>
+            <span style="margin-left: 16px;" data-lang="en">Embeddable LLM diagnostic Agent</span>
+        </div>
+        <div class="footer-meta">
+            <span data-lang="zh">基于 v1.0 现状编写 · </span>
+            <span data-lang="en">Documented against v1.0 · </span>
+            <a href="README.md">文档索引 / Index</a>
+        </div>
+    </div>
+</footer>
+
+<script>
+    // ===== Bilingual toggle =====
+    const langToggle = document.getElementById('langToggle');
+    langToggle.addEventListener('click', () => {
+        const html = document.documentElement;
+        const current = html.getAttribute('data-lang') || 'zh';
+        const next = current === 'zh' ? 'en' : 'zh';
+        html.setAttribute('data-lang', next);
+        document.body.setAttribute('data-lang', next);
+        document.documentElement.setAttribute('lang', next === 'zh' ? 'zh-CN' : 'en');
+        langToggle.textContent = next === 'zh' ? '中文 / EN' : '中文 / EN';
+    });
+
+    // ===== Quick start tabs =====
+    const tabs = document.querySelectorAll('.qs-tab');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const target = tab.getAttribute('data-qs');
+            document.querySelectorAll('.code-block').forEach(block => {
+                block.style.display = block.id === 'qs-' + target ? 'block' : 'none';
+            });
+        });
+    });
+</script>
+
+</body>
+</html>
