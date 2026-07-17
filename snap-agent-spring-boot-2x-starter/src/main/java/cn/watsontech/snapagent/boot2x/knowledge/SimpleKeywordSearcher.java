@@ -40,7 +40,9 @@ public class SimpleKeywordSearcher implements KnowledgeSearcher {
         }
 
         List<String> queryTokens = tokenize(query);
-        if (queryTokens.isEmpty()) {
+        if (queryTokens.size() < 2) {
+            // Too short to meaningfully match — a single token is ambiguous
+            // and would inflate the overlap ratio. Require at least 2 tokens.
             return 0.0;
         }
 

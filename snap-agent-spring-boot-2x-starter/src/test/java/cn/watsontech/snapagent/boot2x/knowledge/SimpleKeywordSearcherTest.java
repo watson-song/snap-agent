@@ -45,21 +45,21 @@ class SimpleKeywordSearcherTest {
 
     @Test
     void score_titleMatchWeightedDouble() {
-        // Title has the keyword, content doesn't
+        // Title has the keywords, content doesn't
         KnowledgeFragment titleOnly = new KnowledgeFragment(
                 "Database Diagnostics", "completely unrelated text here", "src", null);
-        // Content has the keyword, title doesn't
+        // Content has the keywords, title doesn't
         KnowledgeFragment contentOnly = new KnowledgeFragment(
-                "Other Title", "database content here", "src2", null);
+                "Other Title", "database diagnostics content here", "src2", null);
 
-        double titleScore = searcher.score("database", titleOnly);
-        double contentScore = searcher.score("database", contentOnly);
+        double titleScore = searcher.score("database diagnostics", titleOnly);
+        double contentScore = searcher.score("database diagnostics", contentOnly);
 
         // Title match should score higher due to 2x weighting
         assertThat(titleScore).isGreaterThan(contentScore);
-        // Title-only: (1*2 + 0) / (1*2) = 1.0
+        // Title-only: (2*2 + 0) / (2*2) = 4/4 = 1.0
         assertThat(titleScore).isCloseTo(1.0, within(0.001));
-        // Content-only: (0*2 + 1) / (1*2) = 0.5
+        // Content-only: (0*2 + 2) / (2*2) = 2/4 = 0.5
         assertThat(contentScore).isCloseTo(0.5, within(0.001));
     }
 
@@ -106,6 +106,27 @@ class SimpleKeywordSearcherTest {
                 "java spring maven", "java spring maven tool", "src", null);
         double score = searcher.score("java spring maven", fragment);
         assertThat(score).isLessThanOrEqualTo(1.0);
+    }
+
+    @Test
+    void score_singleTokenQuery_returnsZero() {
+        // A single-token query is too short to match (< 2 tokens → 0)
+        KnowledgeFragment fragment = new KnowledgeFragment(
+                "Database Tools", "database tools here", "src", null);
+        assertThat(searcher.score("database", fragment)).isZero();
+        // A single CJK character also produces only 1 token → 0
+        KnowledgeFragment cnFragment = new KnowledgeFragment(
+                "补货策略", "补货策略内容", "src", null);
+        assertThat(searcher.score("补", cnFragment)).isZero();
+    }
+
+    @Test
+    void score_caseInsensitive_matchingUppercaseQuery() {
+        KnowledgeFragment fragment = new KnowledgeFragment(
+                "Database Diagnostics", "database connection pool", "src", null);
+        // Uppercase query should match lowercase fragment tokens
+        double score = searcher.score("DATABASE CONNECTION", fragment);
+        assertThat(score).isGreaterThan(0.5);
     }
 
     @Test

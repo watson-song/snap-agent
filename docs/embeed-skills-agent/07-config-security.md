@@ -142,6 +142,7 @@ snap-agent:
 | `trace.*` | TraceSearchToolProvider（Jaeger 链路追踪） | 04 §5 |
 | `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
+| `knowledge.*` | KnowledgeBase / MarkdownKnowledgeSource / SimpleKeywordSearcher / KnowledgeInjector | §12 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
 | `security.filter-order` | SnapAgentFilter 注册 order | §4 |
