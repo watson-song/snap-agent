@@ -6,6 +6,8 @@ import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.issue.KnowledgeSedimentationExtractor;
 import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
+import cn.watsontech.snapagent.boot2x.issue.SimpleVerificationRunner;
+import cn.watsontech.snapagent.boot2x.issue.TemplateSolutionSuggester;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import cn.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -818,6 +820,30 @@ public class SnapAgentAutoConfiguration {
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(cn.watsontech.snapagent.core.issue.SolutionSuggester.class)
+    public TemplateSolutionSuggester templateSolutionSuggester() {
+        log.info("TemplateSolutionSuggester assembled");
+        return new TemplateSolutionSuggester();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean(cn.watsontech.snapagent.core.issue.VerificationRunner.class)
+    public SimpleVerificationRunner simpleVerificationRunner(
+            AgentExecutor agentExecutor,
+            TaskStore taskStore,
+            SkillRegistry skillRegistry,
+            SnapAgentProperties properties) {
+        log.info("SimpleVerificationRunner assembled (system-user-id={})",
+                properties.getIssueClosure().getSystemUserId());
+        return new SimpleVerificationRunner(agentExecutor, taskStore, skillRegistry,
+                properties.getIssueClosure().getSystemUserId());
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
     public IssueClosureService issueClosureService(
             AgentExecutor agentExecutor,
@@ -827,6 +853,8 @@ public class SnapAgentAutoConfiguration {
             IssueTracker issueTracker,
             ObjectProvider<cn.watsontech.snapagent.core.knowledge.KnowledgeBase> knowledgeBaseProvider,
             KnowledgeSedimentationExtractor sedimentationExtractor,
+            ObjectProvider<cn.watsontech.snapagent.core.issue.SolutionSuggester> solutionSuggesterProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.issue.VerificationRunner> verificationRunnerProvider,
             SnapAgentProperties properties) {
         log.info("IssueClosureService assembled (system-user-id={})",
                 properties.getIssueClosure().getSystemUserId());
@@ -834,6 +862,8 @@ public class SnapAgentAutoConfiguration {
                 issueStore, issueTracker,
                 knowledgeBaseProvider.getIfAvailable(),
                 sedimentationExtractor,
+                solutionSuggesterProvider.getIfAvailable(),
+                verificationRunnerProvider.getIfAvailable(),
                 properties.getIssueClosure().getSystemUserId());
     }
 

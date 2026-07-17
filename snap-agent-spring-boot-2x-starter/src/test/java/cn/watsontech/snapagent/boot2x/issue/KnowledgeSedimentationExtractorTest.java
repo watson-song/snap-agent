@@ -2,10 +2,13 @@ package cn.watsontech.snapagent.boot2x.issue;
 
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,12 +20,28 @@ class KnowledgeSedimentationExtractorTest {
 
     private KnowledgeSedimentationExtractor extractor = new KnowledgeSedimentationExtractor();
 
+    private SolutionSuggestion suggestionOf(String... titles) {
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (String title : titles) {
+            options.add(new SolutionOption("opt-" + index, title, title, "medium", false));
+            index++;
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended, null, null);
+    }
+
+    private VerificationResult verificationOf(boolean passed, String summary) {
+        return new VerificationResult(passed, summary, "FIX_IN_PROGRESS",
+                passed ? "SUCCEEDED" : "FAILED", 1_500L);
+    }
+
     @Test
     void shouldExtractFragmentWithCorrectTitleAndSource() {
         IssueClosure issue = new IssueClosure(
                 "issue-001", null, "task-100",
                 null, "为什么订单服务超时?", "连接池打满",
-                Arrays.asList("方案1", "方案2"), null,
+                suggestionOf("方案1", "方案2"), null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
                 1_000L, 2_000L);
@@ -57,7 +76,7 @@ class KnowledgeSedimentationExtractorTest {
         IssueClosure issue = new IssueClosure(
                 "issue-003", null, "task-300",
                 null, "查询慢", "缺索引",
-                Arrays.asList("方案1", "方案2"), "方案2: 加索引",
+                suggestionOf("方案1", "方案2"), "方案2: 加索引",
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
                 1_000L, 2_000L);
@@ -65,8 +84,8 @@ class KnowledgeSedimentationExtractorTest {
         KnowledgeFragment fragment = extractor.extract(issue);
 
         assertThat(fragment.getContent()).contains("方案2: 加索引");
-        // Should NOT list all solutions when selectedSolution is present
-        assertThat(fragment.getContent()).doesNotContain("- 方案1");
+        // Should NOT list all solution options when selectedSolution is present
+        assertThat(fragment.getContent()).doesNotContain("- [medium] 方案1");
     }
 
     @Test
@@ -74,15 +93,15 @@ class KnowledgeSedimentationExtractorTest {
         IssueClosure issue = new IssueClosure(
                 "issue-004", null, "task-400",
                 null, "查询慢", "缺索引",
-                Arrays.asList("方案A", "方案B"), null,
+                suggestionOf("方案A", "方案B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
                 1_000L, 2_000L);
 
         KnowledgeFragment fragment = extractor.extract(issue);
 
-        assertThat(fragment.getContent()).contains("- 方案A");
-        assertThat(fragment.getContent()).contains("- 方案B");
+        assertThat(fragment.getContent()).contains("- [medium] 方案A: 方案A");
+        assertThat(fragment.getContent()).contains("- [medium] 方案B: 方案B");
     }
 
     @Test
@@ -90,14 +109,15 @@ class KnowledgeSedimentationExtractorTest {
         IssueClosure issue = new IssueClosure(
                 "issue-005", null, "task-500",
                 null, "查询慢", "缺索引",
-                Arrays.asList("方案1"), "方案1",
+                suggestionOf("方案1"), "方案1",
                 IssueStatus.VERIFIED, null,
-                "修复后查询时间从5s降到50ms", null,
+                verificationOf(true, "修复后查询时间从5s降到50ms"), null,
                 1_000L, 3_000L);
 
         KnowledgeFragment fragment = extractor.extract(issue);
 
         assertThat(fragment.getContent()).contains("## 验证结果");
+        assertThat(fragment.getContent()).contains("passed: true");
         assertThat(fragment.getContent()).contains("修复后查询时间从5s降到50ms");
     }
 

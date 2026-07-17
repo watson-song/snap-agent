@@ -3,13 +3,15 @@ package cn.watsontech.snapagent.boot2x.issue;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.issue.IssueStore;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,15 +33,36 @@ class FileIssueStoreTest {
 
     private IssueClosure newSample(String issueId, String taskId, IssueStatus status,
                                    long createdAt, long updatedAt) {
-        List<String> solutions = new ArrayList<String>(Arrays.asList(
-                "方案1: 重启服务", "方案2: 扩容连接池"));
         return new IssueClosure(
                 issueId, null, taskId,
                 "conv-100", "为什么订单服务超时?", "连接池打满",
-                solutions, null,
+                sampleSuggestion(), null,
                 status, null,
                 null, null,
                 createdAt, updatedAt);
+    }
+
+    private SolutionSuggestion sampleSuggestion() {
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        options.add(new SolutionOption("opt-1", "方案1: 重启服务", "方案1: 重启服务", "medium", false));
+        options.add(new SolutionOption("opt-2", "方案2: 扩容连接池", "方案2: 扩容连接池", "medium", false));
+        return new SolutionSuggestion(options, "opt-1", null, null);
+    }
+
+    private SolutionSuggestion suggestionOf(String... titles) {
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (String title : titles) {
+            options.add(new SolutionOption("opt-" + index, title, title, "medium", false));
+            index++;
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended, null, null);
+    }
+
+    private VerificationResult verificationOf(boolean passed, String summary) {
+        return new VerificationResult(passed, summary, "FIX_IN_PROGRESS",
+                passed ? "SUCCEEDED" : "FAILED", 1_500L);
     }
 
     @Test
@@ -56,7 +79,10 @@ class FileIssueStoreTest {
         assertThat(loaded.getUserQuery()).isEqualTo("为什么订单服务超时?");
         assertThat(loaded.getRootCause()).isEqualTo("连接池打满");
         assertThat(loaded.getStatus()).isEqualTo(IssueStatus.DIAGNOSED);
-        assertThat(loaded.getSolutions()).containsExactly("方案1: 重启服务", "方案2: 扩容连接池");
+        assertThat(loaded.getSolution()).isNotNull();
+        assertThat(loaded.getSolution().getOptions()).hasSize(2);
+        assertThat(loaded.getSolution().getOptions().get(0).getTitle()).isEqualTo("方案1: 重启服务");
+        assertThat(loaded.getSolution().getRecommendedOptionId()).isEqualTo("opt-1");
         assertThat(loaded.getCreatedAt()).isEqualTo(1_700_000_000_000L);
         assertThat(loaded.getUpdatedAt()).isEqualTo(1_700_000_001_000L);
     }
@@ -76,9 +102,9 @@ class FileIssueStoreTest {
         IssueClosure updated = new IssueClosure(
                 "issue-002", "EXT-1", "task-200",
                 null, "updated query", "updated root cause",
-                Arrays.asList("new solution"), "selected",
+                suggestionOf("new solution"), "selected",
                 IssueStatus.FIX_IN_PROGRESS, "commit-abc",
-                "verified ok", "kb-1",
+                verificationOf(true, "verified ok"), "kb-1",
                 1_000L, 3_000L);
         store.save(updated);
 
@@ -90,7 +116,9 @@ class FileIssueStoreTest {
         assertThat(loaded.getRootCause()).isEqualTo("updated root cause");
         assertThat(loaded.getSelectedSolution()).isEqualTo("selected");
         assertThat(loaded.getFixCommitId()).isEqualTo("commit-abc");
-        assertThat(loaded.getVerificationResult()).isEqualTo("verified ok");
+        assertThat(loaded.getVerificationResult()).isNotNull();
+        assertThat(loaded.getVerificationResult().isPassed()).isTrue();
+        assertThat(loaded.getVerificationResult().getSummary()).isEqualTo("verified ok");
         assertThat(loaded.getKnowledgeEntryId()).isEqualTo("kb-1");
         assertThat(loaded.getUpdatedAt()).isEqualTo(3_000L);
         assertThat(loaded.getCreatedAt()).isEqualTo(1_000L);
@@ -204,8 +232,7 @@ class FileIssueStoreTest {
 
         IssueClosure loaded = store.load("issue-null-sols");
         assertThat(loaded).isNotNull();
-        assertThat(loaded.getSolutions()).isNotNull();
-        assertThat(loaded.getSolutions()).isEmpty();
+        assertThat(loaded.getSolution()).isNull();
     }
 
     @Test
@@ -213,9 +240,9 @@ class FileIssueStoreTest {
         IssueClosure issue = new IssueClosure(
                 "issue-full", "JIRA-42", "task-full",
                 "conv-42", "full query", "full root cause",
-                Arrays.asList("sol1", "sol2"), "sol1",
+                suggestionOf("sol1", "sol2"), "sol1",
                 IssueStatus.FIX_IN_PROGRESS, "commit-xyz",
-                "verification summary", "kb-entry-1",
+                verificationOf(true, "verification summary"), "kb-entry-1",
                 1_000L, 5_000L);
         store.save(issue);
 
@@ -225,9 +252,14 @@ class FileIssueStoreTest {
         assertThat(loaded.getConversationId()).isEqualTo("conv-42");
         assertThat(loaded.getSelectedSolution()).isEqualTo("sol1");
         assertThat(loaded.getFixCommitId()).isEqualTo("commit-xyz");
-        assertThat(loaded.getVerificationResult()).isEqualTo("verification summary");
+        assertThat(loaded.getVerificationResult()).isNotNull();
+        assertThat(loaded.getVerificationResult().getSummary()).isEqualTo("verification summary");
+        assertThat(loaded.getVerificationResult().isPassed()).isTrue();
         assertThat(loaded.getKnowledgeEntryId()).isEqualTo("kb-entry-1");
-        assertThat(loaded.getSolutions()).containsExactly("sol1", "sol2");
+        assertThat(loaded.getSolution()).isNotNull();
+        assertThat(loaded.getSolution().getOptions()).hasSize(2);
+        assertThat(loaded.getSolution().getOptions().get(0).getTitle()).isEqualTo("sol1");
+        assertThat(loaded.getSolution().getOptions().get(1).getTitle()).isEqualTo("sol2");
     }
 
     @Test

@@ -16,6 +16,9 @@ import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
@@ -1687,15 +1690,54 @@ public class SnapAgentController {
         dto.put("conversationId", issue.getConversationId());
         dto.put("userQuery", issue.getUserQuery());
         dto.put("rootCause", issue.getRootCause());
-        dto.put("solutions", issue.getSolutions());
+        dto.put("solution", solutionToDtoMap(issue.getSolution()));
         dto.put("selectedSolution", issue.getSelectedSolution());
         dto.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
         dto.put("fixCommitId", issue.getFixCommitId());
-        dto.put("verificationResult", issue.getVerificationResult());
+        dto.put("verificationResult", verificationToDtoMap(issue.getVerificationResult()));
         dto.put("knowledgeEntryId", issue.getKnowledgeEntryId());
         dto.put("createdAt", issue.getCreatedAt());
         dto.put("updatedAt", issue.getUpdatedAt());
         return dto;
+    }
+
+    /** Serializes a {@link SolutionSuggestion} to a DTO map, or {@code null}. */
+    private Map<String, Object> solutionToDtoMap(SolutionSuggestion suggestion) {
+        if (suggestion == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> optionsList = new ArrayList<Map<String, Object>>();
+        if (suggestion.getOptions() != null) {
+            for (SolutionOption option : suggestion.getOptions()) {
+                Map<String, Object> optMap = new LinkedHashMap<String, Object>();
+                optMap.put("id", option.getId());
+                optMap.put("title", option.getTitle());
+                optMap.put("description", option.getDescription());
+                optMap.put("effort", option.getEffort());
+                optMap.put("temporary", option.isTemporary());
+                optionsList.add(optMap);
+            }
+        }
+        map.put("options", optionsList);
+        map.put("recommendedOptionId", suggestion.getRecommendedOptionId());
+        map.put("rationale", suggestion.getRationale());
+        map.put("relatedCode", suggestion.getRelatedCode());
+        return map;
+    }
+
+    /** Serializes a {@link VerificationResult} to a DTO map, or {@code null}. */
+    private Map<String, Object> verificationToDtoMap(VerificationResult result) {
+        if (result == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        map.put("passed", result.isPassed());
+        map.put("summary", result.getSummary());
+        map.put("beforeStatus", result.getBeforeStatus());
+        map.put("afterStatus", result.getAfterStatus());
+        map.put("verifiedAt", result.getVerifiedAt());
+        return map;
     }
 
     @SuppressWarnings("unchecked")

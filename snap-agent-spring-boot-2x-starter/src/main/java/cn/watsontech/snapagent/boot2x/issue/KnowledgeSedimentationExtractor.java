@@ -1,6 +1,9 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
 import cn.watsontech.snapagent.core.issue.IssueClosure;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
 
 import java.util.Collections;
@@ -38,16 +41,25 @@ public class KnowledgeSedimentationExtractor {
         content.append("## 问题\n").append(issue.getUserQuery()).append("\n\n");
         content.append("## 根因\n").append(issue.getRootCause()).append("\n\n");
         content.append("## 解决方案\n");
+        SolutionSuggestion suggestion = issue.getSolution();
         if (issue.getSelectedSolution() != null) {
             content.append(issue.getSelectedSolution()).append("\n");
-        } else if (issue.getSolutions() != null && !issue.getSolutions().isEmpty()) {
-            List<String> solutions = issue.getSolutions();
-            for (String s : solutions) {
-                content.append("- ").append(s).append("\n");
+        } else if (suggestion != null && suggestion.getOptions() != null
+                && !suggestion.getOptions().isEmpty()) {
+            List<SolutionOption> options = suggestion.getOptions();
+            for (SolutionOption option : options) {
+                content.append("- [").append(option.getEffort()).append("] ")
+                        .append(option.getTitle()).append(": ")
+                        .append(option.getDescription()).append("\n");
             }
         }
-        if (issue.getVerificationResult() != null) {
-            content.append("\n## 验证结果\n").append(issue.getVerificationResult()).append("\n");
+        VerificationResult verification = issue.getVerificationResult();
+        if (verification != null) {
+            content.append("\n## 验证结果\n");
+            content.append("passed: ").append(verification.isPassed()).append("\n");
+            if (verification.getSummary() != null) {
+                content.append(verification.getSummary()).append("\n");
+            }
         }
 
         return new KnowledgeFragment(

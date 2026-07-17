@@ -7,6 +7,11 @@ import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggester;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
+import cn.watsontech.snapagent.core.issue.VerificationRunner;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
@@ -43,6 +48,8 @@ public class IssueClosureService {
     private final IssueTracker issueTracker;
     private final KnowledgeBase knowledgeBase;
     private final KnowledgeSedimentationExtractor sedimentationExtractor;
+    private final SolutionSuggester solutionSuggester;
+    private final VerificationRunner verificationRunner;
     private final String systemUserId;
 
     /**
@@ -55,6 +62,8 @@ public class IssueClosureService {
      * @param issueTracker          the issue tracker (for external issue systems)
      * @param knowledgeBase         the knowledge base (may be {@code null} if knowledge disabled)
      * @param sedimentationExtractor the knowledge sedimentation extractor
+     * @param solutionSuggester     the solution suggester (may be {@code null} to fall back to skill-based suggestion)
+     * @param verificationRunner    the verification runner (may be {@code null} to fall back to skill-based verification)
      * @param systemUserId          the system user ID used when executing skills
      */
     public IssueClosureService(AgentExecutor agentExecutor,
@@ -64,6 +73,8 @@ public class IssueClosureService {
                                 IssueTracker issueTracker,
                                 KnowledgeBase knowledgeBase,
                                 KnowledgeSedimentationExtractor sedimentationExtractor,
+                                SolutionSuggester solutionSuggester,
+                                VerificationRunner verificationRunner,
                                 String systemUserId) {
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -72,6 +83,8 @@ public class IssueClosureService {
         this.issueTracker = issueTracker;
         this.knowledgeBase = knowledgeBase;
         this.sedimentationExtractor = sedimentationExtractor;
+        this.solutionSuggester = solutionSuggester;
+        this.verificationRunner = verificationRunner;
         this.systemUserId = systemUserId;
     }
 
@@ -79,8 +92,10 @@ public class IssueClosureService {
      * Propose solutions for a completed diagnostic task.
      *
      * <p>Loads the diagnostic task, extracts the root cause from its report,
-     * runs the "solution-suggest" skill synchronously, and creates an
-     * {@link IssueClosure} with status {@link IssueStatus#SOLUTION_PROPOSED}.</p>
+     * then produces a {@link SolutionSuggestion}. When a {@link SolutionSuggester}
+     * is configured, it is invoked directly; otherwise the "solution-suggest"
+     * skill is run and its output is parsed into candidate options. The
+     * resulting issue closure has status {@link IssueStatus#SOLUTION_PROPOSED}.</p>
      *
      * @param taskId the diagnostic task ID
      * @return the created issue closure, or {@code null} if the task or skill is not found
@@ -95,6 +110,62 @@ public class IssueClosureService {
         String rootCause = task.getReport();
         String userQuery = extractUserQuery(task.getInputs());
 
+        long now = System.currentTimeMillis();
+        // Build the issue first with DIAGNOSED status and no solution, so the
+        // suggester (if any) receives an issue without a pre-existing solution.
+        IssueClosure issue = new IssueClosure(
+                "issue_" + now + "_" + randomSuffix(),
+                null,
+                taskId,
+                null,
+                userQuery,
+                rootCause,
+                null,
+                null,
+                IssueStatus.DIAGNOSED,
+                null,
+                null,
+                null,
+                now,
+                now
+        );
+
+        SolutionSuggestion suggestion;
+        if (solutionSuggester != null) {
+            log.info("Proposing solutions for task {} via SolutionSuggester", taskId);
+            suggestion = solutionSuggester.suggest(issue, rootCause);
+            if (suggestion == null) {
+                suggestion = new SolutionSuggestion(
+                        new ArrayList<SolutionOption>(), null, null, null);
+            }
+        } else {
+            suggestion = suggestViaSkill(taskId, rootCause, userQuery);
+            if (suggestion == null) {
+                // Skill not found in fallback path — preserve legacy null result.
+                return null;
+            }
+        }
+
+        long updated = System.currentTimeMillis();
+        issue = issue.withSolution(suggestion, updated)
+                .withStatus(IssueStatus.SOLUTION_PROPOSED, updated);
+        issueStore.save(issue);
+        log.info("Created issue {} with {} option(s) for task {}",
+                issue.getIssueId(),
+                suggestion.getOptions() != null ? suggestion.getOptions().size() : 0,
+                taskId);
+        return issue;
+    }
+
+    /**
+     * Fallback: runs the "solution-suggest" skill and parses its multi-line
+     * output into a {@link SolutionSuggestion} whose options each map to one
+     * non-empty line (id "opt-N", effort "medium", temporary=false).
+     *
+     * @return the suggestion, or {@code null} if the "solution-suggest" skill
+     *         is not registered (preserving the legacy null result).
+     */
+    private SolutionSuggestion suggestViaSkill(String taskId, String rootCause, String userQuery) {
         Map<String, String> inputs = new HashMap<String, String>();
         inputs.put("root_cause", rootCause != null ? rootCause : "");
         inputs.put("original_query", userQuery != null ? userQuery : "");
@@ -106,33 +177,20 @@ public class IssueClosureService {
             return null;
         }
 
-        log.info("Proposing solutions for task {} via solution-suggest skill", taskId);
         AgentTask solutionTask = AgentTask.create(systemUserId, "solution-suggest", inputs, null);
         agentExecutor.execute(solutionTask, skill);
 
-        String solutionText = solutionTask.getReport();
-        List<String> solutions = parseSolutionLines(solutionText);
-
-        long now = System.currentTimeMillis();
-        IssueClosure issue = new IssueClosure(
-                "issue_" + now + "_" + randomSuffix(),
-                null,
-                taskId,
-                null,
-                userQuery,
-                rootCause,
-                solutions,
-                null,
-                IssueStatus.SOLUTION_PROPOSED,
-                null,
-                null,
-                null,
-                now,
-                now
-        );
-        issueStore.save(issue);
-        log.info("Created issue {} with {} solution(s) for task {}", issue.getIssueId(), solutions.size(), taskId);
-        return issue;
+        List<String> lines = parseSolutionLines(solutionTask.getReport());
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (String line : lines) {
+            String id = "opt-" + index;
+            options.add(new SolutionOption(id, line, line, "medium", false));
+            index++;
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended,
+                "Generated from solution-suggest skill output.", null);
     }
 
     /**
@@ -163,7 +221,12 @@ public class IssueClosureService {
     }
 
     /**
-     * Verify the fix for an issue by running the "verify-fix" skill.
+     * Verify the fix for an issue.
+     *
+     * <p>When a {@link VerificationRunner} is configured, it is invoked directly.
+     * Otherwise the "verify-fix" skill is run and a {@link VerificationResult} is
+     * derived from its report (passed when the report mentions "通过"/"pass").
+     * The issue is transitioned to {@link IssueStatus#VERIFIED}.</p>
      *
      * @param issueId the issue ID
      * @return the updated issue closure, or {@code null} if the issue is not found
@@ -175,6 +238,34 @@ public class IssueClosureService {
             return null;
         }
 
+        VerificationResult result;
+        if (verificationRunner != null) {
+            log.info("Verifying fix for issue {} via VerificationRunner", issueId);
+            result = verificationRunner.verify(issue);
+        } else {
+            result = verifyViaSkill(issueId, issue);
+            if (result == null) {
+                // verify-fix skill not found — preserve legacy null result.
+                return null;
+            }
+        }
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withVerification(result, now)
+                .withStatus(IssueStatus.VERIFIED, now);
+        issueStore.save(updated);
+        log.info("Issue {} verified (passed={})", issueId, result.isPassed());
+        return updated;
+    }
+
+    /**
+     * Fallback: runs the "verify-fix" skill and builds a {@link VerificationResult}
+     * from its report. The fix is considered passed when the report mentions
+     * "通过" or "pass" (case-insensitive).
+     *
+     * @return the verification result, or {@code null} if the skill is not registered
+     */
+    private VerificationResult verifyViaSkill(String issueId, IssueClosure issue) {
         Map<String, String> inputs = new HashMap<String, String>();
         inputs.put("root_cause", issue.getRootCause() != null ? issue.getRootCause() : "");
         inputs.put("original_query", issue.getUserQuery() != null ? issue.getUserQuery() : "");
@@ -186,17 +277,16 @@ public class IssueClosureService {
             return null;
         }
 
-        log.info("Verifying fix for issue {} via verify-fix skill", issueId);
         AgentTask verifyTask = AgentTask.create(systemUserId, "verify-fix", inputs, null);
         agentExecutor.execute(verifyTask, skill);
 
-        String verificationResult = verifyTask.getReport();
-        long now = System.currentTimeMillis();
-        IssueClosure updated = issue.withVerification(verificationResult, now)
-                .withStatus(IssueStatus.VERIFIED, now);
-        issueStore.save(updated);
-        log.info("Issue {} verified", issueId);
-        return updated;
+        String report = verifyTask.getReport();
+        boolean passed = report != null
+                && (report.contains("通过") || report.toLowerCase().contains("pass"));
+        String beforeStatus = issue.getStatus() != null ? issue.getStatus().name() : null;
+        String afterStatus = verifyTask.getStatus() != null ? verifyTask.getStatus().name() : null;
+        return new VerificationResult(passed, report, beforeStatus, afterStatus,
+                System.currentTimeMillis());
     }
 
     /**

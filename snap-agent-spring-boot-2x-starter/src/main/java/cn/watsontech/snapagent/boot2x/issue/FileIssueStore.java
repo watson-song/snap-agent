@@ -4,6 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -203,25 +206,68 @@ public class FileIssueStore implements IssueStore {
         map.put("conversationId", issue.getConversationId());
         map.put("userQuery", issue.getUserQuery());
         map.put("rootCause", issue.getRootCause());
-        map.put("solutions", issue.getSolutions());
+        map.put("solution", solutionToMap(issue.getSolution()));
         map.put("selectedSolution", issue.getSelectedSolution());
         map.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
         map.put("fixCommitId", issue.getFixCommitId());
-        map.put("verificationResult", issue.getVerificationResult());
+        map.put("verificationResult", verificationToMap(issue.getVerificationResult()));
         map.put("knowledgeEntryId", issue.getKnowledgeEntryId());
         map.put("createdAt", issue.getCreatedAt());
         map.put("updatedAt", issue.getUpdatedAt());
         return map;
     }
 
+    /** Serializes a {@link SolutionSuggestion} to a nested map, or {@code null}. */
+    private Map<String, Object> solutionToMap(SolutionSuggestion suggestion) {
+        if (suggestion == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> optionsList = new ArrayList<Map<String, Object>>();
+        if (suggestion.getOptions() != null) {
+            for (SolutionOption option : suggestion.getOptions()) {
+                Map<String, Object> optMap = new LinkedHashMap<String, Object>();
+                optMap.put("id", option.getId());
+                optMap.put("title", option.getTitle());
+                optMap.put("description", option.getDescription());
+                optMap.put("effort", option.getEffort());
+                optMap.put("temporary", option.isTemporary());
+                optionsList.add(optMap);
+            }
+        }
+        map.put("options", optionsList);
+        map.put("recommendedOptionId", suggestion.getRecommendedOptionId());
+        map.put("rationale", suggestion.getRationale());
+        map.put("relatedCode", suggestion.getRelatedCode());
+        return map;
+    }
+
+    /** Serializes a {@link VerificationResult} to a nested map, or {@code null}. */
+    private Map<String, Object> verificationToMap(VerificationResult result) {
+        if (result == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        map.put("passed", result.isPassed());
+        map.put("summary", result.getSummary());
+        map.put("beforeStatus", result.getBeforeStatus());
+        map.put("afterStatus", result.getAfterStatus());
+        map.put("verifiedAt", result.getVerifiedAt());
+        return map;
+    }
+
     @SuppressWarnings("unchecked")
     private IssueClosure fromMap(Map<String, Object> data) {
-        List<String> solutions = new ArrayList<String>();
-        Object solsObj = data.get("solutions");
-        if (solsObj instanceof List) {
-            for (Object item : (List<Object>) solsObj) {
-                solutions.add(item != null ? item.toString() : "");
-            }
+        SolutionSuggestion solution = solutionFromMap(data.get("solution"));
+        if (solution == null) {
+            // Backward compat: legacy files stored "solutions" as a List<String>.
+            solution = solutionFromLegacyList(data.get("solutions"));
+        }
+
+        VerificationResult verificationResult = verificationFromMap(data.get("verificationResult"));
+        if (verificationResult == null) {
+            // Backward compat: legacy files stored "verificationResult" as a plain String.
+            verificationResult = verificationFromLegacyString(data.get("verificationResult"));
         }
 
         IssueStatus status = null;
@@ -241,15 +287,96 @@ public class FileIssueStore implements IssueStore {
                 nullableStr(data.get("conversationId")),
                 str(data.get("userQuery")),
                 str(data.get("rootCause")),
-                solutions,
+                solution,
                 nullableStr(data.get("selectedSolution")),
                 status,
                 nullableStr(data.get("fixCommitId")),
-                nullableStr(data.get("verificationResult")),
+                verificationResult,
                 nullableStr(data.get("knowledgeEntryId")),
                 longVal(data.get("createdAt")),
                 longVal(data.get("updatedAt"))
         );
+    }
+
+    /** Reconstructs a {@link SolutionSuggestion} from a nested map. */
+    @SuppressWarnings("unchecked")
+    private SolutionSuggestion solutionFromMap(Object raw) {
+        if (!(raw instanceof Map)) {
+            return null;
+        }
+        Map<String, Object> map = (Map<String, Object>) raw;
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        Object optionsObj = map.get("options");
+        if (optionsObj instanceof List) {
+            for (Object item : (List<Object>) optionsObj) {
+                if (item instanceof Map) {
+                    Map<String, Object> optMap = (Map<String, Object>) item;
+                    options.add(new SolutionOption(
+                            nullableStr(optMap.get("id")),
+                            nullableStr(optMap.get("title")),
+                            nullableStr(optMap.get("description")),
+                            nullableStr(optMap.get("effort")),
+                            boolVal(optMap.get("temporary"))));
+                }
+            }
+        }
+        return new SolutionSuggestion(options,
+                nullableStr(map.get("recommendedOptionId")),
+                nullableStr(map.get("rationale")),
+                nullableStr(map.get("relatedCode")));
+    }
+
+    /** Builds a {@link SolutionSuggestion} from a legacy {@code List<String>}. */
+    @SuppressWarnings("unchecked")
+    private SolutionSuggestion solutionFromLegacyList(Object raw) {
+        if (!(raw instanceof List)) {
+            return null;
+        }
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (Object item : (List<Object>) raw) {
+            if (item != null) {
+                String text = item.toString();
+                options.add(new SolutionOption("opt-" + index, text, text, "medium", false));
+                index++;
+            }
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended, null, null);
+    }
+
+    /** Reconstructs a {@link VerificationResult} from a nested map. */
+    @SuppressWarnings("unchecked")
+    private VerificationResult verificationFromMap(Object raw) {
+        if (!(raw instanceof Map)) {
+            return null;
+        }
+        Map<String, Object> map = (Map<String, Object>) raw;
+        return new VerificationResult(
+                boolVal(map.get("passed")),
+                nullableStr(map.get("summary")),
+                nullableStr(map.get("beforeStatus")),
+                nullableStr(map.get("afterStatus")),
+                longVal(map.get("verifiedAt")));
+    }
+
+    /**
+     * Builds a {@link VerificationResult} from a legacy plain-string
+     * verification result. Passed is inferred from "通过"/"pass" keywords.
+     */
+    private VerificationResult verificationFromLegacyString(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        String text = raw.toString();
+        boolean passed = text.contains("通过") || text.toLowerCase().contains("pass");
+        return new VerificationResult(passed, text, null, null, 0L);
+    }
+
+    private static boolean boolVal(Object obj) {
+        if (obj == null) return false;
+        if (obj instanceof Boolean) return (Boolean) obj;
+        return Boolean.parseBoolean(obj.toString());
     }
 
     private static String str(Object obj) {

@@ -8,6 +8,11 @@ import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggester;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
+import cn.watsontech.snapagent.core.issue.VerificationRunner;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
@@ -16,7 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -45,6 +50,8 @@ class IssueClosureServiceTest {
     private IssueTracker issueTracker;
     private KnowledgeBase knowledgeBase;
     private KnowledgeSedimentationExtractor sedimentationExtractor;
+    private SolutionSuggester solutionSuggester;
+    private VerificationRunner verificationRunner;
 
     private IssueClosureService service;
 
@@ -57,9 +64,34 @@ class IssueClosureServiceTest {
         issueTracker = mock(IssueTracker.class);
         knowledgeBase = mock(KnowledgeBase.class);
         sedimentationExtractor = new KnowledgeSedimentationExtractor();
+        solutionSuggester = null;
+        verificationRunner = null;
 
-        service = new IssueClosureService(agentExecutor, taskStore, skillRegistry,
-                issueStore, issueTracker, knowledgeBase, sedimentationExtractor, "system");
+        // By default the service uses the legacy fallback path (null SPIs).
+        service = newIssueClosureService(null, null);
+    }
+
+    private IssueClosureService newIssueClosureService(
+            SolutionSuggester suggester, VerificationRunner runner) {
+        return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
+                issueStore, issueTracker, knowledgeBase, sedimentationExtractor,
+                suggester, runner, "system");
+    }
+
+    private SolutionSuggestion suggestionOf(String... titles) {
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (String title : titles) {
+            options.add(new SolutionOption("opt-" + index, title, title, "medium", false));
+            index++;
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended, null, null);
+    }
+
+    private VerificationResult verificationOf(boolean passed, String summary) {
+        return new VerificationResult(passed, summary, "FIX_IN_PROGRESS",
+                passed ? "SUCCEEDED" : "FAILED", 1_500L);
     }
 
     // ---- proposeSolution ----
@@ -96,8 +128,10 @@ class IssueClosureServiceTest {
         assertThat(result.getRootCause()).isEqualTo("Root cause: connection pool exhausted");
         assertThat(result.getUserQuery()).contains("order service timeout");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.SOLUTION_PROPOSED);
-        assertThat(result.getSolutions()).hasSize(2);
-        assertThat(result.getSolutions().get(0)).contains("Increase pool size");
+        assertThat(result.getSolution()).isNotNull();
+        assertThat(result.getSolution().getOptions()).hasSize(2);
+        assertThat(result.getSolution().getOptions().get(0).getTitle()).contains("Increase pool size");
+        assertThat(result.getSolution().getRecommendedOptionId()).isEqualTo("opt-1");
 
         verify(issueStore).save(any(IssueClosure.class));
     }
@@ -133,7 +167,7 @@ class IssueClosureServiceTest {
         IssueClosure existing = new IssueClosure(
                 "issue-001", null, "task-100",
                 null, "query", "root cause text",
-                Arrays.asList("solution A", "solution B"), null,
+                suggestionOf("solution A", "solution B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
                 1_000L, 2_000L);
@@ -167,7 +201,7 @@ class IssueClosureServiceTest {
         IssueClosure existing = new IssueClosure(
                 "issue-002", null, "task-200",
                 null, "query", "root cause",
-                Arrays.asList("sol"), null,
+                suggestionOf("sol"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
                 1_000L, 2_000L);
@@ -191,7 +225,7 @@ class IssueClosureServiceTest {
         IssueClosure existing = new IssueClosure(
                 "issue-003", "EXT-1", "task-300",
                 null, "order timeout", "connection pool exhausted",
-                Arrays.asList("increase pool"), "increase pool",
+                suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
                 1_000L, 2_000L);
@@ -212,7 +246,9 @@ class IssueClosureServiceTest {
         IssueClosure result = service.verify("issue-003");
 
         assertThat(result).isNotNull();
-        assertThat(result.getVerificationResult()).contains("Verification passed");
+        assertThat(result.getVerificationResult()).isNotNull();
+        assertThat(result.getVerificationResult().isPassed()).isTrue();
+        assertThat(result.getVerificationResult().getSummary()).contains("Verification passed");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
         verify(issueStore).save(any(IssueClosure.class));
     }
@@ -232,7 +268,7 @@ class IssueClosureServiceTest {
         IssueClosure existing = new IssueClosure(
                 "issue-004", null, "task-400",
                 null, "query", "root cause",
-                Arrays.asList("sol"), null,
+                suggestionOf("sol"), null,
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
                 1_000L, 2_000L);
@@ -252,9 +288,9 @@ class IssueClosureServiceTest {
         IssueClosure existing = new IssueClosure(
                 "issue-005", "EXT-5", "task-500",
                 null, "order timeout", "pool exhausted",
-                Arrays.asList("increase pool"), "increase pool",
+                suggestionOf("increase pool"), "increase pool",
                 IssueStatus.VERIFIED, null,
-                "verification passed", null,
+                verificationOf(true, "verification passed"), null,
                 1_000L, 3_000L);
         when(issueStore.load("issue-005")).thenReturn(existing);
 
@@ -282,16 +318,14 @@ class IssueClosureServiceTest {
     @Test
     void shouldCloseWithoutKnowledgeBaseWhenDisabled() {
         // Service with null knowledgeBase
-        IssueClosureService serviceNoKb = new IssueClosureService(
-                agentExecutor, taskStore, skillRegistry,
-                issueStore, issueTracker, null, sedimentationExtractor, "system");
+        IssueClosureService serviceNoKb = newIssueClosureService(null, null);
 
         IssueClosure existing = new IssueClosure(
                 "issue-006", null, "task-600",
                 null, "query", "root cause",
-                Arrays.asList("sol"), "sol",
+                suggestionOf("sol"), "sol",
                 IssueStatus.VERIFIED, null,
-                "verified", null,
+                verificationOf(true, "verified"), null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-006")).thenReturn(existing);
 
@@ -339,5 +373,62 @@ class IssueClosureServiceTest {
         assertThat(executedTask.getInputs().get("original_query")).contains("high latency");
         assertThat(executedTask.getInputs().get("task_id")).isEqualTo("task-007");
         assertThat(executedTask.getUserId()).isEqualTo("system");
+    }
+
+    // ---- SPI path: SolutionSuggester / VerificationRunner ----
+
+    @Test
+    void shouldUseSolutionSuggesterWhenConfigured() {
+        SolutionSuggester suggester = mock(SolutionSuggester.class);
+        IssueClosureService serviceWithSuggester = newIssueClosureService(suggester, null);
+
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("symptom", "order service timeout");
+        AgentTask diagTask = new AgentTask("task-spi", "user1", "health-check",
+                inputs, null);
+        diagTask.setReport("连接超时, 连接池打满");
+        diagTask.setStatus(TaskStatus.SUCCEEDED);
+        when(taskStore.get("task-spi")).thenReturn(diagTask);
+
+        SolutionSuggestion expectedSuggestion = suggestionOf("调整连接池配置", "增加超时时间");
+        when(suggester.suggest(any(IssueClosure.class), anyString()))
+                .thenReturn(expectedSuggestion);
+
+        IssueClosure result = serviceWithSuggester.proposeSolution("task-spi");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getStatus()).isEqualTo(IssueStatus.SOLUTION_PROPOSED);
+        assertThat(result.getSolution()).isSameAs(expectedSuggestion);
+        assertThat(result.getSolution().getRecommendedOptionId()).isEqualTo("opt-1");
+        // AgentExecutor should NOT be invoked when a suggester is configured.
+        verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
+        verify(issueStore).save(any(IssueClosure.class));
+    }
+
+    @Test
+    void shouldUseVerificationRunnerWhenConfigured() {
+        VerificationRunner runner = mock(VerificationRunner.class);
+        IssueClosureService serviceWithRunner = newIssueClosureService(null, runner);
+
+        IssueClosure existing = new IssueClosure(
+                "issue-spi", "EXT-1", "task-spi",
+                null, "order timeout", "connection pool exhausted",
+                suggestionOf("increase pool"), "increase pool",
+                IssueStatus.FIX_IN_PROGRESS, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.load("issue-spi")).thenReturn(existing);
+
+        VerificationResult expectedResult = verificationOf(true, "re-run succeeded");
+        when(runner.verify(any(IssueClosure.class))).thenReturn(expectedResult);
+
+        IssueClosure result = serviceWithRunner.verify("issue-spi");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getVerificationResult()).isSameAs(expectedResult);
+        assertThat(result.getVerificationResult().isPassed()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
+        verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
+        verify(issueStore).save(any(IssueClosure.class));
     }
 }
