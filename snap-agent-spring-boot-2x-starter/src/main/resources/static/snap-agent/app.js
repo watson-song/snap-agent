@@ -1,6 +1,6 @@
 // SnapAgent SPA — per-skill independent chat sessions with parallel streams
-// Version: v23 (feat: enable all v0.3-v1.0 features, add feature nav bar with modals)
-console.log('[SnapAgent] app.js v23 loaded');
+// Version: v24 (feat: knowledge base modal with status + search)
+console.log('[SnapAgent] app.js v24 loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;            // currently active skill object
@@ -1844,6 +1844,88 @@ document.getElementById('navCostBtn').addEventListener('click', showCostModal);
 document.getElementById('navIssuesBtn').addEventListener('click', showIssuesModal);
 document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModal);
 document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
+document.getElementById('navKnowledgeBtn').addEventListener('click', showKnowledgeModal);
+
+// --- Knowledge Base ---
+async function showKnowledgeModal() {
+    var modal = openFeatureModal('知识库', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var resp = await fetch(BASE + '/knowledge/status', { headers: authHeaders() });
+        if (!resp.ok) {
+            body.innerHTML = featureEmpty('知识库未启用 (HTTP ' + resp.status + ')');
+            return;
+        }
+        var data = await resp.json();
+
+        // Status stats
+        var html = '<div class="feature-stat-row">';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + data.fragmentCount + '</div><div class="feature-stat-label">知识片段</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + data.maxFragments + '</div><div class="feature-stat-label">注入上限</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + data.minScore + '</div><div class="feature-stat-label">最低分数</div></div>';
+        html += '</div>';
+
+        // Sources
+        var sources = data.sources || [];
+        html += '<div style="margin:12px 0;"><div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">数据源 (' + sources.length + ')</div>';
+        html += '<table class="feature-table"><thead><tr><th>类型</th><th>路径</th></tr></thead><tbody>';
+        sources.forEach(function(s) {
+            html += '<tr><td>' + escapeHtml(s.type) + '</td><td><code>' + escapeHtml(s.dir) + '</code></td></tr>';
+        });
+        html += '</tbody></table></div>';
+
+        // Search box
+        html += '<div style="margin:16px 0;">';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">检索测试</div>';
+        html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+        html += '<input type="text" id="knowledgeSearchInput" placeholder="输入关键词搜索知识片段..." ' +
+            'style="flex:1;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;">';
+        html += '<button class="feature-action-btn" id="knowledgeSearchBtn">搜索</button>';
+        html += '</div>';
+        html += '<div id="knowledgeSearchResults"></div>';
+        html += '</div>';
+
+        body.innerHTML = html;
+
+        // Attach search handler
+        var searchInput = document.getElementById('knowledgeSearchInput');
+        var searchBtn = document.getElementById('knowledgeSearchBtn');
+        var resultsDiv = document.getElementById('knowledgeSearchResults');
+
+        async function doSearch() {
+            var q = searchInput.value.trim();
+            if (!q) { resultsDiv.innerHTML = ''; return; }
+            resultsDiv.innerHTML = '<div class="feature-empty">搜索中...</div>';
+            try {
+                var sResp = await fetch(BASE + '/knowledge/search?q=' + encodeURIComponent(q), { headers: authHeaders() });
+                var sData = await sResp.json();
+                var fragments = sData.fragments || [];
+                if (fragments.length === 0) {
+                    resultsDiv.innerHTML = featureEmpty('无匹配的知识片段');
+                    return;
+                }
+                var fHtml = '';
+                fragments.forEach(function(f) {
+                    fHtml += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                        '<div style="font-weight:600;color:var(--accent);margin-bottom:4px;">' + escapeHtml(f.title) + '</div>' +
+                        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">来源: ' + escapeHtml(f.source) + '</div>' +
+                        '<pre style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content) + '</pre>' +
+                        '</div>';
+                });
+                resultsDiv.innerHTML = fHtml;
+            } catch (e) {
+                resultsDiv.innerHTML = featureEmpty('搜索失败: ' + e.message);
+            }
+        }
+
+        searchBtn.addEventListener('click', doSearch);
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') doSearch();
+        });
+    } catch (e) {
+        body.innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
 
 // ===== Init =====
 (async function() {

@@ -870,6 +870,16 @@ public class SnapAgentAutoConfiguration {
                 knowledgeBase, maxFrag, minScore);
     }
 
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
+            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class)
+    public cn.watsontech.snapagent.boot2x.web.KnowledgeController knowledgeController(
+            cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase,
+            SnapAgentProperties props) {
+        log.info("KnowledgeController assembled");
+        return new cn.watsontech.snapagent.boot2x.web.KnowledgeController(knowledgeBase, props);
+    }
+
     // ---- Code Graph (v0.8) ----
 
     @Bean
