@@ -65,8 +65,19 @@ public class KnowledgeBase {
 
     /**
      * 重新加载所有源 (热重载)。
+     *
+     * <p>Calls {@link KnowledgeSource#reload()} on each source first (to
+     * invalidate any internal caches), then re-reads all fragments via
+     * {@link KnowledgeSource#load()}.</p>
      */
     public void reload() {
+        for (KnowledgeSource source : sources) {
+            try {
+                source.reload();
+            } catch (Exception e) {
+                log.warn("Knowledge source {} reload failed: {}", source.type(), e.getMessage());
+            }
+        }
         this.allFragments = loadAll();
     }
 

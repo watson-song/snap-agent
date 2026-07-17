@@ -169,30 +169,48 @@ public class GitLogToolProvider implements ToolProvider {
 
         Process process = pb.start();
 
+        // Read stdout and stderr on separate threads to avoid deadlock
+        // when the process fills one pipe buffer while we're reading the other.
         StringBuilder stdout = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                stdout.append(line).append("\n");
-            }
-        }
-
-        // Read stderr (for error diagnostics, not returned to user but logged)
         StringBuilder stderr = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                stderr.append(line).append("\n");
+        Thread stdoutThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    stdout.append(line).append("\n");
+                }
+            } catch (IOException e) {
+                // Stream closed — acceptable during destroyForcibly
             }
-        }
+        });
+        Thread stderrThread = new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    stderr.append(line).append("\n");
+                }
+            } catch (IOException e) {
+                // Stream closed — acceptable during destroyForcibly
+            }
+        });
+        stdoutThread.start();
+        stderrThread.start();
 
+        // Wait for the process with a timeout — this now actually works
+        // because we're not blocked on stream reads
         boolean finished = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         if (!finished) {
             process.destroyForcibly();
+            stdoutThread.interrupt();
+            stderrThread.interrupt();
             throw new IOException("Git command timed out after " + PROCESS_TIMEOUT_SECONDS + "s");
         }
+
+        // Wait for stream readers to finish (process has exited, streams will EOF)
+        stdoutThread.join(2000);
+        stderrThread.join(2000);
 
         int exitCode = process.exitValue();
         if (exitCode != 0) {

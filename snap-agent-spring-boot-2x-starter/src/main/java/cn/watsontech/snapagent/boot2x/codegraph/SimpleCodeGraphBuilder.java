@@ -64,8 +64,8 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
                     + "(?:\\s+implements\\s+([\\w.,\\s]+))?");
 
     private static final Pattern METHOD_PATTERN =
-            Pattern.compile("(?:public|protected|private)\\s+(?:static\\s+)?(?:final\\s+)?"
-                    + "(?:synchronized\\s+)?([\\w.<>\\[\\],\\s]+?)\\s+(\\w+)\\s*\\(([^)]*)\\)");
+            Pattern.compile("(?:public|protected|private)?\\s*(?:static\\s+)?(?:final\\s+)?"
+                    + "(?:abstract\\s+)?(?:synchronized\\s+)?([\\w.<>\\[\\],\\s]+?)\\s+(\\w+)\\s*\\(([^)]*)\\)");
 
     private static final Pattern FIELD_PATTERN =
             Pattern.compile("(?:private|protected|public)\\s+(?:static\\s+)?(?:final\\s+)?"
@@ -190,8 +190,14 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         }
 
         // Parse methods and fields for each class
-        for (ClassInfo cls : classes) {
-            parseMethodsAndFields(content, cls, relativePath, packageName,
+        for (int i = 0; i < classes.size(); i++) {
+            ClassInfo cls = classes.get(i);
+            // Body extends to the start of the next class, or EOF for the last class
+            int bodyEnd = content.length();
+            if (i + 1 < classes.size()) {
+                bodyEnd = classes.get(i + 1).matchStart;
+            }
+            parseMethodsAndFields(content, cls, bodyEnd, relativePath, packageName,
                     nodes, edges, classNameToId);
         }
     }
@@ -221,13 +227,13 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         return classes;
     }
 
-    private void parseMethodsAndFields(String content, ClassInfo cls, String filePath,
-                                        String packageName, List<CodeGraphNode> nodes,
+    private void parseMethodsAndFields(String content, ClassInfo cls, int bodyEnd,
+                                        String filePath, String packageName,
+                                        List<CodeGraphNode> nodes,
                                         List<CodeGraphEdge> edges,
                                         Map<String, String> classNameToId) {
-        // Get the class body (from class declaration end to EOF or next class)
+        // Get the class body (from class declaration end to next class or EOF)
         int bodyStart = cls.matchEnd;
-        int bodyEnd = content.length();
 
         // Find methods within the class body
         Matcher methodMatcher = METHOD_PATTERN.matcher(content);
