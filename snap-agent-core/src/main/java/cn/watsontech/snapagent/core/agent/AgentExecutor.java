@@ -200,6 +200,35 @@ public class AgentExecutor {
             // Record thoughts — now done in real-time via TurnCollector
             // (each token delta is pushed to the transcript immediately)
 
+            // Handle max_tokens truncation: append partial thoughts and continue
+            // to the next turn so the LLM can resume from where it left off.
+            if ("max_tokens".equals(collector.stopReason)) {
+                log.info("Task {} turn {} hit max_tokens, continuing with partial response",
+                        task.getTaskId(), turn);
+                String partialThoughts = collector.thoughts.length() > 0
+                        ? collector.thoughts.toString()
+                        : "";
+                messages.add(Message.assistant(partialThoughts,
+                        new ArrayList<ToolUseBlock>(collector.toolUses)));
+                if (!collector.toolUses.isEmpty()) {
+                    ToolContext ctx = buildToolContext(task);
+                    for (ToolUseBlock use : collector.toolUses) {
+                        task.addTranscriptEvent(TranscriptEvent.toolCall(use.getId(), use.getName(), use.getInput()));
+                        ToolResult result = toolDispatcher.dispatch(use.getName(), use.getInput(), ctx);
+                        String contentPreview = null;
+                        if (result.getContent() != null) {
+                            String c = result.getContent();
+                            contentPreview = c.length() > 500 ? c.substring(0, 500) + "\n... (truncated)" : c;
+                        }
+                        task.addTranscriptEvent(TranscriptEvent.toolResult(
+                                use.getId(), result.getRowCount(), result.isTruncated(),
+                                result.getDurationMs(), contentPreview, result.getError()));
+                        messages.add(Message.toolResult(use.getId(), serializeResult(result)));
+                    }
+                }
+                continue;
+            }
+
             // Check stop conditions
             boolean endTurn = "end_turn".equals(collector.stopReason)
                     || collector.toolUses.isEmpty();

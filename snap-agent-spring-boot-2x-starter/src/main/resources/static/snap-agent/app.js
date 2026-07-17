@@ -764,22 +764,39 @@ function subscribeStream(taskId, skillName) {
         try {
             // Keep the in-progress entry as the final "回复"
             finalizeStreamingThought(streamState, 'response');
-            let status = '完成';
+            let status = 'SUCCEEDED';
+            let report = '';
             try {
                 const data = JSON.parse(e.data);
-                status = data.status || '完成';
+                status = data.status || 'SUCCEEDED';
+                report = data.report || '';
             } catch (err) {
                 if (e.data && e.data.trim()) status = e.data.trim();
             }
-            appendTranscript(skillName, { type: 'completion', content: `— ${status} —`, timestamp: Date.now() });
+            // Build terminal message — prominent for non-SUCCEEDED
+            let completionContent, completionType = 'completion';
+            if (status === 'SUCCEEDED') {
+                completionContent = `— 完成 —`;
+            } else if (status === 'TIMEOUT') {
+                completionContent = `⚠ 任务超时：${report || '已达最大轮次上限，诊断未能完成'}`;
+                completionType = 'error';
+            } else if (status === 'FAILED') {
+                completionContent = `❌ 任务失败${report ? '：' + report : ''}`;
+                completionType = 'error';
+            } else if (status === 'CANCELLED') {
+                completionContent = `— 已取消 —`;
+            } else {
+                completionContent = `— ${status} —`;
+            }
+            appendTranscript(skillName, { type: completionType, content: completionContent, timestamp: Date.now() });
             // Save assistant content to conversation history
             if (streamState.allText) {
                 const msgs = state.conversationMessages;
                 if (msgs.length === 0 || msgs[msgs.length - 1].role !== 'assistant') {
                     msgs.push({ role: 'assistant', content: streamState.allText });
-                    saveConversationToBackend(skillName);
                 }
             }
+            saveConversationToBackend(skillName);
         } catch (doneErr) {
             console.error('[SSE] done handler error:', doneErr);
         } finally {
@@ -801,12 +818,7 @@ function subscribeStream(taskId, skillName) {
         } catch (err) {
             appendTranscript(skillName, { type: 'error', content: e.data || '任务执行出错', timestamp: Date.now() });
         }
-        // Save conversation with the error so it's preserved on refresh
-        saveConversationToBackend(skillName);
-        setSkillRunning(skillName, false);
-        state.stream = null;
-        try { es.close(); } catch (err) {}
-        if (activeSkillName === skillName) updateSendButtonState();
+        // Don't close ES or null stream — the 'done' event will handle cleanup
     });
 
     es.addEventListener('error', e => {

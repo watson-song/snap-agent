@@ -58,6 +58,7 @@ public class SnapAgentProperties {
     private IssueClosure issueClosure = new IssueClosure();
     private Cost cost = new Cost();
     private Workflows workflows = new Workflows();
+    private Skill skill = new Skill();
 
     // ---- getters / setters ----
 
@@ -259,6 +260,14 @@ public class SnapAgentProperties {
 
     public void setWorkflows(Workflows workflows) {
         this.workflows = workflows;
+    }
+
+    public Skill getSkill() {
+        return skill;
+    }
+
+    public void setSkill(Skill skill) {
+        this.skill = skill;
     }
 
     // ---- nested classes ----
@@ -1408,5 +1417,30 @@ public class SnapAgentProperties {
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public String getDir() { return dir; }
         public void setDir(String dir) { this.dir = dir; }
+    }
+
+    /**
+     * Skill subsystem configuration.
+     *
+     * <p>Controls the {@link cn.watsontech.snapagent.boot2x.skill.SkillHotReloader}
+     * which watches the upload-skills directory for {@code .md} file changes and
+     * triggers {@link cn.watsontech.snapagent.core.skill.SkillRegistry#refresh()}
+     * automatically.</p>
+     */
+    public static class Skill {
+        /**
+         * When true (default), the upload-skills directory is watched for file
+         * changes and the skill registry is auto-refreshed. Set
+         * {@code snap-agent.skill.hot-reload=false} to disable.
+         */
+        private boolean hotReload = true;
+
+        public boolean isHotReload() {
+            return hotReload;
+        }
+
+        public void setHotReload(boolean hotReload) {
+            this.hotReload = hotReload;
+        }
     }
 }

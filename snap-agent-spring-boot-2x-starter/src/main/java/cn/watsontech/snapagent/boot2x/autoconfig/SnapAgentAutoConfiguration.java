@@ -21,8 +21,9 @@ import cn.watsontech.snapagent.boot2x.routing.NoopPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.PeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
+import cn.watsontech.snapagent.boot2x.security.AuditStoreAuditLogger;
 import cn.watsontech.snapagent.boot2x.security.DefaultPrincipalResolver;
-import cn.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
+import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
@@ -30,6 +31,7 @@ import cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.ConfigReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.DataSourceRegistry;
 import cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider;
+import cn.watsontech.snapagent.boot2x.skill.SkillHotReloader;
 import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
 import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
@@ -40,6 +42,10 @@ import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
 import cn.watsontech.snapagent.boot2x.tool.TraceSearchToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
@@ -55,6 +61,7 @@ import cn.watsontech.snapagent.core.cost.CostTracker;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
 import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.security.AuditStore;
 import cn.watsontech.snapagent.core.security.PrincipalResolver;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
@@ -67,6 +74,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -78,6 +86,8 @@ import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
+import okhttp3.OkHttpClient;
+
 import javax.servlet.Filter;
 import javax.sql.DataSource;
 import java.math.BigDecimal;
@@ -88,6 +98,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Auto-configuration for the embedded SnapAgent.
@@ -133,14 +144,24 @@ public class SnapAgentAutoConfiguration {
         return new DefaultPrincipalResolver();
     }
 
-    // ---- SecurityAuditLogger ----
+    // ---- AuditStore (in-memory ring buffer) ----
     @Bean
     @ConditionalOnMissingBean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.security", name = "audit-log", havingValue = "true", matchIfMissing = true)
-    public SecurityAuditLogger securityAuditLogger() {
-        log.info("Using LoggingSecurityAuditLogger (default SLF4J audit logger)");
-        return new LoggingSecurityAuditLogger();
+    public AuditStore auditStore() {
+        log.info("Using InMemoryAuditStore (capacity=1000) for audit entries");
+        return new InMemoryAuditStore(1000);
+    }
+
+    // ---- SecurityAuditLogger (bridged to AuditStore + SLF4J) ----
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.security", name = "audit-log", havingValue = "true", matchIfMissing = true)
+    public SecurityAuditLogger securityAuditLogger(AuditStore auditStore) {
+        log.info("Using AuditStoreAuditLogger (audit store + SLF4J)");
+        return new AuditStoreAuditLogger(auditStore);
     }
 
     // ---- SecurityGateway: Spring Security adapter ----
@@ -413,12 +434,68 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public ToolDispatcher toolDispatcher(
             ObjectProvider<ToolProvider> toolProviders,
+            ObjectProvider<McpBootstrap> mcpBootstrapProvider,
             SnapAgentProperties props) {
         // Collect every ToolProvider bean in the context (Jdbc, Redis, custom).
         List<ToolProvider> providers = new ArrayList<ToolProvider>(
                 toolProviders.orderedStream().collect(java.util.stream.Collectors.toList()));
+        // Add MCP providers that were registered as singletons on the bean factory.
+        // They may also be visible via ObjectProvider<ToolProvider> depending on
+        // creation order, but adding them explicitly here guarantees inclusion
+        // regardless of timing (see mcpBootstrap bean below).
+        McpBootstrap mcpBootstrap = mcpBootstrapProvider.getIfAvailable();
+        if (mcpBootstrap != null) {
+            providers.addAll(mcpBootstrap.getProviders());
+        }
         log.info("ToolDispatcher assembled with {} provider(s)", providers.size());
         return new ToolDispatcher(providers, props.getAgent().getMaxToolResultChars());
+    }
+
+    // ---- McpBootstrap (MCP server discovery) ----
+    // When snap-agent.mcp.enabled=true, connect to each configured MCP server,
+    // discover tools, register each McpToolProvider as an individual singleton on
+    // the bean factory (so ObjectProvider<ToolProvider> can see them), and hold
+    // them in McpBootstrap so toolDispatcher can add them explicitly too. When
+    // MCP is disabled (the default), this bean is not created and toolDispatcher
+    // behaves exactly as before.
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.mcp", name = "enabled", havingValue = "true")
+    public McpBootstrap mcpBootstrap(SnapAgentProperties props,
+                                     ConfigurableListableBeanFactory beanFactory) {
+        McpBootstrap bootstrap = new McpBootstrap();
+        OkHttpClient httpClient = new OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(30, TimeUnit.SECONDS)
+                .build();
+
+        for (Map.Entry<String, SnapAgentProperties.McpServer> entry
+                : props.getMcp().getServers().entrySet()) {
+            String serverName = entry.getKey();
+            SnapAgentProperties.McpServer server = entry.getValue();
+            if (server.getTransport() != null && !"sse".equals(server.getTransport())) {
+                log.warn("MCP server {} uses unsupported transport '{}', skipping",
+                        serverName, server.getTransport());
+                continue;
+            }
+            try {
+                McpSseClient client = new McpSseClient(
+                        server.getUrl(), server.getAuthHeader(),
+                        server.getAuthHeaderValue(), httpClient);
+                List<McpToolInfo> tools = client.connect();
+                for (McpToolInfo tool : tools) {
+                    McpToolProvider provider = new McpToolProvider(
+                            serverName, tool.getName(), tool.getDescription(),
+                            tool.getInputSchema(), client);
+                    String beanName = "mcpTool_" + serverName + "_" + tool.getName();
+                    beanFactory.registerSingleton(beanName, provider);
+                    bootstrap.addProvider(provider);
+                }
+                log.info("Registered {} MCP tools from server '{}'", tools.size(), serverName);
+            } catch (Exception e) {
+                log.error("Failed to connect to MCP server '{}': {}", serverName, e.getMessage());
+            }
+        }
+        return bootstrap;
     }
 
     // ---- ClasspathSkillScanner (builtin skills) ----
@@ -450,6 +527,17 @@ public class SnapAgentAutoConfiguration {
         Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
 
         return new SkillRegistry(uploadDir, builtinSkills, toolDispatcher);
+    }
+
+    // ---- SkillHotReloader (auto-refresh on file change) ----
+    @Bean(initMethod = "start", destroyMethod = "stop")
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "snap-agent.skill", name = "hot-reload",
+            havingValue = "true", matchIfMissing = true)
+    public SkillHotReloader skillHotReloader(SkillRegistry skillRegistry, SnapAgentProperties props) {
+        Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
+        log.info("SkillHotReloader assembled, watching upload-skills-dir: {}", uploadDir);
+        return new SkillHotReloader(uploadDir, skillRegistry, 1000);
     }
 
     // ---- AgentExecutor ----
@@ -584,6 +672,7 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<YamlWorkflowLoader> workflowLoaderProvider,
             ObjectProvider<WorkflowEngine> workflowEngineProvider,
             ObjectProvider<ToolPluginRegistry> toolPluginRegistryProvider,
+            ObjectProvider<AuditStore> auditStoreProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
@@ -598,6 +687,7 @@ public class SnapAgentAutoConfiguration {
         YamlWorkflowLoader workflowLoader = workflowLoaderProvider.getIfAvailable();
         WorkflowEngine workflowEngine = workflowEngineProvider.getIfAvailable();
         ToolPluginRegistry toolPluginRegistry = toolPluginRegistryProvider.getIfAvailable();
+        AuditStore auditStore = auditStoreProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -621,7 +711,7 @@ public class SnapAgentAutoConfiguration {
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
-                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry);
+                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore);
     }
 
     // ---- SnapAgentFilter ----

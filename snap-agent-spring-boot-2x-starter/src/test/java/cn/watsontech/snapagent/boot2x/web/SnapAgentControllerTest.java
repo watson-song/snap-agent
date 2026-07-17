@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
@@ -34,8 +35,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -69,15 +73,17 @@ class SnapAgentControllerTest {
     private SnapAgentController controller;
     private MockMvc mockMvc;
     private ObjectMapper objectMapper;
+    private InMemoryAuditStore auditStore;
 
     @BeforeEach
     void setUp() {
         properties = new SnapAgentProperties();
         objectMapper = new ObjectMapper();
+        auditStore = new InMemoryAuditStore(100);
         controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor,
-                null, llmClient, null, null);
+                null, llmClient, null, null, auditStore);
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
         lenient().when(securityGateway.currentUserId()).thenReturn("user001");
         lenient().when(securityGateway.hasPermission(anyString())).thenReturn(true);
@@ -660,5 +666,79 @@ class SnapAgentControllerTest {
         mockMvc.perform(get("/snap-agent/skills"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.skills[0].requiredPermission").doesNotExist());
+    }
+
+    // ---- GET /runs/{id}/report tests ----
+
+    @Test
+    void shouldReturnMarkdownReportForTask() throws Exception {
+        AgentTask task = AgentTask.create("user001", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.addTranscriptEvent(TranscriptEvent.thought("诊断中..."));
+        task.addTranscriptEvent(TranscriptEvent.done("SUCCEEDED", "完成"));
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        mockMvc.perform(get("/snap-agent/runs/" + task.getTaskId() + "/report")
+                        .param("format", "md"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("诊断报告")))
+                .andExpect(content().string(containsString("诊断中...")))
+                .andExpect(content().string(containsString("SUCCEEDED")));
+    }
+
+    // ---- GET /runs (paginated) tests ----
+
+    @Test
+    void shouldReturnPaginatedRunsByUserId() throws Exception {
+        List<AgentTask> mockPage = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            AgentTask task = AgentTask.create("user001", "test-skill",
+                    new HashMap<String, String>(), "claude-sonnet-4-6");
+            task.setStatus(TaskStatus.SUCCEEDED);
+            mockPage.add(task);
+        }
+        when(taskStore.query(eq("user001"), isNull(), isNull(), eq(5), eq(0))).thenReturn(mockPage);
+        when(taskStore.count(eq("user001"), isNull(), isNull())).thenReturn(12);
+
+        mockMvc.perform(get("/snap-agent/runs")
+                        .param("page", "0")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tasks").isArray())
+                .andExpect(jsonPath("$.total").value(12))
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.totalPages").value(3));
+    }
+
+    @Test
+    void shouldFilterRunsByStatusAndSkillId() throws Exception {
+        List<AgentTask> mockPage = new ArrayList<>();
+        AgentTask task = AgentTask.create("user001", "db-check",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        task.setStatus(TaskStatus.SUCCEEDED);
+        mockPage.add(task);
+        when(taskStore.query(eq("user001"), eq("db-check"), eq(TaskStatus.SUCCEEDED), eq(20), eq(0))).thenReturn(mockPage);
+        when(taskStore.count(eq("user001"), eq("db-check"), eq(TaskStatus.SUCCEEDED))).thenReturn(1);
+
+        mockMvc.perform(get("/snap-agent/runs")
+                        .param("status", "SUCCEEDED")
+                        .param("skillId", "db-check"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.tasks[0].skillId").value("db-check"))
+                .andExpect(jsonPath("$.tasks[0].status").value("SUCCEEDED"));
+    }
+
+    // ---- GET /audit tests ----
+
+    @Test
+    void shouldReturnAuditEntriesForCurrentUser() throws Exception {
+        mockMvc.perform(get("/snap-agent/audit")
+                        .param("page", "0")
+                        .param("size", "10"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries").isArray())
+                .andExpect(jsonPath("$.total").exists());
     }
 }

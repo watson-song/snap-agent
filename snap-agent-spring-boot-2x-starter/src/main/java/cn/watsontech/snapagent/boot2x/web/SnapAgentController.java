@@ -31,6 +31,8 @@ import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
 import cn.watsontech.snapagent.core.patrol.PatrolReport;
 import cn.watsontech.snapagent.core.patrol.PatrolScheduler;
 import cn.watsontech.snapagent.core.patrol.PatrolTask;
+import cn.watsontech.snapagent.core.security.AuditEntry;
+import cn.watsontech.snapagent.core.security.AuditStore;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.security.UserInfo;
@@ -116,6 +118,7 @@ public class SnapAgentController {
     private final YamlWorkflowLoader workflowLoader;
     private final WorkflowEngine workflowEngine;
     private final ToolPluginRegistry toolPluginRegistry;
+    private final AuditStore auditStore;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -201,6 +204,24 @@ public class SnapAgentController {
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore,
+                                AuditStore auditStore) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
                                 PatrolScheduler patrolScheduler,
                                 AlertConverger alertConverger,
                                 TemplateBugfixSuggester bugfixSuggester) {
@@ -228,7 +249,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, null, null, null, null);
+                issueClosureService, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -251,7 +272,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, costSummaryService, null, null, null);
+                issueClosureService, costSummaryService, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -273,7 +294,8 @@ public class SnapAgentController {
                                 CostSummaryService costSummaryService,
                                 YamlWorkflowLoader workflowLoader,
                                 WorkflowEngine workflowEngine,
-                                ToolPluginRegistry toolPluginRegistry) {
+                                ToolPluginRegistry toolPluginRegistry,
+                                AuditStore auditStore) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -294,6 +316,7 @@ public class SnapAgentController {
         this.workflowLoader = workflowLoader;
         this.workflowEngine = workflowEngine;
         this.toolPluginRegistry = toolPluginRegistry;
+        this.auditStore = auditStore;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -776,35 +799,52 @@ public class SnapAgentController {
         return ResponseEntity.accepted().body(result);
     }
 
-    // ---- GET /runs?status=RUNNING ----
+    // ---- GET /runs (paginated, filterable) ----
     @GetMapping("/runs")
     public ResponseEntity<Object> listRuns(
-            @RequestParam(value = "status", required = false) String status) {
-        String userId = securityGateway.currentUserId();
-        if (userId == null) {
-            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
-        }
-        List<Map<String, Object>> tasks = new ArrayList<Map<String, Object>>();
-        for (AgentTask task : taskStore.all()) {
-            if (!userId.equals(task.getUserId())) continue;
-            if (status != null && !status.isEmpty()) {
-                try {
-                    TaskStatus filter = TaskStatus.valueOf(status.toUpperCase());
-                    if (task.getStatus() != filter) continue;
-                } catch (IllegalArgumentException e) {
-                    return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
-                            "unknown status: " + status);
-                }
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "skillId", required = false) String skillId,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        String userId = currentUserId();
+        TaskStatus statusFilter = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                statusFilter = TaskStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "unknown status: " + status);
             }
-            Map<String, Object> t = new LinkedHashMap<String, Object>();
-            t.put("taskId", task.getTaskId());
-            t.put("skillId", task.getSkillId());
-            t.put("status", task.getStatus().name());
-            t.put("createdAt", task.getCreatedAt());
-            tasks.add(t);
         }
+
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AgentTask> tasks = taskStore.query(userId, skillId, statusFilter, size, page * size);
+        int total = taskStore.count(userId, skillId, statusFilter);
+        int totalPages = (total + size - 1) / size;
+
+        List<Map<String, Object>> taskList = new ArrayList<Map<String, Object>>();
+        for (AgentTask task : tasks) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("taskId", task.getTaskId());
+            dto.put("skillId", task.getSkillId());
+            dto.put("status", task.getStatus().name());
+            dto.put("createdAt", task.getCreatedAt());
+            taskList.add(dto);
+        }
+
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("tasks", tasks);
+        result.put("tasks", taskList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", totalPages);
+
+        audit(userId, "GET", "/runs", "LIST_RUNS", null);
+
         return ResponseEntity.ok(result);
     }
 
@@ -862,6 +902,32 @@ public class SnapAgentController {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("transcript", events);
         return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /runs/{id}/report ----
+    @GetMapping("/runs/{id}/report")
+    public ResponseEntity<Object> getReport(@PathVariable String id,
+                                            @RequestParam(value = "format", defaultValue = "md") String format) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "task not found: " + id);
+        }
+        if (!currentUserId().equals(task.getUserId())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "not task owner");
+        }
+
+        String title = task.getSkillId() != null ? task.getSkillId() + " 诊断报告" : "诊断报告";
+        String report = cn.watsontech.snapagent.core.agent.ReportGenerator.generate(title, task.getTranscript());
+
+        audit(currentUserId(), "GET", "/runs/" + id + "/report", "GET_REPORT", null);
+
+        return ResponseEntity.ok()
+                .contentType(new MediaType(MediaType.TEXT_PLAIN, java.nio.charset.StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"report-" + id + ".md\"")
+                .body(report);
     }
 
     // ---- GET /runs/{id}/stream (SSE) ----
@@ -981,11 +1047,20 @@ public class SnapAgentController {
                                 .data(toSseData(event)));
                     }
 
-                    // 2. If already terminal, send done and return
+                    // 2. If already terminal, send error info (if any) then done and return
                     if (isTerminal(task.getStatus())) {
                         log.info("SSE task {} already terminal, sending done", id);
+                        // Replay any error transcript events as task_error SSE events
+                        for (int i = replayStart; i < existing.size(); i++) {
+                            TranscriptEvent event = existing.get(i);
+                            if (TranscriptEvent.TYPE_ERROR.equals(event.getType())) {
+                                emitter.send(SseEmitter.event()
+                                        .name("task_error")
+                                        .data(toSseData(event)));
+                            }
+                        }
                         emitter.send(SseEmitter.event().name("done")
-                                .data(task.getStatus().name()));
+                                .data(buildDoneData(task)));
                         emitter.complete();
                         return;
                     }
@@ -1038,7 +1113,7 @@ public class SnapAgentController {
                                         .data(toSseData(re)));
                             }
                             emitter.send(SseEmitter.event().name("done")
-                                    .data(task.getStatus().name()));
+                                    .data(buildDoneData(task)));
                             emitter.complete();
                             log.info("SSE streaming completed for task {}", id);
                             return;
@@ -1097,6 +1172,46 @@ public class SnapAgentController {
         audit(userId, "POST", "/runs/" + id + "/cancel", "CANCEL_TASK", null);
 
         return ResponseEntity.ok().body(result);
+    }
+
+    // ---- GET /audit (paginated audit entries for current user) ----
+    @GetMapping("/audit")
+    public ResponseEntity<Object> listAudit(
+            @RequestParam(value = "action", required = false) String action,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (auditStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_DISABLED", "audit store not configured");
+        }
+
+        String userId = currentUserId();
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AuditEntry> entries = auditStore.query(userId, action, size, page * size);
+        int total = auditStore.count(userId, action);
+
+        List<Map<String, Object>> entryList = new ArrayList<Map<String, Object>>();
+        for (AuditEntry e : entries) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("userId", e.getUserId());
+            dto.put("method", e.getMethod());
+            dto.put("path", e.getPath());
+            dto.put("action", e.getAction());
+            dto.put("timestamp", e.getTimestamp());
+            entryList.add(dto);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("entries", entryList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+
+        return ResponseEntity.ok(result);
     }
 
     // ---- POST /conversations (save/update a conversation) ----
@@ -1928,6 +2043,16 @@ public class SnapAgentController {
         }
         if (event.getData() != null && !event.getData().isEmpty()) {
             data.putAll(event.getData());
+        }
+        return data;
+    }
+
+    /** Build the terminal SSE 'done' event payload with status and optional report. */
+    private Object buildDoneData(AgentTask task) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("status", task.getStatus().name());
+        if (task.getReport() != null && !task.getReport().isEmpty()) {
+            data.put("report", task.getReport());
         }
         return data;
     }
