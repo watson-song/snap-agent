@@ -100,6 +100,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                     null, task.getId(), null,
                     task.getSkillName(), triggeredAt, "FAILED",
                     "Skill not found: " + task.getSkillName(), false);
+            report.setUserId(task.getUserId());
             reportStore.save(report);
             return;
         }
@@ -118,12 +119,14 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
             PatrolReport report = new PatrolReport(
                     null, task.getId(), agentTask.getTaskId(),
                     task.getSkillName(), triggeredAt, statusStr, summary, false);
+            report.setUserId(task.getUserId());
             reportStore.save(report);
         } catch (Exception e) {
             log.error("Patrol {} failed: {}", task.getId(), e.getMessage(), e);
             PatrolReport report = new PatrolReport(
                     null, task.getId(), null,
                     task.getSkillName(), triggeredAt, "FAILED", e.getMessage(), false);
+            report.setUserId(task.getUserId());
             reportStore.save(report);
         }
     }

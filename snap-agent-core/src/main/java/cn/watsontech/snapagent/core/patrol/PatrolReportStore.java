@@ -35,8 +35,11 @@ public class PatrolReportStore {
     /**
      * Saves a patrol report. Auto-generates an ID if the report's id is null.
      * If the ring buffer is full, the oldest report is evicted first.
+     *
+     * <p>Synchronized to ensure the poll-evict-offer sequence is atomic,
+     * preventing ring buffer / id index inconsistency under concurrent access.</p>
      */
-    public void save(PatrolReport report) {
+    public synchronized void save(PatrolReport report) {
         if (report.getId() == null || report.getId().isEmpty()) {
             report.setId(generateId());
         }
@@ -55,14 +58,25 @@ public class PatrolReportStore {
 
     /**
      * Returns reports for a given user sorted by triggeredAt descending, with
-     * pagination.
+     * pagination. Reports with null userId are system-generated and visible
+     * to all users.
      *
-     * @param userId the user ID (currently unused — returns all reports)
+     * @param userId the user ID for filtering (null returns all reports)
      * @param limit  maximum number of reports to return
      * @param offset number of reports to skip
      */
     public List<PatrolReport> getReports(String userId, int limit, int offset) {
         List<PatrolReport> all = new ArrayList<PatrolReport>(ringBuffer);
+        // Filter by userId (null userId on report = system-generated, visible to all)
+        if (userId != null) {
+            List<PatrolReport> filtered = new ArrayList<PatrolReport>();
+            for (PatrolReport r : all) {
+                if (r.getUserId() == null || userId.equals(r.getUserId())) {
+                    filtered.add(r);
+                }
+            }
+            all = filtered;
+        }
         Collections.sort(all, new Comparator<PatrolReport>() {
             @Override
             public int compare(PatrolReport a, PatrolReport b) {
@@ -76,10 +90,20 @@ public class PatrolReportStore {
     }
 
     /**
-     * Returns the total number of reports currently stored.
+     * Returns the total number of reports for a given user.
+     * Reports with null userId are system-generated and counted for all users.
      */
     public long count(String userId) {
-        return ringBuffer.size();
+        if (userId == null) {
+            return ringBuffer.size();
+        }
+        long c = 0;
+        for (PatrolReport r : ringBuffer) {
+            if (r.getUserId() == null || userId.equals(r.getUserId())) {
+                c++;
+            }
+        }
+        return c;
     }
 
     /**

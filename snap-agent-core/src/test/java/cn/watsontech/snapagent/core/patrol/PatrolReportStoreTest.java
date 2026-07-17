@@ -74,6 +74,44 @@ class PatrolReportStoreTest {
     }
 
     @Test
+    void getReportsShouldFilterByUserId() {
+        PatrolReport r1 = createReport(1000L);
+        r1.setUserId("userA");
+        PatrolReport r2 = createReport(2000L);
+        r2.setUserId("userB");
+        PatrolReport r3 = createReport(3000L);
+        r3.setUserId("userA");
+
+        store.save(r1);
+        store.save(r2);
+        store.save(r3);
+
+        List<PatrolReport> userAReports = store.getReports("userA", 10, 0);
+        assertThat(userAReports).hasSize(2);
+        assertThat(userAReports).allSatisfy(r ->
+                assertThat(r.getUserId()).isEqualTo("userA"));
+
+        List<PatrolReport> userBReports = store.getReports("userB", 10, 0);
+        assertThat(userBReports).hasSize(1);
+        assertThat(userBReports.get(0).getUserId()).isEqualTo("userB");
+    }
+
+    @Test
+    void countShouldFilterByUserId() {
+        PatrolReport r1 = createReport(1000L);
+        r1.setUserId("userA");
+        PatrolReport r2 = createReport(2000L);
+        r2.setUserId("userB");
+
+        store.save(r1);
+        store.save(r2);
+
+        assertThat(store.count("userA")).isEqualTo(1);
+        assertThat(store.count("userB")).isEqualTo(1);
+        assertThat(store.count("userC")).isEqualTo(0);
+    }
+
+    @Test
     void ringBufferEvictsOldestWhenFull() {
         PatrolReportStore smallStore = new PatrolReportStore(3);
 
@@ -99,6 +137,36 @@ class PatrolReportStoreTest {
         assertThat(smallStore.get("r2")).isNotNull();
         assertThat(smallStore.get("r3")).isNotNull();
         assertThat(smallStore.get("r4")).isNotNull();
+    }
+
+    @Test
+    void concurrentSaveShouldNotCorruptRingBuffer() throws Exception {
+        PatrolReportStore smallStore = new PatrolReportStore(10);
+        int threadCount = 20;
+        String[] savedIds = new String[threadCount];
+        Thread[] threads = new Thread[threadCount];
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            threads[i] = new Thread(() -> {
+                PatrolReport r = createReport(1000L + idx);
+                r.setUserId("user" + idx);
+                smallStore.save(r);
+                savedIds[idx] = r.getId();
+            });
+        }
+        for (Thread t : threads) t.start();
+        for (Thread t : threads) t.join();
+
+        // Ring buffer capacity is 10, so at most 10 reports should be stored
+        assertThat(smallStore.count(null)).isLessThanOrEqualTo(10);
+        // idIndex and ringBuffer should be consistent
+        int presentCount = 0;
+        for (String id : savedIds) {
+            if (id != null && smallStore.get(id) != null) {
+                presentCount++;
+            }
+        }
+        assertThat(presentCount).isEqualTo(smallStore.count(null));
     }
 
     private PatrolReport createReport(long triggeredAt) {

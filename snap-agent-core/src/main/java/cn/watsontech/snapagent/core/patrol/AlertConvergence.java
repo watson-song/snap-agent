@@ -1,8 +1,14 @@
 package cn.watsontech.snapagent.core.patrol;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 /**
  * Represents a converged alert that deduplicates repeated anomaly events of
  * the same type and source.
+ *
+ * <p>Thread-safe: {@code count}, {@code lastSeen}, and {@code status} use
+ * atomic/volatile fields to prevent data races between concurrent
+ * {@code record()} and {@code autoResolveStale()} calls.</p>
  */
 public class AlertConvergence {
 
@@ -14,14 +20,13 @@ public class AlertConvergence {
     private String type;
     private String source;
     private String firstMessage;
-    private int count;
-    private long firstSeen;
-    private long lastSeen;
-    private String status;
+    private final AtomicInteger count = new AtomicInteger(1);
+    private volatile long firstSeen;
+    private volatile long lastSeen;
+    private volatile String status;
     private String relatedTaskId;
 
     public AlertConvergence() {
-        this.count = 1;
         this.status = STATUS_ACTIVE;
         long now = System.currentTimeMillis();
         this.firstSeen = now;
@@ -35,7 +40,6 @@ public class AlertConvergence {
         this.type = type;
         this.source = source;
         this.firstMessage = firstMessage;
-        this.count = 1;
         this.status = STATUS_ACTIVE;
         long now = System.currentTimeMillis();
         this.firstSeen = now;
@@ -44,10 +48,10 @@ public class AlertConvergence {
     }
 
     /**
-     * Increments the occurrence count and updates {@code lastSeen} to now.
+     * Increments the occurrence count atomically and updates {@code lastSeen} to now.
      */
     public void incrementCount() {
-        this.count++;
+        this.count.incrementAndGet();
         this.lastSeen = System.currentTimeMillis();
     }
 
@@ -66,8 +70,8 @@ public class AlertConvergence {
     public String getFirstMessage() { return firstMessage; }
     public void setFirstMessage(String firstMessage) { this.firstMessage = firstMessage; }
 
-    public int getCount() { return count; }
-    public void setCount(int count) { this.count = count; }
+    public int getCount() { return count.get(); }
+    public void setCount(int count) { this.count.set(count); }
 
     public long getFirstSeen() { return firstSeen; }
     public void setFirstSeen(long firstSeen) { this.firstSeen = firstSeen; }
