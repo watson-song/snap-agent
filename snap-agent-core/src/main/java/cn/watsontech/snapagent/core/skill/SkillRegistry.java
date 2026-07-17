@@ -189,7 +189,12 @@ public class SkillRegistry {
                 log.debug("Skipping invalid builtin skill: {}", meta.getUnavailableReason());
                 continue;
             }
-            SkillMeta validated = validateContract(meta).withSource("builtin");
+            SkillMeta validated = validateContract(meta);
+            // Only override to "builtin" if source is still the default "custom"
+            // (ClasspathSkillScanner sets "builtin" for JAR skills and "host" for host project skills)
+            if ("custom".equals(validated.getSource())) {
+                validated = validated.withSource("builtin");
+            }
             builtinByName.put(validated.getName(), validated);
         }
 

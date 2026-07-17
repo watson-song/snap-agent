@@ -126,7 +126,7 @@ public class ClasspathSkillScanner {
             if (meta.getName() != null) {
                 seenNames.add(meta.getName());
             }
-            result.add(meta);
+            result.add(meta.withSource("builtin"));
         }
 
         // Pass 2: host project resources (skip names already provided by SnapAgent)
@@ -139,7 +139,7 @@ public class ClasspathSkillScanner {
             if (meta.getName() != null) {
                 seenNames.add(meta.getName());
             }
-            result.add(meta);
+            result.add(meta.withSource("host"));
         }
 
         log.info("Loaded {} builtin skill(s) from {} ({} from SnapAgent JAR, {} from host classpath)",
