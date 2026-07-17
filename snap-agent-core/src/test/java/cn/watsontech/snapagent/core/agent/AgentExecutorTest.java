@@ -539,6 +539,80 @@ class AgentExecutorTest {
     }
 
     @Test
+    void shouldContinueWhenMaxTokensHit() {
+        // Turn 0: LLM hits max_tokens with partial thoughts (no tool_use)
+        // Turn 1: LLM completes the response with end_turn
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("正在分析");
+            sink.onStop("max_tokens");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("诊断完成。");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        // Should NOT be SUCCEEDED from max_tokens — should continue and eventually SUCCEEDED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
+        assertThat(task.getReport()).contains("诊断完成");
+    }
+
+    @Test
+    void shouldHandleMaxTokensWithPartialToolUse() {
+        // Turn 0: LLM hits max_tokens mid-tool-call, but tool_use was already emitted
+        // Turn 1: LLM continues with end_turn
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("查一下数据。");
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("sql", "SELECT 1");
+            sink.onToolUse("toolu_01", "mysql_query", input);
+            sink.onStop("max_tokens");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("数据正常，诊断完成。");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        when(mysqlProvider.execute(any(), any()))
+                .thenReturn(ToolResult.success("1", 1, 10L));
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
+        assertThat(task.getAuditRecords()).hasSize(1);
+    }
+
+    @Test
+    void shouldNotMarkSucceededWhenMaxTokensWithoutEndTurn() {
+        // max_tokens on every turn — should eventually hit max-turns, not SUCCEEDED
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("正在生成报告...");
+            sink.onStop("max_tokens");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 3, 8192);
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        // Should be TIMEOUT (max-turns), NOT SUCCEEDED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.TIMEOUT);
+        assertThat(task.getReport()).contains("max-turns");
+    }
+
+    @Test
     void shouldPassCorrectModelToLlmRequest() {
         ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
         doAnswer(invocation -> {
