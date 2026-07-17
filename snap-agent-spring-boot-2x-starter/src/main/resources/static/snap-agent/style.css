@@ -109,6 +109,37 @@ body {
     border-top: 1px solid var(--border);
 }
 
+/* ===== Feature Nav Bar ===== */
+.feature-nav {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+
+.feature-nav-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 6px 8px;
+    transition: all 0.2s;
+    opacity: 0.6;
+}
+
+.feature-nav-btn:hover {
+    background: var(--bg-card);
+    border-color: var(--border);
+    opacity: 1;
+}
+
+.sidebar.collapsed .feature-nav {
+    display: none;
+}
+
 /* Collapsed skill letter-icons */
 .skill-icons {
     display: none;
@@ -1070,6 +1101,135 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-hover); }
+
+/* ===== Feature Modals (Tools, Workflows, Cost, etc.) ===== */
+.feature-modal-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    width: 800px; max-width: 95vw; max-height: 85vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    border: 1px solid var(--border);
+}
+
+.feature-modal-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.feature-tab {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.feature-tab:hover { color: var(--text-primary); }
+.feature-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+.feature-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.feature-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+}
+
+.feature-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.feature-table tr:hover td { background: var(--bg-card); }
+
+.feature-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    min-width: 120px;
+}
+
+.feature-stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.feature-stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.feature-stat-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 12px 0;
+}
+
+.feature-empty {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.feature-action-btn {
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.feature-action-btn:hover {
+    background: var(--accent);
+    color: white;
+}
+
+.feature-action-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.feature-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.feature-badge.green { background: var(--green-light); color: var(--green); }
+.feature-badge.red { background: var(--red-light); color: var(--red); }
+.feature-badge.orange { background: var(--orange-light); color: var(--orange); }
 
 /* ===== Loading ===== */
 .loading-dots {

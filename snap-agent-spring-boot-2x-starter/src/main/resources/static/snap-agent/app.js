@@ -1,6 +1,6 @@
 // SnapAgent SPA — per-skill independent chat sessions with parallel streams
-// Version: v22 (feat: split builtin/host skills, hide disabled by default, skill detail modal)
-console.log('[SnapAgent] app.js v22 loaded');
+// Version: v23 (feat: enable all v0.3-v1.0 features, add feature nav bar with modals)
+console.log('[SnapAgent] app.js v23 loaded');
 
 const BASE = '/snap-agent';
 let selectedSkill = null;            // currently active skill object
@@ -1458,6 +1458,392 @@ async function reconnectRunningTasks() {
         console.error('[reconnect] Failed to check running tasks:', e);
     }
 }
+
+// ===== Feature Modals (Tools, Workflows, Cost, Issues, Patrol, Alerts) =====
+
+function openFeatureModal(title, bodyHtml) {
+    var existing = document.getElementById('featureModal');
+    if (existing) existing.remove();
+    var modal = document.createElement('div');
+    modal.className = 'history-modal';
+    modal.id = 'featureModal';
+    modal.innerHTML =
+        '<div class="feature-modal-card">' +
+            '<div class="history-modal-header">' +
+                '<span class="history-modal-title">' + escapeHtml(title) + '</span>' +
+                '<button class="history-modal-close" id="featureModalClose">✕</button>' +
+            '</div>' +
+            '<div class="history-modal-body">' + bodyHtml + '</div>' +
+        '</div>';
+    document.body.appendChild(modal);
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal || e.target.id === 'featureModalClose') modal.remove();
+    });
+    return modal;
+}
+
+function featureEmpty(msg) {
+    return '<div class="feature-empty">' + escapeHtml(msg || '暂无数据') + '</div>';
+}
+
+// --- Tools & Plugins ---
+async function showToolsModal() {
+    var modal = openFeatureModal('工具 & 插件', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var toolsResp = await fetch(BASE + '/tools', { headers: authHeaders() });
+        var toolsData = await toolsResp.json();
+        var pluginsResp = await fetch(BASE + '/tools/plugins', { headers: authHeaders() });
+        var pluginsData = await pluginsResp.json();
+        var tools = toolsData.tools || [];
+        var plugins = pluginsData || [];
+
+        var html = '<div style="margin-bottom:20px;">';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">已注册工具 (' + tools.length + ')</div>';
+        if (tools.length === 0) {
+            html += featureEmpty('无可用工具');
+        } else {
+            html += '<table class="feature-table"><thead><tr><th>工具名</th></tr></thead><tbody>';
+            tools.forEach(function(t) {
+                html += '<tr><td><code style="color:var(--accent)">' + escapeHtml(t.name) + '</code></td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+
+        html += '<div>';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">工具插件 (' + plugins.length + ')</div>';
+        if (plugins.length === 0) {
+            html += featureEmpty('无已注册插件');
+        } else {
+            html += '<table class="feature-table"><thead><tr><th>名称</th><th>版本</th><th>工具</th><th>描述</th></tr></thead><tbody>';
+            plugins.forEach(function(p) {
+                html += '<tr><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.version || '') + '</td><td>' +
+                    escapeHtml((p.toolNames || []).join(', ')) + '</td><td>' + escapeHtml(p.description || '') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
+
+// --- Workflows ---
+async function showWorkflowsModal() {
+    var modal = openFeatureModal('工作流', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var resp = await fetch(BASE + '/workflows', { headers: authHeaders() });
+        var data = await resp.json();
+        var workflows = Array.isArray(data) ? data : (data.workflows || []);
+        // Fetch detail for each workflow to get steps
+        var workflowsWithSteps = [];
+        for (var i = 0; i < workflows.length; i++) {
+            var wf = workflows[i];
+            try {
+                var detailResp = await fetch(BASE + '/workflows/' + encodeURIComponent(wf.name), { headers: authHeaders() });
+                if (detailResp.ok) {
+                    var detail = await detailResp.json();
+                    if (detail.steps) wf.steps = detail.steps;
+                }
+            } catch (e) { /* use list data */ }
+            workflowsWithSteps.push(wf);
+        }
+        workflows = workflowsWithSteps;
+        if (workflows.length === 0) {
+            body.innerHTML = featureEmpty('无已注册工作流');
+            return;
+        }
+        var html = '<table class="feature-table"><thead><tr><th>名称</th><th>描述</th><th>步骤数</th><th>操作</th></tr></thead><tbody>';
+        workflows.forEach(function(wf) {
+            var steps = wf.steps || [];
+            html += '<tr><td><strong>' + escapeHtml(wf.name) + '</strong></td><td>' + escapeHtml(wf.description || '') + '</td><td>' + steps.length + '</td>' +
+                '<td><button class="feature-action-btn" data-workflow="' + escapeHtml(wf.name) + '">运行</button></td></tr>';
+        });
+        html += '</tbody></table>';
+
+        // Steps detail
+        html += '<div style="margin-top:16px;">';
+        workflows.forEach(function(wf) {
+            var steps = wf.steps || [];
+            html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
+            html += '<div style="font-weight:600;margin-bottom:8px;">' + escapeHtml(wf.name) + ' — 步骤</div>';
+            steps.forEach(function(step, idx) {
+                var condHtml = step.condition ? ' <span class="feature-badge orange">条件: ' + escapeHtml(step.condition) + '</span>' : '';
+                var failHtml = step.onFailure ? ' <span class="feature-badge red">失败: ' + escapeHtml(step.onFailure) + '</span>' : '';
+                html += '<div style="padding:4px 0;font-size:12px;color:var(--text-secondary);">' +
+                    (idx+1) + '. <strong>' + escapeHtml(step.skill) + '</strong>' + condHtml + failHtml + '</div>';
+            });
+            html += '</div>';
+        });
+        html += '</div>';
+
+        body.innerHTML = html;
+
+        // Attach run buttons
+        body.querySelectorAll('[data-workflow]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                var wfName = btn.dataset.workflow;
+                btn.disabled = true;
+                btn.textContent = '运行中...';
+                try {
+                    var runResp = await fetch(BASE + '/workflows/' + encodeURIComponent(wfName) + '/run', {
+                        method: 'POST',
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: '{}'
+                    });
+                    var runData = await runResp.json();
+                    if (runData.success) {
+                        btn.textContent = '成功';
+                        btn.style.background = 'var(--green-light)';
+                        btn.style.borderColor = 'var(--green)';
+                        btn.style.color = 'var(--green)';
+                    } else {
+                        btn.textContent = '失败';
+                        btn.style.background = 'var(--red-light)';
+                        btn.style.borderColor = 'var(--red)';
+                        btn.style.color = 'var(--red)';
+                    }
+                    setTimeout(function() {
+                        btn.disabled = false;
+                        btn.textContent = '运行';
+                        btn.style.cssText = '';
+                    }, 3000);
+                } catch (e) {
+                    btn.textContent = '错误';
+                    setTimeout(function() {
+                        btn.disabled = false;
+                        btn.textContent = '运行';
+                    }, 3000);
+                }
+            });
+        });
+    } catch (e) {
+        body.innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
+
+// --- Cost Dashboard ---
+async function showCostModal() {
+    var modal = openFeatureModal('成本看板', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var now = Date.now();
+        var from = Math.floor((now - 7 * 24 * 3600 * 1000) / 1000);
+        var to = Math.floor(now / 1000);
+        var resp = await fetch(BASE + '/cost/summary?from=' + from + '&to=' + to, { headers: authHeaders() });
+        if (!resp.ok) {
+            body.innerHTML = featureEmpty('成本核算未启用或请求失败 (' + resp.status + ')');
+            return;
+        }
+        var data = await resp.json();
+        var summaries = data.summaries || [];
+        if (summaries.length === 0) {
+            body.innerHTML = featureEmpty('暂无成本记录。运行一次 skill 后再来查看。');
+            return;
+        }
+        var html = '<div class="feature-stat-row">';
+        var totalCost = 0, totalTokens = 0, totalReqs = 0;
+        summaries.forEach(function(s) {
+            totalCost += parseFloat(s.totalCost || 0);
+            totalTokens += parseInt(s.totalTokens || 0);
+            totalReqs += parseInt(s.requestCount || 0);
+        });
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalCost.toFixed(2) + '</div><div class="feature-stat-label">总成本</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalTokens + '</div><div class="feature-stat-label">总 Tokens</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalReqs + '</div><div class="feature-stat-label">总请求数</div></div>';
+        html += '</div>';
+
+        html += '<table class="feature-table"><thead><tr><th>维度</th><th>值</th><th>成本</th><th>Tokens</th><th>请求数</th><th>预算利用率</th></tr></thead><tbody>';
+        summaries.forEach(function(s) {
+            var util = s.budget ? (s.utilization * 100).toFixed(1) + '%' : '—';
+            html += '<tr><td>' + escapeHtml(s.dimension) + '</td><td>' + escapeHtml(s.dimensionValue) + '</td>' +
+                '<td>' + (parseFloat(s.totalCost || 0)).toFixed(2) + '</td><td>' + (s.totalTokens || 0) + '</td>' +
+                '<td>' + (s.requestCount || 0) + '</td><td>' + util + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
+
+// --- Issues (Problem Closure) ---
+async function showIssuesModal() {
+    var modal = openFeatureModal('问题闭环', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        // Issue closure doesn't have a list-all endpoint; show explanatory info
+        var resp = await fetch(BASE + '/runs?limit=10', { headers: authHeaders() });
+        var data = await resp.json();
+        var runs = data.runs || [];
+        var html = '<div style="padding:8px 0;font-size:13px;color:var(--text-secondary);margin-bottom:12px;">' +
+            '问题闭环功能在每个运行任务完成后可用。在聊天区完成一次诊断后，可对该任务发起"建议方案"、"创建 Issue"、"验证修复"和"关闭问题"操作。</div>';
+        if (runs.length > 0) {
+            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            runs.forEach(function(r) {
+                var isDone = r.status === 'DONE';
+                html += '<tr><td><code>' + escapeHtml(r.taskId) + '</code></td><td>' + escapeHtml(r.skillId || r.skill) + '</td>' +
+                    '<td><span class="feature-badge ' + (isDone ? 'green' : 'orange') + '">' + escapeHtml(r.status) + '</span></td>' +
+                    '<td>' + (isDone ? '<button class="feature-action-btn" data-task-id="' + escapeHtml(r.taskId) + '">建议方案</button>' : '—') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += featureEmpty('暂无运行记录');
+        }
+        body.innerHTML = html;
+
+        // Attach solution buttons
+        body.querySelectorAll('[data-task-id]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                var taskId = btn.dataset.taskId;
+                btn.disabled = true;
+                btn.textContent = '生成中...';
+                try {
+                    var solResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', {
+                        method: 'POST',
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: '{}'
+                    });
+                    var solData = await solResp.json();
+                    btn.textContent = '已生成';
+                    btn.style.background = 'var(--green-light)';
+                    btn.style.borderColor = 'var(--green)';
+                    btn.style.color = 'var(--green)';
+                    // Show solution in alert-like inline
+                    var row = btn.closest('tr');
+                    if (row && solData.solutions) {
+                        var solHtml = '<tr><td colspan="4"><div style="padding:8px;background:var(--bg-card);border-radius:8px;">';
+                        solData.solutions.forEach(function(sol, i) {
+                            solHtml += '<div style="margin-bottom:6px;"><strong>方案' + (i+1) + ':</strong> ' + escapeHtml(sol.description || sol.title || '') +
+                                ' <span class="feature-badge orange">' + escapeHtml(sol.recommendation || '') + '</span></div>';
+                        });
+                        solHtml += '</div></td></tr>';
+                        row.insertAdjacentHTML('afterend', solHtml);
+                    }
+                } catch (e) {
+                    btn.textContent = '失败';
+                    btn.style.background = 'var(--red-light)';
+                }
+                setTimeout(function() {
+                    btn.disabled = false;
+                    btn.textContent = '建议方案';
+                    btn.style.cssText = '';
+                }, 5000);
+            });
+        });
+    } catch (e) {
+        body.innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
+
+// --- Patrol Tasks ---
+async function showPatrolModal() {
+    var modal = openFeatureModal('巡检任务', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var tasksResp = await fetch(BASE + '/patrol/tasks', { headers: authHeaders() });
+        var tasksData = await tasksResp.json();
+        var reportsResp = await fetch(BASE + '/patrol/reports', { headers: authHeaders() });
+        var reportsData = await reportsResp.json();
+        var tasks = tasksData.tasks || [];
+        var reports = reportsData.reports || [];
+
+        var html = '<div style="margin-bottom:20px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+            '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);">巡检任务 (' + tasks.length + ')</span>' +
+            '<button class="feature-action-btn" id="createPatrolBtn">新建巡检</button></div>';
+        if (tasks.length === 0) {
+            html += featureEmpty('无巡检任务');
+        } else {
+            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>状态</th><th>上次运行</th></tr></thead><tbody>';
+            tasks.forEach(function(t) {
+                var badge = t.active ? 'green' : 'orange';
+                html += '<tr><td><code>' + escapeHtml(t.taskId || t.id) + '</code></td><td>' + escapeHtml(t.skillId || t.skill) + '</td>' +
+                    '<td>' + escapeHtml(t.cron || '') + '</td><td><span class="feature-badge ' + badge + '">' + (t.active ? '运行中' : '已停止') + '</span></td>' +
+                    '<td>' + escapeHtml(t.lastRun || '—') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+
+        html += '<div>';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">巡检报告 (' + reports.length + ')</div>';
+        if (reports.length === 0) {
+            html += featureEmpty('无巡检报告');
+        } else {
+            html += '<table class="feature-table"><thead><tr><th>报告 ID</th><th>时间</th><th>状态</th><th>摘要</th></tr></thead><tbody>';
+            reports.forEach(function(r) {
+                var badge = r.severity === 'CRITICAL' ? 'red' : (r.severity === 'WARN' ? 'orange' : 'green');
+                html += '<tr><td><code>' + escapeHtml(r.reportId || r.id) + '</code></td><td>' + escapeHtml(r.timestamp || '') + '</td>' +
+                    '<td><span class="feature-badge ' + badge + '">' + escapeHtml(r.severity || 'INFO') + '</span></td>' +
+                    '<td>' + escapeHtml((r.summary || '').substring(0, 80)) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = featureEmpty('巡检功能未启用或加载失败: ' + e.message);
+    }
+}
+
+// --- Alerts ---
+async function showAlertsModal() {
+    var modal = openFeatureModal('告警', '<div class="feature-empty">加载中...</div>');
+    var body = modal.querySelector('.history-modal-body');
+    try {
+        var resp = await fetch(BASE + '/alerts', { headers: authHeaders() });
+        var data = await resp.json();
+        var alerts = data.alerts || [];
+        if (alerts.length === 0) {
+            body.innerHTML = featureEmpty('无活跃告警');
+            return;
+        }
+        var html = '<table class="feature-table"><thead><tr><th>告警 ID</th><th>类型</th><th>服务</th><th>严重级别</th><th>消息</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+        alerts.forEach(function(a) {
+            var badge = a.severity === 'CRITICAL' ? 'red' : (a.severity === 'WARN' ? 'orange' : 'green');
+            html += '<tr><td><code>' + escapeHtml(a.alertId || a.id) + '</code></td><td>' + escapeHtml(a.type || '') + '</td>' +
+                '<td>' + escapeHtml(a.service || '') + '</td><td><span class="feature-badge ' + badge + '">' + escapeHtml(a.severity || 'INFO') + '</span></td>' +
+                '<td>' + escapeHtml(a.message || '') + '</td><td>' + escapeHtml(a.timestamp || '') + '</td>' +
+                '<td><button class="feature-action-btn" data-alert-id="' + escapeHtml(a.alertId || a.id) + '">解决</button></td></tr>';
+        });
+        html += '</tbody></table>';
+        body.innerHTML = html;
+
+        body.querySelectorAll('[data-alert-id]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                var alertId = btn.dataset.alertId;
+                btn.disabled = true;
+                btn.textContent = '处理中...';
+                try {
+                    await fetch(BASE + '/alerts/' + encodeURIComponent(alertId) + '/resolve', {
+                        method: 'POST',
+                        headers: authHeaders()
+                    });
+                    btn.textContent = '已解决';
+                    btn.style.background = 'var(--green-light)';
+                    btn.style.borderColor = 'var(--green)';
+                    btn.style.color = 'var(--green)';
+                } catch (e) {
+                    btn.textContent = '失败';
+                }
+            });
+        });
+    } catch (e) {
+        body.innerHTML = featureEmpty('告警功能未启用或加载失败: ' + e.message);
+    }
+}
+
+// --- Feature nav button listeners ---
+document.getElementById('navToolsBtn').addEventListener('click', showToolsModal);
+document.getElementById('navWorkflowsBtn').addEventListener('click', showWorkflowsModal);
+document.getElementById('navCostBtn').addEventListener('click', showCostModal);
+document.getElementById('navIssuesBtn').addEventListener('click', showIssuesModal);
+document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModal);
+document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
 
 // ===== Init =====
 (async function() {
