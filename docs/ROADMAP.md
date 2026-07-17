@@ -214,7 +214,6 @@ Agent 自动执行:
 | Spring Boot 3.x | `jakarta.servlet` 版本 starter |
 | Skill 市场 | 社区共享 Skill 模板，一行配置导入 |
 | 工具市场 | 开箱即用的 ToolProvider 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
-| REST API 增强 | SDK 化，非 Web 场景也能调用 Agent |
 | 多租户 | Agent 对话隔离，Skill/工具按租户配置 |
 
 ---
