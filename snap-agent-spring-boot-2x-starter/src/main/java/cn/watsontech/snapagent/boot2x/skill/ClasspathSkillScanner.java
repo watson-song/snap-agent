@@ -62,7 +62,15 @@ public class ClasspathSkillScanner {
      * shadowing when the host project configures Maven {@code <resources>}
      * to include its own {@code docs/skills/} directory.</p>
      *
-     * @param classpathDir a classpath path like {@code classpath:/docs/skills/}
+     * <p><b>classpath: normalization:</b> If the input uses {@code classpath:}
+     * (single-root) instead of {@code classpath*:} (multi-root), it is
+     * automatically normalized to {@code classpath*:}. This prevents a
+     * subtle bug where the host project's {@code docs/skills/} shadows
+     * the SnapAgent JAR's built-in skills — with plain {@code classpath:},
+     * Spring only resolves the first classpath root, so the JAR's skills
+     * are never scanned and the merge logic in this class becomes a no-op.</p>
+     *
+     * @param classpathDir a classpath path like {@code classpath*:/docs/skills/}
      * @return list of parsed skill metadata (source="builtin"); never {@code null}
      */
     public List<SkillMeta> scan(String classpathDir) {
@@ -71,7 +79,14 @@ public class ClasspathSkillScanner {
             return Collections.emptyList();
         }
 
+        // Normalize classpath: → classpath*: to ensure multi-root scanning
+        // (prevents host docs/skills/ from shadowing JAR built-in skills)
         String baseDir = classpathDir;
+        if (baseDir.startsWith("classpath:") && !baseDir.startsWith("classpath*:")) {
+            baseDir = "classpath*:" + baseDir.substring("classpath:".length());
+            log.debug("Normalized builtin-skills-dir from classpath: to classpath*: for multi-root scanning");
+        }
+
         if (!baseDir.endsWith("/")) {
             baseDir = baseDir + "/";
         }

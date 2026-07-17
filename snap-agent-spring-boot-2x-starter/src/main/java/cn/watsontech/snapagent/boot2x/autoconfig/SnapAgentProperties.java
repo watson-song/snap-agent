@@ -25,8 +25,15 @@ public class SnapAgentProperties {
     /** Controller path prefix. */
     private String basePath = "/snap-agent";
 
-    /** Directory on the classpath for built-in skills (read-only, packaged in JAR). */
-    private String builtinSkillsDir = "classpath:/docs/skills/";
+    /**
+     * Directory on the classpath for built-in skills (read-only, packaged in JAR).
+     * <p>Uses {@code classpath*:} prefix to ensure resources from ALL classpath
+     * roots are scanned (both the SnapAgent JAR and the host project). With
+     * plain {@code classpath:}, Spring only resolves the first matching root,
+     * which can shadow SnapAgent's built-in skills when the host project also
+     * has {@code docs/skills/} on the classpath.</p>
+     */
+    private String builtinSkillsDir = "classpath*:/docs/skills/";
 
     /** Directory on the filesystem for uploaded skills (read-write, persists across restarts). */
     private String uploadSkillsDir = "/tmp/snap-agent-skills";
