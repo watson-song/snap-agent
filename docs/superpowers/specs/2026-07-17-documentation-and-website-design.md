@@ -32,6 +32,18 @@ docs/site/
 ├── deployment/
 │   ├── en/multi-cluster-architecture.md
 │   └── zh/multi-cluster-architecture.md
+├── plugins/
+│   ├── en/tool-plugin-architecture.md
+│   └── zh/tool-plugin-architecture.md
+├── workflow/
+│   ├── en/workflow-engine-architecture.md
+│   └── zh/workflow-engine-architecture.md
+├── issue/
+│   ├── en/issue-closure-architecture.md
+│   └── zh/issue-closure-architecture.md
+├── proactive/
+│   ├── en/proactive-monitoring-architecture.md
+│   └── zh/proactive-monitoring-architecture.md
 ├── manual/
 │   ├── en/user-manual.md
 │   └── zh/user-manual.md
@@ -165,7 +177,127 @@ Covers K8s multi-instance deployment and cross-pod routing:
    - SSE proxy compatibility (disable buffering)
    - Docker/standalone deployment notes
 
-### Document 5: User Manual
+### Document 5: Tool Plugin Architecture
+
+**File:** `docs/site/plugins/{en,zh}/tool-plugin-architecture.md`
+
+Covers the v1.0 tool plugin ecosystem design:
+
+1. SPI layer (`core/tool/ToolPlugin.java`):
+   - Interface: name() / version() / description() / toolNames()
+   - Default methods for backward compatibility
+   - Purpose: metadata layer on top of existing ToolProvider auto-discovery
+2. Registry (`boot2x/tool/ToolPluginRegistry.java`):
+   - Collects all ToolPlugin beans via Spring auto-injection
+   - Unconditional assembly (always registered)
+   - Exposes plugin metadata via REST endpoint: GET /tools/plugins
+3. Relationship with ToolProvider:
+   - ToolProvider + @Component = auto-discovered by ToolDispatcher (since v0.1)
+   - ToolPlugin = optional metadata wrapper (name/version/description for display)
+   - ToolProvider can exist without ToolPlugin (no metadata); ToolPlugin without ToolProvider is metadata-only
+4. Built-in tool providers inventory (v0.1-v1.0):
+   - v0.1: JdbcQueryToolProvider, RedisReadToolProvider
+   - v0.3: CodeReaderToolProvider, ProjectStructureToolProvider, GitLogToolProvider
+   - v0.4: MetricsToolProvider, LogSearchToolProvider, TraceSearchToolProvider, ConfigReadToolProvider
+   - v0.8: CodeGraphToolProvider (4 sub-tools: call_chain/reverse_chain/impact_analysis/find)
+5. Extension guide: how to write and register a custom ToolPlugin
+6. Future: independent plugin JAR, MCP protocol plugins (v1.0.1+)
+
+### Document 6: Workflow Engine Architecture
+
+**File:** `docs/site/workflow/{en,zh}/workflow-engine-architecture.md`
+
+Covers the v1.0 workflow engine design:
+
+1. Core SPI (`core/workflow/`):
+   - WorkflowStep: name/skill/condition/inputs/onFailure[STOP|SKIP|RETRY]
+   - WorkflowDefinition: name/description/steps (immutable)
+   - WorkflowResult: success/failure factory methods, stepResults map
+   - WorkflowEngine: execute(definition, triggerInputs) → WorkflowResult, type()
+2. Starter implementation (`boot2x/workflow/`):
+   - YamlWorkflowLoader: SnakeYAML parsing, loadAll() + load(name), reads filesystem dir
+   - SimpleWorkflowEngine: sequential execution, condition evaluation, input reference resolution
+3. Condition expression language:
+   - `${step.result}` — reference previous step result
+   - `${step.result != null}` — null check
+   - `${step.result.contains('text')}` — string contains
+   - `${step.result.size > 0}` — size check
+   - `${trigger.xxx}` — trigger input reference
+4. Input reference resolution: `${step.result}` and `${trigger.field}` substitution
+5. Failure handling: STOP (halt), SKIP (continue next), RETRY (retry step)
+6. REST endpoints: GET /workflows, GET /workflows/{name}, POST /workflows/{name}/run
+7. Built-in workflow: full-diagnose.yml (health-check → error-spike → code-analysis → solution-suggest, 4-step conditional)
+8. Configuration: `snap-agent.workflows.{enabled,dir}`
+9. Future: loops, human approval, cron/event triggers (v1.0.1+)
+
+### Document 7: Issue Closure Architecture
+
+**File:** `docs/site/issue/{en,zh}/issue-closure-architecture.md`
+
+Covers the v0.9 issue closure loop design:
+
+1. Core SPI (`core/issue/`):
+   - IssueStatus: DIAGNOSED → SOLUTION_PROPOSED → FIX_IN_PROGRESS → VERIFIED → CLOSED (state machine)
+   - IssueClosure: immutable value object (issueId/externalIssueId/taskId/conversationId/userQuery/rootCause/solutions/selectedSolution/status/fixCommitId/verificationResult/knowledgeEntryId/createdAt/updatedAt; withStatus/withExternalIssue/withVerification/withKnowledgeEntry return new instances)
+   - IssueStore: save/load/findByTaskId/list/listByStatus/delete (persistence SPI)
+   - IssueTracker: createIssue/updateStatus/getIssueUrl/type (external tracker SPI)
+2. Starter implementation (`boot2x/issue/`):
+   - FileIssueStore: JSON file storage in {upload-skills-dir}/issues/{issueId}.json
+   - NoopIssueTracker: default empty implementation
+   - KnowledgeSedimentationExtractor: extracts KnowledgeFragment from IssueClosure (title="问题: "+truncate(query,60), content=##问题/##根因/##解决方案/##验证结果, source="sedimentation:"+issueId, metadata={category:"经验沉淀"})
+   - IssueClosureService: orchestration service
+     - proposeSolution(taskId): run solution-suggest skill → extract solutions
+     - createExternalIssue(taskId): call IssueTracker.createIssue()
+     - verify(issueId): run verify-fix skill → check if issue resolved
+     - close(issueId): extract knowledge → store in KnowledgeBase → set status CLOSED
+3. REST endpoints: POST /runs/{id}/solution, POST /runs/{id}/issue, GET /issues/{id}, POST /issues/{id}/verify, POST /issues/{id}/close
+4. Knowledge sedimentation flow: diagnosis → solution → fix → verify → sediment to knowledge base → feedback loop
+5. Configuration: `snap-agent.issue-closure.{enabled,system-user-id,storage-dir,tracker-type}`
+6. Built-in skills: solution-suggest.md, verify-fix.md
+7. Extension: implement IssueTracker for Jira/GitHub (v0.9.1+), auto PR creation (v0.9.1+)
+
+### Document 8: Proactive Monitoring Architecture
+
+**File:** `docs/site/proactive/{en,zh}/proactive-monitoring-architecture.md`
+
+Covers the v0.5 proactive monitoring & alert push design, including patrol tasks and alerts:
+
+1. Core SPI (`core/proactive/`):
+   - EventSource: start(listener)/stop()/type() — event source (MQ, scheduled, etc.)
+   - EventConsumer: onEvent(AnomalyEvent) — event handler
+   - AnomalyEvent: immutable (type/service/message/stackTrace/timestamp/metadata)
+   - PushChannel: push(DiagnosticReport)/type() — notification channel
+   - DiagnosticReport: immutable (title/severity[INFO/WARN/CRITICAL]/summary/rootCause/recommendations/evidence/timestamp/metadata)
+2. Starter implementation (`boot2x/proactive/`):
+   - **AlertConverger**: ConcurrentHashMap sliding window, key=service:type, windowMinutes(5) dedup, maxAlertsPerWindow(3) storm prevention
+   - **TrendPredictor**: least-squares linear regression, predict(double[])→Double (returns null if <3 data points), exceedsThreshold check
+   - **AnomalyEventListener**: implements EventConsumer — convergence check → find auto-diagnose skill → construct AgentTask(userId=system) → snapAgentExecutor async execute → extract task.getReport() → DiagnosticReport → push all channels
+   - **ScheduledHealthChecker** (patrol): standalone daemon ScheduledExecutor, periodic ops-health-check skill execution, anomaly keyword detection → push
+   - **NoopEventSource**: default event source (when no MQ), type="noop"
+   - **WebhookPushChannel**: extends ObservabilityHttpClient, httpPost JSON to webhook URL
+3. Lifecycle: SmartLifecycle bean (ProactiveLifecycle) — start() calls eventSource.start(listener) + checker.start(), stop() reverses
+4. Alert convergence design:
+   - Sliding window per service:type key
+   - Dedup: same key within window → increment count, don't create new alert
+   - Storm prevention: max N alerts per window, excess dropped + logged
+   - Converged alert includes: first/last occurrence, count, root cause (if diagnosed)
+5. Patrol task design:
+   - Scheduled execution: cron-like scheduling via ScheduledExecutorService
+   - Skill-driven: runs ops-health-check skill with configured inputs
+   - Anomaly detection: keyword scanning in skill output (e.g. "CRITICAL", "异常", "超时")
+   - Report generation: DiagnosticReport with severity classification
+   - Auto-push: detected anomaly → push to all configured channels
+6. Trend prediction design:
+   - Collects metric data points over time
+   - Least-squares linear regression on data points
+   - Predicts future value, compares against configured threshold
+   - Triggers early warning before threshold breach (e.g. "disk 80% in 3 days")
+7. Configuration: `snap-agent.proactive.{enabled,event-source-type,system-user-id,health-check.*,alert-convergence.*,trend-prediction.*,push.webhook.*}`
+8. Built-in skill: auto-diagnose.md (6-phase: understand anomaly → logs → metrics → trace → code → diagnosis report)
+9. REST endpoints: GET /patrol/tasks, GET /patrol/reports, GET /alerts (active alerts with resolve action)
+10. Extension: KafkaEventSource/RabbitMqEventSource (v0.5.1), DingTalkPushChannel/JiraPushChannel (v0.5.1)
+
+### Document 9: User Manual
 
 **File:** `docs/site/manual/{en,zh}/user-manual.md`
 
@@ -184,26 +316,37 @@ Two-part manual covering both user types:
 5. Tool calls and results in transcript
 6. Canceling a running task
 7. Conversation history (save, load, download, delete)
-8. Feature panels:
-   - Tools & Plugins: view registered tools
-   - Workflows: list, detail, run
-   - Cost dashboard: summary, per-user, per-skill
-   - Issues: propose solution, create issue, verify, close
-   - Patrol: scheduled health checks
-   - Alerts: anomaly convergence
-   - Knowledge base: status, sources, live search
+8. Feature panels — detailed usage guide for each:
+   - **Tools & Plugins (🔧)**: view registered tools and their schemas; view installed plugins with name/version/description; understand which tools each skill uses
+   - **Workflows (📋)**: list available workflows; view step details (skill, condition, inputs, onFailure); run a workflow manually with trigger inputs; monitor step-by-step execution and results; understand condition evaluation and failure handling
+   - **Cost Dashboard (💰)**: view 7-day cost summary; check total cost, token usage, request count; per-user and per-skill breakdown; budget utilization and warning threshold; understand pricing model (input/output/cache-read token rates)
+   - **Issue Closure (🐛)**: view recent diagnostic runs; propose solution for a completed diagnosis; create external issue (Jira/工单); verify fix effectiveness; close issue and sediment knowledge; track issue lifecycle (DIAGNOSED → SOLUTION_PROPOSED → FIX_IN_PROGRESS → VERIFIED → CLOSED)
+   - **Patrol Tasks (🛡️)**: view scheduled health check tasks; view patrol reports with severity classification; understand scheduled execution and anomaly keyword detection; configure patrol schedule and skill
+   - **Alerts (🔔)**: view active alerts with convergence info (count, first/last occurrence); understand alert convergence (dedup window, storm prevention); resolve alerts; configure webhook push channel
+   - **Knowledge Base (📚)**: view knowledge status (fragment count, injection limit, min score); view data sources; live keyword search with relevance score; understand how knowledge is auto-injected into agent conversations
 9. Uploading skills (file, folder, zip)
+10. Model selection and switching
+11. Environment profile awareness
 
 **Part 2 — Developer Guide:**
-1. Writing custom ToolProvider (full example)
+1. Writing custom ToolProvider (full example with @Component)
 2. Writing custom SystemPromptExtender
-3. Implementing IssueTracker (Jira/GitHub)
-4. Implementing CostStore (DB-backed)
-5. Writing workflow YAML
+3. Implementing IssueTracker for Jira/GitHub (createIssue, updateStatus, getIssueUrl)
+4. Implementing CostStore with DB-backed storage
+5. Writing workflow YAML — step-by-step guide:
+   - Step definition (name, skill, condition, inputs, onFailure)
+   - Condition expression syntax (${step.result}, .contains(), .size, ${trigger.xxx})
+   - Input reference resolution
+   - Failure handling strategies (STOP/SKIP/RETRY)
+   - Example: full-diagnose.yml walkthrough
 6. MCP integration (external tool servers)
-7. Knowledge source extension (custom KnowledgeSource)
+7. Knowledge source extension (custom KnowledgeSource implementation)
 8. ConversationStore replacement (DB-backed)
-9. Skill markdown authoring best practices
+9. Implementing custom EventSource (Kafka/RabbitMQ anomaly events)
+10. Implementing custom PushChannel (DingTalk, Jira, email)
+11. Configuring proactive monitoring (patrol schedule, alert convergence, trend prediction, webhook)
+12. Implementing custom CodeGraphBuilder (AST-based)
+13. Skill markdown authoring best practices
 
 ## Sub-project 2: Official Website (after docs)
 
@@ -215,9 +358,10 @@ Two-part manual covering both user types:
 ### Pages
 1. **Homepage** (`docs/site/index.html`) — Hero section, key features, quick start, architecture diagram
 2. **User Manual** — Rendered from `docs/site/manual/` Markdown
-3. **Technical Docs** — Architecture, search algorithm, deployment
+3. **Technical Docs** — Architecture, search algorithm, deployment, tool plugins, workflows, issue closure, proactive monitoring
 4. **Integration Guide** — Host integration step-by-step
 5. **API Reference** — REST endpoints from existing `10-rest-api.md`
+6. **Feature Guide** — How to use each feature: tools, workflows, cost, issues, patrol, alerts, knowledge
 
 ### Layout
 - Single-page navigation (sidebar + content area, like docs sites)
@@ -228,10 +372,21 @@ Two-part manual covering both user types:
 ## Scope Check
 
 This spec covers two independent sub-projects:
-1. Technical documentation (10 Markdown files, bilingual)
+1. Technical documentation (18 Markdown files, bilingual — 9 topics × 2 languages)
 2. Official website (static HTML site)
 
 Sub-project 1 should be completed first as it provides content for sub-project 2.
+
+The 9 documentation topics:
+1. System architecture (overall v0.1-v1.0)
+2. Knowledge search algorithm
+3. Host integration guide
+4. Multi-cluster deployment
+5. Tool plugin architecture (v1.0)
+6. Workflow engine architecture (v1.0)
+7. Issue closure architecture (v0.9)
+8. Proactive monitoring architecture — patrol + alerts (v0.5)
+9. User manual (ops + developer, covers all features)
 
 ## Non-Goals
 
