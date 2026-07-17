@@ -1,9 +1,5 @@
 package cn.watsontech.snapagent.core.issue;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
 /**
  * 问题闭环记录, 跟踪从诊断到沉淀的全生命周期。
  *
@@ -11,9 +7,10 @@ import java.util.List;
  * Mutations are expressed via {@code with*} methods that return a new
  * {@link IssueClosure} instance, leaving the original unchanged.</p>
  *
- * <p>The {@code solutions} list is defensively copied on both input and
- * output to prevent external mutation. A null input list is treated as
- * an empty list.</p>
+ * <p>The {@code solution} field holds a {@link SolutionSuggestion} (nullable)
+ * and {@code verificationResult} holds a {@link VerificationResult} (nullable).
+ * Both are themselves immutable value objects, so no defensive copy is required
+ * at this layer.</p>
  */
 public final class IssueClosure {
 
@@ -23,11 +20,11 @@ public final class IssueClosure {
     private final String conversationId;
     private final String userQuery;
     private final String rootCause;
-    private final List<String> solutions;
+    private final SolutionSuggestion solution;
     private final String selectedSolution;
     private final IssueStatus status;
     private final String fixCommitId;
-    private final String verificationResult;
+    private final VerificationResult verificationResult;
     private final String knowledgeEntryId;
     private final long createdAt;
     private final long updatedAt;
@@ -41,20 +38,20 @@ public final class IssueClosure {
      * @param conversationId     关联的会话 ID (可空)
      * @param userQuery          用户原始问题
      * @param rootCause          根因摘要
-     * @param solutions          方案建议列表 (null → empty list)
-     * @param selectedSolution  用户选择的方案 (可空)
+     * @param solution           方案建议 (可空)
+     * @param selectedSolution  用户选择的方案 ID (可空)
      * @param status             当前状态
      * @param fixCommitId        修复 commit (可空)
-     * @param verificationResult 验证结果摘要 (可空)
+     * @param verificationResult 验证结果 (可空)
      * @param knowledgeEntryId   沉淀到知识库的条目 ID (可空)
      * @param createdAt          创建时间 (epoch millis)
      * @param updatedAt          更新时间 (epoch millis)
      */
     public IssueClosure(String issueId, String externalIssueId, String taskId,
                         String conversationId, String userQuery, String rootCause,
-                        List<String> solutions, String selectedSolution,
+                        SolutionSuggestion solution, String selectedSolution,
                         IssueStatus status, String fixCommitId,
-                        String verificationResult, String knowledgeEntryId,
+                        VerificationResult verificationResult, String knowledgeEntryId,
                         long createdAt, long updatedAt) {
         this.issueId = issueId;
         this.externalIssueId = externalIssueId;
@@ -62,9 +59,7 @@ public final class IssueClosure {
         this.conversationId = conversationId;
         this.userQuery = userQuery;
         this.rootCause = rootCause;
-        this.solutions = solutions != null
-                ? new ArrayList<String>(solutions)
-                : new ArrayList<String>();
+        this.solution = solution;
         this.selectedSolution = selectedSolution;
         this.status = status;
         this.fixCommitId = fixCommitId;
@@ -105,15 +100,15 @@ public final class IssueClosure {
     }
 
     /**
-     * 方案建议列表 (不可变视图, 永不为 null)。
+     * 方案建议 (可空)。
      *
-     * @return unmodifiable list of solution strings
+     * @return the SolutionSuggestion, or null if not yet proposed
      */
-    public List<String> getSolutions() {
-        return Collections.unmodifiableList(solutions);
+    public SolutionSuggestion getSolution() {
+        return solution;
     }
 
-    /** 用户选择的方案 (可空)。 */
+    /** 用户选择的方案 ID (可空)。 */
     public String getSelectedSolution() {
         return selectedSolution;
     }
@@ -128,8 +123,12 @@ public final class IssueClosure {
         return fixCommitId;
     }
 
-    /** 验证结果摘要 (可空)。 */
-    public String getVerificationResult() {
+    /**
+     * 验证结果 (可空)。
+     *
+     * @return the VerificationResult, or null if not yet verified
+     */
+    public VerificationResult getVerificationResult() {
         return verificationResult;
     }
 
@@ -159,7 +158,7 @@ public final class IssueClosure {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
                 this.conversationId, this.userQuery, this.rootCause,
-                this.solutions, this.selectedSolution,
+                this.solution, this.selectedSolution,
                 status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
@@ -177,7 +176,7 @@ public final class IssueClosure {
         return new IssueClosure(
                 this.issueId, externalIssueId, this.taskId,
                 this.conversationId, this.userQuery, this.rootCause,
-                this.solutions, this.selectedSolution,
+                this.solution, this.selectedSolution,
                 status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
@@ -186,8 +185,11 @@ public final class IssueClosure {
     /**
      * 返回一个外部 Issue ID、选择方案、状态和更新时间变更后的新实例, 其余字段不变。
      *
+     * <p>{@code selectedSolution} 保留为 String (用户选择方案的 ID, 而非
+     * {@link SolutionSuggestion} 整体)。</p>
+     *
      * @param externalIssueId  外部 Issue ID
-     * @param selectedSolution 用户选择的方案
+     * @param selectedSolution 用户选择的方案 ID
      * @param status            新状态
      * @param updatedAt         新的更新时间 (epoch millis)
      * @return new {@link IssueClosure} with updated externalIssueId, selectedSolution, status and updatedAt
@@ -197,8 +199,25 @@ public final class IssueClosure {
         return new IssueClosure(
                 this.issueId, externalIssueId, this.taskId,
                 this.conversationId, this.userQuery, this.rootCause,
-                this.solutions, selectedSolution,
+                this.solution, selectedSolution,
                 status, this.fixCommitId,
+                this.verificationResult, this.knowledgeEntryId,
+                this.createdAt, updatedAt);
+    }
+
+    /**
+     * 返回一个方案建议和更新时间变更后的新实例, 其余字段不变。
+     *
+     * @param solution  方案建议
+     * @param updatedAt 新的更新时间 (epoch millis)
+     * @return new {@link IssueClosure} with updated solution and updatedAt
+     */
+    public IssueClosure withSolution(SolutionSuggestion solution, long updatedAt) {
+        return new IssueClosure(
+                this.issueId, this.externalIssueId, this.taskId,
+                this.conversationId, this.userQuery, this.rootCause,
+                solution, this.selectedSolution,
+                this.status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -206,15 +225,15 @@ public final class IssueClosure {
     /**
      * 返回一个验证结果和更新时间变更后的新实例, 其余字段不变。
      *
-     * @param verificationResult 验证结果摘要
+     * @param verificationResult 验证结果
      * @param updatedAt          新的更新时间 (epoch millis)
      * @return new {@link IssueClosure} with updated verificationResult and updatedAt
      */
-    public IssueClosure withVerification(String verificationResult, long updatedAt) {
+    public IssueClosure withVerification(VerificationResult verificationResult, long updatedAt) {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
                 this.conversationId, this.userQuery, this.rootCause,
-                this.solutions, this.selectedSolution,
+                this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
                 verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
@@ -231,7 +250,7 @@ public final class IssueClosure {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
                 this.conversationId, this.userQuery, this.rootCause,
-                this.solutions, this.selectedSolution,
+                this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
                 this.verificationResult, knowledgeEntryId,
                 this.createdAt, updatedAt);
@@ -241,7 +260,8 @@ public final class IssueClosure {
     public String toString() {
         return "IssueClosure{issueId='" + issueId + "', externalIssueId='"
                 + externalIssueId + "', taskId='" + taskId
-                + "', status=" + status + ", solutions=" + solutions.size()
+                + "', status=" + status + ", solution="
+                + (solution != null ? "present(" + solution.getOptions().size() + " options)" : "null")
                 + ", knowledgeEntryId='" + knowledgeEntryId + "', updatedAt="
                 + updatedAt + "}";
     }
