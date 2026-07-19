@@ -149,7 +149,10 @@
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
-                        <version>0.7.0</version>
+                        <!-- 0.8.0+：修复轮询部署状态时 Portal 响应新增 warnings 字段导致
+                             Jackson UnrecognizedPropertyException 的问题（v0.3.0 实际发布
+                             成功但 CI 误报失败的根因） -->
+                        <version>0.8.0</version>
                         <extensions>true</extensions>
                         <configuration>
                             <publishingServerId>central</publishingServerId>

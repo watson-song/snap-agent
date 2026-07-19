@@ -1,0 +1,45 @@
+name: Deploy Docs Site to GitHub Pages
+
+# 把 docs/site/ 部署到 https://watson-song.github.io/snap-agent/
+# index.html 里的文档链接直接指向 GitHub blob 页面，Pages 只需托管静态入口页。
+# 触发：main 分支上 docs/site/** 有变更时自动部署；也可手动触发。
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+# 同一时间只允许一个部署，进行中的部署可被新提交取代
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
