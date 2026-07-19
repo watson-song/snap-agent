@@ -24,4 +24,20 @@ public interface LlmEventSink {
 
     /** An error occurred during streaming. */
     void onError(String message);
+
+    /**
+     * Token usage reported by the LLM API (v1.0 cost accounting).
+     *
+     * <p>Called when the API sends usage information (e.g. Anthropic's
+     * {@code message_start} and {@code message_delta} events). Implementations
+     * can capture these counts to compute cost per call. The default
+     * implementation is a no-op so existing sinks are unaffected.</p>
+     *
+     * @param inputTokens     input (prompt) token count
+     * @param outputTokens    output (completion) token count
+     * @param cacheReadTokens cache-read token count (discounted tokens)
+     */
+    default void onUsage(long inputTokens, long outputTokens, long cacheReadTokens) {
+        // no-op by default
+    }
 }

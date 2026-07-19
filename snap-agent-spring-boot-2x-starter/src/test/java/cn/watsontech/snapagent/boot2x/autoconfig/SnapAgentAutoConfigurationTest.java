@@ -13,6 +13,8 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.AsyncTaskExecutor;
 
+import java.nio.file.Files;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -240,6 +242,188 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).hasSingleBean(cn.watsontech.snapagent.boot2x.routing.PeerSseRelay.class);
                     assertThat(context).hasSingleBean(
                             cn.watsontech.snapagent.boot2x.web.InternalTaskController.class);
+                });
+    }
+
+    // ---- v0.3: Code understanding tools ----
+
+    @Test
+    void shouldNotCreateCodeBeansWhenCodeDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.code.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider.class);
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider.class);
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider.class);
+                });
+    }
+
+    @Test
+    void shouldCreateCodeBeansWhenEnabledWithProjectRoot() {
+        String tempDir = System.getProperty("java.io.tmpdir");
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.code.enabled=true",
+                        "snap-agent.code.project-root=" + tempDir)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider.class);
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider.class);
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider.class);
+                });
+    }
+
+    // ---- v0.5: Patrol ----
+
+    @Test
+    void shouldNotCreatePatrolBeansWhenPatrolDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.patrol.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.patrol.PatrolScheduler.class);
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.patrol.AlertConverger.class);
+                });
+    }
+
+    @Test
+    void shouldCreatePatrolBeansWhenEnabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.patrol.enabled=true",
+                        "snap-agent.alert.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.patrol.PatrolScheduler.class);
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.patrol.AlertConverger.class);
+                });
+    }
+
+    // ---- v0.7: Knowledge base ----
+
+    @Test
+    void shouldNotCreateKnowledgeBeansWhenKnowledgeDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.knowledge.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class);
+                });
+    }
+
+    @Test
+    void shouldCreateKnowledgeBeansWhenEnabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.knowledge.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class);
+                });
+    }
+
+    // ---- v0.8: Code graph ----
+
+    @Test
+    void shouldNotCreateCodeGraphBeansWhenCodeGraphDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.code-graph.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder.class);
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider.class);
+                });
+    }
+
+    @Test
+    void shouldCreateCodeGraphBeansWhenEnabledWithProjectRoot() throws Exception {
+        java.nio.file.Path safeTempDir = Files.createTempDirectory("snapagent-codegraph-test");
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.code.enabled=true",
+                        "snap-agent.code.project-root=" + safeTempDir.toString())
+                .withPropertyValues(
+                        "snap-agent.code-graph.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder.class);
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider.class);
+                });
+    }
+
+    // ---- v1.0: Cost tracking ----
+
+    @Test
+    void shouldNotCreateCostBeansWhenCostDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.cost.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.cost.CostTracker.class);
+                });
+    }
+
+    @Test
+    void shouldCreateCostBeansWhenEnabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.cost.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.cost.CostTracker.class);
+                });
+    }
+
+    // ---- v1.0: Workflows ----
+
+    @Test
+    void shouldNotCreateWorkflowBeansWhenWorkflowsDisabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.workflows.enabled=false")
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.core.workflow.WorkflowEngine.class);
                 });
     }
 }

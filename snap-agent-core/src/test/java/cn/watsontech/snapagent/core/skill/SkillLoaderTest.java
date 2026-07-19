@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.core.skill;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -322,5 +323,38 @@ class SkillLoaderTest {
 
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.INVALID);
         assertThat(meta.getUnavailableReason()).contains("shortcut");
+    }
+
+    @Test
+    @DisplayName("required-permission is parsed from frontmatter")
+    void shouldParseRequiredPermission() {
+        String content = "---\n"
+                + "name: test-skill\n"
+                + "description: \"test\"\n"
+                + "tools: []\n"
+                + "required-permission: snap-agent:admin\n"
+                + "---\n\n"
+                + "# Test\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getRequiredPermission()).isEqualTo("snap-agent:admin");
+    }
+
+    @Test
+    @DisplayName("required-permission defaults to empty when not specified")
+    void shouldDefaultRequiredPermissionToEmpty() {
+        String content = "---\n"
+                + "name: test-skill\n"
+                + "description: \"test\"\n"
+                + "tools: []\n"
+                + "---\n\n"
+                + "# Test\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getRequiredPermission()).isEmpty();
     }
 }

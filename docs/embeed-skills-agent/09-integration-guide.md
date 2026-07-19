@@ -52,6 +52,11 @@ find docs/skills -name "*.md" 2>/dev/null | head -5
                 <exclude>skills/database-query.md</exclude>
                 <exclude>skills/redis-query.md</exclude>
                 <exclude>skills/log-analysis.md</exclude>
+                <exclude>skills/code-analysis.md</exclude>
+                <exclude>skills/ops-health-check.md</exclude>
+                <exclude>skills/slow-query-analysis.md</exclude>
+                <exclude>skills/error-spike-investigation.md</exclude>
+                <exclude>skills/config-diff.md</exclude>
             </excludes>
         </resource>
     </resources>
@@ -85,6 +90,9 @@ snap-agent:
       - /opt/app/logs
     max-lines: 500                       # 单次最多返回行数
     max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件
+  code:
+    enabled: false                      # 代码理解工具（code_read/project_structure/git_log），默认关
+    project-root: ""                    # 宿主项目根目录（含 pom.xml 的目录），为空则工具不启用
   security:
     required-permission: ""              # 已登录即可；建议配 admin 权限码
 ```
@@ -134,7 +142,119 @@ snap-agent:
     app-log-file: /opt/app/logs/application.log
 ```
 
+### 代码理解工具配置（v0.3 新增）
+
+SnapAgent 可以读取宿主项目源码，让 LLM 回答"这段逻辑为什么这样写""这个接口在哪实现"等问题。启用后提供三个只读工具：
+
+| 工具 | 功能 |
+|------|------|
+| `code_read` | 读取源码文件内容，支持行范围和关键词过滤 |
+| `project_structure` | 扫描项目目录结构，返回树形布局 |
+| `git_log` | 查看 git 提交历史、blame、show |
+
+同时，启动时会自动扫描项目结构并生成摘要注入 system prompt，让 LLM 了解项目布局。
+
+```yaml
+snap-agent:
+  code:
+    enabled: true
+    project-root: /app                    # 宿主项目根目录（含 pom.xml 或 build.gradle）
+    allowed-extensions:                    # 允许读取的文件扩展名白名单
+      - .java
+      - .xml
+      - .yml
+      - .properties
+      - .sql
+      - .md
+    max-lines: 500                         # 单次读取最大行数
+    max-file-bytes: 524288                 # 单个文件最大 512KB
+    structure-depth: 3                    # project_structure 默认扫描深度
+    context-injection: true               # 是否注入项目结构摘要到 system prompt
+```
+
+**前提条件**：
+- `project-root` 必须指向实际存在的目录，否则工具不启用（仅 WARN 日志）
+- `git_log` 工具需要宿主环境安装 git（其他两个工具不需要）
+- `project-root` 建议指向含 `pom.xml` 或 `build.gradle` 的目录
+
+**安全保证**：
+- 所有文件路径经 `CodePathGuard` 校验，必须在 `project-root` 下
+- 扩展名白名单防止读取 `.env`、`.key`、`.pem` 等敏感文件
+- `git_log` 使用 `ProcessBuilder(List)` 调用 git，不走 shell，commit_hash 正则校验
+- 三个工具均为只读，不写入/删除/修改任何文件
+
 GET `/skills` 响应中，含 `log_read` 工具的 skill 会额外返回 `appLogFile` 和 `logPaths` 字段，前端据此显示日志路径信息。
+
+### 可观测性工具配置（v0.4 新增）
+
+SnapAgent 可对接可观测性平台（Prometheus / Loki / Jaeger / Nacos），让 Agent 实时查询指标、搜索日志、分析调用链、读取配置，从"被动问答"升级为"主动运营诊断"。启用后提供四个只读工具：
+
+| 工具 | 后端 | 功能 |
+|------|------|------|
+| `metrics_query` | Prometheus | 查询 PromQL 指标（QPS、延迟、错误率、CPU/Mem） |
+| `log_search` | Loki | 搜索 LogQL 日志，分析错误模式、统计频率 |
+| `trace_search` | Jaeger | 搜索分布式 trace，分析调用链、定位慢 span |
+| `config_read` | Spring Environment + Nacos | 读取本地配置或远程 Nacos 配置，对比环境差异 |
+
+所有工具默认 `enabled=false`，未配置时零 bean 创建，零影响。各工具独立装配，互不依赖。
+
+**最小可用配置（启用 Prometheus 指标 + Loki 日志搜索）：**
+
+```yaml
+snap-agent:
+  metrics:
+    enabled: true
+    base-url: http://prometheus:9090        # Prometheus URL
+    # auth-header: Authorization           # 如需鉴权，配 header name
+    # auth-header-value: ${PROM_TOKEN}     # header value（建议用环境变量）
+    timeout-seconds: 15
+    max-points: 200                         # 单 series 最大数据点数
+  log-search:
+    enabled: true
+    base-url: http://loki:3100              # Loki URL
+    # auth-header: Authorization
+    # auth-header-value: ${LOKI_TOKEN}
+    timeout-seconds: 15
+    max-lines: 500                          # 单次返回最大行数
+  # trace:
+  #   enabled: true
+  #   base-url: http://jaeger:16686        # Jaeger URL
+  #   timeout-seconds: 15
+  #   max-traces: 20
+  # config-read:
+  #   enabled: true                         # 本地模式无 URL 要求
+  #   nacos-base-url: http://nacos:8848    # 如需读 Nacos 远程配置
+  #   nacos-namespace: ""
+  #   nacos-auth-token: ${NACOS_TOKEN}
+  #   max-keys: 100
+  #   sensitive-key-patterns: ["password", "secret", "token", "credential", "key"]
+```
+
+**装配条件：**
+
+| 工具 | 装配条件 |
+|------|---------|
+| `metrics_query` | `metrics.enabled=true` AND `base-url` 非空 |
+| `log_search` | `log-search.enabled=true` AND `base-url` 非空 |
+| `trace_search` | `trace.enabled=true` AND `base-url` 非空 |
+| `config_read` | `config-read.enabled=true`（本地模式无 URL 要求；Nacos 模式运行时校验） |
+
+**安全保证：**
+- 所有工具仅发 HTTP GET 请求，不提供 POST/PUT/DELETE
+- `config_read` 本地模式只读 `Environment`，不修改任何 property source
+- 敏感配置字段（password/secret/token/credential/key）自动脱敏为 `****`
+- `auth-header-value` 支持环境变量占位（如 `${PROM_TOKEN:}`），不硬编码
+- 超时强制（默认 15s），防止后端不可达时拖垮 Agent 线程池
+- 结果数量限制（max-points/max-lines/max-traces/max-keys），超限静默截断 + truncated 标志
+
+**配套内置 Skill：**
+
+| Skill | 工具组合 | 场景 |
+|-------|---------|------|
+| `ops-health-check` | metrics_query + log_search + mysql_query | 全面健康检查：指标快照 → 异常识别 → 根因下钻 |
+| `slow-query-analysis` | mysql_query + log_search + metrics_query | 慢查询排查：发现 → 执行计划 → 索引建议 |
+| `error-spike-investigation` | metrics_query + log_search + trace_search + code_read + git_log | 错误突增：定位窗口 → 日志 → 变更 → 调用链 → 代码 |
+| `config-diff` | config_read + metrics_query | 环境配置对比：读取 → 差异 → 风险评估 |
 
 运维在 DB 上建受限只读账号：
 ```sql
@@ -419,6 +539,58 @@ public class DbConversationStore implements ConversationStore {
 
 > 这些端点挂在 `snap-agent.base-path` 下，与其他 API 遵循相同的鉴权规则。
 
+## 主动监控集成（v0.5）
+
+### 启用巡检
+
+在 `application.yml` 中设置 `snap-agent.patrol.enabled=true`。创建巡检任务：
+
+```
+POST /snap-agent/patrol/tasks
+{"skillName": "health-patrol", "cron": "0 */5 * * * *", "inputs": {"service": "order-service"}}
+```
+
+巡检任务会按 cron 定时执行指定的 Skill，执行结果存入 `PatrolReportStore`，可通过 `GET /snap-agent/patrol/reports` 查询。
+
+### 异常事件桥接
+
+实现 `AnomalyEventListener` 将外部 MQ 的异常事件接入 SnapAgent，自动触发诊断 Skill：
+
+```java
+@Component
+public class KafkaAnomalyBridge {
+    @Autowired
+    private AnomalyEventListener listener;
+
+    @KafkaListener(topics = "anomaly-events")
+    public void onMessage(ConsumerRecord<String, String> record) {
+        AnomalyEvent event = parse(record.value());
+        listener.onEvent(event);
+    }
+}
+```
+
+事件进入后，`DefaultAnomalyEventListener` 自动触发诊断 Skill，结果写入巡检报告和告警收敛。
+
+### 告警管理
+
+查看和 resolve 告警：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /snap-agent/alerts?page=&size=&type=&status=` | 分页查询告警 |
+| `POST /snap-agent/alerts/{id}/resolve` | 手动 resolve 告警 |
+
+### Bugfix 建议
+
+诊断完成后，基于 transcript 中的 `code_read` 和 `git_log` 工具调用，自动生成修复建议：
+
+```
+POST /snap-agent/runs/{taskId}/bugfix-suggestion
+```
+
+返回 `BugfixSuggestion`，包含根因、受影响文件、关联 commit、置信度（HIGH/MEDIUM/LOW）。
+
 ## 安全检查清单（集成前）
 
 - [ ] 只读 DB 用户仅授诊断表 SELECT，无敏感表/列
@@ -447,3 +619,81 @@ if (requestUri != null && requestUri.contains("/stream")) {
 
 - 仅 `/stream` 路径需豁免；`/skills`、`/runs` 等 REST 端点被包装无影响（前端按包装格式解析即可）。
 - 若宿主用 `@ControllerAdvice` / ResponseBodyAdvice 做统一包装，同理需排除 SSE 返回类型（`text/event-stream`）。
+
+## 多环境数据源（v0.6）
+
+当应用部署在多环境（SIT/UAT/PROD）时，可配置多数据源让 LLM 选择目标环境查询：
+
+```yaml
+snap-agent:
+  jdbc:
+    enabled: true
+    datasources:
+      sit:
+        url: "jdbc:mysql://sit-db:3306/orders"
+        username: "readonly_user"
+        password: "${SIT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+      uat:
+        url: "jdbc:mysql://uat-db:3306/orders"
+        username: "readonly_user"
+        password: "${UAT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+    default-env: "sit"    # 默认环境, 空=第一个 datasources 条目
+```
+
+配置 `datasources` 后：
+- `mysql_query` 工具 schema 自动新增 `env` 参数（LLM 可选 sit/uat）
+- 不传 `env` → 使用 `default-env`（或第一个条目）
+- 未知环境名 → 返回错误（不静默回退）
+- **向后兼容**：不配 `datasources` 时，行为与旧版一致（单 DataSource）
+
+**注意**：多环境模式使用 `SimpleDriverDataSource`（无连接池），适合只读诊断场景。如需连接池，可在宿主中声明自定义 `DataSourceRegistry` bean 覆盖默认实现。
+
+## Skill 级别权限控制（v0.6）
+
+在 Skill frontmatter 中声明 `required-permission` 实现细粒度权限：
+
+```yaml
+---
+name: database-query
+description: "执行只读 SQL 查询"
+tools: [mysql_query]
+required-permission: snap-agent:db-query
+---
+```
+
+- `required-permission` 为空 → 继承全局 `security.required-permission`（向后兼容）
+- `required-permission` 非空 → 用户需同时拥有全局权限和 skill 级权限
+- 无权限用户运行该 skill → 403 "You don't have permission to run skill: X"
+
+## 多 LLM 适配（v0.6）
+
+现有代码已支持 `api-type: anthropic | openai`。通义千问/文心一言/智谱 GLM 均提供 OpenAI 兼容 API：
+
+```yaml
+# 通义千问 (阿里云百炼)
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api-key: ${DASHSCOPE_API_KEY:}
+    model: qwen-plus
+
+# 文心一言 (百度千帆)
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://qianfan.baidubce.com/v2
+    api-key: ${QIANFAN_API_KEY:}
+    model: ernie-4.0
+
+# 智谱 GLM
+snap-agent:
+  llm:
+    api-type: openai
+    base-url: https://open.bigmodel.cn/api/paas/v4
+    api-key: ${ZHIPU_API_KEY:}
+    model: glm-4
+```
+

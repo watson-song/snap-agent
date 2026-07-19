@@ -34,7 +34,7 @@ snap-agent-demo/                    # 独立演示模块（不在父 pom 中）
 
 1. **构建顺序**：先 `mvn clean install` 父项目（core + starter），再 `cd snap-agent-demo && mvn clean package`
 2. **Java 8**：源码必须兼容 Java 8（无 `var`、无 `Stream.toList()`、无 `Text Blocks`）
-3. **测试基线**：351 tests（core 130 + starter 221），jacoco 行覆盖率 ≥ 0.85
+3. **测试基线**：1010 tests（core 254 + starter 756），jacoco 行覆盖率门槛为 **ratchet 模式**（core ≥ 0.72 / starter ≥ 0.73，即当前实测值向下取整，只许升不许降）。目标：随新测试补齐逐步升回 0.85——重灾区 core `codegraph`/`conversation`/`security` 0% / `patrol` 25% / `cost` 56%，starter `tool.mcp` 43% / `web` 44% / `patrol` 60% / `llm` 65% / `autoconfig` 69%。注意门槛在 `verify` 阶段才检查（且 JaCoCo 比较时向下取整到 2 位小数），日常 `mvn test` 不会触发，发版前必须跑 `mvn clean verify`
 4. **Stale JAR 问题**：Spring Boot fat JAR 嵌套 starter JAR，改了 starter 代码后必须 `mvn clean install` starter 再重新 `mvn clean package` demo
 
 ## 代码约定

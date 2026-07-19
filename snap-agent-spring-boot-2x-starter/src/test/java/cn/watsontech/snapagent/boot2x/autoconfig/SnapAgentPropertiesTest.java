@@ -31,7 +31,7 @@ class SnapAgentPropertiesTest {
     void shouldDefaultBuiltinSkillsDirToClasspathDocsSkills() {
         SnapAgentProperties props = new SnapAgentProperties();
 
-        assertThat(props.getBuiltinSkillsDir()).isEqualTo("classpath:/docs/skills/");
+        assertThat(props.getBuiltinSkillsDir()).isEqualTo("classpath*:/docs/skills/");
     }
 
     @Test

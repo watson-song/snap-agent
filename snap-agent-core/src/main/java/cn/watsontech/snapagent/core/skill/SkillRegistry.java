@@ -189,7 +189,12 @@ public class SkillRegistry {
                 log.debug("Skipping invalid builtin skill: {}", meta.getUnavailableReason());
                 continue;
             }
-            SkillMeta validated = validateContract(meta).withSource("builtin");
+            SkillMeta validated = validateContract(meta);
+            // Only override to "builtin" if source is still the default "custom"
+            // (ClasspathSkillScanner sets "builtin" for JAR skills and "host" for host project skills)
+            if ("custom".equals(validated.getSource())) {
+                validated = validated.withSource("builtin");
+            }
             builtinByName.put(validated.getName(), validated);
         }
 
@@ -318,7 +323,7 @@ public class SkillRegistry {
                     meta.getInputs(), meta.getShortcuts(), meta.getBody(),
                     SkillAvailability.UNAVAILABLE,
                     "tool dispatcher not configured", meta.getSource(),
-                    meta.isOverridesBuiltin());
+                    meta.isOverridesBuiltin(), meta.getRequiredPermission());
         }
         Set<String> available = dispatcher.availableToolNames();
         List<String> missing = new ArrayList<String>();
@@ -334,6 +339,6 @@ public class SkillRegistry {
                 meta.getInputs(), meta.getShortcuts(), meta.getBody(),
                 SkillAvailability.UNAVAILABLE,
                 "tool(s) not available: " + missing, meta.getSource(),
-                meta.isOverridesBuiltin());
+                meta.isOverridesBuiltin(), meta.getRequiredPermission());
     }
 }

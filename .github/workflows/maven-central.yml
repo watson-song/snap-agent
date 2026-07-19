@@ -1,0 +1,89 @@
+name: Publish to Maven Central
+
+# 推 tag (v*) 时自动发布到 Maven Central。
+# 与 release.yml（GitHub Release）并行运行，互不影响。
+#
+# 需要的 GitHub Secrets (Settings → Secrets and variables → Actions):
+#   CENTRAL_USERNAME  - Central Portal User Token 的 username
+#   CENTRAL_PASSWORD  - Central Portal User Token 的 password
+#   GPG_PRIVATE_KEY   - gpg --export-secret-keys --armor <KEY_ID> 的输出
+#   GPG_PASSPHRASE    - GPG 私钥密码
+#
+# Token 获取: https://central.sonatype.com → Account → Generate User Token
+# 详见 docs/RELEASING.md
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.3.0), only for manual runs'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            V="${{ inputs.version }}"
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          # 版本号必须是 x.y.z，防止 tag 拼错导致发布错误版本
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$V' (expected x.y.z). Tag must be like v0.3.0"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 8 + Central credentials + GPG
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+          cache: maven
+          # setup-java 生成 settings.xml：<server id=central>，与 pom 中 publishingServerId 对应
+          server-id: central
+          server-username: CENTRAL_USERNAME
+          server-password: CENTRAL_PASSWORD
+          # 导入 GPG 私钥到 CI 的 gpg keyring
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Set release version
+        run: |
+          mvn -q versions:set -DnewVersion=${{ steps.version.outputs.version }} -DprocessAllModules=true -DgenerateBackupPoms=false
+          # demo 是独立 pom 且不发布，跳过其版本同步
+
+      - name: Run tests
+        run: mvn clean verify -q
+
+      - name: Publish to Maven Central
+        run: |
+          mvn clean deploy -Prelease -DskipTests -Djacoco.skip=true \
+            -Dgpg.passphrase="${{ secrets.GPG_PASSPHRASE }}"
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## Published v${{ steps.version.outputs.version }} to Maven Central" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Global sync takes ~15-30 min. Verify at:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- https://central.sonatype.com/artifact/cn.watsontech.snapagent/snap-agent-core/${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- https://repo1.maven.org/maven2/cn/watsontech/snapagent/" >> "$GITHUB_STEP_SUMMARY"
