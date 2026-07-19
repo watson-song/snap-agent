@@ -6,7 +6,7 @@
 
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-demo</artifactId>
-    <version>0.3.0-SNAPSHOT</version>
+    <version>0.3.0</version>
     <packaging>jar</packaging>
 
     <name>SnapAgent Demo (E2E)</name>
@@ -39,7 +39,7 @@
         <dependency>
             <groupId>cn.watsontech.snapagent</groupId>
             <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-            <version>0.3.0-SNAPSHOT</version>
+            <version>0.3.0</version>
         </dependency>
         <!-- OkHttp (transitively optional in starter; bring it in for the demo) -->
         <dependency>
