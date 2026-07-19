@@ -120,7 +120,7 @@ if $SKIP_TESTS; then
     warn "跳过测试（--skip-tests）"
     run mvn clean install -DskipTests -Djacoco.skip=true -q
 else
-    info "运行完整构建（含 351 个测试 + jacoco 覆盖率检查）..."
+    info "运行完整构建（全量测试 + jacoco 覆盖率检查）..."
     run mvn clean verify -q
 fi
 ok "构建通过"

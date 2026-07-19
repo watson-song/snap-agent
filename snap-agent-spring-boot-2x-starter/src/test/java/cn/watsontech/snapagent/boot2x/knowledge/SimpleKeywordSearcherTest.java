@@ -109,12 +109,17 @@ class SimpleKeywordSearcherTest {
     }
 
     @Test
-    void score_singleTokenQuery_returnsZero() {
-        // A single-token query is too short to match (< 2 tokens → 0)
+    void score_singleTokenQuery_matches() {
+        // Single-token queries are valid since f700948 ("snapagent" must work):
+        // title + content match → clamped to 1.0
         KnowledgeFragment fragment = new KnowledgeFragment(
                 "Database Tools", "database tools here", "src", null);
-        assertThat(searcher.score("database", fragment)).isZero();
-        // A single CJK character also produces only 1 token → 0
+        assertThat(searcher.score("database", fragment)).isCloseTo(1.0, within(0.001));
+        // Content-only single-token match → (0×2 + 1) / (1×2) = 0.5
+        KnowledgeFragment contentOnly = new KnowledgeFragment(
+                "Other Title", "database content here", "src", null);
+        assertThat(searcher.score("database", contentOnly)).isCloseTo(0.5, within(0.001));
+        // A single CJK char never matches 2-char bigrams → 0
         KnowledgeFragment cnFragment = new KnowledgeFragment(
                 "补货策略", "补货策略内容", "src", null);
         assertThat(searcher.score("补", cnFragment)).isZero();
