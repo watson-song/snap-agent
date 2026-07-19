@@ -3,8 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力">
-    <title>SnapAgent — 嵌入式 LLM 诊断 Agent</title>
+    <meta name="description" id="metaDescription"
+          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力"
+          data-en="SnapAgent — an embeddable LLM diagnostic Agent giving Spring Boot 2.x apps built-in read-only diagnostics"
+          content="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力">
+    <title id="pageTitle"
+           data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
+           data-en="SnapAgent — Embeddable LLM Diagnostic Agent">SnapAgent — 嵌入式 LLM 诊断 Agent</title>
+    <link rel="canonical" href="https://watson-song.github.io/snap-agent/">
+    <link rel="alternate" hreflang="zh-CN" href="https://watson-song.github.io/snap-agent/">
+    <link rel="alternate" hreflang="en" href="https://watson-song.github.io/snap-agent/">
+    <meta name="theme-color" content="#0f0f1a">
+
+    <!-- ===== Open Graph (text-only, no image yet — image URL requires deployment domain) ===== -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="SnapAgent">
+    <meta property="og:title" id="ogTitle"
+          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
+          data-en="SnapAgent — Embeddable LLM Diagnostic Agent"
+          content="SnapAgent — 嵌入式 LLM 诊断 Agent">
+    <meta property="og:description" id="ogDescription"
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力：自然语言对话、只读工具调用、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。"
+          data-en="Give your Spring Boot 2.x app an embedded LLM diagnostician: natural-language chat, read-only tool calls, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols."
+          content="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力：自然语言对话、只读工具调用、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。">
+    <meta property="og:url" content="https://watson-song.github.io/snap-agent/">
+    <meta property="og:locale" id="ogLocale"
+          data-zh="zh_CN" data-en="en_US"
+          content="zh_CN">
+    <meta property="og:locale:alternate" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+
+    <!-- ===== Twitter Card (text-only summary, no image) ===== -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" id="twitterTitle"
+          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
+          data-en="SnapAgent — Embeddable LLM Diagnostic Agent"
+          content="SnapAgent — 嵌入式 LLM 诊断 Agent">
+    <meta name="twitter:description" id="twitterDescription"
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力。"
+          data-en="Give your Spring Boot 2.x app an embedded LLM diagnostician."
+          content="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力。">
     <style>
         /* ===== CSS Variables (matches embedded UI) ===== */
         :root {
@@ -225,6 +263,17 @@
             font-family: var(--mono); font-size: 13px; line-height: 1.5;
             color: var(--text-secondary); white-space: pre;
         }
+        .arch-list {
+            display: none;
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 20px;
+            font-size: 14px; line-height: 1.6;
+        }
+        .arch-list ul { padding-left: 20px; margin: 6px 0; }
+        .arch-list > ul { padding-left: 0; }
+        .arch-list li { margin: 4px 0; color: var(--text-secondary); }
+        .arch-list strong { color: var(--accent); font-weight: 600; }
+        .arch-list .arch-node { color: var(--text-primary); font-weight: 600; }
 
         /* ===== Quick Start ===== */
         .qs-tabs {
@@ -293,7 +342,13 @@
             .hero { padding: 80px 0 60px; }
             .hero-stats { gap: 32px; }
             .section { padding: 64px 0; }
-            .nav-link { display: none; }
+            .nav-inner { gap: 8px; }
+            .nav-link { padding: 6px 8px; font-size: 13px; }
+            .nav-lang-toggle { padding: 5px 10px; font-size: 12px; }
+            .nav-cta { padding: 6px 12px; font-size: 13px; }
+            /* Mobile: replace ASCII arch-diagram with semantic list */
+            .arch-diagram { display: none; }
+            .arch-list { display: block; }
         }
 
         /* ===== Bilingual ===== */
@@ -557,6 +612,31 @@
                      ┌────────▼────────┐
                      │   LLM Provider  │  Anthropic · 通义 · 文心 · 智谱
                      └─────────────────┘</div>
+
+        <!-- Mobile fallback: semantic nested list (hidden on desktop via CSS) -->
+        <div class="arch-list">
+            <ul>
+                <li><span class="arch-node">宿主 Spring Boot 应用</span>
+                    <ul>
+                        <li>业务逻辑 + 数据源 + Spring Security + 日志</li>
+                        <li><span class="arch-node">SnapAgent Spring Boot Starter</span> <em>(auto-configuration)</em>
+                            <ul>
+                                <li><strong>Skills Registry</strong> — skill 注册与调度</li>
+                                <li><strong>Tools Dispatch</strong> — 11+ 只读工具</li>
+                                <li><strong>KnowledgeBase</strong> — 业务知识自动注入</li>
+                                <li><strong>Code Graph</strong> — 调用链 / 影响分析</li>
+                                <li><strong>Issue Closure</strong> — 问题闭环 + 知识沉淀</li>
+                                <li><strong>Cost Tracker</strong> — token 记账 + 预算管控</li>
+                                <li><strong>Workflow Engine</strong> — 多步诊断流水线</li>
+                                <li><strong>Patrol + Alert</strong> — 主动巡检 + 告警收敛</li>
+                                <li><strong>AgentExecutor</strong> · SSE Controller · SecurityGateway</li>
+                            </ul>
+                        </li>
+                    </ul>
+                </li>
+                <li><span class="arch-node">LLM Provider</span> — Anthropic · 通义 · 文心 · 智谱</li>
+            </ul>
+        </div>
     </div>
 </section>
 
@@ -602,7 +682,7 @@
         </div>
 
         <div class="code-block" id="qs-yaml" style="display:none">
-<span class="c-com"># application.yml — 最小配置</span>
+<span class="c-com"># application.yml — 最小可跑配置</span>
 <span class="c-key">snap-agent:</span>
   <span class="c-key">enabled:</span> <span class="c-num">true</span>
   <span class="c-key">base-path:</span> <span class="c-str">/snap-agent</span>           <span class="c-com"># web UI + REST API 挂载路径</span>
@@ -614,15 +694,18 @@
     <span class="c-key">timeout-seconds:</span> <span class="c-num">60</span>
   <span class="c-key">security:</span>
     <span class="c-key">required-permission:</span> <span class="c-str">snapagent:use</span>   <span class="c-com"># 复用宿主 Spring Security</span>
-  <span class="c-com"># 可选功能模块（默认 disabled）</span>
-  <span class="c-key">code:</span>
+
+  <span class="c-com"># 可选功能模块（默认 disabled）——完整字段参考：</span>
+  <span class="c-com"># https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/host-integration-guide.md</span>
+  <span class="c-key">code:</span>          <span class="c-com"># 代码工具（code_read / project_structure / code_graph）</span>
     <span class="c-key">enabled:</span> <span class="c-num">true</span>
     <span class="c-key">project-root:</span> <span class="c-str">${user.dir}</span>
-  <span class="c-key">knowledge:</span>
+  <span class="c-key">knowledge:</span>     <span class="c-com"># 业务知识库（自动注入到 LLM system prompt）</span>
     <span class="c-key">enabled:</span> <span class="c-num">true</span>
     <span class="c-key">sources:</span>
       - <span class="c-key">type:</span> <span class="c-str">markdown</span>
         <span class="c-key">dir:</span> <span class="c-str">classpath:/docs/knowledge/</span>
+  <span class="c-com"># cost / workflow / issue / patrol 同理开启即可，详见上方链接</span>
         </div>
 
         <div class="code-block" id="qs-run" style="display:none">
@@ -661,7 +744,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
         </div>
         <div class="docs-grid">
 
-            <a href="architecture/zh/system-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/zh/system-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🏛️</div>
                 <div class="doc-body">
                     <h4>
@@ -672,13 +755,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">Three-layer SPI, module split, execution loop, web layer, security model, auto-config, v0.1→v1.0 roadmap.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="architecture/zh/system-architecture.md">中文</a>
-                        <a href="architecture/en/system-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/zh/system-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/en/system-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="search/zh/knowledge-search.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/zh/knowledge-search.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🔍</div>
                 <div class="doc-body">
                     <h4>
@@ -689,13 +772,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">Hybrid tokenization (Latin + CJK 2-gram), scoring formula, minScore threshold, KnowledgeInjector.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="search/zh/knowledge-search.md">中文</a>
-                        <a href="search/en/knowledge-search.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/zh/knowledge-search.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/en/knowledge-search.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="integration/zh/host-integration-guide.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/host-integration-guide.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🔌</div>
                 <div class="doc-body">
                     <h4>
@@ -706,13 +789,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">Maven deps, full config reference, startup flow, custom tools / skills, security, multi-LLM, deploy checklist.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="integration/zh/host-integration-guide.md">中文</a>
-                        <a href="integration/en/host-integration-guide.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/host-integration-guide.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/host-integration-guide.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="deployment/zh/multi-cluster-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/zh/multi-cluster-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🌐</div>
                 <div class="doc-body">
                     <h4>
@@ -723,13 +806,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">K8s stateless multi-replica, PeerRouter fallback chain, SSE relay, RBAC.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="deployment/zh/multi-cluster-architecture.md">中文</a>
-                        <a href="deployment/en/multi-cluster-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/zh/multi-cluster-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/en/multi-cluster-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="plugins/zh/tool-plugin-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/zh/tool-plugin-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🔧</div>
                 <div class="doc-body">
                     <h4>
@@ -740,13 +823,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">ToolProvider SPI, ToolPlugin metadata, 11+ built-in tools, security constraints, custom plugin example.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="plugins/zh/tool-plugin-architecture.md">中文</a>
-                        <a href="plugins/en/tool-plugin-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/zh/tool-plugin-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/en/tool-plugin-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="workflow/zh/workflow-engine-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/zh/workflow-engine-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">📋</div>
                 <div class="doc-body">
                     <h4>
@@ -757,13 +840,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">YAML format, condition expressions, onFailure policies, built-in full-diagnose workflow.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="workflow/zh/workflow-engine-architecture.md">中文</a>
-                        <a href="workflow/en/workflow-engine-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/zh/workflow-engine-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/en/workflow-engine-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="issue/zh/issue-closure-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/zh/issue-closure-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🐛</div>
                 <div class="doc-body">
                     <h4>
@@ -774,13 +857,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">IssueStatus state machine, FileIssueStore, NoopIssueTracker, knowledge sedimentation, REST API.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="issue/zh/issue-closure-architecture.md">中文</a>
-                        <a href="issue/en/issue-closure-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/zh/issue-closure-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/en/issue-closure-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="proactive/zh/proactive-monitoring-architecture.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/zh/proactive-monitoring-architecture.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">🛡️</div>
                 <div class="doc-body">
                     <h4>
@@ -791,13 +874,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">Patrol (ScheduledPatrolScheduler) + Alert (AlertConverger / AnomalyEventListener) dual mode, push channels, lifecycle.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="proactive/zh/proactive-monitoring-architecture.md">中文</a>
-                        <a href="proactive/en/proactive-monitoring-architecture.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/zh/proactive-monitoring-architecture.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/en/proactive-monitoring-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
 
-            <a href="manual/zh/user-manual.md" class="doc-card">
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/zh/user-manual.md" class="doc-card" target="_blank" rel="noopener">
                 <div class="doc-icon">📖</div>
                 <div class="doc-body">
                     <h4>
@@ -808,8 +891,8 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="en">Quick start, web UI, running skills, conversation history, knowledge base, tools & skills, workflows, issue closure, cost, REST API reference.</span>
                     </p>
                     <div class="doc-links">
-                        <a href="manual/zh/user-manual.md">中文</a>
-                        <a href="manual/en/user-manual.md">English</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/zh/user-manual.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/en/user-manual.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
@@ -838,15 +921,42 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
 <script>
     // ===== Bilingual toggle =====
     const langToggle = document.getElementById('langToggle');
+    const pageTitle = document.getElementById('pageTitle');
+    const metaDescription = document.getElementById('metaDescription');
+    const htmlEl = document.documentElement;
+    const supportedLangs = ['zh', 'en'];
+
+    function applyLang(lang) {
+        htmlEl.setAttribute('data-lang', lang);
+        htmlEl.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+        document.body.setAttribute('data-lang', lang);
+        // Sync <title>, <meta description>, OG, Twitter Card
+        const i18nMetaIds = ['pageTitle', 'metaDescription', 'ogTitle', 'ogDescription', 'twitterTitle', 'twitterDescription'];
+        i18nMetaIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.dataset[lang]) el.setAttribute('content', el.dataset[lang]);
+            if (el && el.tagName === 'TITLE' && el.dataset[lang]) el.textContent = el.dataset[lang];
+        });
+        // OG locale
+        const ogLocale = document.getElementById('ogLocale');
+        if (ogLocale && ogLocale.dataset[lang]) ogLocale.setAttribute('content', ogLocale.dataset[lang]);
+        langToggle.textContent = lang === 'zh' ? '中文 / EN' : 'EN / 中文';
+        langToggle.setAttribute('aria-label', lang === 'zh' ? 'Switch to English' : '切换到中文');
+        langToggle.setAttribute('lang', lang === 'zh' ? 'en' : 'zh');
+    }
+
     langToggle.addEventListener('click', () => {
-        const html = document.documentElement;
-        const current = html.getAttribute('data-lang') || 'zh';
+        const current = htmlEl.getAttribute('data-lang') || 'zh';
         const next = current === 'zh' ? 'en' : 'zh';
-        html.setAttribute('data-lang', next);
-        document.body.setAttribute('data-lang', next);
-        document.documentElement.setAttribute('lang', next === 'zh' ? 'zh-CN' : 'en');
-        langToggle.textContent = next === 'zh' ? '中文 / EN' : '中文 / EN';
+        applyLang(next);
+        try { localStorage.setItem('snapagent-lang', next); } catch (e) {}
     });
+
+    // Restore saved language preference on load
+    try {
+        const saved = localStorage.getItem('snapagent-lang');
+        if (saved && supportedLangs.includes(saved) && saved !== 'zh') applyLang(saved);
+    } catch (e) {}
 
     // ===== Quick start tabs =====
     const tabs = document.querySelectorAll('.qs-tab');
