@@ -6,7 +6,7 @@
 
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-parent</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.3.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>SnapAgent Parent</name>
@@ -71,19 +71,20 @@
     </dependencyManagement>
 
     <distributionManagement>
+        <!-- 显式占位：实际部署由 central-publishing-maven-plugin 接管（见 release profile）。
+             保留 snapshot 配置以便 mvn deploy 直接发 snapshot 到 Central Portal。 -->
         <snapshotRepository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+            <id>central</id>
+            <url>https://central.sonatype.com/repository/maven-snapshots/</url>
         </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2</url>
-        </repository>
     </distributionManagement>
 
     <profiles>
-        <!-- Release profile: 激活时生成 source/javadoc jar、GPG 签名、部署到 OSSRH -->
-        <!-- 用法: mvn deploy -Prelease -->
+        <!-- Release profile: 激活时生成 source/javadoc jar、GPG 签名、部署到 Central Portal 并发布。
+             OSSRH 已于 2025-06-30 下线，所有发布改走 Central Publisher Portal。
+             用法: mvn clean deploy -Prelease
+             前置条件: ~/.m2/settings.xml 中 <server><id>central</id> 配置 Portal User Token；
+                       本机已安装 gpg 且公钥已上传到 keyserver。 -->
         <profile>
             <id>release</id>
             <build>
@@ -92,7 +93,7 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-source-plugin</artifactId>
-                        <version>3.2.1</version>
+                        <version>3.3.1</version>
                         <executions>
                             <execution>
                                 <id>attach-sources</id>
@@ -107,10 +108,13 @@
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>3.3.0</version>
+                        <version>3.11.2</version>
                         <configuration>
                             <doclint>none</doclint>
                             <failOnError>false</failOnError>
+                            <charset>UTF-8</charset>
+                            <encoding>UTF-8</encoding>
+                            <docencoding>UTF-8</docencoding>
                         </configuration>
                         <executions>
                             <execution>
@@ -122,11 +126,13 @@
                         </executions>
                     </plugin>
 
-                    <!-- GPG 签名 -->
+                    <!-- GPG 签名（Central Portal 强制要求）。
+                         密码来源优先级：-Dgpg.passphrase=xxx (CI) > gpg-agent 弹窗 (本地)。
+                         本地非交互可用 -Dgpg.pinentry-mode=loopback -Dgpg.passphrase=xxx。 -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
-                        <version>3.0.1</version>
+                        <version>3.2.7</version>
                         <executions>
                             <execution>
                                 <id>sign-artifacts</id>
@@ -138,16 +144,21 @@
                         </executions>
                     </plugin>
 
-                    <!-- 部署到 OSSRH 并自动发布 -->
+                    <!-- 部署到 Central Publisher Portal 并自动发布。
+                         替代已下线的 nexus-staging-maven-plugin。 -->
                     <plugin>
-                        <groupId>org.sonatype.plugins</groupId>
-                        <artifactId>nexus-staging-maven-plugin</artifactId>
-                        <version>1.6.13</version>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.7.0</version>
                         <extensions>true</extensions>
                         <configuration>
-                            <serverId>ossrh</serverId>
-                            <nexusUrl>https://oss.sonatype.org/</nexusUrl>
-                            <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                            <publishingServerId>central</publishingServerId>
+                            <tokenAuth>true</tokenAuth>
+                            <autoPublish>true</autoPublish>
+                            <!-- 等待 Portal 校验通过；失败时直接报错，便于排查 -->
+                            <waitUntil>published</waitUntil>
+                            <!-- 最多等 30 分钟（Portal 校验 + 同步到 Maven Central） -->
+                            <deploymentTimeout>1800</deploymentTimeout>
                         </configuration>
                     </plugin>
                 </plugins>
