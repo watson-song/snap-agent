@@ -20,6 +20,11 @@ import java.util.Map;
  * <p>Tool name: {@code mysql_query}. Delegates SQL safety to {@link SqlGuard}
  * (whitelist, blacklist, multi-statement rejection, LIMIT injection).</p>
  *
+ * <p><b>Multi-environment mode (v0.6):</b> when constructed with a
+ * {@link DataSourceRegistry}, the tool schema exposes an {@code env} parameter
+ * so the LLM can select the target environment (e.g. sit/uat). The single-
+ * DataSource constructor is retained for backward compatibility.</p>
+ *
  * <p>Results are formatted as a pipe-delimited table and truncated to
  * {@code maxResultRows}. Each invocation is audited via
  * {@link ToolContext#getAuditCallback()} (if present).</p>
@@ -28,16 +33,32 @@ public class JdbcQueryToolProvider implements ToolProvider {
 
     private static final Logger log = LoggerFactory.getLogger(JdbcQueryToolProvider.class);
 
-    private static final String SCHEMA = "{\"name\":\"mysql_query\","
+    private static final String SCHEMA_SINGLE = "{\"name\":\"mysql_query\","
             + "\"description\":\"Execute a read-only SQL query.\","
             + "\"input_schema\":{\"type\":\"object\","
             + "\"properties\":{\"sql\":{\"type\":\"string\","
             + "\"description\":\"SELECT/SHOW/DESCRIBE/EXPLAIN/WITH query\"}},"
             + "\"required\":[\"sql\"]}}";
 
+    private static final String SCHEMA_MULTI_ENV = "{\"name\":\"mysql_query\","
+            + "\"description\":\"Execute a read-only SQL query.\","
+            + "\"input_schema\":{\"type\":\"object\","
+            + "\"properties\":{\"sql\":{\"type\":\"string\","
+            + "\"description\":\"SELECT/SHOW/DESCRIBE/EXPLAIN/WITH query\"},"
+            + "\"env\":{\"type\":\"string\","
+            + "\"description\":\"Environment name (e.g. sit/uat). Empty=use default.\"}},"
+            + "\"required\":[\"sql\"]}}";
+
     private final DataSource dataSource;
+    private final DataSourceRegistry registry;
     private final SqlGuard sqlGuard;
 
+    /**
+     * Single-environment constructor (backward compatible).
+     *
+     * @param dataSource the read-only DataSource
+     * @param sqlGuard   SQL safety guard
+     */
     public JdbcQueryToolProvider(DataSource dataSource, SqlGuard sqlGuard) {
         if (dataSource == null) {
             throw new IllegalArgumentException("dataSource must not be null");
@@ -46,6 +67,25 @@ public class JdbcQueryToolProvider implements ToolProvider {
             throw new IllegalArgumentException("sqlGuard must not be null");
         }
         this.dataSource = dataSource;
+        this.registry = null;
+        this.sqlGuard = sqlGuard;
+    }
+
+    /**
+     * Multi-environment constructor (v0.6).
+     *
+     * @param registry multi-env DataSource registry
+     * @param sqlGuard SQL safety guard
+     */
+    public JdbcQueryToolProvider(DataSourceRegistry registry, SqlGuard sqlGuard) {
+        if (registry == null) {
+            throw new IllegalArgumentException("registry must not be null");
+        }
+        if (sqlGuard == null) {
+            throw new IllegalArgumentException("sqlGuard must not be null");
+        }
+        this.dataSource = null;
+        this.registry = registry;
         this.sqlGuard = sqlGuard;
     }
 
@@ -56,7 +96,7 @@ public class JdbcQueryToolProvider implements ToolProvider {
 
     @Override
     public String schema() {
-        return SCHEMA;
+        return registry != null ? SCHEMA_MULTI_ENV : SCHEMA_SINGLE;
     }
 
     @Override
@@ -78,9 +118,23 @@ public class JdbcQueryToolProvider implements ToolProvider {
         String sanitizedSql = guardResult.getSql();
         int maxRows = sqlGuard.getMaxResultRows();
 
-        log.info("Executing SQL (sanitized): {}", sanitizedSql);
+        // Resolve the target DataSource (multi-env or single)
+        DataSource targetDs;
+        if (registry != null) {
+            String env = extractEnv(args);
+            try {
+                targetDs = registry.resolve(env);
+            } catch (IllegalArgumentException e) {
+                log.warn("DataSource resolution failed for env '{}': {}", env, e.getMessage());
+                return ToolResult.error(e.getMessage(), elapsed(start));
+            }
+            log.info("Executing SQL (sanitized) on env '{}': {}", env, sanitizedSql);
+        } else {
+            targetDs = dataSource;
+            log.info("Executing SQL (sanitized): {}", sanitizedSql);
+        }
 
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = targetDs.getConnection();
              Statement stmt = conn.createStatement()) {
             stmt.setMaxRows(maxRows);
             try (ResultSet rs = stmt.executeQuery(sanitizedSql)) {
@@ -104,6 +158,17 @@ public class JdbcQueryToolProvider implements ToolProvider {
             return (String) value;
         }
         return null;
+    }
+
+    private String extractEnv(Map<String, Object> args) {
+        if (args == null) {
+            return "";
+        }
+        Object value = args.get("env");
+        if (value instanceof String) {
+            return (String) value;
+        }
+        return "";
     }
 
     private ToolResult formatResult(ResultSet rs, int maxRows, long start) throws java.sql.SQLException {

@@ -155,8 +155,15 @@ public class SkillLoader {
             }
         }
 
+        // Parse required-permission (optional, v0.6)
+        String requiredPermission = "";
+        Object permObj = map.get("required-permission");
+        if (permObj instanceof String) {
+            requiredPermission = ((String) permObj).trim();
+        }
+
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                SkillAvailability.AVAILABLE, null, "custom", false);
+                SkillAvailability.AVAILABLE, null, "custom", false, requiredPermission);
     }
 
     @SuppressWarnings("unchecked")
@@ -274,6 +281,6 @@ public class SkillLoader {
     private SkillMeta invalid(String name, String reason) {
         return new SkillMeta(name, null, Collections.<String>emptyList(),
                 Collections.<InputSpec>emptyList(), Collections.<Shortcut>emptyList(),
-                null, SkillAvailability.INVALID, reason, "custom", false);
+                null, SkillAvailability.INVALID, reason, "custom", false, "");
     }
 }

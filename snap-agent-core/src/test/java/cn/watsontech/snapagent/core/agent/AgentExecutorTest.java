@@ -539,6 +539,80 @@ class AgentExecutorTest {
     }
 
     @Test
+    void shouldContinueWhenMaxTokensHit() {
+        // Turn 0: LLM hits max_tokens with partial thoughts (no tool_use)
+        // Turn 1: LLM completes the response with end_turn
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("正在分析");
+            sink.onStop("max_tokens");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("诊断完成。");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        // Should NOT be SUCCEEDED from max_tokens — should continue and eventually SUCCEEDED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
+        assertThat(task.getReport()).contains("诊断完成");
+    }
+
+    @Test
+    void shouldHandleMaxTokensWithPartialToolUse() {
+        // Turn 0: LLM hits max_tokens mid-tool-call, but tool_use was already emitted
+        // Turn 1: LLM continues with end_turn
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("查一下数据。");
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("sql", "SELECT 1");
+            sink.onToolUse("toolu_01", "mysql_query", input);
+            sink.onStop("max_tokens");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("数据正常，诊断完成。");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        when(mysqlProvider.execute(any(), any()))
+                .thenReturn(ToolResult.success("1", 1, 10L));
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
+        assertThat(task.getAuditRecords()).hasSize(1);
+    }
+
+    @Test
+    void shouldNotMarkSucceededWhenMaxTokensWithoutEndTurn() {
+        // max_tokens on every turn — should eventually hit max-turns, not SUCCEEDED
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("正在生成报告...");
+            sink.onStop("max_tokens");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 3, 8192);
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        // Should be TIMEOUT (max-turns), NOT SUCCEEDED
+        assertThat(task.getStatus()).isEqualTo(TaskStatus.TIMEOUT);
+        assertThat(task.getReport()).contains("max-turns");
+    }
+
+    @Test
     void shouldPassCorrectModelToLlmRequest() {
         ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
         doAnswer(invocation -> {
@@ -553,5 +627,88 @@ class AgentExecutorTest {
         executor.execute(task, skill);
 
         assertThat(captor.getValue().getModel()).isEqualTo("claude-sonnet-4-6");
+    }
+
+    // ---- SystemPromptExtender integration (v0.3, multi-extender v0.7) ----
+
+    @Test
+    void shouldAppendExtenderContextToSystemPrompt() {
+        SystemPromptExtender extender = (s, t) ->
+                "## 项目结构\n模块: snap-agent-core";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt).contains("项目结构");
+        assertThat(prompt).contains("snap-agent-core");
+        // The extender content should be near the end, after userId
+        assertThat(prompt.indexOf("user-1")).isLessThan(prompt.indexOf("snap-agent-core"));
+    }
+
+    @Test
+    void shouldNotAppendAnythingWhenExtenderReturnsEmpty() {
+        SystemPromptExtender extender = (s, t) -> "";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        // Prompt should end with the userId line (no extra context)
+        assertThat(prompt.trim()).endsWith("user-1");
+    }
+
+    @Test
+    void shouldNotAppendAnythingWhenExtenderReturnsNull() {
+        SystemPromptExtender extender = (s, t) -> null;
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Collections.singletonList(extender));
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt.trim()).endsWith("user-1");
+    }
+
+    @Test
+    void shouldAppendMultipleExtendersToSystemPrompt() {
+        // v0.7: multiple extenders (e.g. project context + knowledge) coexist
+        SystemPromptExtender projectExtender = (s, t) ->
+                "## 项目结构\n模块: snap-agent-core";
+        SystemPromptExtender knowledgeExtender = (s, t) ->
+                "## 业务知识参考\n补货策略: 最低库存阈值";
+        AgentExecutor executor = new AgentExecutor(llmClient, dispatcher, taskStore, 20, 8192,
+                Arrays.asList(projectExtender, knowledgeExtender));
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        // Both extenders' output should be present
+        assertThat(prompt).contains("项目结构");
+        assertThat(prompt).contains("snap-agent-core");
+        assertThat(prompt).contains("业务知识参考");
+        assertThat(prompt).contains("补货策略");
+        // project context comes before knowledge (insertion order)
+        assertThat(prompt.indexOf("snap-agent-core")).isLessThan(prompt.indexOf("补货策略"));
+        // Both come after userId
+        assertThat(prompt.indexOf("user-1"))
+                .isLessThan(prompt.indexOf("snap-agent-core"))
+                .isLessThan(prompt.indexOf("补货策略"));
+    }
+
+    @Test
+    void shouldWorkWithoutExtenderForBackwardCompat() {
+        // Old 5-arg constructor — no extender, no context injection
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+
+        String prompt = executor.buildSystemPrompt(skill, task);
+
+        assertThat(prompt).startsWith("你是只读诊断 agent");
+        assertThat(prompt).contains("user-1");
+        // No project structure context should be present
+        assertThat(prompt).doesNotContain("项目结构");
     }
 }

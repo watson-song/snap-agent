@@ -352,6 +352,9 @@ public class AnthropicLlmClient implements LlmClient {
 
         // Ensure onStop is called if message_stop was never received
         if (!state.stopCalled) {
+            if (state.usageReported) {
+                events.onUsage(state.inputTokens, state.outputTokens, state.cacheReadTokens);
+            }
             events.onStop(state.stopReason != null ? state.stopReason : "end_turn");
         }
     }
@@ -365,7 +368,18 @@ public class AnthropicLlmClient implements LlmClient {
         try {
             JsonNode node = objectMapper.readTree(data);
 
-            if ("content_block_start".equals(eventType)) {
+            if ("message_start".equals(eventType)) {
+                // v1.0 cost accounting: extract input/cache-read tokens from message_start
+                JsonNode message = node.get("message");
+                if (message != null) {
+                    JsonNode usage = message.get("usage");
+                    if (usage != null) {
+                        state.inputTokens = usage.path("input_tokens").asLong(0);
+                        state.cacheReadTokens = usage.path("cache_read_input_tokens").asLong(0);
+                        state.usageReported = true;
+                    }
+                }
+            } else if ("content_block_start".equals(eventType)) {
                 JsonNode block = node.get("content_block");
                 if (block != null && "tool_use".equals(
                         block.path("type").asText())) {
@@ -413,7 +427,16 @@ public class AnthropicLlmClient implements LlmClient {
                 if (delta != null && delta.has("stop_reason")) {
                     state.stopReason = delta.get("stop_reason").asText();
                 }
+                // v1.0 cost accounting: extract output tokens from message_delta usage
+                JsonNode usage = node.get("usage");
+                if (usage != null) {
+                    state.outputTokens = usage.path("output_tokens").asLong(0);
+                    state.usageReported = true;
+                }
             } else if ("message_stop".equals(eventType)) {
+                if (state.usageReported) {
+                    events.onUsage(state.inputTokens, state.outputTokens, state.cacheReadTokens);
+                }
                 events.onStop(state.stopReason != null ? state.stopReason : "end_turn");
                 state.stopCalled = true;
             } else if ("error".equals(eventType)) {
@@ -437,5 +460,10 @@ public class AnthropicLlmClient implements LlmClient {
         StringBuilder toolUseJson = new StringBuilder();
         String stopReason = null;
         boolean stopCalled = false;
+        // v1.0 cost accounting: token usage extracted from message_start / message_delta
+        long inputTokens = 0;
+        long outputTokens = 0;
+        long cacheReadTokens = 0;
+        boolean usageReported = false;
     }
 }

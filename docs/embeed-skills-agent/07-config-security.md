@@ -29,7 +29,20 @@ snap-agent:
     transcript-event-limit: 500       # 单 task transcript 事件上限
   jdbc:
     enabled: true
-    datasource-bean-name: snapAgentReadOnlyDataSource   # 独立只读 DSN
+    datasource-bean-name: snapAgentReadOnlyDataSource   # 独立只读 DSN（旧: 单环境）
+    # 多环境数据源 (v0.6): 配置后覆盖单 DSN 模式, mysql_query 工具 schema 新增 env 参数
+    datasources:
+      sit:
+        url: "jdbc:mysql://sit-db:3306/orders"
+        username: "readonly_user"
+        password: "${SIT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+      uat:
+        url: "jdbc:mysql://uat-db:3306/orders"
+        username: "readonly_user"
+        password: "${UAT_DB_PASSWORD:}"
+        driver-class-name: "com.mysql.cj.jdbc.Driver"
+    default-env: ""    # 默认环境名, 空=第一个 datasources 条目
   redis:
     enabled: true
     redis-template-bean-name: redisTemplate
@@ -40,6 +53,42 @@ snap-agent:
     max-lines: 500                       # 单次最多返回行数
     max-file-bytes: 10485760             # 拒绝读取 >10MB 的文件（10MB）
     app-log-file: ""                     # 应用日志文件路径；空=自动从 logging.file.name 解析
+  code:
+    enabled: false                       # 代码理解工具（code_read/project_structure/git_log），默认关
+    project-root: ""                     # 宿主项目根目录，为空则工具不启用
+    allowed-extensions: [".java",".xml",".yml",".yaml",".properties",".sql",".md",".txt",".json",".csv"]
+    max-lines: 500                       # 单次读取最大行数
+    max-file-bytes: 524288               # 单个文件最大 512KB
+    structure-depth: 3                  # project_structure 默认扫描深度
+    context-injection: true              # 是否注入项目结构摘要到 system prompt
+  metrics:
+    enabled: false                       # 可观测性指标工具（metrics_query），默认关
+    base-url: ""                         # Prometheus URL, e.g. http://prometheus:9090
+    auth-header: ""                      # HTTP header name (e.g. "Authorization")
+    auth-header-value: ""               # Header value (e.g. "Bearer xxx")
+    timeout-seconds: 15
+    max-points: 200                      # 最大数据点数/series
+  log-search:
+    enabled: false                       # 日志搜索工具（log_search），默认关
+    base-url: ""                         # Loki URL, e.g. http://loki:3100
+    auth-header: ""
+    auth-header-value: ""
+    timeout-seconds: 15
+    max-lines: 500                       # 单次返回最大行数
+  trace:
+    enabled: false                       # 链路追踪工具（trace_search），默认关
+    base-url: ""                         # Jaeger URL, e.g. http://jaeger:16686
+    auth-header: ""
+    auth-header-value: ""
+    timeout-seconds: 15
+    max-traces: 20                       # 单次返回最大 trace 数
+  config-read:
+    enabled: false                       # 配置读取工具（config_read），默认关
+    nacos-base-url: ""                   # Nacos URL
+    nacos-namespace: ""                  # 默认 namespace
+    nacos-auth-token: ""                 # Nacos 鉴权 token
+    max-keys: 100                        # 本地属性最大返回数
+    sensitive-key-patterns: ["password", "secret", "token", "credential", "key"]
   mcp:
     enabled: false                    # Phase 2
     servers: {}                       # {name: {transport: sse, url, auth-header, auth-header-value}}
@@ -52,6 +101,21 @@ snap-agent:
     auth-token-header: ""             # 前后端分离 token 鉴权：HTTP header 名称（如 token）
     auth-token-cookie: ""             # token 存 cookie 时：cookie 名称
     auth-token-local-storage-key: ""  # token 存 localStorage 时：key 名称（如 TOKEN）
+  patrol:
+    enabled: false          # 主动监控巡检子系统（v0.5），默认关
+    scheduler-pool-size: 2  # 定时巡检线程池大小
+    report-buffer-size: 500 # 内存中保留的最大巡检报告数
+  alert:
+    enabled: false            # 告警收敛子系统（v0.5），默认关
+    buffer-size: 1000         # 内存中保留的最大告警数
+    auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+  knowledge:                   # 嵌入式业务知识库（v0.7），默认关
+    enabled: false
+    sources:                   # 知识源列表
+      - type: markdown         # 目前仅支持 markdown
+        dir: classpath:/docs/knowledge/  # classpath: 前缀=JAR 内资源；否则文件系统路径
+    max-fragments: 3           # 每次查询注入的最大知识片段数
+    min-score: 0.1             # 最小相关度阈值 [0.0, 1.0]
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -71,7 +135,14 @@ snap-agent:
 | `agent.transcript-event-limit` | TaskStore | 03 §5 |
 | `jdbc.*` | JdbcQueryToolProvider | 04 §2 |
 | `redis.*` | RedisReadToolProvider | 04 §3 |
+| `logs.*` | LogReadToolProvider | 04 §2.3 |
+| `code.*` | CodeReadToolProvider / GitLogToolProvider / ProjectStructureToolProvider | 04 §4 |
+| `metrics.*` | MetricsToolProvider（Prometheus 查询） | 04 §5 |
+| `log-search.*` | LogSearchToolProvider（Loki 日志搜索） | 04 §5 |
+| `trace.*` | TraceSearchToolProvider（Jaeger 链路追踪） | 04 §5 |
+| `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
+| `knowledge.*` | KnowledgeBase / MarkdownKnowledgeSource / SimpleKeywordSearcher / KnowledgeInjector | §12 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
 | `security.filter-order` | SnapAgentFilter 注册 order | §4 |
@@ -164,6 +235,29 @@ List<GrantedAuthority> authorities = loginUser.getPermissionList().stream()
 ```
 
 这是 Spring Security 的"标准做法"，但可能影响宿主其他模块的权限逻辑。自定义 `SecurityGateway` 更安全、影响面最小。
+
+### 3.6 Skill 级别权限控制（v0.6）
+
+除了全局 `security.required-permission`，v0.6 支持在 Skill frontmatter 中声明 `required-permission`，实现细粒度权限控制：
+
+```yaml
+# skill markdown frontmatter
+---
+name: database-query
+description: "执行只读 SQL 查询"
+tools: [mysql_query]
+required-permission: snap-agent:db-query   # 运行此 skill 需要的权限码
+---
+```
+
+**安全语义：**
+- `required-permission` 为空 → 继承全局 `security.required-permission`（向后兼容）
+- `required-permission` 非空 → 覆盖全局权限，仅检查 skill 级别权限码
+- 宿主可同时配置全局和 skill 级权限：用户需同时拥有全局 access 权限 + 具体 skill 权限
+
+**运行时检查：** `POST /runs` 时，Controller 从 SkillRegistry 获取 skill，如果 skill 声明了 `required-permission` 且用户无此权限 → 返回 403。
+
+**GET /skills 响应：** skill DTO 包含 `requiredPermission` 字段（仅在非空时出现），前端可据此显示权限标识。
 
 ## 4. Filter 可配序、鉴权委托宿主（决策 #4）
 
@@ -270,3 +364,142 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 - 未登录：`SecurityContextHolder.authentication == null` → `currentUserId()` 返回 null → 401。
 - 已登录无权限：`hasPermission` false → 403。
 - principal 解析失败：resolver 返回 null → 401 + WARN 日志提示配 `principal-resolver-class`。
+
+## 10. 主动监控 — 巡检配置（v0.5）
+
+SnapAgent v0.5 引入主动健康巡检调度，按 cron 定时执行诊断 Skill，发现异常自动生成报告。
+
+```yaml
+snap-agent:
+  patrol:
+    enabled: false          # 巡检子系统总开关
+    scheduler-pool-size: 2  # 定时巡检线程池大小
+    report-buffer-size: 500 # 内存中保留的最大巡检报告数（ring buffer）
+```
+
+当 `enabled=true` 时，自动装配以下 Bean：
+
+| Bean | 职责 |
+|------|------|
+| `PatrolReportStore` | 内存 ring buffer，存储巡检报告，支持按用户分页查询 |
+| `ThreadPoolTaskScheduler` | Spring 调度器，驱动 cron 触发的巡检任务 |
+| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务的生命周期（创建/取消/列表/报告查询） |
+| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill |
+
+### 巡检 API
+
+| 端点 | 说明 |
+|------|------|
+| `POST /patrol/tasks` | 创建巡检任务（body: `skillName`, `cron`, `inputs`） |
+| `GET /patrol/tasks` | 列出所有巡检任务 |
+| `DELETE /patrol/tasks/{id}` | 取消巡检任务 |
+| `GET /patrol/reports?page=&size=` | 分页查询巡检报告 |
+| `GET /patrol/reports/{id}` | 获取单个巡检报告详情 |
+
+### Cron 表达式
+
+使用 Spring 6 字段 cron（秒 分 时 日 月 周），例如：
+- `0 */5 * * * *` — 每 5 分钟
+- `0 0 */1 * * *` — 每小时整点
+- `0 30 9 * * MON-FRI` — 工作日 9:30
+
+## 11. 告警收敛配置（v0.5）
+
+告警收敛将重复的同类异常事件聚合为单条告警记录，减少噪声。
+
+```yaml
+snap-agent:
+  alert:
+    enabled: false            # 告警子系统总开关
+    buffer-size: 1000         # 内存中保留的最大告警数
+    auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+```
+
+当 `enabled=true` 时，自动装配 `InMemoryAlertConverger`，使用 SHA-256 指纹对同类型+同来源的异常事件去重，按计数递增。
+
+### 告警 API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /alerts?page=&size=&type=&status=` | 分页查询告警（可选按 type/status 过滤） |
+| `POST /alerts/{id}/resolve` | 手动 resolve 告警 |
+
+### 异常事件桥接
+
+宿主可通过 `AnomalyEventListener` SPI 将外部消息队列（Kafka/RabbitMQ）的异常事件接入：
+
+```java
+@Component
+public class KafkaAnomalyBridge {
+    @Autowired
+    private AnomalyEventListener listener;
+
+    @KafkaListener(topics = "anomaly-events")
+    public void onMessage(ConsumerRecord<String, String> record) {
+        AnomalyEvent event = parse(record.value());
+        listener.onEvent(event);
+    }
+}
+```
+
+事件进入后，`DefaultAnomalyEventListener` 会自动触发对应的诊断 Skill，并将结果写入巡检报告和告警收敛。
+
+## 12. 嵌入式业务知识库配置（v0.7）
+
+```yaml
+snap-agent:
+  knowledge:
+    enabled: true                    # 知识库总开关，默认 false（零 bean）
+    sources:
+      - type: markdown
+        dir: classpath:/docs/knowledge/  # JAR 内置知识
+      - type: markdown
+        dir: /data/snap-agent/knowledge/ # 文件系统知识（可热更新）
+    max-fragments: 3                 # 每次查询注入的最大片段数
+    min-score: 0.1                   # 最小相关度 [0.0, 1.0]
+```
+
+### 知识加载与分段
+
+`MarkdownKnowledgeSource` 从指定目录递归扫描 `.md` 文件，按 `## ` 标题自动分段：
+- 文件级 `# ` 标题 → 存为每个片段的 `category` 元数据
+- `## ` 之前的内容 → 一个 "概述" 片段
+- 每个 `## ` 标题 → 一个独立知识片段（标题=片段标题，正文=片段内容）
+- 无 `## ` 的文件 → 整个文件作为一个片段
+
+### 检索算法
+
+`SimpleKeywordSearcher` 基于词频重叠评分：
+- 英文：按空格/标点分词，转小写，过滤 <2 字符的词
+- 中文：2 字符 bigram 分词（"补货策略" → ["补货","货策","策略"]）
+- 评分 = `(标题命中数 × 2 + 正文命中数) / (查询词数 × 2)`，截断到 [0.0, 1.0]
+- 标题命中权重 ×2，确保标题直接相关的片段排名更高
+
+### 知识注入
+
+`KnowledgeInjector` 实现 `SystemPromptExtender`，与 v0.3 的 `ProjectContextExtender` 并行生效：
+- 运行时从 `AgentTask` 的输入值构建查询
+- 调用 `KnowledgeBase.search(query, maxFragments, minScore)` 检索相关片段
+- 将匹配片段格式化为 Markdown 注入 system prompt
+- 无匹配时返回空字符串（不影响 LLM）
+
+### 自定义知识源
+
+宿主可实现 `KnowledgeSource` SPI 接入 Confluence / 语雀 / 自定义 API：
+
+```java
+@Component
+public class ConfluenceKnowledgeSource implements KnowledgeSource {
+    @Override
+    public List<KnowledgeFragment> load() {
+        // 从 Confluence API 加载文档，分割为片段
+        return fetchAndSplit();
+    }
+    @Override
+    public void reload() { /* 重新加载 */ }
+    @Override
+    public String type() { return "confluence"; }
+}
+```
+
+自定义 `KnowledgeSource` bean 会被 `KnowledgeBase` 自动收集。

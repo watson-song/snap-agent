@@ -53,4 +53,60 @@ class SkillMetaTest {
             assertThat(meta.getAvailability()).isEqualTo(a);
         }
     }
+
+    @Test
+    void shouldDefaultRequiredPermissionToEmptyString() {
+        SkillMeta meta = new SkillMeta("n", "d", null, null, "b",
+                SkillAvailability.AVAILABLE, null);
+
+        assertThat(meta.getRequiredPermission()).isEmpty();
+    }
+
+    @Test
+    void shouldHoldRequiredPermissionWhenProvided() {
+        SkillMeta meta = new SkillMeta("n", "d",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(),
+                "b", SkillAvailability.AVAILABLE, null,
+                "custom", false, "snap-agent:db-query");
+
+        assertThat(meta.getRequiredPermission()).isEqualTo("snap-agent:db-query");
+    }
+
+    @Test
+    void shouldReturnCopyWithRequiredPermissionViaWithMethod() {
+        SkillMeta original = new SkillMeta("n", "d", null, null, "b",
+                SkillAvailability.AVAILABLE, null);
+
+        SkillMeta updated = original.withRequiredPermission("snap-agent:admin");
+
+        assertThat(original.getRequiredPermission()).isEmpty();
+        assertThat(updated.getRequiredPermission()).isEqualTo("snap-agent:admin");
+        assertThat(updated.getName()).isEqualTo("n");
+    }
+
+    @Test
+    void shouldPreserveRequiredPermissionThroughWithSourceAndOverrides() {
+        SkillMeta original = new SkillMeta("n", "d", null, null,
+                Collections.<Shortcut>emptyList(), "b",
+                SkillAvailability.AVAILABLE, null,
+                "custom", false, "snap-agent:db-query");
+
+        SkillMeta withSource = original.withSource("builtin");
+        SkillMeta withOverride = original.withOverridesBuiltin(true);
+
+        assertThat(withSource.getRequiredPermission()).isEqualTo("snap-agent:db-query");
+        assertThat(withOverride.getRequiredPermission()).isEqualTo("snap-agent:db-query");
+    }
+
+    @Test
+    void shouldHandleNullRequiredPermissionAsEmptyString() {
+        SkillMeta meta = new SkillMeta("n", "d", null, null,
+                Collections.<Shortcut>emptyList(), "b",
+                SkillAvailability.AVAILABLE, null,
+                "custom", false, null);
+
+        assertThat(meta.getRequiredPermission()).isEmpty();
+    }
 }

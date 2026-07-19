@@ -1,7 +1,12 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
+import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
+import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
+import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
@@ -12,8 +17,22 @@ import cn.watsontech.snapagent.core.conversation.Conversation;
 import cn.watsontech.snapagent.core.conversation.ConversationMessage;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.core.cost.CostSummary;
+import cn.watsontech.snapagent.core.issue.IssueClosure;
+import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.patrol.AlertConvergence;
+import cn.watsontech.snapagent.core.patrol.AlertConverger;
+import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
+import cn.watsontech.snapagent.core.patrol.PatrolReport;
+import cn.watsontech.snapagent.core.patrol.PatrolScheduler;
+import cn.watsontech.snapagent.core.patrol.PatrolTask;
+import cn.watsontech.snapagent.core.security.AuditEntry;
+import cn.watsontech.snapagent.core.security.AuditStore;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.security.UserInfo;
@@ -22,6 +41,12 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolPlugin;
+import cn.watsontech.snapagent.core.workflow.StepResult;
+import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.core.workflow.WorkflowResult;
+import cn.watsontech.snapagent.core.workflow.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -85,6 +110,15 @@ public class SnapAgentController {
     private final LlmClient llmClient;
     private final SecurityAuditLogger auditLogger;
     private final ConversationStore conversationStore;
+    private final PatrolScheduler patrolScheduler;
+    private final AlertConverger alertConverger;
+    private final TemplateBugfixSuggester bugfixSuggester;
+    private final IssueClosureService issueClosureService;
+    private final CostSummaryService costSummaryService;
+    private final YamlWorkflowLoader workflowLoader;
+    private final WorkflowEngine workflowEngine;
+    private final ToolPluginRegistry toolPluginRegistry;
+    private final AuditStore auditStore;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -153,6 +187,115 @@ public class SnapAgentController {
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, null, null, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                AuditStore auditStore) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
+                issueClosureService, null, null, null, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService,
+                                CostSummaryService costSummaryService) {
+        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
+                auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
+                issueClosureService, costSummaryService, null, null, null, null);
+    }
+
+    public SnapAgentController(SkillRegistry skillRegistry,
+                                AgentExecutor agentExecutor,
+                                TaskStore taskStore,
+                                ToolDispatcher toolDispatcher,
+                                SnapAgentProperties properties,
+                                SecurityGateway securityGateway,
+                                RateLimiter rateLimiter,
+                                AsyncTaskExecutor taskExecutor,
+                                PeerSseRelay peerSseRelay,
+                                LlmClient llmClient,
+                                SecurityAuditLogger auditLogger,
+                                ConversationStore conversationStore,
+                                PatrolScheduler patrolScheduler,
+                                AlertConverger alertConverger,
+                                TemplateBugfixSuggester bugfixSuggester,
+                                IssueClosureService issueClosureService,
+                                CostSummaryService costSummaryService,
+                                YamlWorkflowLoader workflowLoader,
+                                WorkflowEngine workflowEngine,
+                                ToolPluginRegistry toolPluginRegistry,
+                                AuditStore auditStore) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -165,6 +308,15 @@ public class SnapAgentController {
         this.llmClient = llmClient;
         this.auditLogger = auditLogger;
         this.conversationStore = conversationStore;
+        this.patrolScheduler = patrolScheduler;
+        this.alertConverger = alertConverger;
+        this.bugfixSuggester = bugfixSuggester;
+        this.issueClosureService = issueClosureService;
+        this.costSummaryService = costSummaryService;
+        this.workflowLoader = workflowLoader;
+        this.workflowEngine = workflowEngine;
+        this.toolPluginRegistry = toolPluginRegistry;
+        this.auditStore = auditStore;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -530,6 +682,14 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "skill not found: " + skillId);
         }
 
+        // Skill-level permission check (v0.6): if the skill declares a required-permission,
+        // the caller must have it in addition to the global required-permission.
+        if (!skill.getRequiredPermission().isEmpty()
+                && !securityGateway.hasPermission(skill.getRequiredPermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN",
+                    "You don't have permission to run skill: " + skillId);
+        }
+
         if (skill.getAvailability() != SkillAvailability.AVAILABLE) {
             return errorResponse(HttpStatus.CONFLICT, "SKILL_UNAVAILABLE",
                     "skill unavailable: " + skill.getUnavailableReason());
@@ -639,35 +799,52 @@ public class SnapAgentController {
         return ResponseEntity.accepted().body(result);
     }
 
-    // ---- GET /runs?status=RUNNING ----
+    // ---- GET /runs (paginated, filterable) ----
     @GetMapping("/runs")
     public ResponseEntity<Object> listRuns(
-            @RequestParam(value = "status", required = false) String status) {
-        String userId = securityGateway.currentUserId();
-        if (userId == null) {
-            return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
-        }
-        List<Map<String, Object>> tasks = new ArrayList<Map<String, Object>>();
-        for (AgentTask task : taskStore.all()) {
-            if (!userId.equals(task.getUserId())) continue;
-            if (status != null && !status.isEmpty()) {
-                try {
-                    TaskStatus filter = TaskStatus.valueOf(status.toUpperCase());
-                    if (task.getStatus() != filter) continue;
-                } catch (IllegalArgumentException e) {
-                    return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
-                            "unknown status: " + status);
-                }
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "skillId", required = false) String skillId,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        String userId = currentUserId();
+        TaskStatus statusFilter = null;
+        if (status != null && !status.isEmpty()) {
+            try {
+                statusFilter = TaskStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_STATUS", "unknown status: " + status);
             }
-            Map<String, Object> t = new LinkedHashMap<String, Object>();
-            t.put("taskId", task.getTaskId());
-            t.put("skillId", task.getSkillId());
-            t.put("status", task.getStatus().name());
-            t.put("createdAt", task.getCreatedAt());
-            tasks.add(t);
         }
+
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AgentTask> tasks = taskStore.query(userId, skillId, statusFilter, size, page * size);
+        int total = taskStore.count(userId, skillId, statusFilter);
+        int totalPages = (total + size - 1) / size;
+
+        List<Map<String, Object>> taskList = new ArrayList<Map<String, Object>>();
+        for (AgentTask task : tasks) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("taskId", task.getTaskId());
+            dto.put("skillId", task.getSkillId());
+            dto.put("status", task.getStatus().name());
+            dto.put("createdAt", task.getCreatedAt());
+            taskList.add(dto);
+        }
+
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("tasks", tasks);
+        result.put("tasks", taskList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        result.put("totalPages", totalPages);
+
+        audit(userId, "GET", "/runs", "LIST_RUNS", null);
+
         return ResponseEntity.ok(result);
     }
 
@@ -725,6 +902,32 @@ public class SnapAgentController {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("transcript", events);
         return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /runs/{id}/report ----
+    @GetMapping("/runs/{id}/report")
+    public ResponseEntity<Object> getReport(@PathVariable String id,
+                                            @RequestParam(value = "format", defaultValue = "md") String format) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "task not found: " + id);
+        }
+        if (!currentUserId().equals(task.getUserId())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "not task owner");
+        }
+
+        String title = task.getSkillId() != null ? task.getSkillId() + " 诊断报告" : "诊断报告";
+        String report = cn.watsontech.snapagent.core.agent.ReportGenerator.generate(title, task.getTranscript());
+
+        audit(currentUserId(), "GET", "/runs/" + id + "/report", "GET_REPORT", null);
+
+        return ResponseEntity.ok()
+                .contentType(new MediaType(MediaType.TEXT_PLAIN, java.nio.charset.StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"report-" + id + ".md\"")
+                .body(report);
     }
 
     // ---- GET /runs/{id}/stream (SSE) ----
@@ -844,11 +1047,20 @@ public class SnapAgentController {
                                 .data(toSseData(event)));
                     }
 
-                    // 2. If already terminal, send done and return
+                    // 2. If already terminal, send error info (if any) then done and return
                     if (isTerminal(task.getStatus())) {
                         log.info("SSE task {} already terminal, sending done", id);
+                        // Replay any error transcript events as task_error SSE events
+                        for (int i = replayStart; i < existing.size(); i++) {
+                            TranscriptEvent event = existing.get(i);
+                            if (TranscriptEvent.TYPE_ERROR.equals(event.getType())) {
+                                emitter.send(SseEmitter.event()
+                                        .name("task_error")
+                                        .data(toSseData(event)));
+                            }
+                        }
                         emitter.send(SseEmitter.event().name("done")
-                                .data(task.getStatus().name()));
+                                .data(buildDoneData(task)));
                         emitter.complete();
                         return;
                     }
@@ -901,7 +1113,7 @@ public class SnapAgentController {
                                         .data(toSseData(re)));
                             }
                             emitter.send(SseEmitter.event().name("done")
-                                    .data(task.getStatus().name()));
+                                    .data(buildDoneData(task)));
                             emitter.complete();
                             log.info("SSE streaming completed for task {}", id);
                             return;
@@ -960,6 +1172,46 @@ public class SnapAgentController {
         audit(userId, "POST", "/runs/" + id + "/cancel", "CANCEL_TASK", null);
 
         return ResponseEntity.ok().body(result);
+    }
+
+    // ---- GET /audit (paginated audit entries for current user) ----
+    @GetMapping("/audit")
+    public ResponseEntity<Object> listAudit(
+            @RequestParam(value = "action", required = false) String action,
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (auditStore == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_DISABLED", "audit store not configured");
+        }
+
+        String userId = currentUserId();
+        if (page < 0) page = 0;
+        if (size <= 0 || size > 100) size = 20;
+
+        List<AuditEntry> entries = auditStore.query(userId, action, size, page * size);
+        int total = auditStore.count(userId, action);
+
+        List<Map<String, Object>> entryList = new ArrayList<Map<String, Object>>();
+        for (AuditEntry e : entries) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("userId", e.getUserId());
+            dto.put("method", e.getMethod());
+            dto.put("path", e.getPath());
+            dto.put("action", e.getAction());
+            dto.put("timestamp", e.getTimestamp());
+            entryList.add(dto);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("entries", entryList);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+
+        return ResponseEntity.ok(result);
     }
 
     // ---- POST /conversations (save/update a conversation) ----
@@ -1163,6 +1415,492 @@ public class SnapAgentController {
         return ResponseEntity.ok(result);
     }
 
+    // ---- POST /patrol/tasks ----
+    @PostMapping("/patrol/tasks")
+    public ResponseEntity<Object> createPatrolTask(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+
+        String skillName = (String) body.get("skillName");
+        String cron = (String) body.get("cron");
+        String userId = currentUserId();
+        @SuppressWarnings("unchecked")
+        Map<String, String> inputs = (Map<String, String>) body.get("inputs");
+        if (inputs == null) inputs = new LinkedHashMap<String, String>();
+
+        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs);
+        scheduler.schedule(task);
+
+        audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
+                Collections.singletonMap("patrolId", task.getId()));
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", task.getId());
+        result.put("skillName", task.getSkillName());
+        result.put("cron", task.getCron());
+        result.put("enabled", task.isEnabled());
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /patrol/tasks ----
+    @GetMapping("/patrol/tasks")
+    public ResponseEntity<Object> listPatrolTasks() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.ok(Collections.emptyList());
+        }
+        return ResponseEntity.ok(scheduler.listTasks());
+    }
+
+    // ---- DELETE /patrol/tasks/{id} ----
+    @DeleteMapping("/patrol/tasks/{id}")
+    public ResponseEntity<Object> deletePatrolTask(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        scheduler.cancel(id);
+        return ResponseEntity.ok(Collections.singletonMap("deleted", true));
+    }
+
+    // ---- GET /patrol/reports ----
+    @GetMapping("/patrol/reports")
+    public ResponseEntity<Object> listPatrolReports(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("reports", Collections.emptyList());
+            empty.put("total", 0L);
+            empty.put("page", page);
+            empty.put("size", size);
+            return ResponseEntity.ok(empty);
+        }
+        List<? extends PatrolReport> reports = scheduler.getReports(currentUserId(), size, page);
+        long total = scheduler.countReports(currentUserId());
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("reports", reports);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /patrol/reports/{id} ----
+    @GetMapping("/patrol/reports/{id}")
+    public ResponseEntity<Object> getPatrolReport(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        // Search recent reports for the requested id
+        List<? extends PatrolReport> reports = scheduler.getReports(currentUserId(), 500, 0);
+        for (PatrolReport report : reports) {
+            if (id.equals(report.getId())) {
+                return ResponseEntity.ok(report);
+            }
+        }
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Collections.singletonMap("error", "report not found"));
+    }
+
+    // ---- GET /alerts ----
+    @GetMapping("/alerts")
+    public ResponseEntity<Object> listAlerts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String status) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AlertConverger converger = alertConverger;
+        if (converger == null) {
+            Map<String, Object> empty = new LinkedHashMap<String, Object>();
+            empty.put("alerts", Collections.emptyList());
+            empty.put("total", 0L);
+            empty.put("page", page);
+            empty.put("size", size);
+            return ResponseEntity.ok(empty);
+        }
+        List<? extends AlertConvergence> alerts = converger.query(currentUserId(), type, size, page);
+        long total = converger.count(currentUserId(), type);
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("alerts", alerts);
+        result.put("total", total);
+        result.put("page", page);
+        result.put("size", size);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /alerts/{id}/resolve ----
+    @PostMapping("/alerts/{id}/resolve")
+    public ResponseEntity<Object> resolveAlert(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        AlertConverger converger = alertConverger;
+        if (converger == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "alert is not enabled"));
+        }
+        converger.resolve(id);
+        return ResponseEntity.ok(Collections.singletonMap("resolved", true));
+    }
+
+    // ---- POST /runs/{id}/bugfix-suggestion ----
+    @PostMapping("/runs/{id}/bugfix-suggestion")
+    public ResponseEntity<Object> generateBugfixSuggestion(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        TemplateBugfixSuggester suggester = bugfixSuggester;
+        if (suggester == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "bugfix suggester is not available"));
+        }
+
+        AgentTask task = taskStore.get(id);
+        if (task == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Collections.singletonMap("error", "task not found"));
+        }
+
+        BugfixSuggestion suggestion = suggester.suggest(id, task.getTranscript());
+        return ResponseEntity.ok(suggestion);
+    }
+
+    // ---- POST /runs/{taskId}/solution (v0.9 issue closure) ----
+    @PostMapping("/runs/{taskId}/solution")
+    public ResponseEntity<Object> proposeSolution(@PathVariable String taskId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.proposeSolution(taskId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND",
+                    "task or skill not found: " + taskId);
+        }
+
+        audit(currentUserId(), "POST", "/runs/" + taskId + "/solution", "PROPOSE_SOLUTION",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /runs/{taskId}/issue (v0.9 issue closure) ----
+    @PostMapping("/runs/{taskId}/issue")
+    public ResponseEntity<Object> createIssue(@PathVariable String taskId,
+                                               @RequestBody Map<String, String> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        String selectedSolution = body != null ? body.get("selected_solution") : null;
+        IssueClosure issue = issueClosureService.createExternalIssue(taskId, selectedSolution);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "no issue closure found for task: " + taskId);
+        }
+
+        audit(currentUserId(), "POST", "/runs/" + taskId + "/issue", "CREATE_EXTERNAL_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- GET /issues/{issueId} (v0.9 issue closure) ----
+    @GetMapping("/issues/{issueId}")
+    public ResponseEntity<Object> getIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        // Delegate to the service which has access to IssueStore
+        IssueClosure issue = issueClosureService.loadIssue(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue not found: " + issueId);
+        }
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /issues/{issueId}/verify (v0.9 issue closure) ----
+    @PostMapping("/issues/{issueId}/verify")
+    public ResponseEntity<Object> verifyIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.verify(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue or skill not found: " + issueId);
+        }
+
+        audit(currentUserId(), "POST", "/issues/" + issueId + "/verify", "VERIFY_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /issues/{issueId}/close (v0.9 issue closure) ----
+    @PostMapping("/issues/{issueId}/close")
+    public ResponseEntity<Object> closeIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.close(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue not found: " + issueId);
+        }
+
+        audit(currentUserId(), "POST", "/issues/" + issueId + "/close", "CLOSE_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- GET /cost/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/summary")
+    public ResponseEntity<Object> costSummary(
+            @RequestParam long from,
+            @RequestParam long to,
+            @RequestParam(required = false) String groupBy) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/summary", "COST_SUMMARY", null);
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        if ("user".equalsIgnoreCase(groupBy)) {
+            // Group by user: list individual user summaries
+            // Since we don't track unique user IDs separately, we return the global summary
+            // with a note that user-level grouping requires iterating all records
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "user");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+        } else if ("skill".equalsIgnoreCase(groupBy)) {
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "skill");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+        } else {
+            // Default: global summary
+            CostSummary global = costSummaryService.getGlobalSummary(from, to);
+            result.put("dimension", "global");
+            result.put("dimensionValue", "global");
+            result.put("from", from);
+            result.put("to", to);
+            result.put("totalCost", global.getTotalCost());
+            result.put("totalInputTokens", global.getTotalInputTokens());
+            result.put("totalOutputTokens", global.getTotalOutputTokens());
+            result.put("requestCount", global.getRequestCount());
+            result.put("budget", global.getBudget());
+            result.put("utilization", global.getUtilization());
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /cost/users/{userId}/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/users/{userId}/summary")
+    public ResponseEntity<Object> userCostSummary(
+            @PathVariable String userId,
+            @RequestParam long from,
+            @RequestParam long to) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/users/" + userId + "/summary", "USER_COST_SUMMARY", null);
+
+        CostSummary summary = costSummaryService.getUserSummary(userId, from, to);
+        return ResponseEntity.ok(toCostSummaryDto(summary));
+    }
+
+    // ---- GET /cost/skills/{skillName}/summary (v1.0 cost accounting) ----
+    @GetMapping("/cost/skills/{skillName}/summary")
+    public ResponseEntity<Object> skillCostSummary(
+            @PathVariable String skillName,
+            @RequestParam long from,
+            @RequestParam long to) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/skills/" + skillName + "/summary", "SKILL_COST_SUMMARY", null);
+
+        CostSummary summary = costSummaryService.getSkillSummary(skillName, from, to);
+        return ResponseEntity.ok(toCostSummaryDto(summary));
+    }
+
+    // ---- GET /workflows (v1.0 workflow engine) ----
+    @GetMapping("/workflows")
+    public ResponseEntity<Object> listWorkflows() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/workflows", "LIST_WORKFLOWS", null);
+
+        List<WorkflowDefinition> workflows = workflowLoader.loadAll();
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (WorkflowDefinition wf : workflows) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("name", wf.getName());
+            dto.put("description", wf.getDescription());
+            dto.put("stepCount", wf.getSteps().size());
+            result.add(dto);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /workflows/{name} (v1.0 workflow engine) ----
+    @GetMapping("/workflows/{name}")
+    public ResponseEntity<Object> getWorkflow(@PathVariable String name) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        WorkflowDefinition wf = workflowLoader.load(name);
+        if (wf == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND",
+                    "workflow not found: " + name);
+        }
+
+        audit(currentUserId(), "GET", "/workflows/" + name, "GET_WORKFLOW", null);
+        return ResponseEntity.ok(toWorkflowDto(wf));
+    }
+
+    // ---- POST /workflows/{name}/run (v1.0 workflow engine) ----
+    @PostMapping("/workflows/{name}/run")
+    public ResponseEntity<Object> runWorkflow(
+            @PathVariable String name,
+            @RequestBody Map<String, String> triggerInputs) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (workflowEngine == null || workflowLoader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "WORKFLOWS_DISABLED",
+                    "workflow engine not enabled");
+        }
+
+        WorkflowDefinition wf = workflowLoader.load(name);
+        if (wf == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND",
+                    "workflow not found: " + name);
+        }
+
+        if (triggerInputs == null) {
+            triggerInputs = new HashMap<String, String>();
+        }
+
+        audit(currentUserId(), "POST", "/workflows/" + name + "/run", "RUN_WORKFLOW",
+                Collections.<String, Object>singletonMap("workflowName", wf.getName()));
+
+        WorkflowResult result = workflowEngine.execute(wf, triggerInputs);
+        return ResponseEntity.ok(toWorkflowResultDto(result));
+    }
+
+    // ---- GET /tools/plugins (v1.0 tool plugin metadata) ----
+    @GetMapping("/tools/plugins")
+    public ResponseEntity<Object> listToolPlugins() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (toolPluginRegistry == null) {
+            return ResponseEntity.ok(new ArrayList<Object>());
+        }
+
+        audit(currentUserId(), "GET", "/tools/plugins", "LIST_TOOL_PLUGINS", null);
+
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (ToolPlugin plugin : toolPluginRegistry.getPlugins()) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("name", plugin.name());
+            dto.put("version", plugin.version());
+            dto.put("description", plugin.description());
+            dto.put("toolNames", plugin.toolNames());
+            result.add(dto);
+        }
+        return ResponseEntity.ok(result);
+    }
+
     // ---- helpers ----
 
     /**
@@ -1204,6 +1942,10 @@ public class SnapAgentController {
         dto.put("tools", skill.getTools());
         dto.put("source", skill.getSource());
         dto.put("overridesBuiltin", skill.isOverridesBuiltin());
+        // Skill-level required permission (v0.6); empty means inherit global
+        if (!skill.getRequiredPermission().isEmpty()) {
+            dto.put("requiredPermission", skill.getRequiredPermission());
+        }
         if (skill.getUnavailableReason() != null) {
             dto.put("unavailableReason", skill.getUnavailableReason());
         }
@@ -1229,6 +1971,10 @@ public class SnapAgentController {
             shortcuts.add(scDto);
         }
         dto.put("shortcuts", shortcuts);
+        // Skill body (markdown after frontmatter) — used by UI detail modal
+        if (skill.getBody() != null) {
+            dto.put("body", skill.getBody());
+        }
         // Log paths for log_read skills
         if (skill.getTools().contains("log_read")) {
             dto.put("logPaths", properties.getLogs().getAllowedPaths());
@@ -1305,6 +2051,16 @@ public class SnapAgentController {
         return data;
     }
 
+    /** Build the terminal SSE 'done' event payload with status and optional report. */
+    private Object buildDoneData(AgentTask task) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("status", task.getStatus().name());
+        if (task.getReport() != null && !task.getReport().isEmpty()) {
+            data.put("report", task.getReport());
+        }
+        return data;
+    }
+
     private ResponseEntity<Object> errorResponse(HttpStatus status, String error, String message) {
         return ResponseEntity.status(status).body(errorBody(error, message));
     }
@@ -1314,6 +2070,126 @@ public class SnapAgentController {
         body.put("error", error);
         body.put("message", message);
         return body;
+    }
+
+    /** Converts a CostSummary to a DTO map for API responses. */
+    private Map<String, Object> toCostSummaryDto(CostSummary summary) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("dimension", summary.getDimension());
+        dto.put("dimensionValue", summary.getDimensionValue());
+        dto.put("totalCost", summary.getTotalCost());
+        dto.put("totalInputTokens", summary.getTotalInputTokens());
+        dto.put("totalOutputTokens", summary.getTotalOutputTokens());
+        dto.put("requestCount", summary.getRequestCount());
+        dto.put("budget", summary.getBudget());
+        dto.put("utilization", summary.getUtilization());
+        return dto;
+    }
+
+    /** Converts a WorkflowDefinition to a DTO map for API responses. */
+    private Map<String, Object> toWorkflowDto(WorkflowDefinition wf) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("name", wf.getName());
+        dto.put("description", wf.getDescription());
+        List<Map<String, Object>> steps = new ArrayList<Map<String, Object>>();
+        for (WorkflowStep step : wf.getSteps()) {
+            Map<String, Object> stepDto = new LinkedHashMap<String, Object>();
+            stepDto.put("name", step.getName());
+            stepDto.put("skill", step.getSkill());
+            stepDto.put("condition", step.getCondition());
+            stepDto.put("inputs", step.getInputs());
+            stepDto.put("onFailure", step.getOnFailure());
+            steps.add(stepDto);
+        }
+        dto.put("steps", steps);
+        return dto;
+    }
+
+    /** Converts a WorkflowResult to a DTO map for API responses. */
+    private Map<String, Object> toWorkflowResultDto(WorkflowResult result) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("workflowName", result.getWorkflowName());
+        dto.put("success", result.isSuccess());
+        dto.put("status", result.getStatus() != null ? result.getStatus().name() : null);
+        dto.put("failedStep", result.getFailedStep());
+        dto.put("errorMessage", result.getErrorMessage());
+        // Serialize StepResult values into plain maps so callers don't need
+        // the StepResult class on their classpath.
+        Map<String, Object> stepResultsDto = new LinkedHashMap<String, Object>();
+        for (Map.Entry<String, StepResult> entry : result.getStepResults().entrySet()) {
+            StepResult sr = entry.getValue();
+            Map<String, Object> srDto = new LinkedHashMap<String, Object>();
+            if (sr != null) {
+                srDto.put("stepName", sr.getStepName());
+                srDto.put("taskId", sr.getTaskId());
+                srDto.put("status", sr.getStatus());
+                srDto.put("report", sr.getReport());
+            }
+            stepResultsDto.put(entry.getKey(), srDto);
+        }
+        dto.put("stepResults", stepResultsDto);
+        dto.put("durationMs", result.getDurationMs());
+        return dto;
+    }
+
+    /** Converts an IssueClosure to a DTO map for API responses. */
+    private Map<String, Object> toIssueDto(IssueClosure issue) {
+
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("issueId", issue.getIssueId());
+        dto.put("externalIssueId", issue.getExternalIssueId());
+        dto.put("taskId", issue.getTaskId());
+        dto.put("conversationId", issue.getConversationId());
+        dto.put("userQuery", issue.getUserQuery());
+        dto.put("rootCause", issue.getRootCause());
+        dto.put("solution", solutionToDtoMap(issue.getSolution()));
+        dto.put("selectedSolution", issue.getSelectedSolution());
+        dto.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
+        dto.put("fixCommitId", issue.getFixCommitId());
+        dto.put("verificationResult", verificationToDtoMap(issue.getVerificationResult()));
+        dto.put("knowledgeEntryId", issue.getKnowledgeEntryId());
+        dto.put("createdAt", issue.getCreatedAt());
+        dto.put("updatedAt", issue.getUpdatedAt());
+        return dto;
+    }
+
+    /** Serializes a {@link SolutionSuggestion} to a DTO map, or {@code null}. */
+    private Map<String, Object> solutionToDtoMap(SolutionSuggestion suggestion) {
+        if (suggestion == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        List<Map<String, Object>> optionsList = new ArrayList<Map<String, Object>>();
+        if (suggestion.getOptions() != null) {
+            for (SolutionOption option : suggestion.getOptions()) {
+                Map<String, Object> optMap = new LinkedHashMap<String, Object>();
+                optMap.put("id", option.getId());
+                optMap.put("title", option.getTitle());
+                optMap.put("description", option.getDescription());
+                optMap.put("effort", option.getEffort());
+                optMap.put("temporary", option.isTemporary());
+                optionsList.add(optMap);
+            }
+        }
+        map.put("options", optionsList);
+        map.put("recommendedOptionId", suggestion.getRecommendedOptionId());
+        map.put("rationale", suggestion.getRationale());
+        map.put("relatedCode", suggestion.getRelatedCode());
+        return map;
+    }
+
+    /** Serializes a {@link VerificationResult} to a DTO map, or {@code null}. */
+    private Map<String, Object> verificationToDtoMap(VerificationResult result) {
+        if (result == null) {
+            return null;
+        }
+        Map<String, Object> map = new LinkedHashMap<String, Object>();
+        map.put("passed", result.isPassed());
+        map.put("summary", result.getSummary());
+        map.put("beforeStatus", result.getBeforeStatus());
+        map.put("afterStatus", result.getAfterStatus());
+        map.put("verifiedAt", result.getVerifiedAt());
+        return map;
     }
 
     @SuppressWarnings("unchecked")

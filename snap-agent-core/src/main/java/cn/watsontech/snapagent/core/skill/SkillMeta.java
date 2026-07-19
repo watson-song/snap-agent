@@ -23,18 +23,28 @@ public final class SkillMeta {
     private final String unavailableReason;
     private final String source;
     private final boolean overridesBuiltin;
+    private final String requiredPermission;
 
     public SkillMeta(String name, String description, List<String> tools,
                      List<InputSpec> inputs, String body,
                      SkillAvailability availability, String unavailableReason) {
         this(name, description, tools, inputs, Collections.<Shortcut>emptyList(), body,
-                availability, unavailableReason, "custom", false);
+                availability, unavailableReason, "custom", false, "");
     }
 
     public SkillMeta(String name, String description, List<String> tools,
                      List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
                      SkillAvailability availability, String unavailableReason,
                      String source, boolean overridesBuiltin) {
+        this(name, description, tools, inputs, shortcuts, body,
+                availability, unavailableReason, source, overridesBuiltin, "");
+    }
+
+    public SkillMeta(String name, String description, List<String> tools,
+                     List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
+                     SkillAvailability availability, String unavailableReason,
+                     String source, boolean overridesBuiltin,
+                     String requiredPermission) {
         this.name = name;
         this.description = description;
         this.tools = tools == null ? Collections.<String>emptyList() : tools;
@@ -45,6 +55,7 @@ public final class SkillMeta {
         this.unavailableReason = unavailableReason;
         this.source = source;
         this.overridesBuiltin = overridesBuiltin;
+        this.requiredPermission = requiredPermission != null ? requiredPermission : "";
     }
 
     public String getName() {
@@ -87,16 +98,31 @@ public final class SkillMeta {
         return overridesBuiltin;
     }
 
+    /**
+     * Returns the permission code required to run this skill.
+     * Empty string means no skill-level permission is declared;
+     * the global {@code snap-agent.security.required-permission} applies instead.
+     */
+    public String getRequiredPermission() {
+        return requiredPermission;
+    }
+
     /** Returns a copy with the given source. */
     public SkillMeta withSource(String source) {
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                availability, unavailableReason, source, overridesBuiltin);
+                availability, unavailableReason, source, overridesBuiltin, requiredPermission);
     }
 
     /** Returns a copy with overridesBuiltin set. */
     public SkillMeta withOverridesBuiltin(boolean overrides) {
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                availability, unavailableReason, source, overrides);
+                availability, unavailableReason, source, overrides, requiredPermission);
+    }
+
+    /** Returns a copy with the given required permission. */
+    public SkillMeta withRequiredPermission(String requiredPermission) {
+        return new SkillMeta(name, description, tools, inputs, shortcuts, body,
+                availability, unavailableReason, source, overridesBuiltin, requiredPermission);
     }
 
     @Override

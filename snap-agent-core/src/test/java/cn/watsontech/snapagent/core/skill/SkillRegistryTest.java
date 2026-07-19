@@ -437,4 +437,57 @@ class SkillRegistryTest {
         assertThat(registry.get("skill-a").getSource()).isEqualTo("custom");
         assertThat(registry.get("skill-a").isOverridesBuiltin()).isFalse();
     }
+
+    @Test
+    void shouldPreserveRequiredPermissionThroughValidation() {
+        SkillMeta meta = new SkillMeta("perm-skill", "desc",
+                Arrays.asList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null,
+                "builtin", false, "snap-agent:db-query");
+
+        SkillRegistry registry = new SkillRegistry(null,
+                Collections.singletonList(meta), dispatcher);
+
+        SkillMeta result = registry.get("perm-skill");
+        assertThat(result).isNotNull();
+        assertThat(result.getRequiredPermission()).isEqualTo("snap-agent:db-query");
+    }
+
+    @Test
+    void shouldPreserveRequiredPermissionWhenDowngradedToUnavailable() {
+        SkillMeta meta = new SkillMeta("perm-skill", "desc",
+                Arrays.asList("mysql_query", "nonexistent_tool"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                SkillAvailability.AVAILABLE, null,
+                "builtin", false, "snap-agent:admin");
+
+        SkillRegistry registry = new SkillRegistry(null,
+                Collections.singletonList(meta), dispatcher);
+
+        SkillMeta result = registry.get("perm-skill");
+        assertThat(result).isNotNull();
+        assertThat(result.getAvailability()).isEqualTo(SkillAvailability.UNAVAILABLE);
+        assertThat(result.getRequiredPermission()).isEqualTo("snap-agent:admin");
+    }
+
+    @Test
+    void shouldParseRequiredPermissionFromFrontmatter() throws IOException {
+        String content = "---\n"
+                + "name: secured-skill\n"
+                + "description: needs permission\n"
+                + "tools: [mysql_query]\n"
+                + "required-permission: snap-agent:secure\n"
+                + "---\n"
+                + "body\n";
+        Files.write(tempDir.resolve("secured.md"), content.getBytes(StandardCharsets.UTF_8));
+
+        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+
+        SkillMeta meta = registry.get("secured-skill");
+        assertThat(meta).isNotNull();
+        assertThat(meta.getRequiredPermission()).isEqualTo("snap-agent:secure");
+    }
 }

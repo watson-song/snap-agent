@@ -35,3 +35,6 @@ application-local.properties
 
 # Claude
 .claude/
+
+# Git worktrees
+.worktrees/

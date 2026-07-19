@@ -46,23 +46,29 @@
 
 ---
 
-## v0.3 — 代码理解能力
+## v0.3 — 代码理解能力（已交付）
 
 **目标**：Agent 不止能查数据，还能读懂项目代码，回答更精准
 
-### 新增工具
+### 已完成
 
 | 工具 | 能力 |
 |------|------|
-| `CodeReaderToolProvider` | 读取项目源码文件，Agent 可回答"这个接口在哪实现""这段逻辑为什么这样写" |
-| `ProjectStructureToolProvider` | 扫描项目结构（模块、包、关键类、接口列表），Agent 理解项目全貌 |
-| `GitLogToolProvider` | 读取 git log / blame，Agent 可回答"这段代码是谁改的、什么时候改的、改了什么" |
+| `code_read` | 读取项目源码文件，支持行范围和关键词过滤（带上下文 ±2 行） |
+| `project_structure` | 扫描项目目录结构，返回树形布局，支持深度控制和 pattern 过滤 |
+| `git_log` | 读取 git log/blame/show，查看代码变更历史 |
 
-### 增强
+| 增强 | 说明 |
+|------|------|
+| SystemPromptExtender SPI | 新增单方法 SPI，启动时注入项目结构摘要到 system prompt |
+| ProjectContextExtender | 启动时扫描模块/Java文件数/关键目录，缓存摘要注入 LLM |
+| CodePathGuard | 路径安全守卫，project-root 限制 + 扩展名白名单 + 大小限制 |
+| code-analysis 内置 skill | 引导 LLM 五阶段分析代码（理解→定位→读取→追溯→结论） |
+
+### 延后到 v0.3.1 / v0.4
 
 | 项 | 说明 |
 |----|------|
-| 项目上下文注入 | Agent 启动时扫描项目结构，生成摘要作为系统提示注入 LLM，让回答自带项目背景 |
 | Skill 自动生成 | Agent 分析项目代码 + 数据库结构，自动生成候选 Skill Markdown 供开发者确认 |
 | 代码引用渲染 | Agent 回答中引用代码文件时，前端渲染为可点击链接，跳转到源码 |
 
@@ -82,27 +88,36 @@ Agent:
 
 ---
 
-## v0.4 — 运营诊断能力
+## v0.4 — 运营诊断能力（已交付）
 
 **目标**：Agent 对接可观测性平台，从"被动问答"升级为"主动运营诊断"
 
-### 新增工具
+### 已完成
 
 | 工具 | 能力 |
 |------|------|
-| `MetricsToolProvider` | 对接 Prometheus API，Agent 实时查询指标（QPS、延迟、错误率、CPU/Mem） |
-| `LogAnalysisToolProvider` | 对接 ELK / Loki API，Agent 搜索日志、分析错误模式、统计频率 |
-| `TraceAnalysisToolProvider` | 对接 Jaeger / SkyWalking，Agent 分析调用链、定位慢节点 |
-| `ConfigToolProvider` | 读取应用配置（Apollo / Nacos / 本地 yml），Agent 对比环境配置差异 |
+| `metrics_query` | 对接 Prometheus API，Agent 实时查询指标（QPS、延迟、错误率、CPU/Mem），支持即时查询和范围查询 |
+| `log_search` | 对接 Loki API，Agent 搜索日志、分析错误模式、统计频率（LogQL） |
+| `trace_search` | 对接 Jaeger API，Agent 分析调用链、定位慢 span（按 service/operation/traceId 搜索） |
+| `config_read` | 读取本地 Spring Environment 配置 + Nacos 远程配置，Agent 对比环境配置差异 |
 
-### 内置 Skill 模板
+| 增强 | 说明 |
+|------|------|
+| ObservabilityHttpClient | 共享 HTTP 客户端（JDK HttpURLConnection，零外部依赖），protected 方法可子类化测试 |
+| TimeRangeParser | 相对时间解析（"1h"/"30m"/"2d"/"300s"/epoch/ISO-8601 → epoch 秒） |
+| 结果限制 | max-points/max-lines/max-traces/max-keys 硬上限，超限静默截断 + truncated 标志 |
+| 敏感字段脱敏 | config_read 本地模式自动脱敏 password/secret/token/credential/key |
+| 4 个内置 Skill 模板 | ops-health-check / slow-query-analysis / error-spike-investigation / config-diff |
 
-| Skill | 流程 |
-|-------|------|
-| `health-check` | 全面健康检查：CPU/Mem/延迟/错误率 → 异常指标 → 根因分析 |
-| `slow-query-analysis` | 慢查询排查：查慢日志 → 分析执行计划 → 索引建议 |
-| `error-spike-investigation` | 错误率突增：定位时间窗口 → 查日志 → 关联部署 → 根因 |
-| `config-diff` | 环境配置对比：sit vs prod 配置差异 → 识别风险项 |
+### 延后到 v0.4.1 / v0.5
+
+| 项 | 说明 |
+|----|------|
+| Elasticsearch 后端（日志搜索） | v0.4.1 |
+| SkyWalking 后端（链路追踪） | v0.4.1 |
+| Apollo 配置源 | v0.4.1 |
+| 主动监听异常事件 + 自动触发诊断 | v0.5 已交付 |
+| 跨环境配置实时 diff（多环境同时拉取） | v0.5 |
 
 ### 场景示例
 
@@ -124,11 +139,11 @@ Agent:
 
 ---
 
-## v0.5 — 主动监控 & 智能推送
+## v0.5 — 主动监控 & 智能推送（已交付）
 
 **目标**：从"用户提问才诊断"升级为"Agent 主动发现问题并推送"
 
-### 核心能力
+### 已完成
 
 | 能力 | 说明 |
 |------|------|
@@ -180,24 +195,30 @@ Agent 自动执行:
 
 ---
 
-## v0.6 — 平台化
+## v0.6 — 平台化（部分已交付）
 
 **目标**：从框架升级为平台，支持更多语言生态和社区协作
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| 多环境数据源 | `snap-agent.jdbc.datasources: {sit: ..., uat: ...}`，Skill `inputs.env` 选 DSN；`DataSourceRegistry` 多环境路由 + 默认回退 |
+| 权限细化 | Skill 级别权限控制：`required-permission` frontmatter 字段 + `SecurityGateway.hasPermission()` 运行时校验；无权限返回 403 |
+| 多 LLM 适配 | 文档化配置指南（通义/文心/智谱），LlmClient SPI 可插拔 |
+
+### 待实现
 
 | 项 | 说明 |
 |----|------|
 | Spring Boot 3.x | `jakarta.servlet` 版本 starter |
-| 多 LLM 适配 | OpenAI / 国产大模型 (通义/文心/智谱) |
-| 多环境数据源 | `jdbc.datasources: {sit: ..., uat: ...}`，Skill `inputs.env` 选 DSN |
 | Skill 市场 | 社区共享 Skill 模板，一行配置导入 |
 | 工具市场 | 开箱即用的 ToolProvider 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
-| REST API 增强 | SDK 化，非 Web 场景也能调用 Agent |
 | 多租户 | Agent 对话隔离，Skill/工具按租户配置 |
-| 权限细化 | Skill 级别权限控制，不同角色可用不同 Skill |
 
 ---
 
-## v0.7 — 嵌入式业务知识库
+## v0.7 — 嵌入式业务知识库（已交付）
 
 **目标**：让 Agent 具备业务领域知识，从"查数据"升级为"懂业务"，回答不再脱离上下文
 
@@ -283,7 +304,7 @@ Agent 思考:
 
 ---
 
-## v0.8 — 代码知识库（代码图谱）
+## v0.8 — 代码知识库（代码图谱）（已交付）
 
 **目标**：从"按文件名读代码"升级为"按语义关系导航代码"，Agent 理解调用链、依赖关系、业务领域边界
 
@@ -367,7 +388,7 @@ Agent:
 
 ---
 
-## v0.9 — 问题问答闭环
+## v0.9 — 问题问答闭环（已交付）
 
 **目标**：从"一次性诊断"升级为"问题→诊断→方案→修复→验证→沉淀"的完整闭环
 
@@ -974,10 +995,22 @@ public AgentExecutor agentExecutor(
 v0.1-alpha   AgentExecutor + JDBC/Redis 工具               ← 已交付
     │
     ▼
-v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 业务知识预注入
+v0.3          CodeReader/GitLog/ProjectStructure             ← 已交付
     │
     ▼
-v0.8          CodeGraph + 代码结构摘要条件注入                ← 代码知识按需
+v0.4          Metrics/LogSearch/Trace/ConfigRead            ← 已交付
+    │
+    ▼
+v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
+    │                                                        主动监控 & 智能推送
+    ▼
+v0.6          多环境数据源 + Skill 级权限控制                ← 已交付（部分）
+    │                                                        平台化
+    ▼
+v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 已交付（业务知识预注入）
+    │
+    ▼
+v0.8          CodeGraph + 代码结构摘要条件注入                ← 已交付（代码知识按需）
     │
     ▼
 v0.9          IssueExperienceStore + 问题经验预注入            ← 三源齐备
@@ -990,7 +1023,7 @@ v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 
 
 ---
 
-## v1.0 — 工具插件生态 & 工作流 & 成本核算
+## v1.0 — 工具插件生态 & 工作流 & 成本核算（已交付）
 
 **目标**：建立完整生态——工具插件化、Skill 编排工作流、成本透明化
 

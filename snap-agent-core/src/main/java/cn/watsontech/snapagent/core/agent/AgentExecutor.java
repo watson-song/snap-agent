@@ -64,15 +64,56 @@ public class AgentExecutor {
     private final int maxTurns;
     private final int maxTokens;
     private final ObjectMapper objectMapper;
+    private final List<SystemPromptExtender> promptExtenders;
 
     public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
                          TaskStore taskStore, int maxTurns, int maxTokens) {
+        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens,
+                Collections.<SystemPromptExtender>emptyList());
+    }
+
+    /**
+     * Full constructor with an optional single {@link SystemPromptExtender}.
+     *
+     * <p>When {@code promptExtender} is non-null, its {@link SystemPromptExtender#extend}
+     * output is appended to the system prompt, enabling context injection (e.g.
+     * project structure summary) without modifying skill bodies.</p>
+     *
+     * @deprecated use {@link #AgentExecutor(LlmClient, ToolDispatcher, TaskStore, int, int, List)}
+     *             to support multiple extenders (v0.7).
+     */
+    @Deprecated
+    public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
+                         TaskStore taskStore, int maxTurns, int maxTokens,
+                         SystemPromptExtender promptExtender) {
+        this(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens,
+                promptExtender != null
+                        ? Collections.singletonList(promptExtender)
+                        : Collections.<SystemPromptExtender>emptyList());
+    }
+
+    /**
+     * Full constructor with a list of {@link SystemPromptExtender} instances.
+     *
+     * <p>Each extender's {@link SystemPromptExtender#extend} output is appended
+     * to the system prompt in iteration order. This enables multiple context
+     * injectors (e.g. project structure summary + business knowledge) to
+     * coexist.</p>
+     *
+     * @since v0.7
+     */
+    public AgentExecutor(LlmClient llmClient, ToolDispatcher toolDispatcher,
+                         TaskStore taskStore, int maxTurns, int maxTokens,
+                         List<SystemPromptExtender> promptExtenders) {
         this.llmClient = llmClient;
         this.toolDispatcher = toolDispatcher;
         this.taskStore = taskStore;
         this.maxTurns = maxTurns;
         this.maxTokens = maxTokens;
         this.objectMapper = new ObjectMapper();
+        this.promptExtenders = promptExtenders != null
+                ? new ArrayList<SystemPromptExtender>(promptExtenders)
+                : new ArrayList<SystemPromptExtender>();
     }
 
     /**
@@ -159,6 +200,35 @@ public class AgentExecutor {
             // Record thoughts — now done in real-time via TurnCollector
             // (each token delta is pushed to the transcript immediately)
 
+            // Handle max_tokens truncation: append partial thoughts and continue
+            // to the next turn so the LLM can resume from where it left off.
+            if ("max_tokens".equals(collector.stopReason)) {
+                log.info("Task {} turn {} hit max_tokens, continuing with partial response",
+                        task.getTaskId(), turn);
+                String partialThoughts = collector.thoughts.length() > 0
+                        ? collector.thoughts.toString()
+                        : "";
+                messages.add(Message.assistant(partialThoughts,
+                        new ArrayList<ToolUseBlock>(collector.toolUses)));
+                if (!collector.toolUses.isEmpty()) {
+                    ToolContext ctx = buildToolContext(task);
+                    for (ToolUseBlock use : collector.toolUses) {
+                        task.addTranscriptEvent(TranscriptEvent.toolCall(use.getId(), use.getName(), use.getInput()));
+                        ToolResult result = toolDispatcher.dispatch(use.getName(), use.getInput(), ctx);
+                        String contentPreview = null;
+                        if (result.getContent() != null) {
+                            String c = result.getContent();
+                            contentPreview = c.length() > 500 ? c.substring(0, 500) + "\n... (truncated)" : c;
+                        }
+                        task.addTranscriptEvent(TranscriptEvent.toolResult(
+                                use.getId(), result.getRowCount(), result.isTruncated(),
+                                result.getDurationMs(), contentPreview, result.getError()));
+                        messages.add(Message.toolResult(use.getId(), serializeResult(result)));
+                    }
+                }
+                continue;
+            }
+
             // Check stop conditions
             boolean endTurn = "end_turn".equals(collector.stopReason)
                     || collector.toolUses.isEmpty();
@@ -239,6 +309,15 @@ public class AgentExecutor {
 
         // User context
         sb.append("userId: ").append(task.getUserId()).append("\n");
+
+        // Context injection (v0.3+): append each extender's output in order.
+        // v0.7 extends this to multiple extenders (e.g. project context + knowledge).
+        for (SystemPromptExtender extender : promptExtenders) {
+            String context = extender.extend(skill, task);
+            if (context != null && !context.isEmpty()) {
+                sb.append("\n").append(context);
+            }
+        }
 
         return sb.toString();
     }
