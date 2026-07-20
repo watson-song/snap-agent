@@ -247,6 +247,9 @@ public class FileConversationStore implements ConversationStore {
             m.put("role", msg.getRole());
             m.put("content", msg.getContent());
             m.put("timestamp", msg.getTimestamp());
+            if (msg.getTaskId() != null) {
+                m.put("taskId", msg.getTaskId());
+            }
             msgList.add(m);
         }
         map.put("messages", msgList);
@@ -261,10 +264,12 @@ public class FileConversationStore implements ConversationStore {
             for (Object item : (List<Object>) msgsObj) {
                 if (item instanceof Map) {
                     Map<String, Object> m = (Map<String, Object>) item;
+                    String taskId = m.get("taskId") != null ? m.get("taskId").toString() : null;
                     messages.add(new ConversationMessage(
                             str(m.get("role")),
                             str(m.get("content")),
-                            longVal(m.get("timestamp"))));
+                            longVal(m.get("timestamp")),
+                            taskId));
                 }
             }
         }

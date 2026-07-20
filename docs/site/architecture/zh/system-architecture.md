@@ -1,6 +1,6 @@
 # SnapAgent 系统架构总览
 
-> 版本：v1.0 | 更新日期：2026-07-17
+> 版本：v1.1 | 更新日期：2026-07-20
 
 ## 1. 架构概览
 
@@ -855,6 +855,7 @@ public AgentExecutor agentExecutor(
 | v0.8 | 代码知识图谱 | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphToolProvider |
 | v0.9 | 问题问答闭环 | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
 | v1.0 | 工具插件 + 工作流 + 成本核算 | ToolPlugin, WorkflowEngine, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage() |
+| v1.1 | 主动监控 SPI 化 | PatrolReportStore 接口化 (InMemoryPatrolReportStore), PatrolLockProvider (多 Pod 协调), AlertPushChannel (Webhook+Email 默认实现), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost() |
 
 ---
 

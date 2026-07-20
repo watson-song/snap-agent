@@ -1200,12 +1200,16 @@ public class SnapAgentProperties {
         private boolean enabled = false;
         private int schedulerPoolSize = 2;
         private int reportBufferSize = 500;
+        /** TTL for the multi-Pod patrol lock (seconds). Used by PatrolLockProvider. */
+        private long lockTtlSeconds = 300L;
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public int getSchedulerPoolSize() { return schedulerPoolSize; }
         public void setSchedulerPoolSize(int schedulerPoolSize) { this.schedulerPoolSize = schedulerPoolSize; }
         public int getReportBufferSize() { return reportBufferSize; }
         public void setReportBufferSize(int reportBufferSize) { this.reportBufferSize = reportBufferSize; }
+        public long getLockTtlSeconds() { return lockTtlSeconds; }
+        public void setLockTtlSeconds(long lockTtlSeconds) { this.lockTtlSeconds = lockTtlSeconds; }
     }
 
     /**
@@ -1218,12 +1222,70 @@ public class SnapAgentProperties {
         private boolean enabled = false;
         private int bufferSize = 1000;
         private int autoResolveMinutes = 30;
+        private Push push = new Push();
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public int getBufferSize() { return bufferSize; }
         public void setBufferSize(int bufferSize) { this.bufferSize = bufferSize; }
         public int getAutoResolveMinutes() { return autoResolveMinutes; }
         public void setAutoResolveMinutes(int autoResolveMinutes) { this.autoResolveMinutes = autoResolveMinutes; }
+        public Push getPush() { return push; }
+        public void setPush(Push push) { this.push = push; }
+
+        /**
+         * Alert push channel configuration (v1.1).
+         *
+         * <p>When email.enabled=true, an EmailAlertPushChannel bean is assembled
+         * (requires a JavaMailSender bean in the host context — typically via
+         * spring-boot-starter-mail).</p>
+         *
+         * <p>When webhook.enabled=true &amp; webhook.url is set, a WebhookAlertPushChannel
+         * bean is assembled that POSTs JSON alert payloads to the configured URL.</p>
+         */
+        public static class Push {
+            private Email email = new Email();
+            private Webhook webhook = new Webhook();
+            public Email getEmail() { return email; }
+            public void setEmail(Email email) { this.email = email; }
+            public Webhook getWebhook() { return webhook; }
+            public void setWebhook(Webhook webhook) { this.webhook = webhook; }
+
+            public static class Email {
+                private boolean enabled = false;
+                private String from;
+                private List<String> to = new ArrayList<>();
+                private String subjectPrefix = "[SnapAgent 告警]";
+                public boolean isEnabled() { return enabled; }
+                public void setEnabled(boolean enabled) { this.enabled = enabled; }
+                public String getFrom() { return from; }
+                public void setFrom(String from) { this.from = from; }
+                public List<String> getTo() { return to; }
+                public void setTo(List<String> to) { this.to = to; }
+                public String getSubjectPrefix() { return subjectPrefix; }
+                public void setSubjectPrefix(String subjectPrefix) { this.subjectPrefix = subjectPrefix; }
+            }
+
+            public static class Webhook {
+                private boolean enabled = false;
+                private String url;
+                private String authHeader = "Authorization";
+                private String authToken;
+                private int connectTimeoutMs = 5000;
+                private int readTimeoutMs = 10000;
+                public boolean isEnabled() { return enabled; }
+                public void setEnabled(boolean enabled) { this.enabled = enabled; }
+                public String getUrl() { return url; }
+                public void setUrl(String url) { this.url = url; }
+                public String getAuthHeader() { return authHeader; }
+                public void setAuthHeader(String authHeader) { this.authHeader = authHeader; }
+                public String getAuthToken() { return authToken; }
+                public void setAuthToken(String authToken) { this.authToken = authToken; }
+                public int getConnectTimeoutMs() { return connectTimeoutMs; }
+                public void setConnectTimeoutMs(int v) { this.connectTimeoutMs = v; }
+                public int getReadTimeoutMs() { return readTimeoutMs; }
+                public void setReadTimeoutMs(int v) { this.readTimeoutMs = v; }
+            }
+        }
     }
 
     /**

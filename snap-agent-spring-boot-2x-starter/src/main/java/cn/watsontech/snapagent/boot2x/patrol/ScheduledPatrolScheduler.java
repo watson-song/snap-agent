@@ -3,6 +3,9 @@ package cn.watsontech.snapagent.boot2x.patrol;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
+import cn.watsontech.snapagent.core.patrol.AlertPushChannel;
+import cn.watsontech.snapagent.core.patrol.AnomalyEvent;
+import cn.watsontech.snapagent.core.patrol.PatrolLockProvider;
 import cn.watsontech.snapagent.core.patrol.PatrolReport;
 import cn.watsontech.snapagent.core.patrol.PatrolReportStore;
 import cn.watsontech.snapagent.core.patrol.PatrolScheduler;
@@ -15,7 +18,9 @@ import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.support.CronTrigger;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -36,16 +41,38 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private final AgentExecutor agentExecutor;
     private final SkillRegistry skillRegistry;
     private final PatrolReportStore reportStore;
+    private final PatrolLockProvider lockProvider;
+    private final long lockTtlSeconds;
+    private final List<AlertPushChannel> pushChannels;
     private final ConcurrentHashMap<String, PatrolTask> tasks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledFutures = new ConcurrentHashMap<>();
     private final AtomicLong idCounter = new AtomicLong(0);
 
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore) {
+        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+                new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList());
+    }
+
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+                                    SkillRegistry skillRegistry, PatrolReportStore reportStore,
+                                    PatrolLockProvider lockProvider, long lockTtlSeconds) {
+        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+                lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList());
+    }
+
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+                                    SkillRegistry skillRegistry, PatrolReportStore reportStore,
+                                    PatrolLockProvider lockProvider, long lockTtlSeconds,
+                                    List<AlertPushChannel> pushChannels) {
         this.taskScheduler = taskScheduler;
         this.agentExecutor = agentExecutor;
         this.skillRegistry = skillRegistry;
         this.reportStore = reportStore;
+        this.lockProvider = lockProvider;
+        this.lockTtlSeconds = lockTtlSeconds;
+        this.pushChannels = pushChannels != null ? new ArrayList<>(pushChannels)
+                : new ArrayList<>();
     }
 
     @Override
@@ -91,43 +118,94 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
 
     private void executePatrol(PatrolTask task) {
         long triggeredAt = System.currentTimeMillis();
-        log.info("Executing patrol {} (skill={})", task.getId(), task.getSkillName());
-
-        SkillMeta skill = skillRegistry.get(task.getSkillName());
-        if (skill == null) {
-            log.error("Patrol {} failed: skill '{}' not found", task.getId(), task.getSkillName());
-            PatrolReport report = new PatrolReport(
-                    null, task.getId(), null,
-                    task.getSkillName(), triggeredAt, "FAILED",
-                    "Skill not found: " + task.getSkillName(), false);
-            report.setUserId(task.getUserId());
-            reportStore.save(report);
+        // Multi-Pod coordination: only this Pod runs the patrol if it acquires the lock.
+        // Default NoopPatrolLockProvider always grants (single-Pod mode); hosts with
+        // multiple Pods must inject a distributed-lock implementation (Redis, DB, k8s lease).
+        if (!lockProvider.tryAcquire(task.getId(), lockTtlSeconds)) {
+            log.info("Patrol {} skipped (lock held by another Pod, lockProvider={})",
+                    task.getId(), lockProvider.type());
             return;
         }
-
         try {
-            AgentTask agentTask = AgentTask.create(
-                    task.getUserId(), task.getSkillName(),
-                    task.getInputs(), null);
-            agentExecutor.execute(agentTask, skill);
+            log.info("Executing patrol {} (skill={}, lockProvider={})",
+                    task.getId(), task.getSkillName(), lockProvider.type());
 
-            TaskStatus status = agentTask.getStatus();
-            String statusStr = status != null ? status.name() : "UNKNOWN";
-            String summary = agentTask.getReport() != null
-                    ? agentTask.getReport() : "Patrol completed";
+            SkillMeta skill = skillRegistry.get(task.getSkillName());
+            if (skill == null) {
+                log.error("Patrol {} failed: skill '{}' not found", task.getId(), task.getSkillName());
+                PatrolReport report = new PatrolReport(
+                        null, task.getId(), null,
+                        task.getSkillName(), triggeredAt, "FAILED",
+                        "Skill not found: " + task.getSkillName(), false);
+                report.setUserId(task.getUserId());
+                reportStore.save(report);
+                return;
+            }
 
-            PatrolReport report = new PatrolReport(
-                    null, task.getId(), agentTask.getTaskId(),
-                    task.getSkillName(), triggeredAt, statusStr, summary, false);
-            report.setUserId(task.getUserId());
-            reportStore.save(report);
-        } catch (Exception e) {
-            log.error("Patrol {} failed: {}", task.getId(), e.getMessage(), e);
-            PatrolReport report = new PatrolReport(
-                    null, task.getId(), null,
-                    task.getSkillName(), triggeredAt, "FAILED", e.getMessage(), false);
-            report.setUserId(task.getUserId());
-            reportStore.save(report);
+            try {
+                AgentTask agentTask = AgentTask.create(
+                        task.getUserId(), task.getSkillName(),
+                        task.getInputs(), null);
+                agentExecutor.execute(agentTask, skill);
+
+                TaskStatus status = agentTask.getStatus();
+                String statusStr = status != null ? status.name() : "UNKNOWN";
+                String summary = agentTask.getReport() != null
+                        ? agentTask.getReport() : "Patrol completed";
+
+                // Heuristic: if the report summary mentions anomaly keywords, mark as
+                // anomaly-detected so push channels fire. This lets patrol skills signal
+                // problems purely via their final text output, without code changes.
+                boolean anomaly = detectAnomaly(summary, statusStr);
+                PatrolReport report = new PatrolReport(
+                        null, task.getId(), agentTask.getTaskId(),
+                        task.getSkillName(), triggeredAt, statusStr, summary, anomaly);
+                report.setUserId(task.getUserId());
+                reportStore.save(report);
+                if (anomaly) {
+                    pushToChannels(report, null);
+                }
+            } catch (Exception e) {
+                log.error("Patrol {} failed: {}", task.getId(), e.getMessage(), e);
+                PatrolReport report = new PatrolReport(
+                        null, task.getId(), null,
+                        task.getSkillName(), triggeredAt, "FAILED", e.getMessage(), false);
+                report.setUserId(task.getUserId());
+                reportStore.save(report);
+            }
+        } finally {
+            lockProvider.release(task.getId());
+        }
+    }
+
+    /**
+     * Detects anomaly indicators in the patrol report summary. Looks for
+     * keywords like "CRITICAL", "WARNING", "异常", "错误", "失败". Override
+     * threshold by subclassing if a different heuristic is needed.
+     */
+    protected boolean detectAnomaly(String summary, String statusStr) {
+        if ("FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr)) {
+            return true;
+        }
+        if (summary == null || summary.isEmpty()) return false;
+        String lower = summary.toLowerCase(Locale.ROOT);
+        String[] markers = {"critical", "warning", "error", "exception", "failed",
+                "异常", "错误", "失败", "告警", "风险"};
+        for (String m : markers) {
+            if (lower.contains(m)) return true;
+        }
+        return false;
+    }
+
+    private void pushToChannels(PatrolReport report, AnomalyEvent event) {
+        if (pushChannels.isEmpty()) return;
+        for (AlertPushChannel channel : pushChannels) {
+            try {
+                channel.push(report, event);
+            } catch (Exception e) {
+                log.error("Push channel '{}' failed (reportId={}): {}",
+                        channel.type(), report.getId(), e.getMessage());
+            }
         }
     }
 }

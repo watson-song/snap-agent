@@ -105,10 +105,25 @@ snap-agent:
     enabled: false          # 主动监控巡检子系统（v0.5），默认关
     scheduler-pool-size: 2  # 定时巡检线程池大小
     report-buffer-size: 500 # 内存中保留的最大巡检报告数
+    lock-ttl-seconds: 300   # 多 Pod 协调锁存活时间（秒，v1.1 新增，默认 5 分钟）
   alert:
     enabled: false            # 告警收敛子系统（v0.5），默认关
     buffer-size: 1000         # 内存中保留的最大告警数
     auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+    push:                     # 异常报告推送（v1.1 新增）
+      email:
+        enabled: false              # Email 推送开关
+        from: snap-agent@example.com # 发件人
+        to:                          # 收件人列表
+          - ops@example.com
+        subject-prefix: "[SnapAgent 告警]"
+      webhook:
+        enabled: false              # Webhook 推送开关
+        url: https://hook.example.com/snap-agent  # 推送 URL
+        auth-header: Authorization   # 认证头名称
+        auth-token: ""               # 认证令牌（支持 ${ENV}）
+        connect-timeout-ms: 5000
+        read-timeout-ms: 10000
   knowledge:                   # 嵌入式业务知识库（v0.7），默认关
     enabled: false
     sources:                   # 知识源列表
@@ -365,26 +380,62 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 - 已登录无权限：`hasPermission` false → 403。
 - principal 解析失败：resolver 返回 null → 401 + WARN 日志提示配 `principal-resolver-class`。
 
-## 10. 主动监控 — 巡检配置（v0.5）
+## 10. 主动监控 — 巡检配置（v0.5，v1.1 更新）
 
 SnapAgent v0.5 引入主动健康巡检调度，按 cron 定时执行诊断 Skill，发现异常自动生成报告。
+v1.1 新增：多 Pod 协调锁、异常报告推送渠道、PatrolReportStore SPI 化。
 
 ```yaml
 snap-agent:
   patrol:
-    enabled: false          # 巡检子系统总开关
-    scheduler-pool-size: 2  # 定时巡检线程池大小
-    report-buffer-size: 500 # 内存中保留的最大巡检报告数（ring buffer）
+    enabled: false             # 巡检子系统总开关
+    scheduler-pool-size: 2     # 定时巡检线程池大小
+    report-buffer-size: 500    # 内存中保留的最大巡检报告数（ring buffer）
+    lock-ttl-seconds: 300      # 多 Pod 协调锁 TTL（v1.1 新增，秒）
+  alert:
+    enabled: false             # 告警收敛开关
+    buffer-size: 1000
+    auto-resolve-minutes: 30
+    push:                      # 异常报告推送（v1.1 新增）
+      email:
+        enabled: false
+        from: snap-agent@example.com
+        to: [ops@example.com]
+        subject-prefix: "[SnapAgent 告警]"
+      webhook:
+        enabled: false
+        url: https://hook.example.com/snap-agent
+        auth-header: Authorization
+        auth-token: ""
+        connect-timeout-ms: 5000
+        read-timeout-ms: 10000
 ```
 
-当 `enabled=true` 时，自动装配以下 Bean：
+当 `patrol.enabled=true` 时，自动装配以下 Bean：
 
 | Bean | 职责 |
 |------|------|
-| `PatrolReportStore` | 内存 ring buffer，存储巡检报告，支持按用户分页查询 |
+| `PatrolReportStore` (SPI) | 默认 `InMemoryPatrolReportStore` 内存 ring buffer；宿主可替换为 DB 实现（v1.1 SPI 化） |
+| `PatrolLockProvider` (SPI) | 默认 `NoopPatrolLockProvider` 单 Pod 直接放行；多 Pod 部署时宿主可替换为 Redis/k8s lease/DB 行锁（v1.1 新增） |
 | `ThreadPoolTaskScheduler` | Spring 调度器，驱动 cron 触发的巡检任务 |
-| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务的生命周期（创建/取消/列表/报告查询） |
-| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill |
+| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务生命周期（v1.1 注入 lockProvider + pushChannels） |
+| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill（v1.1 注入 pushChannels） |
+
+当 `alert.push.email.enabled=true` 且 classpath 含 `JavaMailSender` 时装配：
+
+| Bean | 职责 |
+|------|------|
+| `EmailAlertPushChannel` | 通过 Spring `JavaMailSender` 发送异常报告邮件（需 `spring-boot-starter-mail` 可选依赖，v1.1 新增） |
+
+当 `alert.push.webhook.enabled=true` 且 `url` 非空时装配：
+
+| Bean | 职责 |
+|------|------|
+| `WebhookAlertPushChannel` | 通过 JDK `HttpURLConnection` POST JSON 到 webhook URL（无外部依赖，v1.1 新增） |
+
+> 巡检执行时若 `detectAnomaly()` 判定为异常（状态 FAILED/TIMEOUT 或报告摘要含
+> "critical"/"warning"/"error"/"异常"/"错误"/"失败" 等关键词），所有
+> `AlertPushChannel` bean 会同时收到推送，单 channel 失败不影响其它。
 
 ### 巡检 API
 

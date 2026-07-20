@@ -18,6 +18,6 @@
 
 ## 版本 | Version
 
-本文档基于 SnapAgent v1.0 现状编写。
+本文档基于 SnapAgent v1.1 现状编写（v1.1 新增：PatrolLockProvider SPI、AlertPushChannel SPI、PatrolReportStore SPI 化、知识点列表 API）。
 
-Documentation based on SnapAgent v1.0 current state.
+Documentation based on SnapAgent v1.1 current state (v1.1 additions: PatrolLockProvider SPI, AlertPushChannel SPI, PatrolReportStore SPI refactor, knowledge fragment list API).

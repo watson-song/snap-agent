@@ -310,6 +310,7 @@ inputs:
 |------|------|------|
 | `GET` | `/snap-agent/knowledge/status` | 知识库状态：片段数、注入上限、minScore、数据源列表 |
 | `GET` | `/snap-agent/knowledge/search?q={query}` | 检索测试（topK = max-fragments × 3，最少 10） |
+| `GET` | `/snap-agent/knowledge/fragments` | 列出所有知识片段（无评分），用于"知识点"统计卡片点击展开查看（v1.1 新增） |
 
 示例：
 
@@ -624,6 +625,7 @@ snap-agent:
 | 24 | `DELETE` | `/conversations/{id}` | 删除会话 |
 | 25 | `GET` | `/knowledge/status` | 知识库状态 |
 | 26 | `GET` | `/knowledge/search?q=` | 知识检索 |
+| 26.5 | `GET` | `/knowledge/fragments` | 列出所有知识片段（v1.1 新增） |
 | 27 | `GET` | `/workflows` | 工作流列表 |
 | 28 | `GET` | `/workflows/{name}` | 工作流详情（含 steps） |
 | 29 | `POST` | `/workflows/{name}/run` | 触发工作流执行 |

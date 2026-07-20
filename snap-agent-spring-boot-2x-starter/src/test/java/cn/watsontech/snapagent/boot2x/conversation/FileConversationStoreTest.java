@@ -261,4 +261,44 @@ class FileConversationStoreTest {
         assertThat(loaded).isNotNull();
         assertThat(loaded.getMessageCount()).isEqualTo(0);
     }
+
+    @Test
+    void shouldPersistTaskIdOnMessages() {
+        // Regression: ConversationMessage.taskId must round-trip through save/load
+        // so per-message issue badges survive page refresh.
+        List<ConversationMessage> messages = Arrays.asList(
+                ConversationMessage.user("分析问题"),
+                ConversationMessage.assistantWithTask("诊断完成", "sa_1784554424504_eb8a8700ef24")
+        );
+        Conversation saved = store.save(new Conversation(null, "user1", "log-analysis",
+                "测试 taskId", 0, 0, messages));
+
+        Conversation loaded = store.load(saved.getId(), "user1");
+        assertThat(loaded).isNotNull();
+        assertThat(loaded.getMessages()).hasSize(2);
+        // User message has no taskId
+        assertThat(loaded.getMessages().get(0).getTaskId()).isNull();
+        // Assistant message retains taskId across save/load
+        assertThat(loaded.getMessages().get(1).getTaskId())
+                .isEqualTo("sa_1784554424504_eb8a8700ef24");
+    }
+
+    @Test
+    void shouldPreserveTaskIdWhenUpdatingExistingConversation() {
+        List<ConversationMessage> first = Arrays.asList(
+                ConversationMessage.assistantWithTask("第一轮诊断", "task_111")
+        );
+        Conversation saved = store.save(new Conversation(null, "user1", "skill1",
+                "first", 0, 0, first));
+
+        List<ConversationMessage> second = new ArrayList<ConversationMessage>(first);
+        second.add(ConversationMessage.assistantWithTask("第二轮诊断", "task_222"));
+        store.save(new Conversation(saved.getId(), "user1", "skill1",
+                saved.getTitle(), saved.getCreatedAt(), 0, second));
+
+        Conversation loaded = store.load(saved.getId(), "user1");
+        assertThat(loaded.getMessages()).hasSize(2);
+        assertThat(loaded.getMessages().get(0).getTaskId()).isEqualTo("task_111");
+        assertThat(loaded.getMessages().get(1).getTaskId()).isEqualTo("task_222");
+    }
 }

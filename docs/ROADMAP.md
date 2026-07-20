@@ -1219,7 +1219,54 @@ Agent (内置 cost-analysis Skill):
 
 ---
 
-## 设计原则（贯穿所有版本）
+## v1.1 — 主动监控 SPI 化（已交付）
+
+**目标**：将主动监控子系统的关键组件重构为 SPI，让宿主可按需替换实现；并新增多 Pod 巡检协调、异常报告推送渠道、知识点列表 API。
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| PatrolReportStore SPI | 从具体类重构为接口，默认实现 `InMemoryPatrolReportStore` 移至 boot2x；宿主可实现 DB/Redis 持久化 |
+| PatrolLockProvider SPI | 多 Pod 巡检协调锁接口；默认 `NoopPatrolLockProvider` 单 Pod 放行，多 Pod 时宿主注入 Redis/k8s lease/DB 行锁 |
+| AlertPushChannel SPI | 异常报告推送渠道接口；默认 `WebhookAlertPushChannel` + `EmailAlertPushChannel`（后者依赖 `spring-boot-starter-mail`，可选） |
+| ScheduledPatrolScheduler 增强 | 注入 `PatrolLockProvider` + `List<AlertPushChannel>` + `lockTtlSeconds`；`executePatrol` 增加 tryAcquire/异常检测/pushToChannels/finally release |
+| DefaultAnomalyEventListener 增强 | 注入 `List<AlertPushChannel>`，诊断后异常报告自动推送 |
+| KnowledgeBase.listAll() | 新增方法返回所有片段（不可变列表）；`GET /knowledge/fragments` 端点供前端"知识点"统计卡片点击展开查看 |
+| ObservabilityHttpClient.httpPost() | 新增 POST 方法，供 `WebhookAlertPushChannel` 复用 |
+| FileConversationStore taskId 修复 | `toMap/fromMap` 漏掉 `taskId` 字段导致前端刷新后丢失问题闭环 badge，已修复 |
+| NoopMarkerBean 模式 | 当 optional 依赖（如 JavaMailSender）缺失时，返回 marker bean 而非 null，保持 Spring 兼容性 |
+
+### 配置
+
+```yaml
+snap-agent:
+  patrol:
+    enabled: true
+    lock-ttl-seconds: 300          # 多 Pod 协调锁 TTL（秒，默认 5 分钟）
+  alert:
+    enabled: true
+    push:
+      email:
+        enabled: true
+        from: snap-agent@example.com
+        to: [ops@example.com]
+      webhook:
+        enabled: true
+        url: https://hook.example.com/snap-agent
+        auth-token: Bearer ${WEBHOOK_TOKEN}
+```
+
+### 测试
+
+- `NoopPatrolLockProviderTest`（4 cases）: tryAcquire 总是返回 true、release 不抛异常、type 标识、重复 acquire 无副作用
+- `WebhookAlertPushChannelTest`（8 cases）: 非 anomaly 跳过、payload 字段、event block、null token、IOException 吞掉、timeout clamp
+- `EmailAlertPushChannelTest`（9 cases）: 非 anomaly 跳过、空 recipients 跳过、from/to/subject/body 字段、默认 subject prefix、默认 from、默认 event type、MailException 吞掉、type 标识
+- `ObservabilityHttpClientTest` 新增 5 cases 覆盖 `httpPost` URL/headers/body/timeouts、null 输入、IOException 传播、空输入
+
+---
+
+
 
 1. **嵌入式优先** — 永远是库，不是独立服务。不增加运维负担。
 2. **只读优先** — 内置工具默认只读。写操作需要自定义 ToolProvider 且明确标注风险。

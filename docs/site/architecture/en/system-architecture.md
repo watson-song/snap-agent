@@ -1,6 +1,6 @@
 # SnapAgent System Architecture
 
-> Version: v1.0 | Updated: 2026-07-17
+> Version: v1.1 | Updated: 2026-07-20
 
 ## 1. Architecture Overview
 
@@ -856,6 +856,7 @@ public AgentExecutor agentExecutor(
 | v0.8 | Code knowledge graph | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphToolProvider |
 | v0.9 | Issue closure loop | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
 | v1.0 | Plugins + workflows + cost | ToolPlugin, WorkflowEngine, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage() |
+| v1.1 | Proactive monitoring SPI | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost() |
 
 ---
 

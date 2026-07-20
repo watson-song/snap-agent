@@ -332,6 +332,16 @@ public class IssueClosureService {
         return issueStore.load(issueId);
     }
 
+    /**
+     * Lists all issue closures sorted by {@code updatedAt} descending
+     * (newest first). Delegates to {@link IssueStore#list()}.
+     *
+     * @return list of issue closures (never null, empty if none)
+     */
+    public List<IssueClosure> listIssues() {
+        return issueStore.list();
+    }
+
     // ---- helpers ----
 
     /**

@@ -1,6 +1,6 @@
 # SnapAgent Knowledge Search Algorithm Design
 
-> Version: v1.0 | Updated: 2026-07-17
+> Version: v1.1 | Updated: 2026-07-20
 
 ## 1. Architecture Overview
 
@@ -316,6 +316,36 @@ Returns matching fragments with relevance scores:
     ]
 }
 ```
+
+### GET /knowledge/fragments (new in v1.1)
+
+Returns all knowledge fragments (no scoring) for the frontend "knowledge stat" card
+click-to-expand view:
+
+```json
+{
+    "total": 5,
+    "fragments": [
+        {
+            "title": "系统概述",
+            "content": "...",
+            "source": "business-overview.md:section-1",
+            "metadata": { "category": "..." }
+        },
+        ...
+    ]
+}
+```
+
+Differences from `/knowledge/search`:
+
+| Endpoint | Purpose | Scored? | Input |
+|----------|---------|---------|-------|
+| `GET /knowledge/search` | Search by query keywords | Yes (`score` field) | `q` (query) |
+| `GET /knowledge/fragments` | List all fragments for browsing | No | None |
+
+Underlying implementation: `KnowledgeBase.listAll()` returns
+`Collections.unmodifiableList(allFragments)`, preserving load order.
 
 ---
 

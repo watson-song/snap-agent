@@ -309,6 +309,7 @@ When a skill runs, `KnowledgeInjector` (implements `SystemPromptExtender`) build
 |--------|-----------|-------------|
 | `GET` | `/snap-agent/knowledge/status` | Knowledge base status: fragment count, injection cap, minScore, source list |
 | `GET` | `/snap-agent/knowledge/search?q={query}` | Retrieval test (topK = max-fragments × 3, min 10) |
+| `GET` | `/snap-agent/knowledge/fragments` | List all knowledge fragments (no score); used by the "knowledge stat" card click-to-expand view (new in v1.1) |
 
 Example:
 
@@ -623,6 +624,7 @@ All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except fo
 | 24 | `DELETE` | `/conversations/{id}` | Delete a conversation |
 | 25 | `GET` | `/knowledge/status` | Knowledge base status |
 | 26 | `GET` | `/knowledge/search?q=` | Knowledge retrieval |
+| 26.5 | `GET` | `/knowledge/fragments` | List all knowledge fragments (new in v1.1) |
 | 27 | `GET` | `/workflows` | Workflow list |
 | 28 | `GET` | `/workflows/{name}` | Workflow detail (with steps) |
 | 29 | `POST` | `/workflows/{name}/run` | Trigger workflow execution |

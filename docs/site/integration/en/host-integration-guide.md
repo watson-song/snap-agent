@@ -294,6 +294,7 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 | `enabled` | `false` | Scheduled patrol switch |
 | `scheduler-pool-size` | `2` | Patrol scheduler thread pool size |
 | `report-buffer-size` | `500` | Patrol report ring buffer size |
+| `lock-ttl-seconds` | `300` | Multi-Pod coordination lock TTL (seconds, default 5 min, new in v1.1) |
 
 **Alert convergence (`snap-agent.alert.*`)**:
 
@@ -302,6 +303,16 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 | `enabled` | `false` | Alert convergence switch |
 | `buffer-size` | `1000` | Alert buffer size |
 | `auto-resolve-minutes` | `30` | Alert auto-resolve minutes |
+| `push.email.enabled` | `false` | Email push switch (new in v1.1) |
+| `push.email.from` | `snap-agent@local` | Email sender |
+| `push.email.to` | `[]` | Email recipient list |
+| `push.email.subject-prefix` | `[SnapAgent Alert]` | Email subject prefix |
+| `push.webhook.enabled` | `false` | Webhook push switch (new in v1.1) |
+| `push.webhook.url` | _empty_ | Webhook push URL; bean only wired when non-empty |
+| `push.webhook.auth-header` | `Authorization` | Webhook auth header name |
+| `push.webhook.auth-token` | _empty_ | Webhook auth token |
+| `push.webhook.connect-timeout-ms` | `5000` | Webhook connect timeout |
+| `push.webhook.read-timeout-ms` | `10000` | Webhook read timeout |
 
 ### 3.13 Issue Closure Configuration (`snap-agent.issue-closure.*`)
 
@@ -916,7 +927,130 @@ Confirm each item before going to production:
 - [ ] **Observability endpoints**: if using ops diagnostics, `metrics.base-url` / `log-search.base-url` / `trace.base-url` and auth headers are configured
 - [ ] **Cost budgets**: if using cost accounting, `snap-agent.cost.budgets.*` and `pricing.*` are set
 - [ ] **Proactive monitoring**: if using patrol/alert, `snap-agent.patrol.*` / `snap-agent.alert.*` are configured
+- [ ] **Alert push**: if using anomaly report push, configure `snap-agent.alert.push.email.*` or `snap-agent.alert.push.webhook.*` (new in v1.1)
+- [ ] **Multi-Pod coordination lock**: in multi-Pod deployments, implement a custom `PatrolLockProvider` bean (Redis / k8s lease / DB row lock) — see §10 (new in v1.1)
+- [ ] **Persistent storage**: to persist patrol reports / conversation history / Issues, implement custom SPI beans such as `PatrolReportStore` (new in v1.1)
 - [ ] **basePath does not conflict**: `snap-agent.base-path` (default `/snap-agent`) does not collide with existing host routes
 - [ ] **JDBC driver**: the host has the JDBC driver for its database (e.g., `mysql-connector-java`)
 - [ ] **Log paths**: `snap-agent.logs.allowed-paths` lists allowed log directories (or confirm `logging.file.name` is auto-resolvable)
 - [ ] **Smoke test**: after startup, `GET {base-path}/skills` returns the skill list, and a sample skill runs a full conversation end-to-end
+
+---
+
+## 10. Replaceable SPI Catalog (updated in v1.1)
+
+All core SnapAgent components are exposed as SPI interfaces; hosts can replace any of
+them. Implement the interface + `@Component` (or `@Bean`); `@ConditionalOnMissingBean`
+yields to your custom bean.
+
+### 10.1 SPI overview
+
+| SPI interface | Default impl | Wiring condition | Purpose |
+|---------------|-------------|-------------------|---------|
+| `LlmClient` | `AnthropicLlmClient` | `snap-agent.llm.api-type=anthropic` | LLM streaming |
+| `ToolProvider` | multiple built-in | `@Component` discovery | Tools |
+| `SecurityGateway` | `SpringSecurityAdapter` | `@ConditionalOnMissingBean` | Permission check |
+| `PrincipalResolver` | `SpringPrincipalResolver` | `@ConditionalOnMissingBean` | User identity resolution |
+| `SystemPromptExtender` | `ProjectContextExtender` / `KnowledgeInjector` | `@ConditionalOnMissingBean` | system prompt injection |
+| `ConversationStore` | `FileConversationStore` | `@ConditionalOnMissingBean` | Conversation history |
+| `IssueStore` | `FileIssueStore` | `@ConditionalOnMissingBean` | Issue persistence |
+| `IssueTracker` | `NoopIssueTracker` | `@ConditionalOnMissingBean` | External issue tracker |
+| `KnowledgeSource` | `MarkdownKnowledgeSource` | `@ConditionalOnMissingBean` | Knowledge sources |
+| `KnowledgeSearcher` | `SimpleKeywordSearcher` | `@ConditionalOnMissingBean` | Knowledge search |
+| `CostStore` | `FileCostStore` | `@ConditionalOnMissingBean` | Cost record persistence |
+| `CostTracker` | `DefaultCostTracker` | `@ConditionalOnMissingBean` | Cost tracking |
+| `WorkflowEngine` | `SimpleWorkflowEngine` | `@ConditionalOnMissingBean` | Workflow engine |
+| `PatrolScheduler` | `ScheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | Patrol scheduling |
+| `PatrolReportStore` | `InMemoryPatrolReportStore` | `snap-agent.patrol.enabled=true` | Patrol report storage (v1.1 SPI) |
+| `PatrolLockProvider` | `NoopPatrolLockProvider` | `snap-agent.patrol.enabled=true` | Multi-Pod patrol lock (new in v1.1) |
+| `AlertConverger` | `InMemoryAlertConverger` | `snap-agent.alert.enabled=true` | Alert convergence |
+| `AnomalyEventListener` | `DefaultAnomalyEventListener` | `snap-agent.patrol.enabled=true` | Anomaly event handling |
+| `BugfixSuggester` | `TemplateBugfixSuggester` | `@ConditionalOnMissingBean` | Fix suggestion generation |
+| `AlertPushChannel` | `WebhookAlertPushChannel` + `EmailAlertPushChannel` | `snap-agent.alert.push.*` | Anomaly report push (new in v1.1, supports multiple beans) |
+
+### 10.2 PatrolLockProvider — multi-Pod coordination
+
+In multi-Pod deployments (e.g., K8s replicas), the same patrol task fires on every Pod,
+causing duplicate execution and duplicate alerts. Implement `PatrolLockProvider` to fix:
+
+```java
+@Component
+public class RedisPatrolLockProvider implements PatrolLockProvider {
+    private final StringRedisTemplate redis;
+    private final String podName = System.getenv().getOrDefault("MY_POD_NAME", "pod-0");
+
+    @Override
+    public boolean tryAcquire(String patrolId, long ttlSeconds) {
+        String key = "patrol:lock:" + patrolId;
+        return Boolean.TRUE.equals(redis.opsForValue()
+                .setIfAbsent(key, podName, Duration.ofSeconds(ttlSeconds)));
+    }
+
+    @Override
+    public void release(String patrolId) {
+        // Use a Lua script to verify owner before deleting, to avoid releasing someone else's lock
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                + "return redis.call('del', KEYS[1]) else return 0 end";
+        redis.execute(new DefaultRedisScript<>(script, Long.class),
+                Collections.singletonList("patrol:lock:" + patrolId), podName);
+    }
+
+    @Override
+    public String type() { return "redis"; }
+}
+```
+
+> TTL defaults to 300 seconds (`snap-agent.patrol.lock-ttl-seconds`), covering the
+> longest single patrol. If a Pod crashes, the lock auto-expires after TTL and other
+> Pods take over on the next cron tick.
+
+### 10.3 AlertPushChannel — custom push channels
+
+Implement `AlertPushChannel` + `@Component` to work alongside the default
+Webhook/Email channels (all `AlertPushChannel` beans are collected into a
+`List<AlertPushChannel>`; anomaly reports fan out to all of them):
+
+```java
+@Component
+public class DingTalkAlertPushChannel implements AlertPushChannel {
+    @Override
+    public void push(PatrolReport report, AnomalyEvent event) {
+        if (report == null || !report.isAnomalyDetected()) return;
+        // Build DingTalk markdown message, POST to webhook URL
+    }
+    @Override
+    public String type() { return "dingtalk"; }
+}
+```
+
+### 10.4 PatrolReportStore — persistent patrol reports
+
+The default `InMemoryPatrolReportStore` has limited capacity and loses data on restart;
+production deployments can swap in a DB implementation:
+
+```java
+@Component
+public class JdbcPatrolReportStore implements PatrolReportStore {
+    private final JdbcTemplate jdbc;
+    // CREATE TABLE patrol_report (id VARCHAR PRIMARY KEY, patrol_id VARCHAR,
+    //   task_id VARCHAR, user_id VARCHAR, skill_name VARCHAR,
+    //   triggered_at BIGINT, status VARCHAR, summary TEXT,
+    //   anomaly_detected BOOLEAN)
+    // ...
+}
+```
+
+### 10.5 Optional dependencies for email push
+
+`EmailAlertPushChannel` depends on `spring-context-support` + `javax.mail`, both marked
+`<optional>true</optional>` in the starter pom. To enable:
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
+```
+
+Then set `snap-agent.alert.push.email.enabled=true` + `to[]=ops@example.com`. Without
+these deps, `@ConditionalOnClass` skips the bean and the host is unaffected.
