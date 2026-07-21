@@ -318,8 +318,14 @@
         .doc-icon { font-size: 24px; flex-shrink: 0; }
         .doc-body h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
         .doc-body p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
-        .doc-links { display: flex; gap: 12px; font-size: 12px; }
-        .doc-links a { display: inline-flex; align-items: center; gap: 4px; }
+        .doc-links { display: flex; gap: 8px; font-size: 12px; }
+        .doc-links a {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 4px 12px; border: 1px solid var(--border);
+            border-radius: 6px; background: var(--bg-tertiary);
+            transition: all 0.2s;
+        }
+        .doc-links a:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-card); }
 
         /* ===== Footer ===== */
         .footer {
@@ -779,7 +785,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
         </div>
         <div class="docs-grid">
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/zh/system-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🏛️</div>
                 <div class="doc-body">
                     <h4>
@@ -794,9 +800,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/en/system-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/anchor-feature-guide.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">💬</div>
                 <div class="doc-body">
                     <h4>
@@ -811,9 +817,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/anchor-feature-guide.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/zh/knowledge-search.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🔍</div>
                 <div class="doc-body">
                     <h4>
@@ -828,9 +834,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/en/knowledge-search.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/host-integration-guide.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🔌</div>
                 <div class="doc-body">
                     <h4>
@@ -845,9 +851,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/host-integration-guide.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/zh/multi-cluster-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🌐</div>
                 <div class="doc-body">
                     <h4>
@@ -862,9 +868,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/en/multi-cluster-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/zh/tool-plugin-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🔧</div>
                 <div class="doc-body">
                     <h4>
@@ -879,9 +885,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/en/tool-plugin-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/zh/workflow-engine-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">📋</div>
                 <div class="doc-body">
                     <h4>
@@ -896,9 +902,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/en/workflow-engine-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/zh/issue-closure-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🐛</div>
                 <div class="doc-body">
                     <h4>
@@ -913,9 +919,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/en/issue-closure-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/zh/proactive-monitoring-architecture.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">🛡️</div>
                 <div class="doc-body">
                     <h4>
@@ -930,9 +936,9 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/en/proactive-monitoring-architecture.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
-            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/zh/user-manual.md" class="doc-card" target="_blank" rel="noopener">
+            <div class="doc-card">
                 <div class="doc-icon">📖</div>
                 <div class="doc-body">
                     <h4>
@@ -947,7 +953,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/en/user-manual.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
-            </a>
+            </div>
 
         </div>
     </div>
