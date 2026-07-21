@@ -318,14 +318,15 @@
         .doc-icon { font-size: 24px; flex-shrink: 0; }
         .doc-body h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
         .doc-body p { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
-        .doc-links { display: flex; gap: 8px; font-size: 12px; }
+        .doc-links { display: flex; gap: 8px; font-size: 13px; }
         .doc-links a {
             display: inline-flex; align-items: center; gap: 4px;
-            padding: 4px 12px; border: 1px solid var(--border);
+            padding: 6px 14px; border: 1px solid var(--border-hover);
             border-radius: 6px; background: var(--bg-tertiary);
+            font-weight: 500;
             transition: all 0.2s;
         }
-        .doc-links a:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-card); }
+        .doc-links a:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-card); transform: translateX(2px); }
 
         /* ===== Footer ===== */
         .footer {
@@ -795,10 +796,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">三层 SPI 架构、模块划分、执行循环、Web 层、安全模型、自动装配、v0.1→v1.0 完整演进路线。</span>
                         <span data-lang="en">Three-layer SPI, module split, execution loop, web layer, security model, auto-config, v0.1→v1.0 full evolution.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/zh/system-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/en/system-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#system-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -812,10 +810,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">anchor.js 引入、data-snap-anchor 标注 API、SecurityGateway 集成、智能技能路由、预摘要缓存、Shadow DOM 隔离、SPA 适配、移动端。</span>
                         <span data-lang="en">anchor.js setup, data-snap-anchor API, SecurityGateway integration, smart skill routing, pre-summary cache, Shadow DOM isolation, SPA compat, mobile.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/anchor-feature-guide.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/anchor-feature-guide.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#anchor-feature-guide"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -829,10 +824,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">混合分词（Latin + CJK 2-gram）、打分公式、minScore 阈值、KnowledgeInjector 自动注入。</span>
                         <span data-lang="en">Hybrid tokenization (Latin + CJK 2-gram), scoring formula, minScore threshold, KnowledgeInjector.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/zh/knowledge-search.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/search/en/knowledge-search.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#knowledge-search"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -846,10 +838,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">Maven 依赖、配置项全表、启动流程、自定义工具 / Skill、安全集成、多 LLM 对接、部署清单。</span>
                         <span data-lang="en">Maven deps, full config reference, startup flow, custom tools / skills, security, multi-LLM, deploy checklist.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/host-integration-guide.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/host-integration-guide.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#host-integration-guide"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -863,10 +852,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">K8s 多副本无状态部署、PeerRouter 降级链（k8s-api / headless-dns / static / none）、SSE 中继、RBAC。</span>
                         <span data-lang="en">K8s stateless multi-replica, PeerRouter fallback chain, SSE relay, RBAC.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/zh/multi-cluster-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/deployment/en/multi-cluster-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#multi-cluster-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -880,10 +866,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">ToolProvider SPI、ToolPlugin 元数据层、11+ 内置工具、安全约束（SqlGuard / CodePathGuard）、自定义插件示例。</span>
                         <span data-lang="en">ToolProvider SPI, ToolPlugin metadata, 11+ built-in tools, security constraints, custom plugin example.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/zh/tool-plugin-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/plugins/en/tool-plugin-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#tool-plugin-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -897,10 +880,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">YAML 定义、条件表达式（${step.*.result}）、onFailure 策略、内置 full-diagnose 工作流。</span>
                         <span data-lang="en">YAML format, condition expressions, onFailure policies, built-in full-diagnose workflow.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/zh/workflow-engine-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/workflow/en/workflow-engine-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#workflow-engine-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -914,10 +894,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">IssueStatus 状态机、FileIssueStore、NoopIssueTracker、知识沉淀提取器、REST API。</span>
                         <span data-lang="en">IssueStatus state machine, FileIssueStore, NoopIssueTracker, knowledge sedimentation, REST API.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/zh/issue-closure-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/issue/en/issue-closure-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#issue-closure-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -931,10 +908,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">巡检（ScheduledPatrolScheduler）+ 告警（AlertConverger / AnomalyEventListener）双模式、推送渠道、生命周期。</span>
                         <span data-lang="en">Patrol (ScheduledPatrolScheduler) + Alert (AlertConverger / AnomalyEventListener) dual mode, push channels, lifecycle.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/zh/proactive-monitoring-architecture.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/proactive/en/proactive-monitoring-architecture.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#proactive-monitoring-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -948,10 +922,7 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">快速开始、Web UI 使用、运行 Skill、会话历史、知识库、工具与 Skill 全景、工作流、问题闭环、成本、REST API 参考。</span>
                         <span data-lang="en">Quick start, web UI, running skills, conversation history, knowledge base, tools & skills, workflows, issue closure, cost, REST API reference.</span>
                     </p>
-                    <div class="doc-links">
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/zh/user-manual.md" target="_blank" rel="noopener">中文</a>
-                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/manual/en/user-manual.md" target="_blank" rel="noopener">English</a>
-                    </div>
+                    <div class="doc-links"><a href="docs.html#user-manual"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
