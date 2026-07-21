@@ -29,7 +29,7 @@ class IssueClosureTest {
     private IssueClosure newSample() {
         return new IssueClosure(
                 "issue-001", null, "task-100",
-                "conv-100", "为什么订单服务超时?", "连接池打满",
+                "conv-100", "user1", "为什么订单服务超时?", "连接池打满",
                 sampleSuggestion(), null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -44,6 +44,7 @@ class IssueClosureTest {
         assertThat(issue.getExternalIssueId()).isNull();
         assertThat(issue.getTaskId()).isEqualTo("task-100");
         assertThat(issue.getConversationId()).isEqualTo("conv-100");
+        assertThat(issue.getUserId()).isEqualTo("user1");
         assertThat(issue.getUserQuery()).isEqualTo("为什么订单服务超时?");
         assertThat(issue.getRootCause()).isEqualTo("连接池打满");
         // New: SolutionSuggestion instead of List<String>
@@ -66,7 +67,7 @@ class IssueClosureTest {
     void shouldReturnNullSolutionWhenNullPassed() {
         // New behavior: null SolutionSuggestion → getter returns null, does not crash
         IssueClosure issue = new IssueClosure(
-                "id", null, "task", null, "q", "rc",
+                "id", null, "task", null, null, "q", "rc",
                 null, null, IssueStatus.DIAGNOSED, null, null, null,
                 CREATED_AT, UPDATED_AT);
 
@@ -81,7 +82,7 @@ class IssueClosureTest {
         // that the exact same immutable suggestion is returned.
         SolutionSuggestion suggestion = sampleSuggestion();
         IssueClosure issue = new IssueClosure(
-                "id", null, "task", null, "q", "rc",
+                "id", null, "task", null, null, "q", "rc",
                 suggestion, null, IssueStatus.DIAGNOSED, null, null, null,
                 CREATED_AT, UPDATED_AT);
 
@@ -168,7 +169,7 @@ class IssueClosureTest {
     @Test
     void withSolutionShouldReturnNewInstanceWithSolutionSuggestion() {
         IssueClosure original = new IssueClosure(
-                "id", null, "task", null, "q", "rc",
+                "id", null, "task", null, null, "q", "rc",
                 null, null, IssueStatus.DIAGNOSED, null, null, null,
                 CREATED_AT, UPDATED_AT);
         long newUpdatedAt = UPDATED_AT + 6_000L;

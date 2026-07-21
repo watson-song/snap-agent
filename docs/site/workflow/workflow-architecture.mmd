@@ -1,0 +1,60 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef ai fill:#dcfce7,stroke:#4ade80,stroke-width:1.5px,color:#166534,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        Modal["Workflow Modal<br/>工作流列表 + 详情 + 执行"]
+    end
+
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        Controller["SnapAgentController<br/>工作流列表 / 详情 / 执行端点"]
+    end
+
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        Engine["SimpleWorkflowEngine<br/>顺序执行 + 条件分支"]
+        Loader["YamlWorkflowLoader<br/>SnakeYAML 解析工作流定义"]
+    end
+
+    subgraph AI ["AI 引擎层 (AI Layer)"]
+        direction LR
+        Executor["AgentExecutor<br/>逐步骤执行 skill"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        YAML["YAML Files<br/>工作流定义文件"]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        LLM["LLM Provider<br/>逐步骤运行 skill 的 LLM 调用"]
+    end
+
+    Modal --> Controller
+    Controller --> Engine
+    Engine --> Loader
+    Loader --> YAML
+    Engine --> Executor
+    Executor --> LLM
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style AI fill:#22c55e,stroke:#22c55e,stroke-width:2px,color:#86efac
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class Modal client
+    class Controller api
+    class Engine,Loader service
+    class Executor ai
+    class YAML storage
+    class LLM external

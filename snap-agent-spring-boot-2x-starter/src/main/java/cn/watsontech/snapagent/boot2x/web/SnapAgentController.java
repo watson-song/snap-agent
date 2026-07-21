@@ -1,6 +1,9 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorContext;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
+import cn.watsontech.snapagent.boot2x.anchor.PreprocessResult;
 import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
@@ -17,6 +20,7 @@ import cn.watsontech.snapagent.core.conversation.Conversation;
 import cn.watsontech.snapagent.core.conversation.ConversationMessage;
 import cn.watsontech.snapagent.core.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.core.cost.CostRecord;
 import cn.watsontech.snapagent.core.cost.CostSummary;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
@@ -24,6 +28,7 @@ import cn.watsontech.snapagent.core.issue.SolutionOption;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.llm.LlmEventSink;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
@@ -119,6 +124,7 @@ public class SnapAgentController {
     private final WorkflowEngine workflowEngine;
     private final ToolPluginRegistry toolPluginRegistry;
     private final AuditStore auditStore;
+    private AnchorOrchestrator anchorOrchestrator;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -329,12 +335,62 @@ public class SnapAgentController {
         return ResponseEntity.ok(config);
     }
 
+    // ---- GET /anchor/config (public, returns anchor feature config) ----
+    @GetMapping("/anchor/config")
+    public ResponseEntity<Object> getAnchorConfig() {
+        Map<String, Object> config = new LinkedHashMap<String, Object>();
+        config.put("enabled", properties.getAnchor().isEnabled());
+        config.put("disabledPaths", properties.getAnchor().getDisabledPaths());
+        return ResponseEntity.ok(config);
+    }
+
+    // ---- POST /anchor/preprocess (requires auth; pre-summarize + pre-classify) ----
+    @PostMapping("/anchor/preprocess")
+    public ResponseEntity<Object> preprocessAnchor(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (anchorOrchestrator == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ANCHOR_DISABLED",
+                    "anchor orchestrator not configured");
+        }
+
+        Object anchorObj = body.get("anchor");
+        if (!(anchorObj instanceof Map)) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                    "missing or invalid 'anchor' field");
+        }
+        @SuppressWarnings("unchecked")
+        AnchorContext anchor = AnchorContext.fromMap((Map<String, Object>) anchorObj);
+        if (anchor == null) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                    "anchor must have non-empty 'name' and 'content'");
+        }
+
+        String question = body.get("question") instanceof String
+                ? (String) body.get("question") : "";
+
+        PreprocessResult result = anchorOrchestrator.preprocess(anchor, question);
+
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("preprocessId", result.getPreprocessId());
+        response.put("status", "started");
+        return ResponseEntity.ok(response);
+    }
+
+    /** Injects the AnchorOrchestrator (optional dependency, set by auto-config). */
+    public void setAnchorOrchestrator(AnchorOrchestrator anchorOrchestrator) {
+        this.anchorOrchestrator = anchorOrchestrator;
+    }
+
     // ---- GET /user-info (requires auth; returns auth status + authorization) ----
     @GetMapping("/user-info")
     public ResponseEntity<Object> getUserInfo() {
         UserInfo info = new UserInfo();
         // Surface the host app's active profiles so the web UI can inject environment context
         info.setActiveProfilesFromCsv(properties.getAppProfiles());
+        // Surface whether the issue-closure (问题闭环) feature is enabled so the UI can show/hide action buttons
+        info.setIssueClosureEnabled(issueClosureService != null);
         if (securityGateway == null) {
             info.setMessage("security not configured");
             return ResponseEntity.ok(info);
@@ -382,16 +438,56 @@ public class SnapAgentController {
 
         audit(currentUserId(), "GET", "/tools", "LIST_TOOLS", null);
 
-        Set<String> names = toolDispatcher.availableToolNames();
+        // ToolDispatcher.providers() returns ToolProvider instances with name() and schema()
         List<Map<String, Object>> toolList = new ArrayList<Map<String, Object>>();
-        for (String name : names) {
+        for (Object provider : toolDispatcher.providers()) {
+            cn.watsontech.snapagent.core.tool.ToolProvider tp =
+                    (cn.watsontech.snapagent.core.tool.ToolProvider) provider;
             Map<String, Object> tool = new LinkedHashMap<String, Object>();
-            tool.put("name", name);
+            tool.put("name", tp.name());
+            // Parse the JSON schema string to extract description + parameters
+            String schemaJson = tp.schema();
+            tool.put("schemaRaw", schemaJson);
+            parseToolSchemaIntoDto(tool, schemaJson);
             toolList.add(tool);
         }
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("tools", toolList);
+        result.put("autoDiscovery", true);
+        result.put("discoveryHint",
+                "Tool providers are auto-discovered as Spring @Component beans; " +
+                "implement ToolProvider and annotate with @Component to register a new tool.");
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Parses a JSON schema string (Anthropic tool format) and populates
+     * description/parameters fields on the DTO. Falls back gracefully on
+     * parse errors so a malformed schema doesn't break the listing.
+     */
+    private void parseToolSchemaIntoDto(Map<String, Object> dto, String schemaJson) {
+        if (schemaJson == null || schemaJson.isEmpty()) {
+            dto.put("description", "");
+            dto.put("parameters", new LinkedHashMap<String, Object>());
+            return;
+        }
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper =
+                    new com.fasterxml.jackson.databind.ObjectMapper();
+            com.fasterxml.jackson.databind.JsonNode node = mapper.readTree(schemaJson);
+            dto.put("description", node.path("description").asText(""));
+            com.fasterxml.jackson.databind.JsonNode inputSchema = node.path("input_schema");
+            if (inputSchema.isMissingNode() || inputSchema.isNull()) {
+                inputSchema = node.path("parameters");
+            }
+            dto.put("parameters", inputSchema.isMissingNode()
+                    ? new LinkedHashMap<String, Object>()
+                    : mapper.treeToValue(inputSchema, Map.class));
+        } catch (Exception e) {
+            log.warn("Failed to parse tool schema for {}: {}", dto.get("name"), e.getMessage());
+            dto.put("description", "");
+            dto.put("parameters", new LinkedHashMap<String, Object>());
+        }
     }
 
     // ---- GET /models ----
@@ -678,6 +774,15 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required");
         }
 
+        // Anchor Q&A routing: skillId="auto" with anchor context bypasses skill lookup
+        if ("auto".equals(skillId) && body.containsKey("anchor")) {
+            if (!properties.getAnchor().isEnabled() || anchorOrchestrator == null) {
+                return errorResponse(HttpStatus.CONFLICT, "ANCHOR_DISABLED",
+                        "anchor Q&A feature is not enabled");
+            }
+            return createAnchorRun(body, userId);
+        }
+
         SkillMeta skill = skillRegistry.get(skillId);
         if (skill == null) {
             return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "skill not found: " + skillId);
@@ -796,6 +901,118 @@ public class SnapAgentController {
         auditDetails.put("model", model);
         auditDetails.put("taskId", task.getTaskId());
         audit(userId, "POST", "/runs", "RUN_SKILL", auditDetails);
+
+        return ResponseEntity.accepted().body(result);
+    }
+
+    /**
+     * Handle {@code skillId="auto"} with anchor context — direct LLM Q&A
+     * with the anchor content as context. Bypasses skill registry and
+     * delegates to {@link AnchorOrchestrator#executeWithAnchor}.
+     */
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<Object> createAnchorRun(Map<String, Object> body, String userId) {
+        Object anchorObj = body.get("anchor");
+        if (!(anchorObj instanceof Map)) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "anchor must be an object");
+        }
+        Map<String, Object> anchorData = (Map<String, Object>) anchorObj;
+        String anchorName = (String) anchorData.get("name");
+        String anchorContent = (String) anchorData.get("content");
+        String pageUrl = (String) anchorData.get("pageUrl");
+        if (anchorName == null || anchorName.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "anchor.name is required");
+        }
+        if (anchorContent == null) {
+            anchorContent = "";
+        }
+
+        Map<String, String> inputs = extractInputs(body.get("inputs"));
+        String question = inputs != null ? inputs.get("message") : null;
+        if (question == null || question.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "inputs.message is required");
+        }
+
+        String model = (String) body.get("model");
+        if (model == null || model.isEmpty()) {
+            model = properties.getLlm().getModel();
+        }
+
+        if (!rateLimiter.tryAcquire(userId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", "30")
+                    .body(errorBody("RATE_LIMITED", "rate limit exceeded"));
+        }
+
+        AgentTask task = AgentTask.create(userId, "auto", inputs, model, null);
+        taskStore.save(task);
+
+        final AgentTask finalTask = task;
+        final String finalUserId = userId;
+        final AnchorContext anchorContext = new AnchorContext(anchorName, anchorContent, pageUrl);
+        final String preprocessId = (String) body.get("preprocessId");
+        final String finalQuestion = question;
+        try {
+            taskExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        finalTask.setStatus(TaskStatus.RUNNING);
+                        taskStore.update(finalTask);
+
+                        LlmEventSink sink = new LlmEventSink() {
+                            @Override
+                            public void onThought(String text) {
+                                if (text != null && !text.isEmpty()) {
+                                    finalTask.addTranscriptEvent(TranscriptEvent.thought(text));
+                                }
+                            }
+                            @Override
+                            public void onToolUse(String id, String name, Map<String, Object> input) { }
+                            @Override
+                            public void onToolResult(String toolUseId, String result) { }
+                            @Override
+                            public void onStop(String stopReason) { }
+                            @Override
+                            public void onError(String message) {
+                                finalTask.addTranscriptEvent(TranscriptEvent.error(message));
+                            }
+                        };
+
+                        anchorOrchestrator.executeWithAnchor(anchorContext, finalQuestion,
+                                preprocessId, sink);
+                        finalTask.setStatus(TaskStatus.SUCCEEDED);
+                        taskStore.update(finalTask);
+                    } catch (RuntimeException e) {
+                        log.error("Anchor execution failed for task {}: {}",
+                                finalTask.getTaskId(), e.getMessage());
+                        finalTask.addTranscriptEvent(TranscriptEvent.error(e.getMessage()));
+                        finalTask.setStatus(TaskStatus.FAILED);
+                        taskStore.update(finalTask);
+                    } finally {
+                        rateLimiter.release(finalUserId);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            rateLimiter.releaseRejected(userId);
+            task.setStatus(TaskStatus.FAILED);
+            taskStore.update(task);
+            log.error("Task executor rejected anchor task {}: {}", task.getTaskId(), e.getMessage());
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "EXECUTOR_REJECTED",
+                    "server busy, please retry later");
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("taskId", task.getTaskId());
+        result.put("status", task.getStatus().name());
+        result.put("streamUrl", properties.getBasePath() + "/runs/" + task.getTaskId() + "/stream");
+
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("skillId", "auto");
+        auditDetails.put("anchor", anchorName);
+        auditDetails.put("taskId", task.getTaskId());
+        audit(userId, "POST", "/runs", "RUN_ANCHOR_QA", auditDetails);
 
         return ResponseEntity.accepted().body(result);
     }
@@ -1253,7 +1470,8 @@ public class SnapAgentController {
                 } else {
                     ts = System.currentTimeMillis();
                 }
-                messages.add(new ConversationMessage(role, content, ts));
+                String msgTaskId = m.get("taskId") instanceof String ? (String) m.get("taskId") : null;
+                messages.add(new ConversationMessage(role, content, ts, msgTaskId));
             }
         }
 
@@ -1338,6 +1556,9 @@ public class SnapAgentController {
             m.put("role", msg.getRole());
             m.put("content", msg.getContent());
             m.put("timestamp", msg.getTimestamp());
+            if (msg.getTaskId() != null) {
+                m.put("taskId", msg.getTaskId());
+            }
             msgList.add(m);
         }
         result.put("messages", msgList);
@@ -1430,12 +1651,13 @@ public class SnapAgentController {
 
         String skillName = (String) body.get("skillName");
         String cron = (String) body.get("cron");
+        String alertKeywords = (String) body.get("alertKeywords");
         String userId = currentUserId();
         @SuppressWarnings("unchecked")
         Map<String, String> inputs = (Map<String, String>) body.get("inputs");
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
-        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs);
+        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
@@ -1640,6 +1862,140 @@ public class SnapAgentController {
         return ResponseEntity.ok(toIssueDto(issue));
     }
 
+    // ---- GET /issues/recent-runs (v0.9 issue closure — recent runs joined with issue status) ----
+    @GetMapping("/issues/recent-runs")
+    public ResponseEntity<Object> recentRunsWithIssues(@RequestParam(value = "limit", defaultValue = "20") int limit) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        String userId = currentUserId();
+        if (limit <= 0 || limit > 100) limit = 20;
+
+        // Fetch all tasks for this user (any status) — issue closure is not restricted to SUCCEEDED;
+        // TIMEOUT/FAILED/CANCELLED tasks may also have diagnostic content worth filing as issues.
+        List<AgentTask> allTasks = taskStore.query(userId, null, null, Math.max(limit * 2, limit), 0);
+        // Filter to terminal statuses only (exclude PENDING and RUNNING)
+        List<AgentTask> tasks = new ArrayList<AgentTask>();
+        for (AgentTask t : allTasks) {
+            TaskStatus s = t.getStatus();
+            if (s == TaskStatus.SUCCEEDED || s == TaskStatus.TIMEOUT
+                    || s == TaskStatus.FAILED || s == TaskStatus.CANCELLED) {
+                tasks.add(t);
+            }
+            if (tasks.size() >= limit) break;
+        }
+
+        // Build taskId → issue map from all issues
+        List<IssueClosure> allIssues = issueClosureService.listIssues();
+        Map<String, IssueClosure> issueByTaskId = new HashMap<String, IssueClosure>();
+        for (IssueClosure ic : allIssues) {
+            if (ic.getTaskId() != null) {
+                issueByTaskId.put(ic.getTaskId(), ic);
+            }
+        }
+
+        // Build combined DTOs from tasks
+        List<Map<String, Object>> runs = new ArrayList<Map<String, Object>>();
+        java.util.Set<String> seenTaskIds = new java.util.HashSet<String>();
+        for (AgentTask task : tasks) {
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("taskId", task.getTaskId());
+            dto.put("skillId", task.getSkillId());
+            dto.put("status", task.getStatus().name());
+            dto.put("done", task.getStatus() == TaskStatus.SUCCEEDED);
+            dto.put("createdAt", task.getCreatedAt());
+            seenTaskIds.add(task.getTaskId());
+
+            IssueClosure ic = issueByTaskId.get(task.getTaskId());
+            if (ic != null) {
+                dto.put("issue", toIssueDto(ic));
+            } else {
+                dto.put("issue", null);
+            }
+            runs.add(dto);
+        }
+
+        // Append orphan issues — issues whose tasks are no longer in the in-memory TaskStore
+        // (e.g. after app restart, the TaskStore is wiped but FileIssueStore persists).
+        // Sort orphans by updatedAt desc so the most recent appear first.
+        List<IssueClosure> orphanIssues = new ArrayList<IssueClosure>();
+        for (IssueClosure ic : allIssues) {
+            String tid = ic.getTaskId();
+            if (tid == null || seenTaskIds.contains(tid)) continue;
+            // Only include issues belonging to the current user. IssueClosure now
+            // carries userId (propagated from the original task), so we can filter.
+            if (ic.getUserId() != null && !ic.getUserId().equals(userId)) continue;
+            orphanIssues.add(ic);
+        }
+        orphanIssues.sort((a, b) -> Long.compare(b.getUpdatedAt(), a.getUpdatedAt()));
+        for (IssueClosure ic : orphanIssues) {
+            if (runs.size() >= limit) break;
+            Map<String, Object> dto = new LinkedHashMap<String, Object>();
+            dto.put("taskId", ic.getTaskId());
+            dto.put("skillId", null);
+            dto.put("status", "UNKNOWN");
+            dto.put("done", false);
+            dto.put("createdAt", ic.getCreatedAt());
+            dto.put("issue", toIssueDto(ic));
+            runs.add(dto);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("runs", runs);
+        result.put("total", runs.size());
+
+        audit(userId, "GET", "/issues/recent-runs", "LIST_RUNS_WITH_ISSUES", null);
+
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- GET /issues (v0.9 issue closure — list all) ----
+    @GetMapping("/issues")
+    public ResponseEntity<Object> listIssues(@RequestParam(required = false) String status) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/issues", "LIST_ISSUES", null);
+
+        List<IssueClosure> issues = issueClosureService.listIssues();
+        // Optional status filter
+        if (status != null && !status.isEmpty()) {
+            IssueStatus filterStatus = null;
+            try {
+                filterStatus = IssueStatus.valueOf(status.toUpperCase());
+            } catch (IllegalArgumentException ignored) {
+                return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_STATUS",
+                        "unknown status: " + status);
+            }
+            List<IssueClosure> filtered = new ArrayList<IssueClosure>();
+            for (IssueClosure i : issues) {
+                if (i.getStatus() == filterStatus) {
+                    filtered.add(i);
+                }
+            }
+            issues = filtered;
+        }
+
+        List<Map<String, Object>> dtoList = new ArrayList<Map<String, Object>>();
+        for (IssueClosure i : issues) {
+            dtoList.add(toIssueDto(i));
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("issues", dtoList);
+        result.put("total", dtoList.size());
+        return ResponseEntity.ok(result);
+    }
+
     // ---- GET /issues/{issueId} (v0.9 issue closure) ----
     @GetMapping("/issues/{issueId}")
     public ResponseEntity<Object> getIssue(@PathVariable String issueId) {
@@ -1800,6 +2156,69 @@ public class SnapAgentController {
 
         CostSummary summary = costSummaryService.getSkillSummary(skillName, from, to);
         return ResponseEntity.ok(toCostSummaryDto(summary));
+    }
+
+    // ---- GET /cost/records (v1.0 cost accounting — list individual records) ----
+    @GetMapping("/cost/records")
+    public ResponseEntity<Object> costRecords(
+            @RequestParam long from,
+            @RequestParam long to,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String skillName) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (costSummaryService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "COST_DISABLED",
+                    "cost accounting not enabled");
+        }
+
+        audit(currentUserId(), "GET", "/cost/records", "COST_RECORDS", null);
+
+        List<CostRecord> records;
+        if (userId != null && !userId.isEmpty()) {
+            records = costSummaryService.getStore().listByUser(userId, from, to);
+        } else if (skillName != null && !skillName.isEmpty()) {
+            records = costSummaryService.getStore().listBySkill(skillName, from, to);
+        } else {
+            records = costSummaryService.listRecords(from, to);
+        }
+
+        // Sort newest-first
+        List<CostRecord> sorted = new ArrayList<CostRecord>(records);
+        java.util.Collections.sort(sorted, new java.util.Comparator<CostRecord>() {
+            @Override
+            public int compare(CostRecord a, CostRecord b) {
+                return Long.compare(b.getTimestamp(), a.getTimestamp());
+            }
+        });
+
+        List<Map<String, Object>> dtoList = new ArrayList<Map<String, Object>>();
+        for (CostRecord r : sorted) {
+            dtoList.add(toCostRecordDto(r));
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("records", dtoList);
+        result.put("total", dtoList.size());
+        result.put("from", from);
+        result.put("to", to);
+        return ResponseEntity.ok(result);
+    }
+
+    /** Serializes a {@link CostRecord} to a DTO map. */
+    private Map<String, Object> toCostRecordDto(CostRecord r) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("id", r.getId());
+        dto.put("userId", r.getUserId());
+        dto.put("skillName", r.getSkillName());
+        dto.put("taskId", r.getTaskId());
+        dto.put("model", r.getModel());
+        dto.put("inputTokens", r.getInputTokens());
+        dto.put("outputTokens", r.getOutputTokens());
+        dto.put("cacheReadTokens", r.getCacheReadTokens());
+        dto.put("cost", r.getCost() != null ? r.getCost().toPlainString() : "0");
+        dto.put("timestamp", r.getTimestamp());
+        return dto;
     }
 
     // ---- GET /workflows (v1.0 workflow engine) ----
@@ -2141,6 +2560,7 @@ public class SnapAgentController {
         dto.put("externalIssueId", issue.getExternalIssueId());
         dto.put("taskId", issue.getTaskId());
         dto.put("conversationId", issue.getConversationId());
+        dto.put("userId", issue.getUserId());
         dto.put("userQuery", issue.getUserQuery());
         dto.put("rootCause", issue.getRootCause());
         dto.put("solution", solutionToDtoMap(issue.getSolution()));

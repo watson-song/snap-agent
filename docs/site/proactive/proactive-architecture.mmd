@@ -1,0 +1,59 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        Modal["Patrol / Alert Modal<br/>巡检任务管理 + 告警列表"]
+    end
+
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        Scheduler["PatrolScheduler<br/>cron 定时触发巡检 skill"]
+        Listener["AnomalyEventListener<br/>接收异常 → 触发自动诊断"]
+    end
+
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        Converger["AlertConverger<br/>滑动窗口去重 + 风暴防护"]
+        Predictor["TrendPredictor<br/>线性回归趋势预测"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        ReportStore[("PatrolReportStore<br/>环形缓冲区 500 条")]
+        AlertCache[("In-Memory Alerts<br/>告警去重缓存")]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        LLM["LLM Provider<br/>运行巡检 / 诊断 skill"]
+        Webhook["Webhook<br/>告警推送到外部系统"]
+        Prom["Prometheus<br/>健康检查指标来源"]
+    end
+
+    Modal --> Scheduler
+    Modal --> Converger
+    Scheduler --> ReportStore
+    Listener --> Converger
+    Converger --> AlertCache
+    Listener --> LLM
+    Scheduler --> LLM
+    Predictor --> Prom
+    Converger --> Webhook
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class Modal client
+    class Scheduler,Listener api
+    class Converger,Predictor service
+    class ReportStore,AlertCache storage
+    class LLM,Webhook,Prom external

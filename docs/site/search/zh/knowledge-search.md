@@ -1,6 +1,6 @@
 # SnapAgent 知识搜索算法设计
 
-> 版本：v1.0 | 更新日期：2026-07-17
+> 版本：v1.1 | 更新日期：2026-07-20
 
 ## 1. 架构概览
 
@@ -383,6 +383,35 @@ snap-agent:
     ]
 }
 ```
+
+### GET /knowledge/fragments（v1.1 新增）
+
+返回所有知识片段（无评分），用于前端"知识点"统计卡片的点击展开查看：
+
+```json
+{
+    "total": 5,
+    "fragments": [
+        {
+            "title": "系统概述",
+            "content": "SnapAgent 是嵌入式 LLM 诊断 Agent...",
+            "source": "business-overview.md:section-1",
+            "metadata": { "category": "SnapAgent 业务知识示例" }
+        },
+        ...
+    ]
+}
+```
+
+与 `/knowledge/search` 的差异：
+
+| 端点 | 用途 | 是否评分 | 入参 |
+|------|------|---------|------|
+| `GET /knowledge/search` | 按查询关键词检索 | 是（`score` 字段） | `q`（query） |
+| `GET /knowledge/fragments` | 列出所有片段供浏览 | 否 | 无 |
+
+底层实现：`KnowledgeBase.listAll()` 返回 `Collections.unmodifiableList(allFragments)`，
+保持片段加载顺序。
 
 ---
 

@@ -1,0 +1,57 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        Modal["Knowledge Modal<br/>知识库状态 + 搜索 + 上传"]
+    end
+
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        Controller["KnowledgeController<br/>状态 / 搜索 / 上传 / 重载"]
+    end
+
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        KB["KnowledgeBase<br/>管理所有源, 委托检索"]
+        Source["KnowledgeSource SPI<br/>知识源加载 classpath / FS"]
+        Searcher["KnowledgeSearcher<br/>中英文分词 + 关键词打分"]
+        Injector["KnowledgeInjector<br/>匹配片段注入 prompt"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        Markdown["Markdown Files<br/>知识源文件 classpath + FS"]
+        Cache[("In-Memory Cache<br/>启动时 loadAll 缓存")]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        Extensible["(可扩展)<br/>Confluence / 语雀 / 外部 API"]
+    end
+
+    Modal --> Controller
+    Controller --> KB
+    KB --> Source
+    KB --> Searcher
+    Source --> Markdown
+    Source --> Cache
+    KB --> Injector
+    Source -.->|"可扩展"| Extensible
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class Modal client
+    class Controller api
+    class KB,Source,Searcher,Injector service
+    class Markdown,Cache storage
+    class Extensible external

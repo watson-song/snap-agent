@@ -293,6 +293,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 | `enabled` | `false` | 定时巡检开关 |
 | `scheduler-pool-size` | `2` | 巡检调度线程池大小 |
 | `report-buffer-size` | `500` | 巡检报告环形缓冲大小 |
+| `lock-ttl-seconds` | `300` | 多 Pod 协调锁存活时间（秒，默认 5 分钟，v1.1 新增） |
 
 **告警收敛 (`snap-agent.alert.*`)**：
 
@@ -301,6 +302,16 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 | `enabled` | `false` | 告警收敛开关 |
 | `buffer-size` | `1000` | 告警缓冲大小 |
 | `auto-resolve-minutes` | `30` | 告警自动恢复分钟数 |
+| `push.email.enabled` | `false` | Email 推送开关（v1.1 新增） |
+| `push.email.from` | `snap-agent@local` | Email 发件人 |
+| `push.email.to` | `[]` | Email 收件人列表 |
+| `push.email.subject-prefix` | `[SnapAgent 告警]` | Email 主题前缀 |
+| `push.webhook.enabled` | `false` | Webhook 推送开关（v1.1 新增） |
+| `push.webhook.url` | _空_ | Webhook 推送 URL，非空时才装配 |
+| `push.webhook.auth-header` | `Authorization` | Webhook 认证头名称 |
+| `push.webhook.auth-token` | _空_ | Webhook 认证令牌 |
+| `push.webhook.connect-timeout-ms` | `5000` | Webhook 连接超时 |
+| `push.webhook.read-timeout-ms` | `10000` | Webhook 读超时 |
 
 ### 3.13 问题闭环配置 (`snap-agent.issue-closure.*`)
 
@@ -915,7 +926,127 @@ public class MyCustomLlmClient implements LlmClient {
 - [ ] **可观测端点**：如使用运营诊断，已配 `metrics.base-url` / `log-search.base-url` / `trace.base-url` 及认证头
 - [ ] **成本预算**：如使用成本核算，已设 `snap-agent.cost.budgets.*` 与 `pricing.*`
 - [ ] **主动监控**：如使用巡检/告警，已配 `snap-agent.patrol.*` / `snap-agent.alert.*`
+- [ ] **告警推送**：如使用异常报告推送，已配 `snap-agent.alert.push.email.*` 或 `snap-agent.alert.push.webhook.*`（v1.1 新增）
+- [ ] **多 Pod 协调锁**：多 Pod 部署时已实现自定义 `PatrolLockProvider` Bean（Redis / k8s lease / DB 行锁），见 §10（v1.1 新增）
+- [ ] **持久化存储**：如需持久化巡检报告/会话历史/Issue，已实现自定义 `PatrolReportStore` 等 SPI Bean（v1.1 新增）
 - [ ] **basePath 不冲突**：`snap-agent.base-path`（默认 `/snap-agent`）不与宿主已有路由冲突
 - [ ] **JDBC 驱动**：已在宿主引入对应数据库的 JDBC 驱动（如 `mysql-connector-java`）
 - [ ] **日志路径**：`snap-agent.logs.allowed-paths` 已配置允许读取的日志目录（或确认 `logging.file.name` 可被自动解析）
 - [ ] **冒烟测试**：启动后访问 `GET {base-path}/skills` 能返回技能列表，用示例技能跑通一次完整对话
+- [ ] **锚点问答**：如需页面区域锚点问答，已引入 `<script src="/snap-agent/anchor.js" defer>` 并在页面区域标注 `data-snap-anchor`（详见[锚点问答接入指南](anchor-feature-guide.md)）
+
+---
+
+## 10. 可替换 SPI 清单（v1.1 更新）
+
+SnapAgent 的所有核心组件均以 SPI 接口形式暴露，宿主可按需替换。所有自定义实现
++ `@Component`（或 `@Bean`）即可让 `@ConditionalOnMissingBean` 让位给自定义 bean。
+
+### 10.1 SPI 总览
+
+| SPI 接口 | 默认实现 | 装配条件 | 用途 |
+|---------|---------|---------|------|
+| `LlmClient` | `AnthropicLlmClient` | `snap-agent.llm.api-type=anthropic` | LLM 流式调用 |
+| `ToolProvider` | 多个内置 | `@Component` 即发现 | 工具实现 |
+| `SecurityGateway` | `SpringSecurityAdapter` | `@ConditionalOnMissingBean` | 权限校验 |
+| `PrincipalResolver` | `SpringPrincipalResolver` | `@ConditionalOnMissingBean` | 用户身份解析 |
+| `SystemPromptExtender` | `ProjectContextExtender` / `KnowledgeInjector` | `@ConditionalOnMissingBean` | system prompt 注入 |
+| `ConversationStore` | `FileConversationStore` | `@ConditionalOnMissingBean` | 会话历史持久化 |
+| `IssueStore` | `FileIssueStore` | `@ConditionalOnMissingBean` | Issue 持久化 |
+| `IssueTracker` | `NoopIssueTracker` | `@ConditionalOnMissingBean` | 外部 Issue 跟踪 |
+| `KnowledgeSource` | `MarkdownKnowledgeSource` | `@ConditionalOnMissingBean` | 知识源 |
+| `KnowledgeSearcher` | `SimpleKeywordSearcher` | `@ConditionalOnMissingBean` | 知识检索算法 |
+| `CostStore` | `FileCostStore` | `@ConditionalOnMissingBean` | 成本记录持久化 |
+| `CostTracker` | `DefaultCostTracker` | `@ConditionalOnMissingBean` | 成本追踪 |
+| `WorkflowEngine` | `SimpleWorkflowEngine` | `@ConditionalOnMissingBean` | 工作流引擎 |
+| `PatrolScheduler` | `ScheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | 巡检调度 |
+| `PatrolReportStore` | `InMemoryPatrolReportStore` | `snap-agent.patrol.enabled=true` | 巡检报告存储（v1.1 SPI） |
+| `PatrolLockProvider` | `NoopPatrolLockProvider` | `snap-agent.patrol.enabled=true` | 多 Pod 巡检锁（v1.1 新增） |
+| `AlertConverger` | `InMemoryAlertConverger` | `snap-agent.alert.enabled=true` | 告警收敛 |
+| `AnomalyEventListener` | `DefaultAnomalyEventListener` | `snap-agent.patrol.enabled=true` | 异常事件处理 |
+| `BugfixSuggester` | `TemplateBugfixSuggester` | `@ConditionalOnMissingBean` | 修复建议生成 |
+| `AlertPushChannel` | `WebhookAlertPushChannel` + `EmailAlertPushChannel` | `snap-agent.alert.push.*` | 异常报告推送（v1.1 新增，支持多 bean 同时生效） |
+
+### 10.2 PatrolLockProvider — 多 Pod 协调
+
+多 Pod 部署（如 K8s 多副本）时，同一巡检任务在每个 Pod 都会触发，会导致
+重复执行与重复告警。实现 `PatrolLockProvider` 即可解决：
+
+```java
+@Component
+public class RedisPatrolLockProvider implements PatrolLockProvider {
+    private final StringRedisTemplate redis;
+    private final String podName = System.getenv().getOrDefault("MY_POD_NAME", "pod-0");
+
+    @Override
+    public boolean tryAcquire(String patrolId, long ttlSeconds) {
+        String key = "patrol:lock:" + patrolId;
+        return Boolean.TRUE.equals(redis.opsForValue()
+                .setIfAbsent(key, podName, Duration.ofSeconds(ttlSeconds)));
+    }
+
+    @Override
+    public void release(String patrolId) {
+        // 用 Lua 脚本验证 owner 后再删，避免误释放他人锁
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                + "return redis.call('del', KEYS[1]) else return 0 end";
+        redis.execute(new DefaultRedisScript<>(script, Long.class),
+                Collections.singletonList("patrol:lock:" + patrolId), podName);
+    }
+
+    @Override
+    public String type() { return "redis"; }
+}
+```
+
+> TTL 默认 300 秒（`snap-agent.patrol.lock-ttl-seconds`），覆盖单次巡检最长耗时；
+> Pod 宕机时锁会在 TTL 后自动失效，其它 Pod 在下个 cron 周期接管。
+
+### 10.3 AlertPushChannel — 自定义推送渠道
+
+实现 `AlertPushChannel` + `@Component` 即可与默认的 Webhook/Email 渠道一同生效
+（所有 `AlertPushChannel` bean 被收集为 `List<AlertPushChannel>`，异常报告同时推送）：
+
+```java
+@Component
+public class DingTalkAlertPushChannel implements AlertPushChannel {
+    @Override
+    public void push(PatrolReport report, AnomalyEvent event) {
+        if (report == null || !report.isAnomalyDetected()) return;
+        // 构造钉钉 markdown 消息，POST 到 webhook URL
+    }
+    @Override
+    public String type() { return "dingtalk"; }
+}
+```
+
+### 10.4 PatrolReportStore — 持久化巡检报告
+
+默认 `InMemoryPatrolReportStore` 容量有限且重启丢失，生产环境可替换为 DB 实现：
+
+```java
+@Component
+public class JdbcPatrolReportStore implements PatrolReportStore {
+    private final JdbcTemplate jdbc;
+    // CREATE TABLE patrol_report (id VARCHAR PRIMARY KEY, patrol_id VARCHAR,
+    //   task_id VARCHAR, user_id VARCHAR, skill_name VARCHAR,
+    //   triggered_at BIGINT, status VARCHAR, summary TEXT,
+    //   anomaly_detected BOOLEAN)
+    // ...
+}
+```
+
+### 10.5 邮件推送的可选依赖
+
+`EmailAlertPushChannel` 依赖 `spring-context-support` + `javax.mail`，在 starter pom
+中标记为 `<optional>true</optional>`。启用方式：
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-mail</artifactId>
+</dependency>
+```
+
+引入后，配置 `snap-agent.alert.push.email.enabled=true` + `to[]=ops@example.com`
+即可启用邮件推送。未引入时 `@ConditionalOnClass` 自动跳过装配，宿主无感知。

@@ -53,7 +53,7 @@ class SimpleVerificationRunnerTest {
     private IssueClosure issueWithTaskId(String taskId) {
         return new IssueClosure(
                 "issue-verify", null, taskId,
-                null, "为什么订单服务超时?", "连接池打满",
+                null, "user1", "为什么订单服务超时?", "连接池打满",
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
@@ -70,28 +70,27 @@ class SimpleVerificationRunnerTest {
     // ---- failure cases ----
 
     @Test
-    void shouldReturnFailedResultWhenTaskIdIsNull() {
+    void shouldReturnNullWhenTaskIdIsNull() {
         IssueClosure issue = issueWithTaskId(null);
 
         VerificationResult result = runner.verify(issue);
 
-        assertThat(result).isNotNull();
-        assertThat(result.isPassed()).isFalse();
-        assertThat(result.getSummary()).contains("task not found");
-        assertThat(result.getBeforeStatus()).isNull();
-        assertThat(result.getAfterStatus()).isNull();
+        assertThat(result).isNull();
         verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
     }
 
     @Test
-    void shouldReturnFailedResultWhenTaskNotFoundInTaskStore() {
+    void shouldReturnNullWhenTaskNotFoundInTaskStore() {
         when(taskStore.get("task-missing")).thenReturn(null);
         IssueClosure issue = issueWithTaskId("task-missing");
 
         VerificationResult result = runner.verify(issue);
 
-        assertThat(result.isPassed()).isFalse();
-        assertThat(result.getSummary()).contains("task not found");
+        // Returns null so IssueClosureService can fall back to the verify-fix
+        // skill path (which uses issue data, not the lost task). This handles
+        // the orphan-issue scenario after an app restart: TaskStore is in-memory
+        // and gets wiped, but FileIssueStore persists issues to disk.
+        assertThat(result).isNull();
         verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
     }
 
