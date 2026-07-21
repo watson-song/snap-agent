@@ -79,6 +79,7 @@ SnapAgent uses a multi-module Maven structure. The core principle is **separatio
 | Implementation | `snap-agent-spring-boot-2x-starter` | Spring Boot auto-configuration + built-in implementations | `snap-agent-core`, Spring Web, javax.servlet, OkHttp, Spring Security (optional) |
 | SDK | `snap-agent-client` | REST API client SDK (no Spring dependency) | HttpURLConnection |
 | Demo | `snap-agent-demo` | Standalone Spring Boot demo app (E2E testing) | Spring Boot Starter Web + snap-agent-starter |
+| Anchor Demo | `snap-agent-anchor-demo` | Anchor Q&A feature demo app (Thymeleaf SKU pages) | Spring Boot Starter Web + snap-agent-starter |
 
 ### snap-agent-core
 
@@ -125,7 +126,9 @@ cn.watsontech.snapagent.boot2x/
 ├── cost/         FileCostStore, BudgetEnforcer, DefaultCostTracker, CostTrackingLlmClient, CostSummaryService, CostCalculator
 ├── workflow/     YamlWorkflowLoader, SimpleWorkflowEngine
 ├── conversation/ FileConversationStore
-├── patrol/       DefaultAnomalyEventListener, InMemoryAlertConverger, ScheduledPatrolScheduler, TemplateBugfixSuggester
+├── patrol/       DefaultAnomalyEventListener, InMemoryAlertConverger, ScheduledPatrolScheduler, TemplateBugfixSuggester,
+│                 InMemoryPatrolReportStore, NoopPatrolLockProvider, WebhookAlertPushChannel, EmailAlertPushChannel
+├── anchor/       AnchorOrchestrator, AnchorContext, AnchorContextSummarizer, AnchorSkillClassifier, AnchorSummaryCache
 └── routing/      PeerRouter, NoopPeerRouter, StaticPeerRouter, K8sApiPeerRouter, HeadlessDnsPeerRouter, PeerSseRelay
 ```
 
@@ -562,6 +565,9 @@ The main controller, mounted under `${snap-agent.base-path:/snap-agent}`, provid
 | `/alerts` | GET | Alert list |
 | `/alerts/{id}/resolve` | POST | Resolve alert |
 | `/runs/{id}/bugfix-suggestion` | POST | Bugfix suggestion |
+| `/anchor.js` | GET | Anchor Q&A client script (static asset) |
+| `/anchor/config` | GET | Anchor feature config (public) |
+| `/anchor/preprocess` | POST | Pre-summarize + pre-classify on anchor click |
 
 ### KnowledgeController
 
@@ -755,6 +761,7 @@ public class SnapAgentProperties {
     private Cost cost;          // Cost accounting (enabled, pricing, budgets)
     private Workflows workflows; // Workflows (enabled, dir)
     private Skill skill;        // Skill hot reload
+    private Anchor anchor;      // Anchor Q&A (enabled, disabled-paths, max-context-chars, preprocess)
 }
 ```
 
@@ -780,6 +787,7 @@ Each feature is independently controlled via `@ConditionalOnProperty`:
 | Cost Accounting | `snap-agent.cost` | false | `@ConditionalOnProperty` |
 | Workflows | `snap-agent.workflows` | false | `@ConditionalOnProperty` |
 | MCP Tools | `snap-agent.mcp` | false | `@ConditionalOnProperty` |
+| Anchor Q&A | `snap-agent.anchor` | true (matchIfMissing) | `@ConditionalOnProperty` |
 
 ### @ConditionalOnMissingBean Pattern
 
@@ -856,7 +864,7 @@ public AgentExecutor agentExecutor(
 | v0.8 | Code knowledge graph | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphToolProvider |
 | v0.9 | Issue closure loop | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
 | v1.0 | Plugins + workflows + cost | ToolPlugin, WorkflowEngine, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage() |
-| v1.1 | Proactive monitoring SPI | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost() |
+| v1.1 | Proactive monitoring SPI + Anchor Q&A | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (page-section anchor Q&A + smart skill routing + pre-summary cache) |
 
 ---
 

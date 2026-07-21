@@ -131,6 +131,16 @@ snap-agent:
         dir: classpath:/docs/knowledge/  # classpath: 前缀=JAR 内资源；否则文件系统路径
     max-fragments: 3           # 每次查询注入的最大知识片段数
     min-score: 0.1             # 最小相关度阈值 [0.0, 1.0]
+  anchor:                      # 页面区域锚点问答（v1.1），默认开
+    enabled: true                           # true=加载 anchor.js + 装配 AnchorOrchestrator
+    disabled-paths:                         # 黑名单路径（匹配的页面不扫描锚点）
+      - "/payment/**"
+    max-context-chars: 8000                 # 单次请求发送给 LLM 的最大字符数
+    preprocess-enabled: true                # 点击锚点时预摘要 + 预分类
+    summary-threshold-chars: 4000           # 短于此阈值的内容跳过摘要器
+    summary-cache-ttl-seconds: 600          # Caffeine LRU 缓存 TTL（秒）
+    classifier-model: ""                    # 空=用默认模型；填模型名可用便宜模型省成本
+    classifier-confidence-threshold: 0.5   # 低于此置信度回退到通用 LLM
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -158,6 +168,7 @@ snap-agent:
 | `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
 | `knowledge.*` | KnowledgeBase / MarkdownKnowledgeSource / SimpleKeywordSearcher / KnowledgeInjector | §12 |
+| `anchor.*` | AnchorOrchestrator / AnchorSkillClassifier / AnchorSummaryCache / anchor.js | §13 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
 | `security.filter-order` | SnapAgentFilter 注册 order | §4 |
@@ -554,3 +565,54 @@ public class ConfluenceKnowledgeSource implements KnowledgeSource {
 ```
 
 自定义 `KnowledgeSource` bean 会被 `KnowledgeBase` 自动收集。
+
+## 13. 页面区域锚点问答配置（v1.1）
+
+SnapAgent v1.1 新增页面区域锚点问答功能。宿主应用页面引入 `anchor.js` 脚本后，页面中标注 `data-snap-anchor` 的区域会显示 💬 图标，用户点击后右侧滑出抽屉，可在不离开当前页面的情况下针对该区域内容发起 LLM 问答。
+
+### 配置
+
+```yaml
+snap-agent:
+  anchor:
+    enabled: true                           # 默认 true；false 禁用 anchor.js + AnchorOrchestrator
+    disabled-paths:                         # 黑名单路径（匹配的页面不扫描锚点）
+      - "/payment/**"
+    max-context-chars: 8000                 # 单次请求发送给 LLM 的最大字符数
+    preprocess-enabled: true                # 点击锚点时预摘要 + 预分类
+    summary-threshold-chars: 4000           # 短于此阈值的内容跳过摘要器
+    summary-cache-ttl-seconds: 600          # Caffeine LRU 缓存 TTL（秒）
+    classifier-model: ""                    # 空=用默认模型；可用便宜模型省成本
+    classifier-confidence-threshold: 0.5   # 低于此置信度回退到通用 LLM
+```
+
+### 装配的 Bean
+
+当 `anchor.enabled=true`（默认）时装配：
+
+| Bean | 职责 |
+|------|------|
+| `AnchorOrchestrator` | 锚点问答主编排器：接收前端 preprocess 请求 → 提取锚点上下文 → 预摘要/预分类 → 调用 AgentExecutor 执行诊断 → 返回结果 |
+| `AnchorSkillClassifier` | 智能技能路由：根据锚点内容和用户问题，调用 LLM 分类最合适的 skill |
+| `AnchorContextSummarizer` | 预摘要器：对长内容生成摘要，减少 LLM token 消耗 |
+| `AnchorSummaryCache` | Caffeine LRU 缓存：相同锚点内容的摘要/分类结果缓存，避免重复 LLM 调用 |
+
+### 前端端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/anchor.js` | GET | 锚点问答客户端脚本（静态资源，Shadow DOM 隔离） |
+| `/anchor/config` | GET | 锚点功能配置（公开，返回 disabled-paths 等） |
+| `/anchor/preprocess` | POST | 锚点点击后预摘要 + 预分类（返回摘要 + 推荐 skill） |
+
+### 安全要求
+
+`anchor.js` 启动时会调 `GET /snap-agent/user-info` 检查授权。若宿主未提供 `SecurityGateway` 实现，接口返回 `authenticated: false`，`anchor.js` 静默不渲染任何图标。宿主必须提供 `SecurityGateway` bean（见 §3.5）。
+
+### 宿主接入
+
+1. 引入脚本：`<script src="/snap-agent/anchor.js" defer></script>`
+2. 标注锚点：`<section data-snap-anchor="SKU 详情" data-snap-skill="auto">...</section>`
+3. 提供 `SecurityGateway` bean（如已有则无需额外操作）
+
+详细接入指南见 [锚点问答接入指南](../site/integration/zh/anchor-feature-guide.md)。

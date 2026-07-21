@@ -1221,7 +1221,7 @@ Agent (内置 cost-analysis Skill):
 
 ## v1.1 — 主动监控 SPI 化（已交付）
 
-**目标**：将主动监控子系统的关键组件重构为 SPI，让宿主可按需替换实现；并新增多 Pod 巡检协调、异常报告推送渠道、知识点列表 API。
+**目标**：将主动监控子系统的关键组件重构为 SPI，让宿主可按需替换实现；并新增多 Pod 巡检协调、异常报告推送渠道、知识点列表 API、页面区域锚点问答。
 
 ### 已完成
 
@@ -1236,6 +1236,7 @@ Agent (内置 cost-analysis Skill):
 | ObservabilityHttpClient.httpPost() | 新增 POST 方法，供 `WebhookAlertPushChannel` 复用 |
 | FileConversationStore taskId 修复 | `toMap/fromMap` 漏掉 `taskId` 字段导致前端刷新后丢失问题闭环 badge，已修复 |
 | NoopMarkerBean 模式 | 当 optional 依赖（如 JavaMailSender）缺失时，返回 marker bean 而非 null，保持 Spring 兼容性 |
+| AnchorOrchestrator 锚点问答 | 页面区域锚点问答功能：宿主引入 `anchor.js` + `data-snap-anchor` 标注 → 用户点击 💬 图标 → 右侧抽屉打开 → 针对页面区域内容发起 LLM 问答；含智能技能路由 (AnchorSkillClassifier)、预摘要缓存 (AnchorSummaryCache)、Shadow DOM 隔离 |
 
 ### 配置
 
@@ -1255,6 +1256,16 @@ snap-agent:
         enabled: true
         url: https://hook.example.com/snap-agent
         auth-token: Bearer ${WEBHOOK_TOKEN}
+  anchor:                                  # v1.1: 页面区域锚点问答
+    enabled: true                           # 默认 true；false 禁用 anchor.js + AnchorOrchestrator
+    disabled-paths:                         # 黑名单路径（不扫描）
+      - "/payment/**"
+    max-context-chars: 8000                 # 单次请求发送给 LLM 的最大字符数
+    preprocess-enabled: true                # 点击时预摘要 + 预分类
+    summary-threshold-chars: 4000           # 短于此阈值的内容跳过摘要
+    summary-cache-ttl-seconds: 600          # Caffeine LRU 缓存 TTL
+    classifier-model: ""                    # 空用默认模型；可用便宜模型省成本
+    classifier-confidence-threshold: 0.5   # 低于此置信度回退到通用 LLM
 ```
 
 ### 测试

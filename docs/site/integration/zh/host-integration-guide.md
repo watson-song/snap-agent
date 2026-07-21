@@ -933,6 +933,7 @@ public class MyCustomLlmClient implements LlmClient {
 - [ ] **JDBC 驱动**：已在宿主引入对应数据库的 JDBC 驱动（如 `mysql-connector-java`）
 - [ ] **日志路径**：`snap-agent.logs.allowed-paths` 已配置允许读取的日志目录（或确认 `logging.file.name` 可被自动解析）
 - [ ] **冒烟测试**：启动后访问 `GET {base-path}/skills` 能返回技能列表，用示例技能跑通一次完整对话
+- [ ] **锚点问答**：如需页面区域锚点问答，已引入 `<script src="/snap-agent/anchor.js" defer>` 并在页面区域标注 `data-snap-anchor`（详见[锚点问答接入指南](anchor-feature-guide.md)）
 
 ---
 

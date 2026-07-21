@@ -934,6 +934,7 @@ Confirm each item before going to production:
 - [ ] **JDBC driver**: the host has the JDBC driver for its database (e.g., `mysql-connector-java`)
 - [ ] **Log paths**: `snap-agent.logs.allowed-paths` lists allowed log directories (or confirm `logging.file.name` is auto-resolvable)
 - [ ] **Smoke test**: after startup, `GET {base-path}/skills` returns the skill list, and a sample skill runs a full conversation end-to-end
+- [ ] **Anchor Q&A**: if using page-section anchor Q&A, added `<script src="/snap-agent/anchor.js" defer>` and annotated page regions with `data-snap-anchor` (see [Anchor Q&A Integration Guide](anchor-feature-guide.md))
 
 ---
 
