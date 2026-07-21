@@ -66,6 +66,7 @@ public class SnapAgentProperties {
     private Cost cost = new Cost();
     private Workflows workflows = new Workflows();
     private Skill skill = new Skill();
+    private Anchor anchor = new Anchor();
 
     // ---- getters / setters ----
 
@@ -275,6 +276,14 @@ public class SnapAgentProperties {
 
     public void setSkill(Skill skill) {
         this.skill = skill;
+    }
+
+    public Anchor getAnchor() {
+        return anchor;
+    }
+
+    public void setAnchor(Anchor anchor) {
+        this.anchor = anchor;
     }
 
     // ---- nested classes ----
@@ -1448,6 +1457,155 @@ public class SnapAgentProperties {
 
         public void setHotReload(boolean hotReload) {
             this.hotReload = hotReload;
+        }
+    }
+
+    /**
+     * Anchor Q&amp;A feature configuration (v0.4).
+     *
+     * <p>When {@code enabled=true} (default), the host page anchor script
+     * scans DOM regions marked with {@code data-snap-anchor} and injects
+     * anchor icons for in-context LLM Q&amp;A.</p>
+     */
+    public static class Anchor {
+        /** Master switch for the anchor feature. Default true. */
+        private boolean enabled = true;
+
+        /** Paths where anchor scanning is disabled (ant-style, e.g. {@code /payment/**}). */
+        private List<String> disabledPaths = new ArrayList<>();
+
+        /** Max chars of page-section content sent to LLM per request. */
+        private int maxContextChars = 8000;
+
+        /** Pre-summarize + pre-classify on anchor click to reduce first-token latency. */
+        private boolean preprocessEnabled = true;
+
+        /** Abort preprocess if user doesn't submit within this many milliseconds. */
+        private long preprocessTimeoutMs = 5000;
+
+        /** Skip summarizer for content shorter than this many chars. */
+        private int summaryThresholdChars = 4000;
+
+        /** TTL (seconds) for cached summaries in the Caffeine LRU cache. */
+        private int summaryCacheTtlSeconds = 600;
+
+        /** LLM model override for the classifier (empty = use default model). */
+        private String classifierModel = "";
+
+        /** Confidence below this falls back to general LLM. */
+        private double classifierConfidenceThreshold = 0.5;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * Returns the disabled-paths list. Never null — returns an empty
+         * list when the field is null to avoid NPEs in path-matching logic.
+         */
+        public List<String> getDisabledPaths() {
+            return disabledPaths == null ? new ArrayList<>() : disabledPaths;
+        }
+
+        public void setDisabledPaths(List<String> disabledPaths) {
+            this.disabledPaths = disabledPaths;
+        }
+
+        public int getMaxContextChars() {
+            return maxContextChars;
+        }
+
+        public void setMaxContextChars(int maxContextChars) {
+            this.maxContextChars = maxContextChars;
+        }
+
+        public boolean isPreprocessEnabled() {
+            return preprocessEnabled;
+        }
+
+        public void setPreprocessEnabled(boolean preprocessEnabled) {
+            this.preprocessEnabled = preprocessEnabled;
+        }
+
+        public long getPreprocessTimeoutMs() {
+            return preprocessTimeoutMs;
+        }
+
+        public void setPreprocessTimeoutMs(long preprocessTimeoutMs) {
+            this.preprocessTimeoutMs = preprocessTimeoutMs;
+        }
+
+        public int getSummaryThresholdChars() {
+            return summaryThresholdChars;
+        }
+
+        public void setSummaryThresholdChars(int summaryThresholdChars) {
+            this.summaryThresholdChars = summaryThresholdChars;
+        }
+
+        public int getSummaryCacheTtlSeconds() {
+            return summaryCacheTtlSeconds;
+        }
+
+        public void setSummaryCacheTtlSeconds(int summaryCacheTtlSeconds) {
+            this.summaryCacheTtlSeconds = summaryCacheTtlSeconds;
+        }
+
+        public String getClassifierModel() {
+            return classifierModel;
+        }
+
+        public void setClassifierModel(String classifierModel) {
+            this.classifierModel = classifierModel;
+        }
+
+        public double getClassifierConfidenceThreshold() {
+            return classifierConfidenceThreshold;
+        }
+
+        public void setClassifierConfidenceThreshold(double classifierConfidenceThreshold) {
+            this.classifierConfidenceThreshold = classifierConfidenceThreshold;
+        }
+
+        /**
+         * Checks if the given request path matches any disabled-path pattern.
+         *
+         * <p>Pattern matching rules:</p>
+         * <ul>
+         *   <li>Pattern ending with {@code /**}: matches if path equals or
+         *       starts with the prefix (e.g. {@code /payment/**} matches
+         *       {@code /payment} and {@code /payment/checkout})</li>
+         *   <li>Exact pattern: matches if path equals the pattern or starts
+         *       with {@code pattern + "/"} (prefix match for sub-paths)</li>
+         * </ul>
+         *
+         * @param path the request path (e.g. {@code /payment/checkout})
+         * @return true if the path should not have anchor scanning
+         */
+        public boolean isPathDisabled(String path) {
+            if (path == null || disabledPaths == null || disabledPaths.isEmpty()) {
+                return false;
+            }
+            for (String pattern : disabledPaths) {
+                if (pattern == null || pattern.isEmpty()) {
+                    continue;
+                }
+                if (pattern.endsWith("/**")) {
+                    String prefix = pattern.substring(0, pattern.length() - 3);
+                    if (path.equals(prefix) || path.startsWith(prefix + "/")) {
+                        return true;
+                    }
+                } else {
+                    if (path.equals(pattern) || path.startsWith(pattern + "/")) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
     }
 }

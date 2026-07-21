@@ -46,6 +46,10 @@ import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorContextSummarizer;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorSkillClassifier;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorSummaryCache;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
@@ -706,12 +710,25 @@ public class SnapAgentAutoConfiguration {
                 log.info("App active profiles resolved: {}", joined);
             }
         }
-        return new SnapAgentController(
+        SnapAgentController controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
                 costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore);
+
+        // Wire anchor orchestrator if anchor feature is enabled and LLM is available
+        if (properties.getAnchor().isEnabled() && llmClient != null) {
+            AnchorSummaryCache cache = new AnchorSummaryCache(properties.getAnchor());
+            AnchorContextSummarizer summarizer = new AnchorContextSummarizer(llmClient, properties.getAnchor());
+            AnchorSkillClassifier classifier = new AnchorSkillClassifier(llmClient, skillRegistry, properties.getAnchor());
+            AnchorOrchestrator orchestrator = new AnchorOrchestrator(llmClient, cache, summarizer,
+                    classifier, skillRegistry, properties.getAnchor());
+            controller.setAnchorOrchestrator(orchestrator);
+            log.info("AnchorOrchestrator wired (anchor feature enabled)");
+        }
+
+        return controller;
     }
 
     // ---- SnapAgentFilter ----
