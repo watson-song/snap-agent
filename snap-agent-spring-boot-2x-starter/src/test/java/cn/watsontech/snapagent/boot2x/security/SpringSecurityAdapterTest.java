@@ -96,6 +96,29 @@ class SpringSecurityAdapterTest {
         assertThat(adapter.currentUserId()).isEqualTo("u999");
     }
 
+    @Test
+    void shouldReturnNameFromAuthenticationWhenAvailable() {
+        Authentication auth = mock(Authentication.class);
+        when(auth.getName()).thenReturn("Alice Wang");
+        SecurityContextHolder.getContext().setAuthentication(auth);
+
+        assertThat(adapter.currentUserName()).isEqualTo("Alice Wang");
+    }
+
+    @Test
+    void shouldReturnNullForCurrentUserNameWhenNoAuthentication() {
+        assertThat(adapter.currentUserName()).isNull();
+    }
+
+    @Test
+    void shouldReturnNullWhenAuthGetNameReturnsEmptyString() {
+        Authentication auth = mock(Authentication.class);
+        when(auth.getName()).thenReturn("");
+        SecurityContextHolder.getContext().setAuthentication(auth);
+
+        assertThat(adapter.currentUserName()).isNull();
+    }
+
     private void setAuthentication(Object principal, Collection<? extends GrantedAuthority> authorities) {
         Authentication auth = mock(Authentication.class);
         when(auth.getPrincipal()).thenReturn(principal);

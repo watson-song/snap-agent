@@ -40,6 +40,16 @@ public class SpringSecurityAdapter implements SecurityGateway {
     }
 
     @Override
+    public String currentUserName() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) {
+            return null;
+        }
+        String name = auth.getName();
+        return (name != null && !name.isEmpty()) ? name : null;
+    }
+
+    @Override
     public boolean hasPermission(String code) {
         if (code == null || code.isEmpty()) {
             return true;
