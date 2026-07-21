@@ -591,6 +591,116 @@ snap-agent:
 
 ---
 
+## 9.5 锚点问答（Anchor Q&A）
+
+> v0.4 新增。让宿主应用页面任意区域支持"点击锚点图标 → 右侧抽屉即时问答"，无需切换到 SnapAgent 主 SPA。
+
+完整接入流程（包括 SecurityGateway 配置、SPA 兼容、移动端适配）见 [锚点问答接入指南](../integration/zh/anchor-feature-guide.md)。本节只关注"如何使用"。
+
+### 9.5.1 功能概述
+
+宿主页面引入 `<script src="/snap-agent/anchor.js" defer></script>` 后，脚本会自动扫描 `<main>` 区域内的 `data-snap-anchor` 标注，在每个区域右上角注入锚点图标（紫色圆形💬，28×28）。用户点击图标后，右侧滑出抽屉，可针对该区域内容发起 LLM 问答。
+
+```
+┌─ 宿主页面 ────────────────────┐    ┌─ 右侧抽屉（圆角） ──────┐
+│ <section data-snap-anchor=    │    │ 💬 商品概览         ✕    │
+│   "商品概览" data-snap-skill= │    │ ## 商品概览 / ... ← 摘要 │
+│   "auto">                     │ →  │ ⚡ 智能路由 (Auto)      │
+│   ...表格内容...               │    │ 用户：这个分类有多少？  │
+│ </section>                    │    │ AI：根据表格...          │
+└───────────────────────────────┘    └─────────────────────────┘
+```
+
+### 9.5.2 用户交互
+
+1. 用户访问宿主页面，`anchor.js` 自动加载并扫描锚点
+2. 用户点击锚点图标 → 右侧抽屉滑出（Shadow DOM 隔离，右侧两角圆角）
+3. **标题栏**显示锚点名称 + 内容摘要 subtitle（前 80 字符单行摘要）
+4. **技能信息条**显示当前使用的技能：
+   - `data-snap-skill="auto"` → 显示"智能路由 (Auto)"
+   - 指定技能名 → 调 `GET /skills` 拉取技能 displayName + description
+5. 后台并行启动预摘要 + 预分类（`POST /anchor/preprocess`）
+6. 用户输入问题，点击发送
+7. `POST /runs` 发起运行（`skillId: "auto"` + `anchor` 字段）
+8. SSE 流式返回 token 到抽屉，回答实时呈现
+
+### 9.5.3 标注锚点
+
+在 HTML 中加 `data-snap-anchor` 属性：
+
+```html
+<section data-snap-anchor="商品概览" data-snap-skill="auto">
+  <h2>商品概览</h2>
+  <table>
+    <tr><th>分类</th><th>SKU 数</th></tr>
+    <tr><td>烘焙类</td><td>3</td></tr>
+  </table>
+</section>
+```
+
+| 属性 | 必填 | 值 |
+|------|------|-----|
+| `data-snap-anchor` | 是 | 锚点名称（显示在抽屉标题栏） |
+| `data-snap-skill` | 否 | `auto`（默认，智能路由）/ `<skill-name>`（指定技能）/ `off`（仅展示不问答） |
+
+页面未标注时，脚本自动扫描 `<section>` 和带 `id` 的 `<h2>` / `<h3>` 作为降级锚点。
+
+### 9.5.4 REST API 调用
+
+锚点问答通过扩展 `POST /snap-agent/runs` 实现，请求体新增 `anchor` 字段，`skillId` 设为 `"auto"`：
+
+```bash
+curl -u alice:secret -X POST http://localhost:8080/snap-agent/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "skillId": "auto",
+    "inputs": {"message": "这个分类有多少个 SKU？"},
+    "anchor": {
+      "name": "商品概览",
+      "content": "## 商品概览\n\n| 分类 | SKU 数 |\n|---|---|\n| 烘焙类 | 3 |",
+      "truncated": false,
+      "originalLength": 0,
+      "pageUrl": "/skus"
+    },
+    "preprocessId": "550e8400-e29b-41d4-a716-446655440000"
+  }'
+```
+
+响应（202 Accepted）：
+
+```json
+{
+  "taskId": "sa_1784556364221_60c600a7a559",
+  "status": "PENDING",
+  "streamUrl": "/snap-agent/runs/sa_1784556364221_60c600a7a559/stream"
+}
+```
+
+后续用 `GET /snap-agent/runs/{taskId}/stream` 订阅 SSE 流，事件格式与普通 Skill 运行完全一致（见 [§3.3 流式输出生命周期](#33-流式输出生命周期)）。审计日志记录为 `action=RUN_ANCHOR_QA`。
+
+完整 API 端点列表见 [§10 REST API 参考](#10-rest-api-参考)。
+
+### 9.5.5 相关端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/snap-agent/anchor.js` | 静态资源：锚点脚本（公开） |
+| `GET` | `/snap-agent/anchor/config` | 返回 `{enabled, disabledPaths}` 给客户端（公开） |
+| `POST` | `/snap-agent/anchor/preprocess` | 点击锚点时预摘要 + 预分类（需认证） |
+| `POST` | `/snap-agent/runs` | 扩展：`skillId="auto"` + `anchor` 字段触发锚点问答（需认证） |
+
+### 9.5.6 常见使用场景
+
+| 场景 | HTML 写法 |
+|------|-----------|
+| 文档站点：任意章节自动问答 | 无需标注，`anchor.js` 自动扫描 `<section>` / `<h2[id]>` |
+| 业务列表页：某区块问答 | `<section data-snap-anchor="商品概览">` |
+| 运维仪表盘：异常指标问答 | `<div data-snap-anchor="QPS 异常" data-snap-skill="patrol">` |
+| 表单：字段帮助 | `<div data-snap-anchor="订单号字段" data-snap-skill="off">` |
+| SKU 详情：基本信息问答 | `<section data-snap-anchor="基本信息" data-snap-skill="auto">` |
+
+---
+
 ## 10. REST API 参考
 
 所有端点挂载在 `${snap-agent.base-path:/snap-agent}` 下。除 `GET /auth-config` 公开外，其余端点要求宿主安全框架已认证用户，并通过 `SecurityGateway.hasPermission(required-permission)` 权限校验。
@@ -645,6 +755,9 @@ snap-agent:
 | 43 | `GET` | `/patrol/reports/{id}` | 巡检报告详情 |
 | 44 | `GET` | `/alerts` | 活跃告警列表 |
 | 45 | `POST` | `/alerts/{id}/resolve` | 解决告警 |
+| 46 | `GET` | `/anchor.js` | 锚点脚本静态资源（公开，无需认证） |
+| 47 | `GET` | `/anchor/config` | 锚点功能配置（公开）：`{enabled, disabledPaths}` |
+| 48 | `POST` | `/anchor/preprocess` | 锚点预摘要 + 预分类（需认证，返回 `preprocessId`） |
 
 ### 10.2 端到端示例：用 curl 跑一次 health-check
 
@@ -697,7 +810,7 @@ curl -N -u alice:secret \
 | 403 | `FORBIDDEN` | 无 `required-permission` 权限 |
 | 404 | `SKILL_NOT_FOUND` / `TASK_NOT_FOUND` / `CONVERSATION_NOT_FOUND` / `ISSUE_NOT_FOUND` / `WORKFLOW_NOT_FOUND` | 资源不存在 |
 | 400 | `INVALID_INPUT` / `INVALID_STATUS` / `MODEL_NOT_ALLOWED` | 入参错误 |
-| 409 | `SKILL_UNAVAILABLE` | Skill 依赖的 Tool 未装配 |
+| 409 | `SKILL_UNAVAILABLE` / `ANCHOR_DISABLED` | Skill 依赖的 Tool 未装配 / 锚点功能未启用（`skillId="auto"` + `anchor` 字段但 `snap-agent.anchor.enabled=false`） |
 | 429 | `RATE_LIMITED` | 限流（`Retry-After: 30`） |
 | 503 | `*_DISABLED` | 对应子系统未启用（conversation / cost / workflow / issue-closure / audit） |
 
@@ -707,6 +820,7 @@ curl -N -u alice:secret \
 
 - [系统架构总览](../architecture/zh/system-architecture.md)
 - [宿主集成指南](../integration/zh/host-integration-guide.md)
+- [锚点问答接入指南](../integration/zh/anchor-feature-guide.md)
 - [知识搜索算法](../search/zh/knowledge-search.md)
 - [工具插件架构](../plugins/zh/tool-plugin-architecture.md)
 - [工作流引擎架构](../workflow/zh/workflow-engine-architecture.md)

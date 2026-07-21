@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>SKU 商品列表 — SnapAgent Anchor Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; color: #1e293b; }
+        .header { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; padding: 24px 40px; }
+        .header h1 { font-size: 22px; font-weight: 600; }
+        .header .subtitle { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+        .stats-bar { display: flex; gap: 32px; padding: 16px 40px; background: white; border-bottom: 1px solid #e2e8f0; }
+        .stat { display: flex; flex-direction: column; }
+        .stat .num { font-size: 24px; font-weight: 700; color: #4f46e5; }
+        .stat .label { font-size: 12px; color: #64748b; margin-top: 2px; }
+        .search-bar { padding: 16px 40px; background: white; border-bottom: 1px solid #e2e8f0; }
+        .search-bar input { padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; width: 300px; }
+        .search-bar button { padding: 8px 20px; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; margin-left: 8px; }
+        .search-bar button:hover { background: #4f46e5; }
+        main { padding: 24px 40px; max-width: 1200px; margin: 0 auto; }
+        .section-card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 24px; overflow: hidden; border: 1px solid #e2e8f0; }
+        .section-card h2 { padding: 16px 20px; font-size: 16px; font-weight: 600; color: #1e293b; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 10px 16px; font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+        tr:hover td { background: #f8fafc; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+        .tag-active { background: #d1fae5; color: #065f46; }
+        .tag-inactive { background: #fee2e2; color: #991b1b; }
+        .tag-clearance { background: #fef3c7; color: #92400e; }
+        .tag-other { background: #e0e7ff; color: #3730a3; }
+        .footer { text-align: center; padding: 20px; color: #94a3b8; font-size: 12px; }
+        .empty { text-align: center; padding: 40px; color: #94a3b8; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>SKU 商品列表</h1>
+    <div class="subtitle">SnapAgent Anchor Q&A Demo — 点击区块右侧的 💬 图标向 AI 提问</div>
+</div>
+
+<div class="stats-bar">
+    <div class="stat">
+        <span class="num" th:text="${totalCount}">—</span>
+        <span class="label">SKU 总数</span>
+    </div>
+    <div class="stat">
+        <span class="num" th:text="${brandCount}">—</span>
+        <span class="label">品牌数</span>
+    </div>
+    <div class="stat">
+        <span class="num" th:text="${displayedCount}">—</span>
+        <span class="label">当前显示</span>
+    </div>
+</div>
+
+<div class="search-bar">
+    <form method="get" action="/">
+        <input type="text" name="q" th:value="${keyword}" placeholder="搜索 SKU 编码或名称..."/>
+        <button type="submit">搜索</button>
+        <a href="/" style="margin-left:8px;font-size:14px;color:#6366f1;text-decoration:none;">重置</a>
+    </form>
+</div>
+
+<main>
+    <!-- Overview section with anchor -->
+    <section class="section-card" data-snap-anchor="商品概览" data-snap-skill="auto">
+        <h2>商品概览</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>一级分类</th>
+                    <th>SKU 数量</th>
+                    <th>品牌数</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="entry : ${grouped}">
+                    <td th:text="${entry.key}">分类名</td>
+                    <td th:text="${entry.value.size()}">0</td>
+                    <td th:text="${entry.value.![brand_code].stream().distinct().count()}">0</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Each category section with anchor -->
+    <section class="section-card" th:each="entry : ${grouped}"
+             th:attr="data-snap-anchor=${entry.key}, data-snap-skill='auto'">
+        <h2 th:text="${entry.key} + ' — SKU 详情'">分类</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>SKU 编码</th>
+                    <th>商品名称</th>
+                    <th>品牌</th>
+                    <th>二级分类</th>
+                    <th>生命周期</th>
+                    <th>销售状态</th>
+                    <th>箱规</th>
+                    <th>重量(g)</th>
+                    <th>价格</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr th:each="sku : ${entry.value}">
+                    <td>
+                        <a th:href="@{'/sku/detail?code=' + ${sku.sku_code}}" th:text="${sku.sku_code}" style="color:#6366f1;text-decoration:none;">SKU001</a>
+                    </td>
+                    <td th:text="${sku.sku_name}">商品名称</td>
+                    <td th:text="${sku.brand_name != null ? sku.brand_name : '—'}">品牌</td>
+                    <td th:text="${sku.lv2_clssf_name}">二级分类</td>
+                    <td>
+                        <span class="tag" th:classappend="${sku.lifetime == '在售' ? 'tag-active' : (sku.lifetime == '下市' ? 'tag-inactive' : (sku.lifetime == '清库' ? 'tag-clearance' : 'tag-other'))}" th:text="${sku.lifetime}">状态</span>
+                    </td>
+                    <td>
+                        <span class="tag tag-other" th:text="${sku.sale_status != null ? sku.sale_status : '—'}">销售状态</span>
+                    </td>
+                    <td th:text="${sku.box_spec}">1</td>
+                    <td th:text="${sku.weight}">0</td>
+                    <td th:text="${sku.price != null ? '¥' + sku.price : '—'}">¥0.00</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <div class="empty" th:if="${skus.isEmpty()}">
+        没有找到匹配的 SKU 数据
+    </div>
+</main>
+
+<div class="footer">
+    SnapAgent Anchor Demo — Powered by SnapAgent v0.4
+</div>
+
+<!-- SnapAgent Anchor Q&A Script -->
+<script src="/snap-agent/anchor.js" defer></script>
+
+</body>
+</html>

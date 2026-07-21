@@ -1,6 +1,9 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorContext;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
+import cn.watsontech.snapagent.boot2x.anchor.PreprocessResult;
 import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
@@ -25,6 +28,7 @@ import cn.watsontech.snapagent.core.issue.SolutionOption;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.llm.LlmEventSink;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
@@ -120,6 +124,7 @@ public class SnapAgentController {
     private final WorkflowEngine workflowEngine;
     private final ToolPluginRegistry toolPluginRegistry;
     private final AuditStore auditStore;
+    private AnchorOrchestrator anchorOrchestrator;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -328,6 +333,54 @@ public class SnapAgentController {
         config.put("authCookie", properties.getSecurity().getAuthTokenCookie());
         config.put("authLocalStorageKey", properties.getSecurity().getAuthTokenLocalStorageKey());
         return ResponseEntity.ok(config);
+    }
+
+    // ---- GET /anchor/config (public, returns anchor feature config) ----
+    @GetMapping("/anchor/config")
+    public ResponseEntity<Object> getAnchorConfig() {
+        Map<String, Object> config = new LinkedHashMap<String, Object>();
+        config.put("enabled", properties.getAnchor().isEnabled());
+        config.put("disabledPaths", properties.getAnchor().getDisabledPaths());
+        return ResponseEntity.ok(config);
+    }
+
+    // ---- POST /anchor/preprocess (requires auth; pre-summarize + pre-classify) ----
+    @PostMapping("/anchor/preprocess")
+    public ResponseEntity<Object> preprocessAnchor(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (anchorOrchestrator == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ANCHOR_DISABLED",
+                    "anchor orchestrator not configured");
+        }
+
+        Object anchorObj = body.get("anchor");
+        if (!(anchorObj instanceof Map)) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                    "missing or invalid 'anchor' field");
+        }
+        @SuppressWarnings("unchecked")
+        AnchorContext anchor = AnchorContext.fromMap((Map<String, Object>) anchorObj);
+        if (anchor == null) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "BAD_REQUEST",
+                    "anchor must have non-empty 'name' and 'content'");
+        }
+
+        String question = body.get("question") instanceof String
+                ? (String) body.get("question") : "";
+
+        PreprocessResult result = anchorOrchestrator.preprocess(anchor, question);
+
+        Map<String, Object> response = new LinkedHashMap<String, Object>();
+        response.put("preprocessId", result.getPreprocessId());
+        response.put("status", "started");
+        return ResponseEntity.ok(response);
+    }
+
+    /** Injects the AnchorOrchestrator (optional dependency, set by auto-config). */
+    public void setAnchorOrchestrator(AnchorOrchestrator anchorOrchestrator) {
+        this.anchorOrchestrator = anchorOrchestrator;
     }
 
     // ---- GET /user-info (requires auth; returns auth status + authorization) ----
@@ -720,6 +773,15 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required");
         }
 
+        // Anchor Q&A routing: skillId="auto" with anchor context bypasses skill lookup
+        if ("auto".equals(skillId) && body.containsKey("anchor")) {
+            if (!properties.getAnchor().isEnabled() || anchorOrchestrator == null) {
+                return errorResponse(HttpStatus.CONFLICT, "ANCHOR_DISABLED",
+                        "anchor Q&A feature is not enabled");
+            }
+            return createAnchorRun(body, userId);
+        }
+
         SkillMeta skill = skillRegistry.get(skillId);
         if (skill == null) {
             return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND", "skill not found: " + skillId);
@@ -838,6 +900,118 @@ public class SnapAgentController {
         auditDetails.put("model", model);
         auditDetails.put("taskId", task.getTaskId());
         audit(userId, "POST", "/runs", "RUN_SKILL", auditDetails);
+
+        return ResponseEntity.accepted().body(result);
+    }
+
+    /**
+     * Handle {@code skillId="auto"} with anchor context — direct LLM Q&A
+     * with the anchor content as context. Bypasses skill registry and
+     * delegates to {@link AnchorOrchestrator#executeWithAnchor}.
+     */
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<Object> createAnchorRun(Map<String, Object> body, String userId) {
+        Object anchorObj = body.get("anchor");
+        if (!(anchorObj instanceof Map)) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "anchor must be an object");
+        }
+        Map<String, Object> anchorData = (Map<String, Object>) anchorObj;
+        String anchorName = (String) anchorData.get("name");
+        String anchorContent = (String) anchorData.get("content");
+        String pageUrl = (String) anchorData.get("pageUrl");
+        if (anchorName == null || anchorName.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "anchor.name is required");
+        }
+        if (anchorContent == null) {
+            anchorContent = "";
+        }
+
+        Map<String, String> inputs = extractInputs(body.get("inputs"));
+        String question = inputs != null ? inputs.get("message") : null;
+        if (question == null || question.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "inputs.message is required");
+        }
+
+        String model = (String) body.get("model");
+        if (model == null || model.isEmpty()) {
+            model = properties.getLlm().getModel();
+        }
+
+        if (!rateLimiter.tryAcquire(userId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .header("Retry-After", "30")
+                    .body(errorBody("RATE_LIMITED", "rate limit exceeded"));
+        }
+
+        AgentTask task = AgentTask.create(userId, "auto", inputs, model, null);
+        taskStore.save(task);
+
+        final AgentTask finalTask = task;
+        final String finalUserId = userId;
+        final AnchorContext anchorContext = new AnchorContext(anchorName, anchorContent, pageUrl);
+        final String preprocessId = (String) body.get("preprocessId");
+        final String finalQuestion = question;
+        try {
+            taskExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        finalTask.setStatus(TaskStatus.RUNNING);
+                        taskStore.update(finalTask);
+
+                        LlmEventSink sink = new LlmEventSink() {
+                            @Override
+                            public void onThought(String text) {
+                                if (text != null && !text.isEmpty()) {
+                                    finalTask.addTranscriptEvent(TranscriptEvent.thought(text));
+                                }
+                            }
+                            @Override
+                            public void onToolUse(String id, String name, Map<String, Object> input) { }
+                            @Override
+                            public void onToolResult(String toolUseId, String result) { }
+                            @Override
+                            public void onStop(String stopReason) { }
+                            @Override
+                            public void onError(String message) {
+                                finalTask.addTranscriptEvent(TranscriptEvent.error(message));
+                            }
+                        };
+
+                        anchorOrchestrator.executeWithAnchor(anchorContext, finalQuestion,
+                                preprocessId, sink);
+                        finalTask.setStatus(TaskStatus.SUCCEEDED);
+                        taskStore.update(finalTask);
+                    } catch (RuntimeException e) {
+                        log.error("Anchor execution failed for task {}: {}",
+                                finalTask.getTaskId(), e.getMessage());
+                        finalTask.addTranscriptEvent(TranscriptEvent.error(e.getMessage()));
+                        finalTask.setStatus(TaskStatus.FAILED);
+                        taskStore.update(finalTask);
+                    } finally {
+                        rateLimiter.release(finalUserId);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            rateLimiter.releaseRejected(userId);
+            task.setStatus(TaskStatus.FAILED);
+            taskStore.update(task);
+            log.error("Task executor rejected anchor task {}: {}", task.getTaskId(), e.getMessage());
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "EXECUTOR_REJECTED",
+                    "server busy, please retry later");
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("taskId", task.getTaskId());
+        result.put("status", task.getStatus().name());
+        result.put("streamUrl", properties.getBasePath() + "/runs/" + task.getTaskId() + "/stream");
+
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("skillId", "auto");
+        auditDetails.put("anchor", anchorName);
+        auditDetails.put("taskId", task.getTaskId());
+        audit(userId, "POST", "/runs", "RUN_ANCHOR_QA", auditDetails);
 
         return ResponseEntity.accepted().body(result);
     }
