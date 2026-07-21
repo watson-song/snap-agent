@@ -465,6 +465,29 @@ public class HostSecurityGateway extends SpringSecurityAdapter {
 > `currentUserId()` 继承自 `SpringSecurityAdapter`，通过 `PrincipalResolver` 解析，无需重写。
 > 详细说明见 [07](07-config-security.md) §3.5。
 
+### 5b.1 覆盖 `currentUserName()` 取真实显示名
+
+默认 `SpringSecurityAdapter.currentUserName()` 调 `auth.getName()`,对大多数 Spring Security 宿主已够用。若你的 principal 是自定义对象且 `auth.getName()` 返回值不理想(如返回 userId 而非姓名),可覆盖:
+
+```java
+@Component
+public class HostSecurityGateway extends SpringSecurityAdapter {
+
+    public HostSecurityGateway(PrincipalResolver principalResolver) {
+        super(principalResolver);
+    }
+
+    @Override
+    public String currentUserName() {
+        LoginUser loginUser = (LoginUser) SecurityContextHolder.getContext()
+                .getAuthentication().getPrincipal();
+        return loginUser.getRealName();  // 或 getNickname()/getDisplayName()
+    }
+}
+```
+
+`@ConditionalOnMissingBean` 生效,宿主 bean 替换默认实现。`currentUserId()` 继承父类逻辑,无需重写。
+
 ## 故障排查
 
 | 现象 | 排查 |

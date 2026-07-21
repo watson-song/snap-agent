@@ -168,17 +168,21 @@ if (!securityGateway.hasPermission(props.getSecurity().getRequiredPermission()))
 }
 ```
 
+**`currentUserName()`** — 返回当前用户的显示名(真实姓名/昵称),用于前端右上角显示。SPI 默认实现返回 `null`,controller 会 fallback 到 userId,所以**自定义 SecurityGateway bean 且不覆盖该方法时显示与改造前一致**。`SpringSecurityAdapter` 覆盖该方法调用 `Authentication#getName()`(`UserDetails` 走 `getUsername()`、`AuthenticatedPrincipal`/`Principal` 走 `getName()`、否则 `toString()`)。**行为变更**: 使用默认 `SpringSecurityAdapter` 且不替换 bean 的宿主,`info.username` 会从"等于 userId"变为"`auth.getName()`" — 这是修 bug(字段名叫 username 却塞 userId 是错的)。如需保留旧行为,覆盖 `currentUserName()` 返回 `currentUserId()` 即可显式 opt-out。`ShiroAdapter` 不覆盖(Shiro 没有等价概念,宿主可自行覆盖 bean)。**注意**: `currentUserId()` 仍用于任务归属、审计、Cost 归属、限流,不要用 displayName 替代 userId。
+
 ## 3. 双 Adapter（Phase 1 都做 — 决策 #5）
 
 ### 3.1 SpringSecurityAdapter
 - 装配条件：`@ConditionalOnClass(SecurityContextHolder.class)` 且 `security.framework` ∈ `{auto, spring-security}`。
 - `currentUserId()`：`SecurityContextHolder.getContext().getAuthentication()` → 若为 null 抛 401；否则 `principalResolver.resolve(auth.getPrincipal())`。
 - `hasPermission(code)`：`code` 空 → true；否则遍历 `auth.getAuthorities()`，**精确匹配** `authority.getAuthority().equals(code)`。
+- `currentUserName()` 覆盖为调 `auth.getName()`,空串/null 时返回 null 让 controller fallback。
 
 ### 3.2 ShiroAdapter
 - 装配条件：`@ConditionalOnClass(SecurityUtils.class)` 且 `security.framework` ∈ `{auto, shiro}`。
 - `currentUserId()`：`SecurityUtils.getSubject().getPrincipal()` → principalResolver 解析。
 - `hasPermission(code)`：`code` 空 → true；否则 `SecurityUtils.getSubject().isPermitted(code)`（Shiro 走 **wildcard** 匹配，如 `skills:*` 命中 `skills:run`）。
+- `currentUserName()` 不覆盖,默认返回 null,controller fallback 到 userId。需要真实姓名时由宿主覆盖 bean。
 
 ### 3.3 auto 模式选择
 - `framework=auto`（默认）：按 classpath 优先级选。两者都在 → 默认 Spring Security（可 yml 强制 shiro）。两者都不在 → SecurityGateway 不装配 → 所有 skill UNAVAILABLE（理由：缺安全框架），starter 不崩。
