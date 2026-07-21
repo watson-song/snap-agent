@@ -105,10 +105,25 @@ snap-agent:
     enabled: false          # 主动监控巡检子系统（v0.5），默认关
     scheduler-pool-size: 2  # 定时巡检线程池大小
     report-buffer-size: 500 # 内存中保留的最大巡检报告数
+    lock-ttl-seconds: 300   # 多 Pod 协调锁存活时间（秒，v1.1 新增，默认 5 分钟）
   alert:
     enabled: false            # 告警收敛子系统（v0.5），默认关
     buffer-size: 1000         # 内存中保留的最大告警数
     auto-resolve-minutes: 30  # 无更新的告警自动 resolve 的分钟数
+    push:                     # 异常报告推送（v1.1 新增）
+      email:
+        enabled: false              # Email 推送开关
+        from: snap-agent@example.com # 发件人
+        to:                          # 收件人列表
+          - ops@example.com
+        subject-prefix: "[SnapAgent 告警]"
+      webhook:
+        enabled: false              # Webhook 推送开关
+        url: https://hook.example.com/snap-agent  # 推送 URL
+        auth-header: Authorization   # 认证头名称
+        auth-token: ""               # 认证令牌（支持 ${ENV}）
+        connect-timeout-ms: 5000
+        read-timeout-ms: 10000
   knowledge:                   # 嵌入式业务知识库（v0.7），默认关
     enabled: false
     sources:                   # 知识源列表
@@ -116,6 +131,16 @@ snap-agent:
         dir: classpath:/docs/knowledge/  # classpath: 前缀=JAR 内资源；否则文件系统路径
     max-fragments: 3           # 每次查询注入的最大知识片段数
     min-score: 0.1             # 最小相关度阈值 [0.0, 1.0]
+  anchor:                      # 页面区域锚点问答（v1.1），默认开
+    enabled: true                           # true=加载 anchor.js + 装配 AnchorOrchestrator
+    disabled-paths:                         # 黑名单路径（匹配的页面不扫描锚点）
+      - "/payment/**"
+    max-context-chars: 8000                 # 单次请求发送给 LLM 的最大字符数
+    preprocess-enabled: true                # 点击锚点时预摘要 + 预分类
+    summary-threshold-chars: 4000           # 短于此阈值的内容跳过摘要器
+    summary-cache-ttl-seconds: 600          # Caffeine LRU 缓存 TTL（秒）
+    classifier-model: ""                    # 空=用默认模型；填模型名可用便宜模型省成本
+    classifier-confidence-threshold: 0.5   # 低于此置信度回退到通用 LLM
 ```
 
 ### 配置字段落点矩阵（验证项 #1 文档自检）
@@ -143,6 +168,7 @@ snap-agent:
 | `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
 | `knowledge.*` | KnowledgeBase / MarkdownKnowledgeSource / SimpleKeywordSearcher / KnowledgeInjector | §12 |
+| `anchor.*` | AnchorOrchestrator / AnchorSkillClassifier / AnchorSummaryCache / anchor.js | §13 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
 | `security.filter-order` | SnapAgentFilter 注册 order | §4 |
@@ -369,26 +395,62 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 - 已登录无权限：`hasPermission` false → 403。
 - principal 解析失败：resolver 返回 null → 401 + WARN 日志提示配 `principal-resolver-class`。
 
-## 10. 主动监控 — 巡检配置（v0.5）
+## 10. 主动监控 — 巡检配置（v0.5，v1.1 更新）
 
 SnapAgent v0.5 引入主动健康巡检调度，按 cron 定时执行诊断 Skill，发现异常自动生成报告。
+v1.1 新增：多 Pod 协调锁、异常报告推送渠道、PatrolReportStore SPI 化。
 
 ```yaml
 snap-agent:
   patrol:
-    enabled: false          # 巡检子系统总开关
-    scheduler-pool-size: 2  # 定时巡检线程池大小
-    report-buffer-size: 500 # 内存中保留的最大巡检报告数（ring buffer）
+    enabled: false             # 巡检子系统总开关
+    scheduler-pool-size: 2     # 定时巡检线程池大小
+    report-buffer-size: 500    # 内存中保留的最大巡检报告数（ring buffer）
+    lock-ttl-seconds: 300      # 多 Pod 协调锁 TTL（v1.1 新增，秒）
+  alert:
+    enabled: false             # 告警收敛开关
+    buffer-size: 1000
+    auto-resolve-minutes: 30
+    push:                      # 异常报告推送（v1.1 新增）
+      email:
+        enabled: false
+        from: snap-agent@example.com
+        to: [ops@example.com]
+        subject-prefix: "[SnapAgent 告警]"
+      webhook:
+        enabled: false
+        url: https://hook.example.com/snap-agent
+        auth-header: Authorization
+        auth-token: ""
+        connect-timeout-ms: 5000
+        read-timeout-ms: 10000
 ```
 
-当 `enabled=true` 时，自动装配以下 Bean：
+当 `patrol.enabled=true` 时，自动装配以下 Bean：
 
 | Bean | 职责 |
 |------|------|
-| `PatrolReportStore` | 内存 ring buffer，存储巡检报告，支持按用户分页查询 |
+| `PatrolReportStore` (SPI) | 默认 `InMemoryPatrolReportStore` 内存 ring buffer；宿主可替换为 DB 实现（v1.1 SPI 化） |
+| `PatrolLockProvider` (SPI) | 默认 `NoopPatrolLockProvider` 单 Pod 直接放行；多 Pod 部署时宿主可替换为 Redis/k8s lease/DB 行锁（v1.1 新增） |
 | `ThreadPoolTaskScheduler` | Spring 调度器，驱动 cron 触发的巡检任务 |
-| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务的生命周期（创建/取消/列表/报告查询） |
-| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill |
+| `ScheduledPatrolScheduler` | 实现 `PatrolScheduler` SPI，管理巡检任务生命周期（v1.1 注入 lockProvider + pushChannels） |
+| `DefaultAnomalyEventListener` | 实现 `AnomalyEventListener` SPI，接收异常事件并自动触发诊断 Skill（v1.1 注入 pushChannels） |
+
+当 `alert.push.email.enabled=true` 且 classpath 含 `JavaMailSender` 时装配：
+
+| Bean | 职责 |
+|------|------|
+| `EmailAlertPushChannel` | 通过 Spring `JavaMailSender` 发送异常报告邮件（需 `spring-boot-starter-mail` 可选依赖，v1.1 新增） |
+
+当 `alert.push.webhook.enabled=true` 且 `url` 非空时装配：
+
+| Bean | 职责 |
+|------|------|
+| `WebhookAlertPushChannel` | 通过 JDK `HttpURLConnection` POST JSON 到 webhook URL（无外部依赖，v1.1 新增） |
+
+> 巡检执行时若 `detectAnomaly()` 判定为异常（状态 FAILED/TIMEOUT 或报告摘要含
+> "critical"/"warning"/"error"/"异常"/"错误"/"失败" 等关键词），所有
+> `AlertPushChannel` bean 会同时收到推送，单 channel 失败不影响其它。
 
 ### 巡检 API
 
@@ -507,3 +569,54 @@ public class ConfluenceKnowledgeSource implements KnowledgeSource {
 ```
 
 自定义 `KnowledgeSource` bean 会被 `KnowledgeBase` 自动收集。
+
+## 13. 页面区域锚点问答配置（v1.1）
+
+SnapAgent v1.1 新增页面区域锚点问答功能。宿主应用页面引入 `anchor.js` 脚本后，页面中标注 `data-snap-anchor` 的区域会显示 💬 图标，用户点击后右侧滑出抽屉，可在不离开当前页面的情况下针对该区域内容发起 LLM 问答。
+
+### 配置
+
+```yaml
+snap-agent:
+  anchor:
+    enabled: true                           # 默认 true；false 禁用 anchor.js + AnchorOrchestrator
+    disabled-paths:                         # 黑名单路径（匹配的页面不扫描锚点）
+      - "/payment/**"
+    max-context-chars: 8000                 # 单次请求发送给 LLM 的最大字符数
+    preprocess-enabled: true                # 点击锚点时预摘要 + 预分类
+    summary-threshold-chars: 4000           # 短于此阈值的内容跳过摘要器
+    summary-cache-ttl-seconds: 600          # Caffeine LRU 缓存 TTL（秒）
+    classifier-model: ""                    # 空=用默认模型；可用便宜模型省成本
+    classifier-confidence-threshold: 0.5   # 低于此置信度回退到通用 LLM
+```
+
+### 装配的 Bean
+
+当 `anchor.enabled=true`（默认）时装配：
+
+| Bean | 职责 |
+|------|------|
+| `AnchorOrchestrator` | 锚点问答主编排器：接收前端 preprocess 请求 → 提取锚点上下文 → 预摘要/预分类 → 调用 AgentExecutor 执行诊断 → 返回结果 |
+| `AnchorSkillClassifier` | 智能技能路由：根据锚点内容和用户问题，调用 LLM 分类最合适的 skill |
+| `AnchorContextSummarizer` | 预摘要器：对长内容生成摘要，减少 LLM token 消耗 |
+| `AnchorSummaryCache` | Caffeine LRU 缓存：相同锚点内容的摘要/分类结果缓存，避免重复 LLM 调用 |
+
+### 前端端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/anchor.js` | GET | 锚点问答客户端脚本（静态资源，Shadow DOM 隔离） |
+| `/anchor/config` | GET | 锚点功能配置（公开，返回 disabled-paths 等） |
+| `/anchor/preprocess` | POST | 锚点点击后预摘要 + 预分类（返回摘要 + 推荐 skill） |
+
+### 安全要求
+
+`anchor.js` 启动时会调 `GET /snap-agent/user-info` 检查授权。若宿主未提供 `SecurityGateway` 实现，接口返回 `authenticated: false`，`anchor.js` 静默不渲染任何图标。宿主必须提供 `SecurityGateway` bean（见 §3.5）。
+
+### 宿主接入
+
+1. 引入脚本：`<script src="/snap-agent/anchor.js" defer></script>`
+2. 标注锚点：`<section data-snap-anchor="SKU 详情" data-snap-skill="auto">...</section>`
+3. 提供 `SecurityGateway` bean（如已有则无需额外操作）
+
+详细接入指南见 [锚点问答接入指南](../site/integration/zh/anchor-feature-guide.md)。

@@ -12,6 +12,7 @@ let skillsData = [];                 // cached skill objects (for restore / icon
 let skillChatState = {};
 // Host app active profiles (resolved from /user-info) — injected as environment context
 let currentProfiles = [];
+let issueClosureEnabled = false; // populated from /user-info; controls visibility of per-message 建议方案/创建 Issue buttons
 
 // ===== Auth config: read token source from server =====
 let authConfig = { authHeader: '', authCookie: '', authLocalStorageKey: '' };
@@ -81,6 +82,10 @@ async function checkUserStatus() {
         if (Array.isArray(info.activeProfiles) && info.activeProfiles.length > 0) {
             currentProfiles = info.activeProfiles;
         }
+        // Capture issue-closure feature flag for per-message action button visibility
+        if (typeof info.issueClosureEnabled === 'boolean') {
+            issueClosureEnabled = info.issueClosureEnabled;
+        }
         return true;
     } catch (e) {
         showAuthPrompt('网络错误', '无法连接服务器，请检查网络后重试');
@@ -132,10 +137,57 @@ function getSkillState(skillName) {
             conversationId: null,
             transcript: [],
             conversationMessages: [],
-            stream: null
+            stream: null,
+            // Per-task issue closure state: { taskId: { solutionProposed, issueId, issueStatus } }
+            taskIssueStates: {}
         };
     }
     return skillChatState[skillName];
+}
+
+function getTaskIssueState(skillName, taskId) {
+    if (!taskId) return null;
+    const state = getSkillState(skillName);
+    if (!state.taskIssueStates[taskId]) {
+        state.taskIssueStates[taskId] = { solutionProposed: false, issueId: null, issueStatus: null };
+    }
+    return state.taskIssueStates[taskId];
+}
+
+// Fetch issue states from the backend so per-message badges survive page refresh.
+// Matches issues to transcript entries by taskId and populates taskIssueStates.
+async function fetchIssueStatesForSkill(skillName) {
+    if (!issueClosureEnabled) return;
+    const state = getSkillState(skillName);
+    const taskIds = new Set();
+    (state.transcript || []).forEach(function(t) { if (t.taskId) taskIds.add(t.taskId); });
+    if (taskIds.size === 0) return;
+    try {
+        const resp = await fetch(BASE + '/issues', { headers: authHeaders() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const issues = data.issues || [];
+        let changed = false;
+        issues.forEach(function(ic) {
+            const tid = ic.taskId;
+            if (!tid || !taskIds.has(tid)) return;
+            const issueState = getTaskIssueState(skillName, tid);
+            if (ic.status === 'SOLUTION_PROPOSED' || ic.status === 'FIX_IN_PROGRESS'
+                || ic.status === 'VERIFIED' || ic.status === 'CLOSED') {
+                issueState.solutionProposed = true;
+            }
+            if (ic.issueId) {
+                issueState.issueId = ic.issueId;
+                issueState.issueStatus = ic.status;
+            }
+            changed = true;
+        });
+        if (changed && activeSkillName === skillName) {
+            renderTranscript(skillName);
+        }
+    } catch (e) {
+        console.error('[Issues] fetchIssueStatesForSkill failed:', e);
+    }
 }
 
 function formatTime(ts) {
@@ -419,14 +471,18 @@ async function selectSkill(skill, li) {
             const transcript = (conv.messages || []).map(m => ({
                 type: roleToType(m.role),
                 content: m.content,
-                timestamp: m.timestamp || Date.now()
+                timestamp: m.timestamp || Date.now(),
+                taskId: m.taskId || null
             }));
             skillChatState[skillName] = {
                 conversationId: conv.conversationId,
                 transcript: transcript,
                 conversationMessages: transcriptToLlmHistory(transcript),
-                stream: null
+                stream: null,
+                taskIssueStates: {}
             };
+            // Fetch issue states so per-message badges show on restored conversations
+            fetchIssueStatesForSkill(skillName);
         } else {
             getSkillState(skillName);
         }
@@ -554,7 +610,7 @@ function renderTranscript(skillName) {
         chatWelcome.style.display = 'flex';
     }
     state.transcript.forEach((entry, idx) => {
-        const el = renderMessageEl(entry);
+        const el = renderMessageEl(entry, skillName);
         chatMessages.appendChild(el);
         if (entry.streaming && state.stream) {
             state.stream.thoughtIdx = idx;
@@ -571,7 +627,7 @@ function renderTranscript(skillName) {
 }
 
 // ===== Build a single message DOM element from a transcript entry =====
-function renderMessageEl(entry) {
+function renderMessageEl(entry, skillName) {
     const el = document.createElement('div');
     el.className = `msg msg-${entry.type}`;
     const labelMap = {
@@ -620,7 +676,125 @@ function renderMessageEl(entry) {
     if (entry.streaming) {
         el.classList.add('stream-cursor');
     }
+    // Append per-message action buttons for finalized responses tied to a task
+    if (entry.type === 'response' && entry.taskId && !entry.streaming) {
+        appendMessageActions(el, entry, skillName || entry.skillName);
+    }
     return el;
+}
+
+// ===== Decide whether a response has substantive diagnostic content (for "创建 Issue" visibility) =====
+function responseHasDiagnosticContent(entry, transcript, idx) {
+    if (!entry || entry.type !== 'response') return false;
+    const content = (entry.content || '').toLowerCase();
+    const text = entry.content || '';
+
+    // Heuristic 1: response mentions root cause / solution / problem keywords
+    const diagnosticKeywords = [
+        '根因', '原因', '问题', '建议', '方案', '修复', '解决', '异常', '错误', '风险', '排查', '诊断',
+        'root cause', 'issue', 'fix', 'solution', 'error', 'exception', 'failure', 'recommendation'
+    ];
+    const contentLower = content.toLowerCase();
+    if (diagnosticKeywords.some(k => contentLower.indexOf(k) >= 0)) return true;
+
+    // Heuristic 2: response is non-trivial (>= 120 chars) AND there were tool calls since the preceding user message
+    if (text.length >= 120) {
+        // Walk backwards from idx-1 to find the last user message; check for tool_call entries in between
+        for (let i = idx - 1; i >= 0; i--) {
+            const prev = transcript[i];
+            if (!prev) break;
+            if (prev.type === 'tool-call' || prev.type === 'tool-result') return true;
+            if (prev.type === 'user') break;
+        }
+    }
+
+    // Heuristic 3: the preceding user message contains problem-report keywords
+    for (let i = idx - 1; i >= 0; i--) {
+        const prev = transcript[i];
+        if (!prev) break;
+        if (prev.type === 'user') {
+            const q = (prev.content || '').toLowerCase();
+            const problemKeywords = [
+                '错误', '异常', '失败', '报错', '不行', '不工作', '没生效', '无效', '慢', '挂了', '卡', '不对',
+                '为什么', '怎么办', '排查', '诊断', '帮忙', '看看', '查下', '查一下',
+                'error', 'exception', 'failed', 'broken', 'slow', 'down', 'why', 'help', 'investigate'
+            ];
+            return problemKeywords.some(k => q.indexOf(k) >= 0);
+        }
+        // Don't cross tool calls — only look at the nearest preceding user message
+        if (prev.type === 'response' || prev.type === 'thought') continue;
+    }
+    return false;
+}
+
+// ===== Append per-message action buttons (复制 / 建议方案 / 创建 Issue) =====
+function appendMessageActions(msgEl, entry, skillName) {
+    const taskId = entry.taskId;
+    if (!taskId) return;
+    const sn = skillName || entry.skillName || activeSkillName;
+    if (!sn) return;
+    const state = getSkillState(sn);
+    const issueState = getTaskIssueState(sn, taskId);
+
+    // If issue already created, show a status badge instead of buttons
+    const existing = msgEl.querySelector('.msg-actions');
+    if (existing) existing.remove();
+
+    const actionsEl = document.createElement('div');
+    actionsEl.className = 'msg-actions';
+
+    // 📋 复制 — always available
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'msg-action-btn';
+    copyBtn.type = 'button';
+    copyBtn.textContent = '📋 复制';
+    copyBtn.setAttribute('data-action', 'copy');
+    copyBtn.setAttribute('data-task-id', taskId);
+    copyBtn.title = '复制本条消息内容';
+    actionsEl.appendChild(copyBtn);
+
+    // 💡 建议方案 — visible if issue-closure enabled and solution not yet proposed
+    // (issueClosureEnabled flag is set globally from /user-info; default true if unknown)
+    if (issueClosureEnabled !== false && !issueState.solutionProposed && !issueState.issueId) {
+        const solBtn = document.createElement('button');
+        solBtn.className = 'msg-action-btn';
+        solBtn.type = 'button';
+        solBtn.textContent = '💡 建议方案';
+        solBtn.setAttribute('data-action', 'propose-solution');
+        solBtn.setAttribute('data-task-id', taskId);
+        solBtn.setAttribute('data-skill-name', sn);
+        solBtn.title = '基于本次诊断生成修复方案';
+        actionsEl.appendChild(solBtn);
+    } else if (issueState.solutionProposed && !issueState.issueId) {
+        const badge = document.createElement('span');
+        badge.className = 'msg-action-badge success';
+        badge.textContent = '✓ 方案已生成';
+        actionsEl.appendChild(badge);
+    }
+
+    // 🐛 创建 Issue — visible only if diagnostic content present and issue not yet created
+    const transcript = state.transcript;
+    const idx = transcript.indexOf(entry);
+    const hasContent = idx >= 0 && responseHasDiagnosticContent(entry, transcript, idx);
+    if (issueClosureEnabled !== false && hasContent && !issueState.issueId) {
+        const issBtn = document.createElement('button');
+        issBtn.className = 'msg-action-btn';
+        issBtn.type = 'button';
+        issBtn.textContent = '🐛 创建 Issue';
+        issBtn.setAttribute('data-action', 'create-issue');
+        issBtn.setAttribute('data-task-id', taskId);
+        issBtn.setAttribute('data-skill-name', sn);
+        issBtn.title = '基于本次诊断创建外部 Issue';
+        actionsEl.appendChild(issBtn);
+    } else if (issueState.issueId) {
+        const badge = document.createElement('span');
+        badge.className = 'msg-action-badge success';
+        badge.textContent = '✓ Issue ' + (issueState.issueStatus ? '(' + issueState.issueStatus + ')' : '');
+        badge.title = issueState.issueId;
+        actionsEl.appendChild(badge);
+    }
+
+    msgEl.appendChild(actionsEl);
 }
 
 // ===== Append a transcript entry; render to live DOM only if the skill is active =====
@@ -629,7 +803,7 @@ function appendTranscript(skillName, entry) {
     state.transcript.push(entry);
     if (activeSkillName === skillName) {
         hideRobotWorking();
-        document.getElementById('chatMessages').appendChild(renderMessageEl(entry));
+        document.getElementById('chatMessages').appendChild(renderMessageEl(entry, skillName));
         // Re-show working indicator if the stream is still running after a tool call/result
         const st = skillChatState[skillName];
         if (st.stream && !st.stream.done && !st.stream.cancelled) {
@@ -647,6 +821,11 @@ function finalizeStreamingThought(streamState, toType) {
     if (entry) {
         entry.streaming = false;
         entry.type = toType; // 'thought' or 'response'
+        // Stamp taskId on the final response so per-message action buttons can target it
+        if (toType === 'response' && streamState.taskId) {
+            entry.taskId = streamState.taskId;
+            entry.skillName = streamState.capturedSkillName;
+        }
     }
     // Update the live DOM element if the skill is currently visible
     if (activeSkillName === streamState.capturedSkillName && streamState.thoughtEl) {
@@ -662,6 +841,10 @@ function finalizeStreamingThought(streamState, toType) {
             } catch (err) {
                 contentEl.textContent = streamState.thoughtText;
             }
+        }
+        // If finalized as response with taskId, append per-message action buttons
+        if (toType === 'response' && streamState.taskId) {
+            appendMessageActions(el, entry, streamState.capturedSkillName);
         }
     }
     streamState.thoughtIdx = null;
@@ -956,6 +1139,10 @@ function subscribeStream(taskId, skillName) {
                 completionContent = `— ${status} —`;
             }
             appendTranscript(skillName, { type: completionType, content: completionContent, timestamp: Date.now() });
+            // Save last task info for chat action bar
+            state.lastTaskId = streamState.taskId;
+            state.lastTaskStatus = status;
+            state.lastTaskIssueId = null;
             // Save assistant content to conversation history
             if (streamState.allText) {
                 const msgs = state.conversationMessages;
@@ -970,7 +1157,11 @@ function subscribeStream(taskId, skillName) {
             try { es.close(); } catch (err) {}
             state.stream = null;
             setSkillRunning(skillName, false);
-            if (activeSkillName === skillName) updateSendButtonState();
+            if (activeSkillName === skillName) {
+                updateSendButtonState();
+                // Per-message action buttons are already appended by finalizeStreamingThought above
+                // when the streaming thought is converted to a final 'response' entry.
+            }
         }
     });
 
@@ -1122,7 +1313,8 @@ async function saveConversationToBackend(skillName) {
                 messages: state.transcript.map(t => ({
                     role: t.type,
                     content: t.content,
-                    timestamp: t.timestamp || Date.now()
+                    timestamp: t.timestamp || Date.now(),
+                    taskId: t.taskId || null
                 }))
             })
         });
@@ -1180,7 +1372,8 @@ async function loadConversationById(conversationId) {
             messages: (data.messages || []).map(m => ({
                 role: m.role,
                 content: m.content,
-                timestamp: m.timestamp
+                timestamp: m.timestamp,
+                taskId: m.taskId || null
             }))
         };
     } catch (e) {
@@ -1293,16 +1486,20 @@ async function restoreConversation(conversationId, skillId) {
     const transcript = (conv.messages || []).map(m => ({
         type: roleToType(m.role),
         content: m.content,
-        timestamp: m.timestamp || Date.now()
+        timestamp: m.timestamp || Date.now(),
+        taskId: m.taskId || null
     }));
     skillChatState[skillId] = {
         conversationId: conv.conversationId,
         transcript: transcript,
         conversationMessages: transcriptToLlmHistory(transcript),
-        stream: null
+        stream: null,
+        taskIssueStates: {}
     };
     const skillLi = document.querySelector(`.skill-list li[data-skill-id="${CSS.escape(skillId)}"]`);
     selectSkill(skill, skillLi);
+    // Fetch issue states so per-message badges show on restored conversations
+    fetchIssueStatesForSkill(skillId);
     toast('会话已加载', 'success');
 }
 
@@ -1345,7 +1542,7 @@ async function deleteConversationById(conversationId) {
             toast('已删除', 'success');
             for (const skillName in skillChatState) {
                 if (skillChatState[skillName].conversationId === conversationId) {
-                    skillChatState[skillName] = { conversationId: null, transcript: [], conversationMessages: [], stream: null };
+                    skillChatState[skillName] = { conversationId: null, transcript: [], conversationMessages: [], stream: null, taskIssueStates: {} };
                     if (selectedSkill && selectedSkill.name === skillName) {
                         renderTranscript(skillName);
                     }
@@ -1416,6 +1613,143 @@ msgInput.addEventListener('input', () => {
 document.getElementById('inputForm').addEventListener('input', updateSendButtonState);
 document.getElementById('inputForm').addEventListener('change', updateSendButtonState);
 
+// ===== Per-message action buttons (复制 / 建议方案 / 创建 Issue) =====
+// Delegated click handler on the chat area — handles dynamically rendered buttons.
+document.getElementById('chatMessages').addEventListener('click', async function(ev) {
+    var btn = ev.target.closest('[data-action]');
+    if (!btn || btn.disabled) return;
+    var action = btn.getAttribute('data-action');
+    var taskId = btn.getAttribute('data-task-id');
+    var skillName = btn.getAttribute('data-skill-name') || activeSkillName;
+    if (!taskId || !skillName) return;
+
+    if (action === 'copy') {
+        // Copy the content of this specific message
+        var msgEl = btn.closest('.msg');
+        var contentEl = msgEl ? msgEl.querySelector('.msg-content') : null;
+        var text = contentEl ? (contentEl.innerText || contentEl.textContent || '') : '';
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            var orig = btn.textContent;
+            btn.textContent = '✓ 已复制';
+            btn.classList.add('success');
+            setTimeout(function() { btn.textContent = orig; btn.classList.remove('success'); }, 2000);
+        } catch (e) {
+            appendTranscript(skillName, { type: 'error', content: '复制失败，请手动选择文本复制', timestamp: Date.now() });
+            renderTranscript(skillName);
+        }
+        return;
+    }
+
+    if (action === 'propose-solution') {
+        await perMessageActionCall(btn, skillName, taskId, BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', null, 'propose');
+        return;
+    }
+
+    if (action === 'create-issue') {
+        // Creating an issue requires a solution first; auto-propose if not yet done.
+        // The button stays disabled with "处理中..." text across both calls.
+        btn.disabled = true;
+        btn.textContent = '处理中...';
+        var issueState = getTaskIssueState(skillName, taskId);
+        if (!issueState.solutionProposed) {
+            var proposeOk = await perMessageActionCall(btn, skillName, taskId, BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', null, 'propose-auto');
+            if (!proposeOk) {
+                // perMessageActionCall already restored the button on error
+                return;
+            }
+        }
+        await perMessageActionCall(btn, skillName, taskId, BASE + '/runs/' + encodeURIComponent(taskId) + '/issue', '{}', 'issue');
+        return;
+    }
+});
+
+async function perMessageActionCall(btn, skillName, taskId, url, body, mode) {
+    var origText = btn.textContent;
+    // Only flip to "处理中..." if not already in that state (create-issue sets it before the auto-propose call)
+    if (btn.textContent !== '处理中...') {
+        btn.disabled = true;
+        btn.textContent = '处理中...';
+    }
+    try {
+        var resp = await fetch(url, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: body });
+        var data = await resp.json();
+        if (!resp.ok) {
+            btn.textContent = '失败';
+            btn.classList.add('error');
+            appendTranscript(skillName, { type: 'error', content: '操作失败: ' + (data.error || data.message || resp.status), timestamp: Date.now() });
+            renderTranscript(skillName);
+            setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.classList.remove('error'); }, 2500);
+            return false;
+        }
+        var issueState = getTaskIssueState(skillName, taskId);
+
+        // Build result text for chat
+        var resultParts = [];
+
+        if (mode === 'propose' || mode === 'propose-auto') {
+            issueState.solutionProposed = true;
+            if (mode === 'propose') {
+                // Standalone propose-solution click: show success on the button
+                btn.textContent = '✓ 方案已生成';
+                btn.classList.add('success');
+                btn.disabled = true;
+            }
+            // For propose-auto, leave the button as "处理中..." — the subsequent issue call will update it.
+            resultParts.push('**建议方案：**');
+            if (data.solution && data.solution.options) {
+                (data.solution.options || []).forEach(function(opt, i) {
+                    resultParts.push((i + 1) + '. **' + (opt.title || '') + '** — ' + (opt.description || '') + ' (工作量: ' + (opt.effort || '') + ')');
+                });
+                if (data.solution.recommendedOptionId) resultParts.push('推荐: ' + data.solution.recommendedOptionId);
+                if (data.solution.rationale) resultParts.push('理由: ' + data.solution.rationale);
+            }
+            if (data.rootCause) resultParts.push('**根因：** ' + data.rootCause);
+            if (data.status) resultParts.push('**状态：** ' + data.status);
+            // For propose-auto, no separate chat message and no re-render — the issue call follows immediately
+            // and will use the same button reference (renderTranscript here would detach it).
+            if (mode === 'propose' && resultParts.length > 1) {
+                appendTranscript(skillName, { type: 'response', content: resultParts.join('\n'), timestamp: Date.now(), taskId: taskId });
+                renderTranscript(skillName);
+            }
+        }
+
+        if (mode === 'issue') {
+            if (data.issueId) {
+                issueState.issueId = data.issueId;
+                issueState.issueStatus = data.status || null;
+            }
+            btn.textContent = '✓ Issue 已创建';
+            btn.classList.add('success');
+            btn.disabled = true;
+            resultParts = [];
+            if (data.issueId) {
+                resultParts.push('**Issue 已创建**');
+                resultParts.push('Issue ID: `' + data.issueId + '`');
+                if (data.externalIssueId) resultParts.push('外部 Issue: ' + data.externalIssueId);
+            }
+            if (data.status) resultParts.push('状态: ' + data.status);
+            if (data.rootCause) resultParts.push('根因: ' + data.rootCause);
+            if (resultParts.length > 0) {
+                appendTranscript(skillName, { type: 'response', content: resultParts.join('\n'), timestamp: Date.now(), taskId: taskId });
+            }
+            // Re-render so the parent message's action buttons / badges reflect new state
+            // (button becomes "✓ Issue (...)" badge, 建议方案 button is hidden)
+            renderTranscript(skillName);
+        }
+
+        return true;
+    } catch (e) {
+        btn.textContent = '错误';
+        btn.classList.add('error');
+        setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.classList.remove('error'); }, 2500);
+        appendTranscript(skillName, { type: 'error', content: '请求异常: ' + e.message, timestamp: Date.now() });
+        renderTranscript(skillName);
+        return false;
+    }
+}
+
 // ===== Reconnect to running tasks after page refresh =====
 async function reconnectRunningTasks() {
     try {
@@ -1436,7 +1770,8 @@ async function reconnectRunningTasks() {
                 const fullTranscript = conv.messages.map(m => ({
                     type: roleToType(m.role),
                     content: m.content,
-                    timestamp: m.timestamp || Date.now()
+                    timestamp: m.timestamp || Date.now(),
+                    taskId: m.taskId || null
                 }));
                 var lastUserIdx = -1;
                 for (var i = 0; i < fullTranscript.length; i++) {
@@ -1447,7 +1782,8 @@ async function reconnectRunningTasks() {
                     conversationId: conv.conversationId,
                     transcript: kept,
                     conversationMessages: transcriptToLlmHistory(kept),
-                    stream: null
+                    stream: null,
+                    taskIssueStates: {}
                 };
             } else {
                 getSkillState(t.skillId);
@@ -1498,14 +1834,23 @@ async function showToolsModal() {
         var tools = toolsData.tools || [];
         var plugins = pluginsData || [];
 
-        var html = '<div style="margin-bottom:20px;">';
+        var html = '<div style="margin-bottom:16px;padding:10px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);">' +
+            '<strong>💡 工具发现机制：</strong> ' + escapeHtml(toolsData.discoveryHint || 'Tool providers auto-discovered as Spring @Component beans') +
+            '</div>';
+
+        html += '<div style="margin-bottom:20px;">';
         html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">已注册工具 (' + tools.length + ')</div>';
         if (tools.length === 0) {
             html += featureEmpty('无可用工具');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>工具名</th></tr></thead><tbody>';
-            tools.forEach(function(t) {
-                html += '<tr><td><code style="color:var(--accent)">' + escapeHtml(t.name) + '</code></td></tr>';
+            html += '<table class="feature-table"><thead><tr><th>工具名</th><th>描述</th><th>操作</th></tr></thead><tbody>';
+            tools.forEach(function(t, idx) {
+                var desc = (t.description || '').substring(0, 80);
+                html += '<tr>' +
+                    '<td><code style="color:var(--accent)">' + escapeHtml(t.name) + '</code></td>' +
+                    '<td style="font-size:12px;color:var(--text-secondary);">' + escapeHtml(desc) + '</td>' +
+                    '<td><button class="feature-action-btn" data-tool-idx="' + idx + '">查看详情</button></td>' +
+                    '</tr>';
             });
             html += '</tbody></table>';
         }
@@ -1525,6 +1870,47 @@ async function showToolsModal() {
         }
         html += '</div>';
         body.innerHTML = html;
+
+        // Attach detail expand handlers
+        body.querySelectorAll('[data-tool-idx]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var idx = parseInt(btn.dataset.toolIdx, 10);
+                var tool = tools[idx];
+                if (!tool) return;
+                var row = btn.closest('tr');
+                var existing = row.nextElementSibling;
+                if (existing && existing.className === 'tool-detail-row') {
+                    existing.remove();
+                    btn.textContent = '查看详情';
+                    return;
+                }
+                var params = tool.parameters || {};
+                var paramHtml;
+                if (params && params.properties) {
+                    var props = params.properties;
+                    var required = params.required || [];
+                    var rows = Object.keys(props).map(function(k) {
+                        var p = props[k] || {};
+                        var req = required.indexOf(k) >= 0 ? '<span class="feature-badge red">必填</span>' : '<span class="feature-badge">可选</span>';
+                        return '<tr><td><code>' + escapeHtml(k) + '</code></td><td>' + escapeHtml(p.type || '') + '</td><td>' +
+                            escapeHtml(p.description || '') + '</td><td>' + req + '</td></tr>';
+                    }).join('');
+                    paramHtml = '<table class="feature-table" style="margin-top:6px;"><thead><tr><th>参数</th><th>类型</th><th>描述</th><th>必填</th></tr></thead><tbody>' +
+                        rows + '</tbody></table>';
+                } else {
+                    paramHtml = '<pre style="font-size:11px;color:var(--text-muted);white-space:pre-wrap;background:var(--bg-card);padding:8px;border-radius:6px;">' +
+                        escapeHtml(JSON.stringify(params, null, 2)) + '</pre>';
+                }
+                var detailHtml = '<tr class="tool-detail-row"><td colspan="3">' +
+                    '<div style="padding:10px;background:var(--bg-card);border-radius:8px;">' +
+                    '<div style="margin-bottom:6px;font-size:12px;color:var(--text-secondary);"><strong>完整描述：</strong> ' + escapeHtml(tool.description || '(无描述)') + '</div>' +
+                    '<div style="margin-bottom:6px;font-size:12px;color:var(--text-secondary);"><strong>参数 Schema：</strong></div>' +
+                    paramHtml +
+                    '</div></td></tr>';
+                row.insertAdjacentHTML('afterend', detailHtml);
+                btn.textContent = '收起';
+            });
+        });
     } catch (e) {
         body.innerHTML = featureEmpty('加载失败: ' + e.message);
     }
@@ -1633,106 +2019,345 @@ async function showCostModal() {
         var now = Date.now();
         var from = Math.floor((now - 7 * 24 * 3600 * 1000) / 1000);
         var to = Math.floor(now / 1000);
-        var resp = await fetch(BASE + '/cost/summary?from=' + from + '&to=' + to, { headers: authHeaders() });
+        // Note: backend expects epoch millis for CostStore queries
+        var fromMs = from * 1000;
+        var toMs = to * 1000;
+        var resp = await fetch(BASE + '/cost/summary?from=' + fromMs + '&to=' + toMs, { headers: authHeaders() });
         if (!resp.ok) {
             body.innerHTML = featureEmpty('成本核算未启用或请求失败 (' + resp.status + ')');
             return;
         }
         var data = await resp.json();
-        var summaries = data.summaries || [];
-        if (summaries.length === 0) {
-            body.innerHTML = featureEmpty('暂无成本记录。运行一次 skill 后再来查看。');
-            return;
-        }
         var html = '<div class="feature-stat-row">';
-        var totalCost = 0, totalTokens = 0, totalReqs = 0;
-        summaries.forEach(function(s) {
-            totalCost += parseFloat(s.totalCost || 0);
-            totalTokens += parseInt(s.totalTokens || 0);
-            totalReqs += parseInt(s.requestCount || 0);
-        });
-        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalCost.toFixed(2) + '</div><div class="feature-stat-label">总成本</div></div>';
-        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalTokens + '</div><div class="feature-stat-label">总 Tokens</div></div>';
-        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalReqs + '</div><div class="feature-stat-label">总请求数</div></div>';
+        var totalCost = parseFloat(data.totalCost || 0);
+        var totalInputTokens = parseInt(data.totalInputTokens || 0);
+        var totalOutputTokens = parseInt(data.totalOutputTokens || 0);
+        var totalReqs = parseInt(data.requestCount || 0);
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalCost.toFixed(4) + '</div><div class="feature-stat-label">总成本</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalInputTokens + '</div><div class="feature-stat-label">输入 Tokens</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalOutputTokens + '</div><div class="feature-stat-label">输出 Tokens</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + totalReqs + '</div><div class="feature-stat-label">请求数</div></div>';
         html += '</div>';
 
-        html += '<table class="feature-table"><thead><tr><th>维度</th><th>值</th><th>成本</th><th>Tokens</th><th>请求数</th><th>预算利用率</th></tr></thead><tbody>';
-        summaries.forEach(function(s) {
-            var util = s.budget ? (s.utilization * 100).toFixed(1) + '%' : '—';
-            html += '<tr><td>' + escapeHtml(s.dimension) + '</td><td>' + escapeHtml(s.dimensionValue) + '</td>' +
-                '<td>' + (parseFloat(s.totalCost || 0)).toFixed(2) + '</td><td>' + (s.totalTokens || 0) + '</td>' +
-                '<td>' + (s.requestCount || 0) + '</td><td>' + util + '</td></tr>';
-        });
-        html += '</tbody></table>';
+        var util = data.budget ? ((parseFloat(data.utilization || 0)) * 100).toFixed(1) + '%' : '—';
+        html += '<div style="margin:8px 0;font-size:12px;color:var(--text-secondary);">维度: ' + escapeHtml(data.dimension || 'global') +
+            ' | 预算: ' + (data.budget ? '¥' + parseFloat(data.budget).toFixed(2) : '无') +
+            ' | 利用率: ' + util + '</div>';
+
+        // Records section
+        html += '<div style="margin-top:16px;">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+            '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);">成本记录</span>' +
+            '<button class="feature-action-btn" id="costRefreshBtn">刷新</button></div>';
+        html += '<div id="costRecordsContainer"><div class="feature-empty">加载中...</div></div>';
+        html += '</div>';
+
         body.innerHTML = html;
+
+        async function loadRecords() {
+            var container = body.querySelector('#costRecordsContainer');
+            container.innerHTML = '<div class="feature-empty">加载中...</div>';
+            try {
+                var recResp = await fetch(BASE + '/cost/records?from=' + fromMs + '&to=' + toMs, { headers: authHeaders() });
+                if (!recResp.ok) {
+                    container.innerHTML = featureEmpty('获取记录失败 (' + recResp.status + ')');
+                    return;
+                }
+                var recData = await recResp.json();
+                var records = recData.records || [];
+                if (records.length === 0) {
+                    container.innerHTML = featureEmpty('暂无成本记录。运行一次 skill 后再查看。');
+                    return;
+                }
+                var rHtml = '<table class="feature-table"><thead><tr><th>时间</th><th>用户</th><th>Skill</th><th>模型</th><th>输入</th><th>输出</th><th>缓存</th><th>费用</th><th>任务 ID</th></tr></thead><tbody>';
+                records.forEach(function(r) {
+                    var date = new Date(parseInt(r.timestamp));
+                    var ts = date.toLocaleString();
+                    rHtml += '<tr>' +
+                        '<td style="font-size:11px;">' + escapeHtml(ts) + '</td>' +
+                        '<td>' + escapeHtml(r.userId || '') + '</td>' +
+                        '<td>' + escapeHtml(r.skillName || '') + '</td>' +
+                        '<td style="font-size:11px;">' + escapeHtml(r.model || '') + '</td>' +
+                        '<td>' + (r.inputTokens || 0) + '</td>' +
+                        '<td>' + (r.outputTokens || 0) + '</td>' +
+                        '<td>' + (r.cacheReadTokens || 0) + '</td>' +
+                        '<td><strong>¥' + (parseFloat(r.cost || 0)).toFixed(6) + '</strong></td>' +
+                        '<td><code style="font-size:10px;">' + escapeHtml(r.taskId || '') + '</code></td>' +
+                        '</tr>';
+                });
+                rHtml += '</tbody></table>';
+                container.innerHTML = rHtml;
+            } catch (e) {
+                container.innerHTML = featureEmpty('加载记录失败: ' + e.message);
+            }
+        }
+        await loadRecords();
+        body.querySelector('#costRefreshBtn').addEventListener('click', loadRecords);
     } catch (e) {
         body.innerHTML = featureEmpty('加载失败: ' + e.message);
     }
 }
 
 // --- Issues (Problem Closure) ---
+
+// Build action buttons for an issue based on its status (used in 已记录问题 list)
+function buildIssueActions(issue) {
+    if (!issue) return '';
+    var s = issue.status;
+    var issueId = escapeHtml(issue.issueId || '');
+    var taskId = escapeHtml(issue.taskId || '');
+    if (s === 'CLOSED') {
+        return '<span style="font-size:11px;color:var(--green);">✓ 已关闭</span>';
+    }
+    var acts = '';
+    // SOLUTION_PROPOSED → 创建外部 Issue (advance to FIX_IN_PROGRESS)
+    if (s === 'SOLUTION_PROPOSED' || s === 'DIAGNOSED') {
+        acts += '<button class="feature-action-btn" data-action="create-external" data-task-id="' + taskId + '" data-issue-id="' + issueId + '">创建外部 Issue</button> ';
+    }
+    // FIX_IN_PROGRESS → 验证修复 (advance to VERIFIED)
+    if (s === 'FIX_IN_PROGRESS') {
+        acts += '<button class="feature-action-btn" data-action="verify" data-task-id="' + taskId + '" data-issue-id="' + issueId + '">验证修复</button> ';
+    }
+    // VERIFIED → 关闭问题 (advance to CLOSED)
+    if (s === 'VERIFIED') {
+        acts += '<button class="feature-action-btn" data-action="close" data-task-id="' + taskId + '" data-issue-id="' + issueId + '">关闭问题</button>';
+    }
+    return acts;
+}
+
+// Build detail panel HTML for an issue (shown when row is clicked)
+function buildIssueDetail(run) {
+    var i = run.issue || {};
+    var html = '<div style="padding:12px;background:var(--bg-card);border-radius:8px;font-size:12px;line-height:1.7;">';
+    if (run.skillId) {
+        html += '<div><strong>Skill:</strong> ' + escapeHtml(run.skillId) + '</div>';
+    }
+    if (i.userId) {
+        html += '<div><strong>创建人:</strong> ' + escapeHtml(i.userId) + '</div>';
+    }
+    if (i.userQuery) {
+        html += '<div style="margin-top:6px;"><strong>用户问题:</strong> ' + escapeHtml(i.userQuery) + '</div>';
+    }
+    if (i.rootCause) {
+        html += '<div style="margin-top:6px;"><strong>根因:</strong> ' + escapeHtml(i.rootCause) + '</div>';
+    }
+    if (i.solution && i.solution.options) {
+        html += '<div style="margin-top:6px;"><strong>建议方案:</strong></div>';
+        (i.solution.options || []).forEach(function(opt, idx) {
+            html += '<div style="margin-left:12px;">' + (idx + 1) + '. <strong>' + escapeHtml(opt.title || '') + '</strong> — ' + escapeHtml(opt.description || '');
+            html += ' <span class="feature-badge orange">工作量: ' + escapeHtml(opt.effort || '') + '</span>';
+            if (opt.temporary) html += ' <span class="feature-badge red">临时</span>';
+            html += '</div>';
+        });
+        if (i.solution.recommendedOptionId) {
+            html += '<div style="margin-left:12px;"><em>推荐: ' + escapeHtml(i.solution.recommendedOptionId) + '</em></div>';
+        }
+        if (i.solution.rationale) {
+            html += '<div style="margin-left:12px;"><strong>理由:</strong> ' + escapeHtml(i.solution.rationale) + '</div>';
+        }
+    }
+    if (i.verificationResult) {
+        html += '<div style="margin-top:6px;"><strong>验证结果:</strong> ' + (i.verificationResult.passed ? '✓ 通过' : '✗ 未通过') + '</div>';
+        if (i.verificationResult.summary) {
+            html += '<div style="margin-left:12px;">' + escapeHtml(i.verificationResult.summary) + '</div>';
+        }
+    }
+    if (i.fixCommitId) {
+        html += '<div style="margin-top:6px;"><strong>修复 Commit:</strong> <code>' + escapeHtml(i.fixCommitId) + '</code></div>';
+    }
+    if (i.knowledgeEntryId) {
+        html += '<div><strong>知识库条目:</strong> <code>' + escapeHtml(i.knowledgeEntryId) + '</code></div>';
+    }
+    html += '<div style="margin-top:6px;color:var(--text-muted);font-size:11px;">';
+    html += '创建: ' + (i.createdAt ? new Date(i.createdAt).toLocaleString() : '') + ' | ';
+    html += '更新: ' + (i.updatedAt ? new Date(i.updatedAt).toLocaleString() : '');
+    html += '</div>';
+    html += '</div>';
+    return html;
+}
+
 async function showIssuesModal() {
     var modal = openFeatureModal('问题闭环', '<div class="feature-empty">加载中...</div>');
     var body = modal.querySelector('.history-modal-body');
     try {
-        // Issue closure doesn't have a list-all endpoint; show explanatory info
-        var resp = await fetch(BASE + '/runs?limit=10', { headers: authHeaders() });
+        // Single fetch: backend returns terminal runs pre-joined with issue status
+        var resp = await fetch(BASE + '/issues/recent-runs?limit=20', { headers: authHeaders() });
+        if (!resp.ok) {
+            if (resp.status === 503) {
+                body.innerHTML = featureEmpty('问题闭环功能未启用 (snap-agent.issue-closure.enabled=false)');
+            } else {
+                body.innerHTML = featureEmpty('加载失败: HTTP ' + resp.status);
+            }
+            return;
+        }
         var data = await resp.json();
         var runs = data.runs || [];
-        var html = '<div style="padding:8px 0;font-size:13px;color:var(--text-secondary);margin-bottom:12px;">' +
-            '问题闭环功能在每个运行任务完成后可用。在聊天区完成一次诊断后，可对该任务发起"建议方案"、"创建 Issue"、"验证修复"和"关闭问题"操作。</div>';
-        if (runs.length > 0) {
-            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>状态</th><th>操作</th></tr></thead><tbody>';
-            runs.forEach(function(r) {
-                var isDone = r.status === 'DONE';
-                html += '<tr><td><code>' + escapeHtml(r.taskId) + '</code></td><td>' + escapeHtml(r.skillId || r.skill) + '</td>' +
-                    '<td><span class="feature-badge ' + (isDone ? 'green' : 'orange') + '">' + escapeHtml(r.status) + '</span></td>' +
-                    '<td>' + (isDone ? '<button class="feature-action-btn" data-task-id="' + escapeHtml(r.taskId) + '">建议方案</button>' : '—') + '</td></tr>';
+
+        var html = '<div style="padding:8px 0;font-size:13px;color:var(--text-secondary);margin-bottom:12px;line-height:1.6;">' +
+            '问题闭环流程: <strong>创建 Issue</strong> (最近运行) → ' +
+            '<strong>创建外部 Issue</strong> → <strong>验证修复</strong> → <strong>关闭问题</strong> (已记录问题)。<br>' +
+            '点击已记录问题的行可展开查看详情。</div>';
+
+        // Split: issues list (runs with issues) + pending runs (runs without issues)
+        var issuesList = runs.filter(function(r) { return r.issue != null; });
+        var pendingRuns = runs.filter(function(r) { return r.issue == null; });
+
+        // === 已记录问题 ===
+        if (issuesList.length > 0) {
+            html += '<div style="margin-bottom:16px;">';
+            html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">已记录问题 (' + issuesList.length + ')</div>';
+            html += '<table class="feature-table"><thead><tr><th>Issue / 任务</th><th>状态</th><th>根因摘要</th><th>更新时间</th><th>操作</th></tr></thead><tbody>';
+            issuesList.forEach(function(r) {
+                var i = r.issue;
+                // Ensure taskId is available on issue object for buildIssueActions
+                if (!i.taskId) i.taskId = r.taskId;
+                var statusBadge = (i.status === 'CLOSED' || i.status === 'VERIFIED') ? 'green' : 'orange';
+                var rootSummary = (i.rootCause || '').substring(0, 60);
+                var updated = i.updatedAt ? new Date(i.updatedAt).toLocaleString() : '';
+                html += '<tr class="issue-row" data-issue-id="' + escapeHtml(i.issueId || '') + '" data-task-id="' + escapeHtml(r.taskId || '') + '" style="cursor:pointer;">' +
+                    '<td><code>' + escapeHtml(i.issueId || '') + '</code><br><code style="font-size:10px;color:var(--text-secondary);">' + escapeHtml(r.taskId || '') + '</code></td>' +
+                    '<td><span class="feature-badge ' + statusBadge + '">' + escapeHtml(i.status || '') + '</span></td>' +
+                    '<td style="font-size:12px;">' + escapeHtml(rootSummary) + '</td>' +
+                    '<td style="font-size:11px;">' + escapeHtml(updated) + '</td>' +
+                    '<td>' + buildIssueActions(i) + '</td>' +
+                    '</tr>';
+                // Hidden detail row — toggled by clicking the row
+                html += '<tr class="issue-detail-row" style="display:none;"><td colspan="5">' + buildIssueDetail(r) + '</td></tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // === 最近运行 (only pending — tasks without issues) ===
+        html += '<div>';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">最近运行 (' + pendingRuns.length + ')</div>';
+        if (pendingRuns.length === 0) {
+            html += featureEmpty('暂无待发起 Issue 的运行记录');
+        } else {
+            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
+            pendingRuns.forEach(function(r) {
+                var created = r.createdAt ? new Date(r.createdAt).toLocaleString() : '';
+                html += '<tr data-task-id="' + escapeHtml(r.taskId || '') + '">' +
+                    '<td><code style="font-size:10px;">' + escapeHtml(r.taskId || '') + '</code></td>' +
+                    '<td>' + escapeHtml(r.skillId || r.skill || '') + '</td>' +
+                    '<td><span class="feature-badge">' + escapeHtml(r.status || '') + '</span></td>' +
+                    '<td style="font-size:11px;">' + escapeHtml(created) + '</td>' +
+                    '<td><button class="feature-action-btn" data-action="create-issue" data-task-id="' + escapeHtml(r.taskId || '') + '">创建 Issue</button></td>' +
+                    '</tr>';
             });
             html += '</tbody></table>';
-        } else {
-            html += featureEmpty('暂无运行记录');
         }
+        html += '</div>';
         body.innerHTML = html;
 
-        // Attach solution buttons
-        body.querySelectorAll('[data-task-id]').forEach(function(btn) {
-            btn.addEventListener('click', async function() {
-                var taskId = btn.dataset.taskId;
-                btn.disabled = true;
-                btn.textContent = '生成中...';
-                try {
-                    var solResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', {
-                        method: 'POST',
-                        headers: authHeaders({ 'Content-Type': 'application/json' }),
-                        body: '{}'
-                    });
-                    var solData = await solResp.json();
-                    btn.textContent = '已生成';
-                    btn.style.background = 'var(--green-light)';
-                    btn.style.borderColor = 'var(--green)';
-                    btn.style.color = 'var(--green)';
-                    // Show solution in alert-like inline
-                    var row = btn.closest('tr');
-                    if (row && solData.solutions) {
-                        var solHtml = '<tr><td colspan="4"><div style="padding:8px;background:var(--bg-card);border-radius:8px;">';
-                        solData.solutions.forEach(function(sol, i) {
-                            solHtml += '<div style="margin-bottom:6px;"><strong>方案' + (i+1) + ':</strong> ' + escapeHtml(sol.description || sol.title || '') +
-                                ' <span class="feature-badge orange">' + escapeHtml(sol.recommendation || '') + '</span></div>';
-                        });
-                        solHtml += '</div></td></tr>';
-                        row.insertAdjacentHTML('afterend', solHtml);
+        // Row click handler — toggle detail panel (only in 已记录问题 list)
+        body.addEventListener('click', function(ev) {
+            // Don't toggle when clicking a button or inside the detail row
+            if (ev.target.closest('[data-action]') || ev.target.closest('.issue-detail-row')) return;
+            var row = ev.target.closest('tr.issue-row');
+            if (!row) return;
+            var detailRow = row.nextElementSibling;
+            if (detailRow && detailRow.classList.contains('issue-detail-row')) {
+                var isHidden = detailRow.style.display === 'none';
+                detailRow.style.display = isHidden ? '' : 'none';
+            }
+        });
+
+        // Action button handler (delegated)
+        body.addEventListener('click', async function(ev) {
+            var btn = ev.target.closest('[data-action]');
+            if (!btn || btn.disabled) return;
+            var action = btn.dataset.action;
+            var taskId = btn.dataset.taskId;
+            var issueId = btn.dataset.issueId;
+            var origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '处理中...';
+            try {
+                var url, method = 'POST', reqBody = null;
+                if (action === 'create-issue') {
+                    // Full flow: auto-propose solution then create external issue
+                    var proposeResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }) });
+                    var proposeData = await proposeResp.json();
+                    if (!proposeResp.ok) {
+                        btn.textContent = '失败';
+                        btn.style.background = 'var(--red-light)';
+                        alert('建议方案生成失败: ' + (proposeData.error || proposeData.message || proposeResp.status));
+                        setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
+                        return;
                     }
-                } catch (e) {
+                    // Now create external issue
+                    url = BASE + '/runs/' + encodeURIComponent(taskId) + '/issue';
+                    reqBody = '{}';
+                } else if (action === 'create-external') {
+                    url = BASE + '/runs/' + encodeURIComponent(taskId) + '/issue';
+                    reqBody = '{}';
+                } else if (action === 'verify') {
+                    url = BASE + '/issues/' + encodeURIComponent(issueId) + '/verify';
+                } else if (action === 'close') {
+                    url = BASE + '/issues/' + encodeURIComponent(issueId) + '/close';
+                }
+                var headers = authHeaders({ 'Content-Type': 'application/json' });
+                var resp2 = await fetch(url, { method: method, headers: headers, body: reqBody });
+                var data2 = await resp2.json();
+                if (!resp2.ok) {
                     btn.textContent = '失败';
                     btn.style.background = 'var(--red-light)';
+                    alert('操作失败: ' + (data2.error || data2.message || resp2.status));
+                    setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
+                    return;
                 }
-                setTimeout(function() {
-                    btn.disabled = false;
-                    btn.textContent = '建议方案';
-                    btn.style.cssText = '';
-                }, 5000);
-            });
+                btn.textContent = '✓ 成功';
+                btn.style.background = 'var(--green-light)';
+                btn.style.borderColor = 'var(--green)';
+                btn.style.color = 'var(--green)';
+
+                // For create-issue action: the task moves from 最近运行 to 已记录问题.
+                // Simplest UX: refresh the modal so the task disappears from pending list
+                // and appears in the issues list.
+                if (action === 'create-issue') {
+                    // Show a brief inline result, then refresh after 1.5s
+                    var pendingRow = btn.closest('tr');
+                    if (pendingRow) {
+                        var cells = pendingRow.querySelectorAll('td');
+                        if (cells.length >= 5) {
+                            cells[4].innerHTML = '<span style="color:var(--green);font-size:11px;">✓ Issue ' + escapeHtml(data2.issueId || '') + ' 已创建</span>';
+                        }
+                    }
+                    setTimeout(function() { showIssuesModal(); }, 1500);
+                    return;
+                }
+
+                // For create-external/verify/close: update the issue row in-place
+                var issueRow = btn.closest('tr.issue-row');
+                if (issueRow) {
+                    var newStatus = data2.status;
+                    var newIssueId = data2.issueId || issueId;
+                    // Update status badge (2nd column) and action buttons (5th column)
+                    var rowCells = issueRow.querySelectorAll('td');
+                    if (rowCells.length >= 5) {
+                        var badgeColor = (newStatus === 'CLOSED' || newStatus === 'VERIFIED') ? 'green' : 'orange';
+                        rowCells[1].innerHTML = '<span class="feature-badge ' + badgeColor + '">' + escapeHtml(newStatus || '') + '</span>';
+                        // Rebuild action buttons (5th column)
+                        rowCells[4].innerHTML = buildIssueActions({ status: newStatus, issueId: newIssueId, taskId: taskId });
+                    }
+                    // Refresh the detail panel (if visible)
+                    var detailRow = issueRow.nextElementSibling;
+                    if (detailRow && detailRow.classList.contains('issue-detail-row') && detailRow.style.display !== 'none') {
+                        // Build a synthetic run object for buildIssueDetail
+                        var syntheticRun = { taskId: taskId, skillId: null, issue: data2 };
+                        detailRow.innerHTML = '<td colspan="5">' + buildIssueDetail(syntheticRun) + '</td>';
+                    } else if (detailRow && detailRow.classList.contains('issue-detail-row')) {
+                        // Update hidden detail too, so it's fresh when expanded
+                        var syntheticRun2 = { taskId: taskId, skillId: null, issue: data2 };
+                        detailRow.innerHTML = '<td colspan="5">' + buildIssueDetail(syntheticRun2) + '</td>';
+                    }
+                }
+            } catch (e) {
+                btn.textContent = '错误';
+                btn.style.background = 'var(--red-light)';
+                setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
+                alert('请求异常: ' + e.message);
+            }
         });
     } catch (e) {
         body.innerHTML = featureEmpty('加载失败: ' + e.message);
@@ -1748,22 +2373,64 @@ async function showPatrolModal() {
         var tasksData = await tasksResp.json();
         var reportsResp = await fetch(BASE + '/patrol/reports', { headers: authHeaders() });
         var reportsData = await reportsResp.json();
-        var tasks = tasksData.tasks || [];
+        var tasks = Array.isArray(tasksData) ? tasksData : (tasksData.tasks || []);
         var reports = reportsData.reports || [];
+
+        // Build a skill-name dropdown using loaded skills (skillsData)
+        var skillOptions = '';
+        if (skillsData && skillsData.length) {
+            skillsData.forEach(function(s) {
+                skillOptions += '<option value="' + escapeHtml(s.name) + '">' + escapeHtml(s.name) + ' — ' + escapeHtml((s.description || '').substring(0, 60)) + '</option>';
+            });
+        }
 
         var html = '<div style="margin-bottom:20px;">';
         html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
             '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);">巡检任务 (' + tasks.length + ')</span>' +
             '<button class="feature-action-btn" id="createPatrolBtn">新建巡检</button></div>';
+        // Create form (hidden by default)
+        html += '<div id="patrolCreateForm" style="display:none;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">';
+        html += '<div style="font-weight:600;margin-bottom:8px;">新建巡检任务</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">Skill</label>' +
+            '<select id="patrolSkillSelect" style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
+            skillOptions + '</select></div>';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">Cron 表达式</label>' +
+            '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * ? (每15分钟)" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></div>';
+        // Dynamic input area: text mode (for skills without inputs) or JSON mode (for skills with inputs)
+        html += '<div id="patrolTextInputWrap" style="display:none;">' +
+            '<label style="font-size:12px;color:var(--text-secondary);">自然语言指令</label>' +
+            '<textarea id="patrolTextInput" placeholder="例如: 检查drp_allocation_plan表是否有generate_date等于当前日期的记录" rows="3" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></textarea>' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">该 Skill 无预定义参数, 直接输入自然语言指令即可 (等价于在聊天框输入)。</div></div>';
+        html += '<div id="patrolJsonInputWrap">' +
+            '<label style="font-size:12px;color:var(--text-secondary);">输入参数 (JSON)</label>' +
+            '<textarea id="patrolInputsInput" placeholder="{}" rows="3" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;"></textarea></div>';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">告警关键词 (可选, 逗号分隔)</label>' +
+            '<input type="text" id="patrolAlertKeywordsInput" placeholder="例如: 未生成, 0行, 无记录, 失败" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">巡检报告中出现这些词时触发告警推送; 留空则仅用内置关键词 (异常/错误/失败/critical/warning 等)。</div></div>';
+        html += '<div style="display:flex;gap:8px;">' +
+            '<button class="feature-action-btn" id="patrolSubmitBtn">创建</button>' +
+            '<button class="feature-action-btn" id="patrolCancelBtn" style="background:var(--bg-input);">取消</button></div>';
+        html += '<div id="patrolCreateStatus" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>';
+        html += '</div></div>';
+
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>状态</th><th>上次运行</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>上次运行</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
-                var badge = t.active ? 'green' : 'orange';
-                html += '<tr><td><code>' + escapeHtml(t.taskId || t.id) + '</code></td><td>' + escapeHtml(t.skillId || t.skill) + '</td>' +
-                    '<td>' + escapeHtml(t.cron || '') + '</td><td><span class="feature-badge ' + badge + '">' + (t.active ? '运行中' : '已停止') + '</span></td>' +
-                    '<td>' + escapeHtml(t.lastRun || '—') + '</td></tr>';
+                var badge = t.active || t.enabled ? 'green' : 'orange';
+                var isActive = t.active || t.enabled;
+                html += '<tr><td><code>' + escapeHtml(t.taskId || t.id) + '</code></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
+                    '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
+                    '<td style="font-size:11px;">' + escapeHtml(t.alertKeywords || '—') + '</td>' +
+                    '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
+                    '<td style="font-size:11px;">' + escapeHtml(t.lastRun || '—') + '</td>' +
+                    '<td><button class="feature-action-btn" data-patrol-id="' + escapeHtml(t.taskId || t.id) + '">删除</button></td></tr>';
             });
             html += '</tbody></table>';
         }
@@ -1777,7 +2444,7 @@ async function showPatrolModal() {
             html += '<table class="feature-table"><thead><tr><th>报告 ID</th><th>时间</th><th>状态</th><th>摘要</th></tr></thead><tbody>';
             reports.forEach(function(r) {
                 var badge = r.severity === 'CRITICAL' ? 'red' : (r.severity === 'WARN' ? 'orange' : 'green');
-                html += '<tr><td><code>' + escapeHtml(r.reportId || r.id) + '</code></td><td>' + escapeHtml(r.timestamp || '') + '</td>' +
+                html += '<tr><td><code>' + escapeHtml(r.reportId || r.id) + '</code></td><td style="font-size:11px;">' + escapeHtml(r.timestamp || '') + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + escapeHtml(r.severity || 'INFO') + '</span></td>' +
                     '<td>' + escapeHtml((r.summary || '').substring(0, 80)) + '</td></tr>';
             });
@@ -1785,6 +2452,118 @@ async function showPatrolModal() {
         }
         html += '</div>';
         body.innerHTML = html;
+
+        // Attach create button toggle
+        var createBtn = body.querySelector('#createPatrolBtn');
+        var createForm = body.querySelector('#patrolCreateForm');
+        var submitBtn = body.querySelector('#patrolSubmitBtn');
+        var cancelBtn = body.querySelector('#patrolCancelBtn');
+        var skillSelect = body.querySelector('#patrolSkillSelect');
+        var cronInput = body.querySelector('#patrolCronInput');
+        var textInput = body.querySelector('#patrolTextInput');
+        var jsonInput = body.querySelector('#patrolInputsInput');
+        var textWrap = body.querySelector('#patrolTextInputWrap');
+        var jsonWrap = body.querySelector('#patrolJsonInputWrap');
+        var alertKwInput = body.querySelector('#patrolAlertKeywordsInput');
+        var statusDiv = body.querySelector('#patrolCreateStatus');
+
+        // Toggle between text mode (no inputs) and JSON mode (has inputs) based on skill selection
+        function toggleInputMode() {
+            var skillName = skillSelect.value;
+            var skill = (skillsData || []).find(function(s) { return s.name === skillName; });
+            var hasInputs = skill && skill.inputs && skill.inputs.length > 0;
+            if (hasInputs) {
+                textWrap.style.display = 'none';
+                jsonWrap.style.display = 'block';
+            } else {
+                textWrap.style.display = 'block';
+                jsonWrap.style.display = 'none';
+            }
+        }
+        skillSelect.addEventListener('change', toggleInputMode);
+        toggleInputMode(); // initialize for the default selection
+
+        createBtn.addEventListener('click', function() {
+            if (createForm.style.display === 'none') {
+                createForm.style.display = 'block';
+                createBtn.textContent = '收起';
+            } else {
+                createForm.style.display = 'none';
+                createBtn.textContent = '新建巡检';
+            }
+        });
+        cancelBtn.addEventListener('click', function() {
+            createForm.style.display = 'none';
+            createBtn.textContent = '新建巡检';
+            statusDiv.textContent = '';
+        });
+        submitBtn.addEventListener('click', async function() {
+            var skillName = skillSelect.value;
+            var cron = cronInput.value.trim();
+            var alertKeywords = alertKwInput.value.trim();
+            if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
+            if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
+
+            // Build inputs: text mode wraps as _user_message, JSON mode parses directly
+            var inputsObj;
+            var textMode = textWrap.style.display !== 'none';
+            if (textMode) {
+                var text = textInput.value.trim();
+                if (!text) { statusDiv.textContent = '请输入自然语言指令'; return; }
+                inputsObj = { _user_message: text };
+            } else {
+                var inputsText = jsonInput.value.trim() || '{}';
+                try { inputsObj = JSON.parse(inputsText); }
+                catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = '创建中...';
+            statusDiv.textContent = '';
+            try {
+                var resp = await fetch(BASE + '/patrol/tasks', {
+                    method: 'POST',
+                    headers: authHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
+                });
+                var data = await resp.json();
+                if (!resp.ok) {
+                    statusDiv.textContent = '创建失败: ' + (data.error || resp.status);
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = '创建';
+                    return;
+                }
+                statusDiv.style.color = 'var(--green)';
+                statusDiv.textContent = '✓ 创建成功, ID: ' + (data.id || '');
+                submitBtn.textContent = '✓';
+                setTimeout(function() { showPatrolModal(); }, 800);
+            } catch (e) {
+                statusDiv.textContent = '请求异常: ' + e.message;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '创建';
+            }
+        });
+
+        // Attach delete handlers
+        body.querySelectorAll('[data-patrol-id]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                if (!confirm('删除该巡检任务?')) return;
+                var id = btn.dataset.patrolId;
+                btn.disabled = true;
+                btn.textContent = '删除中...';
+                try {
+                    await fetch(BASE + '/patrol/tasks/' + encodeURIComponent(id), {
+                        method: 'DELETE',
+                        headers: authHeaders()
+                    });
+                    btn.textContent = '已删除';
+                    setTimeout(function() { showPatrolModal(); }, 600);
+                } catch (e) {
+                    btn.textContent = '失败';
+                    setTimeout(function() { btn.disabled = false; btn.textContent = '删除'; }, 1500);
+                }
+            });
+        });
     } catch (e) {
         body.innerHTML = featureEmpty('巡检功能未启用或加载失败: ' + e.message);
     }
@@ -1858,19 +2637,33 @@ async function showKnowledgeModal() {
         }
         var data = await resp.json();
 
-        // Status stats
+        // Status stats — the "知识片段" card is clickable to expand the full fragment list
         var html = '<div class="feature-stat-row">';
-        html += '<div class="feature-stat"><div class="feature-stat-value">' + data.fragmentCount + '</div><div class="feature-stat-label">知识片段</div></div>';
+        html += '<div class="feature-stat" id="knowledgeStatFragments" style="cursor:pointer;transition:background 0.15s;" title="点击查看所有知识点">';
+        html += '<div class="feature-stat-value">' + data.fragmentCount + '</div><div class="feature-stat-label">知识片段 (点击展开)</div></div>';
         html += '<div class="feature-stat"><div class="feature-stat-value">' + data.maxFragments + '</div><div class="feature-stat-label">注入上限</div></div>';
         html += '<div class="feature-stat"><div class="feature-stat-value">' + data.minScore + '</div><div class="feature-stat-label">最低分数</div></div>';
+        html += '</div>';
+        // Fragment list container — populated lazily on stat-card click
+        html += '<div id="knowledgeFragmentsList" style="display:none;margin:12px 0;"></div>';
+
+        // Action bar: reload + upload
+        html += '<div style="display:flex;gap:8px;align-items:center;margin:12px 0;padding:8px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
+        html += '<button class="feature-action-btn" id="knowledgeReloadBtn">🔄 刷新知识库</button>';
+        html += '<label class="feature-action-btn" style="cursor:pointer;display:inline-block;">' +
+            '<span>📤 上传 Markdown</span>' +
+            '<input type="file" id="knowledgeUploadInput" accept=".md" hidden style="display:none;">' +
+            '</label>';
+        html += '<span id="knowledgeActionStatus" style="font-size:11px;color:var(--text-muted);"></span>';
         html += '</div>';
 
         // Sources
         var sources = data.sources || [];
         html += '<div style="margin:12px 0;"><div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">数据源 (' + sources.length + ')</div>';
-        html += '<table class="feature-table"><thead><tr><th>类型</th><th>路径</th></tr></thead><tbody>';
+        html += '<table class="feature-table"><thead><tr><th>类型</th><th>路径</th><th>可写</th></tr></thead><tbody>';
         sources.forEach(function(s) {
-            html += '<tr><td>' + escapeHtml(s.type) + '</td><td><code>' + escapeHtml(s.dir) + '</code></td></tr>';
+            html += '<tr><td>' + escapeHtml(s.type) + '</td><td><code>' + escapeHtml(s.dir) + '</code></td>' +
+                '<td>' + (s.writable ? '<span class="feature-badge green">是</span>' : '<span class="feature-badge">否</span>') + '</td></tr>';
         });
         html += '</tbody></table></div>';
 
@@ -1887,10 +2680,129 @@ async function showKnowledgeModal() {
 
         body.innerHTML = html;
 
+        // Attach reload + upload handlers
+        var actionStatus = body.querySelector('#knowledgeActionStatus');
+        body.querySelector('#knowledgeReloadBtn').addEventListener('click', async function() {
+            var btn = body.querySelector('#knowledgeReloadBtn');
+            btn.disabled = true;
+            btn.textContent = '刷新中...';
+            actionStatus.textContent = '';
+            try {
+                var rResp = await fetch(BASE + '/knowledge/reload', { method: 'POST', headers: authHeaders() });
+                var rData = await rResp.json();
+                if (!rResp.ok) {
+                    actionStatus.style.color = 'var(--red)';
+                    actionStatus.textContent = '失败: ' + (rData.error || rResp.status);
+                    btn.disabled = false;
+                    btn.textContent = '🔄 刷新知识库';
+                    return;
+                }
+                actionStatus.style.color = 'var(--green)';
+                actionStatus.textContent = '✓ 已刷新，当前 ' + rData.fragmentCount + ' 个片段';
+                btn.disabled = false;
+                btn.textContent = '🔄 刷新知识库';
+                // Refresh the status stats at top of modal
+                setTimeout(showKnowledgeModal, 1000);
+            } catch (e) {
+                actionStatus.style.color = 'var(--red)';
+                actionStatus.textContent = '异常: ' + e.message;
+                btn.disabled = false;
+                btn.textContent = '🔄 刷新知识库';
+            }
+        });
+
+        body.querySelector('#knowledgeUploadInput').addEventListener('change', async function(e) {
+            var file = e.target.files && e.target.files[0];
+            if (!file) return;
+            actionStatus.textContent = '上传 ' + file.name + ' 中...';
+            actionStatus.style.color = 'var(--text-muted)';
+            try {
+                var formData = new FormData();
+                formData.append('file', file);
+                var uResp = await fetch(BASE + '/knowledge/upload', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: formData
+                });
+                var uData = await uResp.json();
+                if (!uResp.ok) {
+                    actionStatus.style.color = 'var(--red)';
+                    actionStatus.textContent = '失败: ' + (uData.error || uResp.status);
+                    return;
+                }
+                actionStatus.style.color = 'var(--green)';
+                actionStatus.textContent = '✓ 已上传 ' + file.name + '，当前 ' + uData.fragmentCount + ' 个片段';
+                // Refresh the modal to show new fragment count + sources
+                setTimeout(showKnowledgeModal, 1000);
+            } catch (err) {
+                actionStatus.style.color = 'var(--red)';
+                actionStatus.textContent = '异常: ' + err.message;
+            }
+        });
+
         // Attach search handler
         var searchInput = document.getElementById('knowledgeSearchInput');
         var searchBtn = document.getElementById('knowledgeSearchBtn');
         var resultsDiv = document.getElementById('knowledgeSearchResults');
+
+        // Stat-card click → toggle fragment list
+        var fragmentsListDiv = body.querySelector('#knowledgeFragmentsList');
+        var fragmentsLoaded = false;
+        body.querySelector('#knowledgeStatFragments').addEventListener('click', async function() {
+            if (fragmentsListDiv.style.display === 'none') {
+                fragmentsListDiv.style.display = 'block';
+                if (!fragmentsLoaded) {
+                    await loadAllFragments(fragmentsListDiv);
+                    fragmentsLoaded = true;
+                }
+            } else {
+                fragmentsListDiv.style.display = 'none';
+            }
+        });
+
+        async function loadAllFragments(container) {
+            container.innerHTML = '<div class="feature-empty">加载知识点列表中...</div>';
+            try {
+                var fResp = await fetch(BASE + '/knowledge/fragments', { headers: authHeaders() });
+                if (!fResp.ok) {
+                    container.innerHTML = featureEmpty('加载失败 (HTTP ' + fResp.status + ')');
+                    return;
+                }
+                var fData = await fResp.json();
+                var fragments = fData.fragments || [];
+                if (fragments.length === 0) {
+                    container.innerHTML = featureEmpty('知识库为空');
+                    return;
+                }
+                var fHtml = '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">' +
+                    '全部知识点 (' + fragments.length + ') — 点击展开/折叠内容</div>';
+                fragments.forEach(function(f, idx) {
+                    var safeId = 'knowledgeFragment_' + idx;
+                    fHtml += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;" ' +
+                        'data-fragment-idx="' + idx + '" id="' + safeId + '_header">' +
+                        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                        '<span style="font-weight:600;color:var(--accent);">' + escapeHtml(f.title || '(无标题)') + '</span>' +
+                        '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(f.source || '') + '</span>' +
+                        '</div></div>';
+                    fHtml += '<div id="' + safeId + '_body" style="display:none;margin:-6px 0 8px 0;padding:10px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                        '<pre style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content || '') + '</pre>' +
+                        '</div>';
+                });
+                container.innerHTML = fHtml;
+                // Attach click handlers to each fragment header
+                container.querySelectorAll('[data-fragment-idx]').forEach(function(header) {
+                    header.addEventListener('click', function() {
+                        var idxAttr = header.getAttribute('data-fragment-idx');
+                        var bodyEl = container.querySelector('#knowledgeFragment_' + idxAttr + '_body');
+                        if (bodyEl) {
+                            bodyEl.style.display = bodyEl.style.display === 'none' ? 'block' : 'none';
+                        }
+                    });
+                });
+            } catch (e) {
+                container.innerHTML = featureEmpty('加载失败: ' + e.message);
+            }
+        }
 
         async function doSearch() {
             var q = searchInput.value.trim();

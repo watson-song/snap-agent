@@ -105,6 +105,18 @@ public class KnowledgeBase {
         return allFragments.size();
     }
 
+    /**
+     * Returns all cached fragments (unranked). Used by the UI to list every
+     * knowledge point in the knowledge base modal.
+     *
+     * <p>Returns a defensive copy so callers cannot mutate the internal cache.</p>
+     *
+     * @return unmodifiable list of all fragments (never {@code null}, may be empty)
+     */
+    public List<KnowledgeFragment> listAll() {
+        return Collections.unmodifiableList(allFragments);
+    }
+
     private List<KnowledgeFragment> loadAll() {
         List<KnowledgeFragment> all = new ArrayList<KnowledgeFragment>();
         for (KnowledgeSource source : sources) {

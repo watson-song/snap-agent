@@ -5,6 +5,7 @@ import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
+import cn.watsontech.snapagent.core.patrol.AlertPushChannel;
 import cn.watsontech.snapagent.core.patrol.AnomalyEvent;
 import cn.watsontech.snapagent.core.patrol.AnomalyEventListener;
 import cn.watsontech.snapagent.core.patrol.PatrolReport;
@@ -14,7 +15,9 @@ import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,15 +39,27 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
     private final SkillRegistry skillRegistry;
     private final AlertConverger alertConverger;
     private final PatrolReportStore reportStore;
+    private final List<AlertPushChannel> pushChannels;
 
     public DefaultAnomalyEventListener(AgentExecutor agentExecutor,
                                        SkillRegistry skillRegistry,
                                        AlertConverger alertConverger,
                                        PatrolReportStore reportStore) {
+        this(agentExecutor, skillRegistry, alertConverger, reportStore,
+                Collections.<AlertPushChannel>emptyList());
+    }
+
+    public DefaultAnomalyEventListener(AgentExecutor agentExecutor,
+                                       SkillRegistry skillRegistry,
+                                       AlertConverger alertConverger,
+                                       PatrolReportStore reportStore,
+                                       List<AlertPushChannel> pushChannels) {
         this.agentExecutor = agentExecutor;
         this.skillRegistry = skillRegistry;
         this.alertConverger = alertConverger;
         this.reportStore = reportStore;
+        this.pushChannels = pushChannels != null ? pushChannels
+                : Collections.<AlertPushChannel>emptyList();
     }
 
     @Override
@@ -85,6 +100,7 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
                             null, patrolId, null, skillName, triggeredAt,
                             "FAILED", "Skill not found: " + skillName, true);
                     reportStore.save(report);
+                    pushToChannels(report, event);
                 }
                 return;
             }
@@ -99,6 +115,7 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
                         null, patrolId, agentTask.getTaskId(),
                         skillName, triggeredAt, statusStr, event.getMessage(), true);
                 reportStore.save(report);
+                pushToChannels(report, event);
             }
         } catch (Exception e) {
             log.error("Anomaly-triggered diagnosis failed: {}", e.getMessage(), e);
@@ -107,6 +124,19 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
                         null, patrolId, null,
                         skillName, triggeredAt, "FAILED", e.getMessage(), true);
                 reportStore.save(report);
+                pushToChannels(report, event);
+            }
+        }
+    }
+
+    private void pushToChannels(PatrolReport report, AnomalyEvent event) {
+        if (pushChannels == null || pushChannels.isEmpty()) return;
+        for (AlertPushChannel channel : pushChannels) {
+            try {
+                channel.push(report, event);
+            } catch (Exception e) {
+                log.error("Push channel '{}' failed (reportId={}): {}",
+                        channel.type(), report.getId(), e.getMessage());
             }
         }
     }

@@ -18,6 +18,7 @@ public final class IssueClosure {
     private final String externalIssueId;
     private final String taskId;
     private final String conversationId;
+    private final String userId;
     private final String userQuery;
     private final String rootCause;
     private final SolutionSuggestion solution;
@@ -36,6 +37,7 @@ public final class IssueClosure {
      * @param externalIssueId    外部 Issue ID (Jira/工单, 可空)
      * @param taskId             关联的诊断任务 ID
      * @param conversationId     关联的会话 ID (可空)
+     * @param userId             创建人 (发起诊断的用户 ID, 可空)
      * @param userQuery          用户原始问题
      * @param rootCause          根因摘要
      * @param solution           方案建议 (可空)
@@ -48,7 +50,8 @@ public final class IssueClosure {
      * @param updatedAt          更新时间 (epoch millis)
      */
     public IssueClosure(String issueId, String externalIssueId, String taskId,
-                        String conversationId, String userQuery, String rootCause,
+                        String conversationId, String userId, String userQuery,
+                        String rootCause,
                         SolutionSuggestion solution, String selectedSolution,
                         IssueStatus status, String fixCommitId,
                         VerificationResult verificationResult, String knowledgeEntryId,
@@ -57,6 +60,7 @@ public final class IssueClosure {
         this.externalIssueId = externalIssueId;
         this.taskId = taskId;
         this.conversationId = conversationId;
+        this.userId = userId;
         this.userQuery = userQuery;
         this.rootCause = rootCause;
         this.solution = solution;
@@ -87,6 +91,11 @@ public final class IssueClosure {
     /** 关联的会话 ID (可空)。 */
     public String getConversationId() {
         return conversationId;
+    }
+
+    /** 创建人 (发起诊断的用户 ID, 可空)。 */
+    public String getUserId() {
+        return userId;
     }
 
     /** 用户原始问题。 */
@@ -157,7 +166,7 @@ public final class IssueClosure {
     public IssueClosure withStatus(IssueStatus status, long updatedAt) {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
@@ -175,7 +184,7 @@ public final class IssueClosure {
     public IssueClosure withExternalIssue(String externalIssueId, IssueStatus status, long updatedAt) {
         return new IssueClosure(
                 this.issueId, externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
@@ -198,7 +207,7 @@ public final class IssueClosure {
                                           IssueStatus status, long updatedAt) {
         return new IssueClosure(
                 this.issueId, externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, selectedSolution,
                 status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
@@ -215,7 +224,7 @@ public final class IssueClosure {
     public IssueClosure withSolution(SolutionSuggestion solution, long updatedAt) {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 solution, this.selectedSolution,
                 this.status, this.fixCommitId,
                 this.verificationResult, this.knowledgeEntryId,
@@ -232,7 +241,7 @@ public final class IssueClosure {
     public IssueClosure withVerification(VerificationResult verificationResult, long updatedAt) {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
                 verificationResult, this.knowledgeEntryId,
@@ -249,7 +258,7 @@ public final class IssueClosure {
     public IssueClosure withKnowledgeEntry(String knowledgeEntryId, long updatedAt) {
         return new IssueClosure(
                 this.issueId, this.externalIssueId, this.taskId,
-                this.conversationId, this.userQuery, this.rootCause,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
                 this.verificationResult, knowledgeEntryId,
@@ -260,7 +269,8 @@ public final class IssueClosure {
     public String toString() {
         return "IssueClosure{issueId='" + issueId + "', externalIssueId='"
                 + externalIssueId + "', taskId='" + taskId
-                + "', status=" + status + ", solution="
+                + "', userId='" + userId + "'"
+                + ", status=" + status + ", solution="
                 + (solution != null ? "present(" + solution.getOptions().size() + " options)" : "null")
                 + ", knowledgeEntryId='" + knowledgeEntryId + "', updatedAt="
                 + updatedAt + "}";

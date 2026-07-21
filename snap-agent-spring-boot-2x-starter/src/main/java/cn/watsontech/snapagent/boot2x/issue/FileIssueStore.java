@@ -204,6 +204,7 @@ public class FileIssueStore implements IssueStore {
         map.put("externalIssueId", issue.getExternalIssueId());
         map.put("taskId", issue.getTaskId());
         map.put("conversationId", issue.getConversationId());
+        map.put("userId", issue.getUserId());
         map.put("userQuery", issue.getUserQuery());
         map.put("rootCause", issue.getRootCause());
         map.put("solution", solutionToMap(issue.getSolution()));
@@ -285,6 +286,7 @@ public class FileIssueStore implements IssueStore {
                 nullableStr(data.get("externalIssueId")),
                 str(data.get("taskId")),
                 nullableStr(data.get("conversationId")),
+                nullableStr(data.get("userId")),
                 str(data.get("userQuery")),
                 str(data.get("rootCause")),
                 solution,

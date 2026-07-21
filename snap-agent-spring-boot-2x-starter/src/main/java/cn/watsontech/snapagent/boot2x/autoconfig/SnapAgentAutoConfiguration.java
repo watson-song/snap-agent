@@ -46,6 +46,10 @@ import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorContextSummarizer;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorSkillClassifier;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorSummaryCache;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
@@ -706,12 +710,25 @@ public class SnapAgentAutoConfiguration {
                 log.info("App active profiles resolved: {}", joined);
             }
         }
-        return new SnapAgentController(
+        SnapAgentController controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
                 costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore);
+
+        // Wire anchor orchestrator if anchor feature is enabled and LLM is available
+        if (properties.getAnchor().isEnabled() && llmClient != null) {
+            AnchorSummaryCache cache = new AnchorSummaryCache(properties.getAnchor());
+            AnchorContextSummarizer summarizer = new AnchorContextSummarizer(llmClient, properties.getAnchor());
+            AnchorSkillClassifier classifier = new AnchorSkillClassifier(llmClient, skillRegistry, properties.getAnchor());
+            AnchorOrchestrator orchestrator = new AnchorOrchestrator(llmClient, cache, summarizer,
+                    classifier, skillRegistry, properties.getAnchor());
+            controller.setAnchorOrchestrator(orchestrator);
+            log.info("AnchorOrchestrator wired (anchor feature enabled)");
+        }
+
+        return controller;
     }
 
     // ---- SnapAgentFilter ----
@@ -730,14 +747,23 @@ public class SnapAgentAutoConfiguration {
         return registration;
     }
 
-    // ---- PatrolReportStore (v0.5) ----
+    // ---- InMemoryPatrolReportStore (v0.5, SPI-extracted v1.1) ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
     public cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore(SnapAgentProperties props) {
-        log.info("PatrolReportStore assembled (buffer-size={})", props.getPatrol().getReportBufferSize());
-        return new cn.watsontech.snapagent.core.patrol.PatrolReportStore(
+        log.info("InMemoryPatrolReportStore assembled (buffer-size={})", props.getPatrol().getReportBufferSize());
+        return new cn.watsontech.snapagent.boot2x.patrol.InMemoryPatrolReportStore(
                 props.getPatrol().getReportBufferSize());
+    }
+
+    // ---- NoopPatrolLockProvider (v1.1, multi-Pod coordination SPI) ----
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.core.patrol.PatrolLockProvider patrolLockProvider() {
+        log.info("NoopPatrolLockProvider assembled (single-Pod mode; implement PatrolLockProvider for multi-Pod)");
+        return new cn.watsontech.snapagent.boot2x.patrol.NoopPatrolLockProvider();
     }
 
     // ---- Patrol TaskScheduler (v0.5) ----
@@ -763,10 +789,19 @@ public class SnapAgentAutoConfiguration {
             org.springframework.scheduling.TaskScheduler patrolTaskScheduler,
             AgentExecutor agentExecutor,
             SkillRegistry skillRegistry,
-            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore) {
-        log.info("ScheduledPatrolScheduler assembled");
+            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
+            cn.watsontech.snapagent.core.patrol.PatrolLockProvider patrolLockProvider,
+            SnapAgentProperties props,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider) {
+        List<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannels =
+                new ArrayList<cn.watsontech.snapagent.core.patrol.AlertPushChannel>();
+        pushChannels.addAll(pushChannelProvider.orderedStream()
+                .collect(java.util.stream.Collectors.toList()));
+        log.info("ScheduledPatrolScheduler assembled (lockProvider={}, pushChannels={}, lockTtl={}s)",
+                patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds());
         return new cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler(
-                patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore);
+                patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore,
+                patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels);
     }
 
     // ---- InMemoryAlertConverger (v0.5) ----
@@ -790,10 +825,55 @@ public class SnapAgentAutoConfiguration {
             AgentExecutor agentExecutor,
             SkillRegistry skillRegistry,
             ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
-            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore) {
-        log.info("DefaultAnomalyEventListener assembled");
+            cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider) {
+        List<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannels =
+                new ArrayList<cn.watsontech.snapagent.core.patrol.AlertPushChannel>();
+        pushChannels.addAll(pushChannelProvider.orderedStream()
+                .collect(java.util.stream.Collectors.toList()));
+        log.info("DefaultAnomalyEventListener assembled (pushChannels={})", pushChannels.size());
         return new cn.watsontech.snapagent.boot2x.patrol.DefaultAnomalyEventListener(
-                agentExecutor, skillRegistry, alertConvergerProvider.getIfAvailable(), patrolReportStore);
+                agentExecutor, skillRegistry, alertConvergerProvider.getIfAvailable(),
+                patrolReportStore, pushChannels);
+    }
+
+    // ---- WebhookAlertPushChannel (v1.1, default push channel) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
+            "${snap-agent.alert.push.webhook.enabled:false} and " +
+            "!T(org.springframework.util.StringUtils).isEmpty('${snap-agent.alert.push.webhook.url:}')")
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.patrol.WebhookAlertPushChannel webhookAlertPushChannel(
+            SnapAgentProperties props) {
+        SnapAgentProperties.Alert.Push.Webhook wh = props.getAlert().getPush().getWebhook();
+        log.info("WebhookAlertPushChannel assembled (url={}, connectMs={}, readMs={})",
+                wh.getUrl(), wh.getConnectTimeoutMs(), wh.getReadTimeoutMs());
+        return new cn.watsontech.snapagent.boot2x.patrol.WebhookAlertPushChannel(
+                wh.getUrl(), wh.getAuthHeader(), wh.getAuthToken(),
+                wh.getConnectTimeoutMs(), wh.getReadTimeoutMs());
+    }
+
+    // ---- EmailAlertPushChannel (v1.1, default push channel; requires spring-boot-starter-mail) ----
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.alert.push.email", name = "enabled", havingValue = "true")
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnClass(
+            name = "org.springframework.mail.javamail.JavaMailSender")
+    @ConditionalOnMissingBean
+    public Object emailAlertPushChannel(
+            SnapAgentProperties props,
+            ObjectProvider<org.springframework.mail.javamail.JavaMailSender> mailSenderProvider) {
+        SnapAgentProperties.Alert.Push.Email emailCfg = props.getAlert().getPush().getEmail();
+        org.springframework.mail.javamail.JavaMailSender mailSender = mailSenderProvider.getIfAvailable();
+        if (mailSender == null) {
+            log.warn("snap-agent.alert.push.email.enabled=true but no JavaMailSender bean found; " +
+                    "add spring-boot-starter-mail to host dependencies to enable email push");
+            return new cn.watsontech.snapagent.boot2x.autoconfig.NoopMarkerBean("emailAlertPushChannel-skipped");
+        }
+        log.info("EmailAlertPushChannel assembled (recipients={}, from={})",
+                emailCfg.getTo(), emailCfg.getFrom());
+        return new cn.watsontech.snapagent.boot2x.patrol.EmailAlertPushChannel(
+                mailSender, emailCfg.getFrom(), emailCfg.getTo(), emailCfg.getSubjectPrefix());
     }
 
     // ---- TemplateBugfixSuggester (v0.5) ----

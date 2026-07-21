@@ -1,0 +1,60 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        Browser["Browser (SSE)<br/>断线重连后跨 Pod 中继"]
+    end
+
+    subgraph Gateway ["网关与路由层 (Gateway & Routing)"]
+        direction LR
+        PodB["Pod B (中继)<br/>未命中 TaskStore → 触发 PeerSseRelay"]
+        Router["PeerRouter<br/>K8s API / DNS 探测兄弟 Pod"]
+        Relay["PeerSseRelay<br/>逐行中继 SSE 流"]
+        Internal["InternalTaskController<br/>Pod 间 SSE 流转发端点"]
+    end
+
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        PodA["Pod A (持有 Task)<br/>TaskStore 命中, 直推 SSE"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        TaskStore[("In-Memory TaskStore<br/>每 Pod 独立, 无共享状态")]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        K8sAPI["K8s API<br/>Endpoints 列表查询"]
+        Ingress["Ingress / LB<br/>负载均衡 round-robin"]
+        DNS["Headless DNS<br/>Pod IP 解析"]
+    end
+
+    Browser --> Ingress
+    Ingress --> PodB
+    PodB --> Router
+    Router --> K8sAPI
+    Router --> DNS
+    Router --> Internal
+    Internal --> PodA
+    PodA --> TaskStore
+    PodB --> TaskStore
+    PodA -.->|"SSE 中继"| Browser
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class Browser client
+    class PodB,Router,Relay,Internal api
+    class PodA service
+    class TaskStore storage
+    class K8sAPI,Ingress,DNS external

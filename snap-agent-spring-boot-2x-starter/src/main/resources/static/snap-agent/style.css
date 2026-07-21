@@ -78,12 +78,15 @@ body {
     width: 48px;
     min-width: 48px;
     overflow: visible; /* allow tooltip ::after to show beyond sidebar */
+    position: relative; /* positioning context for skill-sections flyout */
 }
 .sidebar.collapsed .logo-text,
 .sidebar.collapsed .sidebar-actions,
-.sidebar.collapsed .skill-list-header,
-.sidebar.collapsed .skill-list {
+.sidebar.collapsed .skill-list-header {
     display: none;
+}
+.sidebar.collapsed .skill-list {
+    display: none; /* hidden in collapsed mode; skill-sections flyout re-shows it on hover */
 }
 .sidebar.collapsed .skill-icons {
     display: flex;
@@ -136,8 +139,61 @@ body {
     opacity: 1;
 }
 
+/* Collapsed mode: show feature-nav as vertical icon column */
 .sidebar.collapsed .feature-nav {
-    display: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+}
+.sidebar.collapsed .feature-nav-btn {
+    padding: 6px 8px;
+    font-size: 16px;
+    opacity: 0.7;
+}
+.sidebar.collapsed .feature-nav-btn:hover {
+    opacity: 1;
+}
+
+/* Collapsed skill list flyout: hovering skill-icons reveals the full skill list */
+.sidebar.collapsed .skill-icons {
+    position: relative;
+    flex: 1;
+}
+
+.sidebar.collapsed .skill-sections {
+    position: absolute;
+    left: 48px;
+    top: 0;
+    bottom: 0;
+    width: 232px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 16px rgba(0,0,0,0.18);
+    z-index: 60;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+/* Re-show the skill-list inside the flyout (it was hidden by .sidebar.collapsed .skill-list) */
+.sidebar.collapsed .skill-sections .skill-list {
+    display: block;
+}
+
+/* Also show the skill-list-header inside the flyout */
+.sidebar.collapsed .skill-sections .skill-list-header {
+    display: flex;
+}
+
+/* Trigger: hover over skill-icons OR the flyout itself keeps it open */
+.sidebar.collapsed .skill-icons:hover ~ .skill-sections,
+.sidebar.collapsed .skill-sections:hover {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 /* Collapsed skill letter-icons */
@@ -1095,6 +1151,62 @@ body {
 }
 
 .input-bar textarea:focus { border-color: var(--accent); }
+
+/* ===== Per-message action buttons (复制 / 建议方案 / 创建 Issue) ===== */
+.msg-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 6px 0 0 0;
+    margin-top: 6px;
+    border-top: 1px dashed var(--border);
+}
+.msg-action-btn {
+    padding: 3px 10px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.msg-action-btn:hover:not(:disabled) {
+    background: var(--bg-hover, var(--bg-secondary));
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+.msg-action-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.msg-action-btn.success {
+    border-color: var(--green);
+    color: var(--green);
+    background: var(--green-light, transparent);
+}
+.msg-action-btn.error {
+    border-color: var(--red);
+    color: var(--red);
+    background: var(--red-light, transparent);
+}
+.msg-action-badge {
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 12px;
+    background: var(--green-light, transparent);
+    color: var(--green);
+    border: 1px solid var(--green);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+.msg-action-badge.success {
+    background: var(--green-light, transparent);
+    color: var(--green);
+    border-color: var(--green);
+}
 
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 6px; }

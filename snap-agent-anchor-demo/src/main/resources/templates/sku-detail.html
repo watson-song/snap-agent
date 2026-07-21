@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title th:text="${sku != null ? sku.sku_name + ' — SKU 详情' : 'SKU 详情'}">SKU 详情</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; color: #1e293b; }
+        .header { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; padding: 20px 40px; }
+        .header a { color: white; text-decoration: none; font-size: 14px; opacity: 0.8; }
+        .header h1 { font-size: 20px; margin-top: 8px; }
+        main { padding: 24px 40px; max-width: 900px; margin: 0 auto; }
+        .detail-card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 24px; margin-bottom: 24px; border: 1px solid #e2e8f0; }
+        .detail-card h2 { font-size: 16px; font-weight: 600; color: #4f46e5; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e0e7ff; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; }
+        .info-item { display: flex; flex-direction: column; }
+        .info-item .label { font-size: 12px; color: #64748b; font-weight: 500; }
+        .info-item .value { font-size: 14px; color: #1e293b; margin-top: 2px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; background: #e0e7ff; color: #3730a3; }
+        .error { text-align: center; padding: 60px; color: #dc2626; font-size: 16px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <a href="/">&larr; 返回列表</a>
+    <h1 th:text="${sku != null ? sku.sku_name : 'SKU 详情'}">SKU 名称</h1>
+</div>
+
+<main th:if="${sku != null}">
+    <!-- Basic info section with anchor -->
+    <section class="detail-card" data-snap-anchor="基本信息" data-snap-skill="auto">
+        <h2>基本信息</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="label">SKU 编码</span>
+                <span class="value" th:text="${sku.sku_code}">SKU001</span>
+            </div>
+            <div class="info-item">
+                <span class="label">商品名称</span>
+                <span class="value" th:text="${sku.sku_name}">商品名称</span>
+            </div>
+            <div class="info-item">
+                <span class="label">品牌</span>
+                <span class="value" th:text="${sku.brand_name != null ? sku.brand_name : '—'}">品牌</span>
+            </div>
+            <div class="info-item">
+                <span class="label">商品组</span>
+                <span class="value" th:text="${sku.sku_group_code != null ? sku.sku_group_code : '—'}">组编码</span>
+            </div>
+            <div class="info-item">
+                <span class="label">一级分类</span>
+                <span class="value" th:text="${sku.lv1_clssf_name}">一级分类</span>
+            </div>
+            <div class="info-item">
+                <span class="label">二级分类</span>
+                <span class="value" th:text="${sku.lv2_clssf_name}">二级分类</span>
+            </div>
+            <div class="info-item">
+                <span class="label">价格</span>
+                <span class="value" th:text="${sku.price != null ? '¥' + sku.price : '—'}">¥0.00</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Lifecycle section with anchor -->
+    <section class="detail-card" data-snap-anchor="生命周期与状态" data-snap-skill="auto">
+        <h2>生命周期与状态</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="label">生命周期状态</span>
+                <span class="value">
+                    <span class="tag" th:text="${sku.lifetime}">在售</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="label">销售状态</span>
+                <span class="value">
+                    <span class="tag" th:text="${sku.sale_status != null ? sku.sale_status : '—'}">正常</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="label">上市日期</span>
+                <span class="value" th:text="${sku.effect_dt != null ? #temporals.format(sku.effect_dt, 'yyyy-MM-dd') : '—'}">2024-01-01</span>
+            </div>
+            <div class="info-item">
+                <span class="label">下市日期</span>
+                <span class="value" th:text="${sku.invld_dt != null ? #temporals.format(sku.invld_dt, 'yyyy-MM-dd') : '—'}">—</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Packaging section with anchor -->
+    <section class="detail-card" data-snap-anchor="包装与物流" data-snap-skill="auto">
+        <h2>包装与物流</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="label">箱规</span>
+                <span class="value" th:text="${sku.box_spec}">1</span>
+            </div>
+            <div class="info-item">
+                <span class="label">重量（克）</span>
+                <span class="value" th:text="${sku.weight}">0</span>
+            </div>
+            <div class="info-item">
+                <span class="label">每箱体积（m³）</span>
+                <span class="value" th:text="${sku.box_vol}">0.0000</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Forecast config section with anchor -->
+    <section class="detail-card" data-snap-anchor="预测与补货配置" data-snap-skill="auto">
+        <h2>预测与补货配置</h2>
+        <div class="info-grid">
+            <div class="info-item">
+                <span class="label">参与预测</span>
+                <span class="value">
+                    <span class="tag" th:text="${sku.forecast_flag == 1 ? '是' : '否'}">是</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="label">参与补货</span>
+                <span class="value">
+                    <span class="tag" th:text="${sku.replenishment_flag == 1 ? '是' : '否'}">是</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="label">参与调拨</span>
+                <span class="value">
+                    <span class="tag" th:text="${sku.transfer_flag == 1 ? '是' : '否'}">是</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="label">预测开始时间</span>
+                <span class="value" th:text="${sku.forecast_start_time != null ? #temporals.format(sku.forecast_start_time, 'yyyy-MM-dd HH:mm') : '—'}">—</span>
+            </div>
+            <div class="info-item">
+                <span class="label">预测结束时间</span>
+                <span class="value" th:text="${sku.forecast_end_time != null ? #temporals.format(sku.forecast_end_time, 'yyyy-MM-dd HH:mm') : '—'}">—</span>
+            </div>
+        </div>
+    </section>
+</main>
+
+<div class="error" th:if="${error != null}">
+    <p th:text="${error}">SKU not found</p>
+</div>
+
+<!-- SnapAgent Anchor Q&A Script -->
+<script src="/snap-agent/anchor.js" defer></script>
+
+</body>
+</html>

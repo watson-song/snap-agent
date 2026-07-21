@@ -186,15 +186,99 @@ class ObservabilityHttpClientTest {
         assertThat(client.lastHeaders).containsEntry("X-Present", "yes");
     }
 
+    // ---- httpPost parameter passing via subclass override ----
+
+    @Test
+    @DisplayName("httpPost receives the URL, headers, body, and timeouts supplied by the caller")
+    void httpPostShouldReceiveUrlHeadersBodyAndTimeouts() throws IOException {
+        final CapturingClient client = new CapturingClient();
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("Content-Type", "application/json");
+        headers.put("Authorization", "Bearer secret");
+
+        client.httpPost("http://hook.example.com/alert", headers, "{\"text\":\"hi\"}", 3000, 7000);
+
+        assertThat(client.lastPostUrl).isEqualTo("http://hook.example.com/alert");
+        assertThat(client.lastPostHeaders)
+                .containsEntry("Content-Type", "application/json")
+                .containsEntry("Authorization", "Bearer secret");
+        assertThat(client.lastPostBody).isEqualTo("{\"text\":\"hi\"}");
+        assertThat(client.lastPostConnectTimeoutMs).isEqualTo(3000);
+        assertThat(client.lastPostReadTimeoutMs).isEqualTo(7000);
+    }
+
+    @Test
+    @DisplayName("httpPost accepts null headers and null body without throwing")
+    void httpPostShouldAcceptNullHeadersAndBody() throws IOException {
+        final CapturingClient client = new CapturingClient();
+
+        client.httpPost("http://localhost:9/post", null, null, 100, 200);
+
+        assertThat(client.lastPostUrl).isEqualTo("http://localhost:9/post");
+        assertThat(client.lastPostHeaders).isNull();
+        assertThat(client.lastPostBody).isNull();
+        assertThat(client.lastPostConnectTimeoutMs).isEqualTo(100);
+        assertThat(client.lastPostReadTimeoutMs).isEqualTo(200);
+    }
+
+    @Test
+    @DisplayName("httpPost returns the body supplied by the override")
+    void httpPostShouldReturnBodyFromOverride() throws IOException {
+        ObservabilityHttpClient client = new ObservabilityHttpClient() {
+            @Override
+            protected String httpPost(String url, Map<String, String> headers, String body,
+                                      int connectTimeoutMs, int readTimeoutMs) {
+                return "{\"ok\":true}";
+            }
+        };
+
+        String body = client.httpPost("http://x", Collections.<String, String>emptyMap(), "{}", 1, 1);
+
+        assertThat(body).isEqualTo("{\"ok\":true}");
+    }
+
+    @Test
+    @DisplayName("httpPost propagates IOException from the override")
+    void httpPostShouldPropagateIOException() {
+        ObservabilityHttpClient client = new ObservabilityHttpClient() {
+            @Override
+            protected String httpPost(String url, Map<String, String> headers, String body,
+                                      int connectTimeoutMs, int readTimeoutMs) throws IOException {
+                throw new IOException("HTTP 500: webhook endpoint down");
+            }
+        };
+
+        assertThatThrownBy(() -> client.httpPost("http://x", null, null, 1, 1))
+                .isInstanceOf(IOException.class)
+                .hasMessageContaining("HTTP 500");
+    }
+
+    @Test
+    @DisplayName("httpPost with empty header map and empty body does not throw")
+    void httpPostShouldHandleEmptyHeadersAndBody() throws IOException {
+        final CapturingClient client = new CapturingClient();
+
+        client.httpPost("http://localhost/empty", new LinkedHashMap<String, String>(), "", 10, 20);
+
+        assertThat(client.lastPostHeaders).isEmpty();
+        assertThat(client.lastPostBody).isEmpty();
+    }
+
     /**
-     * Subclass that records the arguments passed to {@code httpGet} and returns
-     * a canned body, so tests can assert parameter passing without real HTTP.
+     * Subclass that records the arguments passed to {@code httpGet} and {@code httpPost}
+     * and returns a canned body, so tests can assert parameter passing without real HTTP.
      */
     static class CapturingClient extends ObservabilityHttpClient {
         String lastUrl;
         Map<String, String> lastHeaders;
         int lastConnectTimeoutMs;
         int lastReadTimeoutMs;
+
+        String lastPostUrl;
+        Map<String, String> lastPostHeaders;
+        String lastPostBody;
+        int lastPostConnectTimeoutMs;
+        int lastPostReadTimeoutMs;
 
         @Override
         protected String httpGet(String url, Map<String, String> headers,
@@ -203,6 +287,17 @@ class ObservabilityHttpClientTest {
             this.lastHeaders = headers;
             this.lastConnectTimeoutMs = connectTimeoutMs;
             this.lastReadTimeoutMs = readTimeoutMs;
+            return "";
+        }
+
+        @Override
+        protected String httpPost(String url, Map<String, String> headers, String body,
+                                  int connectTimeoutMs, int readTimeoutMs) {
+            this.lastPostUrl = url;
+            this.lastPostHeaders = headers;
+            this.lastPostBody = body;
+            this.lastPostConnectTimeoutMs = connectTimeoutMs;
+            this.lastPostReadTimeoutMs = readTimeoutMs;
             return "";
         }
     }

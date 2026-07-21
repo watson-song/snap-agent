@@ -1,0 +1,97 @@
+graph TD
+    %% ===== Glassmorphism Node Classes (Tailwind pastels, semi-transparent) =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef ai fill:#dcfce7,stroke:#4ade80,stroke-width:1.5px,color:#166534,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    %% ===== L1 接入层 =====
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        A1["Browser (Web UI)<br/>Skill 选择 + SSE 流式"]
+        A2["第三方 REST Client<br/>API SDK 调用"]
+    end
+
+    %% ===== L2 网关与接口层 =====
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        B1["SnapAgentFilter<br/>用户身份注入 ThreadLocal"]
+        B2["SecurityGateway<br/>权限校验与身份解析"]
+        B3["SnapAgentController<br/>REST API + SSE 端点"]
+        B4["KnowledgeController<br/>知识库搜索/上传端点"]
+    end
+
+    %% ===== L3 核心业务层 =====
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        C1["SkillRegistry<br/>两层 Skill 合并管理"]
+        C2["ToolDispatcher<br/>工具路由与截断保护"]
+        C3["SystemPromptExtender<br/>上下文注入 项目+知识"]
+        C4["ConversationStore<br/>会话历史持久化"]
+    end
+
+    %% ===== L4 AI 引擎层 =====
+    subgraph AI ["AI 引擎层 (AI Layer)"]
+        direction LR
+        D1["AgentExecutor<br/>LLM × 工具交互循环"]
+        D2["LlmClient<br/>流式 LLM 客户端 SPI"]
+        D3["CostTrackingLlmClient<br/>Token 成本追踪装饰器"]
+    end
+
+    %% ===== L5 数据与存储层 =====
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        E1[("MySQL<br/>业务数据只读")]
+        E2[("Redis<br/>缓存只读")]
+        E3["File Storage<br/>Skill/会话/Issue JSON"]
+        E4[("In-Memory TaskStore<br/>任务状态 每Pod独立")]
+    end
+
+    %% ===== L6 基础设施与外部系统 =====
+    subgraph Infra ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        F1["LLM Provider<br/>Anthropic / OpenAI / 通义"]
+        F2["Prometheus<br/>指标查询"]
+        F3["Loki<br/>日志搜索"]
+        F4["Jaeger<br/>链路追踪"]
+    end
+
+    %% ===== 连线规范：实线=同步调用，虚线=异步/跨层 =====
+    A1 --> B3
+    A2 --> B3
+    B1 --> B2
+    B2 --> B3
+    B3 --> D1
+    B3 --> C1
+    B3 --> C4
+    B4 --> C3
+    D1 --> C2
+    D1 --> D2
+    D3 -.-> D2
+    D2 -.-> F1
+    C2 --> E1
+    C2 --> E2
+    C1 --> E3
+    C4 --> E3
+    D1 --> E4
+    C2 -.-> F2
+    C2 -.-> F3
+    C2 -.-> F4
+
+    %% ===== Glass Layer Styles (distinct transparent glass per layer) =====
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style AI fill:#22c55e,stroke:#22c55e,stroke-width:2px,color:#86efac
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style Infra fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    %% ===== 应用颜色类 =====
+    class A1,A2 client
+    class B1,B2,B3,B4 api
+    class C1,C2,C3,C4 service
+    class D1,D2,D3 ai
+    class E1,E2,E3,E4 storage
+    class F1,F2,F3,F4 external

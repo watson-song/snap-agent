@@ -1,5 +1,7 @@
-package cn.watsontech.snapagent.core.patrol;
+package cn.watsontech.snapagent.boot2x.patrol;
 
+import cn.watsontech.snapagent.core.patrol.PatrolReport;
+import cn.watsontech.snapagent.core.patrol.PatrolReportStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -7,13 +9,17 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class PatrolReportStoreTest {
+/**
+ * Unit tests for {@link InMemoryPatrolReportStore} (default in-memory impl of
+ * {@link PatrolReportStore}).
+ */
+class InMemoryPatrolReportStoreTest {
 
     private PatrolReportStore store;
 
     @BeforeEach
     void setUp() {
-        store = new PatrolReportStore(100);
+        store = new InMemoryPatrolReportStore(100);
     }
 
     @Test
@@ -113,7 +119,7 @@ class PatrolReportStoreTest {
 
     @Test
     void ringBufferEvictsOldestWhenFull() {
-        PatrolReportStore smallStore = new PatrolReportStore(3);
+        PatrolReportStore smallStore = new InMemoryPatrolReportStore(3);
 
         PatrolReport r1 = createReport(1000L);
         r1.setId("r1");
@@ -141,7 +147,7 @@ class PatrolReportStoreTest {
 
     @Test
     void concurrentSaveShouldNotCorruptRingBuffer() throws Exception {
-        PatrolReportStore smallStore = new PatrolReportStore(10);
+        PatrolReportStore smallStore = new InMemoryPatrolReportStore(10);
         int threadCount = 20;
         String[] savedIds = new String[threadCount];
         Thread[] threads = new Thread[threadCount];

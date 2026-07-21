@@ -40,7 +40,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldExtractFragmentWithCorrectTitleAndSource() {
         IssueClosure issue = new IssueClosure(
                 "issue-001", null, "task-100",
-                null, "为什么订单服务超时?", "连接池打满",
+                null, null, "为什么订单服务超时?", "连接池打满",
                 suggestionOf("方案1", "方案2"), null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -56,7 +56,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldBuildContentWithProblemAndRootCauseSections() {
         IssueClosure issue = new IssueClosure(
                 "issue-002", null, "task-200",
-                null, "数据库查询慢", "缺少索引",
+                null, null, "数据库查询慢", "缺少索引",
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -75,7 +75,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldUseSelectedSolutionWhenPresent() {
         IssueClosure issue = new IssueClosure(
                 "issue-003", null, "task-300",
-                null, "查询慢", "缺索引",
+                null, null, "查询慢", "缺索引",
                 suggestionOf("方案1", "方案2"), "方案2: 加索引",
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
@@ -92,7 +92,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldListAllSolutionsWhenNoSelectedSolution() {
         IssueClosure issue = new IssueClosure(
                 "issue-004", null, "task-400",
-                null, "查询慢", "缺索引",
+                null, null, "查询慢", "缺索引",
                 suggestionOf("方案A", "方案B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
@@ -108,7 +108,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldIncludeVerificationSectionWhenPresent() {
         IssueClosure issue = new IssueClosure(
                 "issue-005", null, "task-500",
-                null, "查询慢", "缺索引",
+                null, null, "查询慢", "缺索引",
                 suggestionOf("方案1"), "方案1",
                 IssueStatus.VERIFIED, null,
                 verificationOf(true, "修复后查询时间从5s降到50ms"), null,
@@ -131,7 +131,7 @@ class KnowledgeSedimentationExtractorTest {
         String longQuery = sb.toString(); // 80 characters
         IssueClosure issue = new IssueClosure(
                 "issue-006", null, "task-600",
-                null, longQuery, "root cause",
+                null, null, longQuery, "root cause",
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -151,7 +151,7 @@ class KnowledgeSedimentationExtractorTest {
     void shouldSetMetadataWithCategory() {
         IssueClosure issue = new IssueClosure(
                 "issue-007", null, "task-700",
-                null, "query", "root cause",
+                null, null, "query", "root cause",
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,

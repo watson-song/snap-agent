@@ -4,7 +4,7 @@
 
 [![Java 8](https://img.shields.io/badge/Java-8-orange.svg)](https://adoptium.net/)
 [![Spring Boot 2.5.15](https://img.shields.io/badge/Spring%20Boot-2.5.15-green.svg)](https://spring.io/projects/spring-boot)
-[![Version](https://img.shields.io/badge/version-0.1--alpha-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)]()
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 [English](README.md) | [中文](README_zh.md)
@@ -47,7 +47,7 @@ SnapAgent is an **embedded AI skill framework**. Add one Maven dependency + a fe
 **Option A — One-line install (downloads pre-built JARs from GitHub Releases):**
 
 ```bash
-bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/v0.1-alpha/install.sh)
+bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/v0.4.0/install.sh)
 ```
 
 **Option B — Build from source:**
@@ -62,7 +62,7 @@ git clone https://github.com/watson-song/snap-agent.git && cd snap-agent && mvn 
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>0.1-alpha</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -123,6 +123,37 @@ or use your custom tools...
 
 Open `http://localhost:8080/snap-agent/`, select a Skill, type your question, and watch the Agent work.
 
+### 7. Enable Page-Section Anchor Q&A (Optional, v0.4)
+
+Add the anchor script to any host page that should support in-context Q&A:
+
+```html
+<script src="/snap-agent/anchor.js" defer></script>
+```
+
+Annotate page regions with `data-snap-anchor`:
+
+```html
+<section data-snap-anchor="SKU Overview" data-snap-skill="auto">
+  <h2>SKU Overview</h2>
+  <table>...</table>
+</section>
+```
+
+Users click the purple 💬 icon → a right-side drawer opens → they ask LLM questions about that section's content, without leaving the page. The drawer shows a content summary subtitle, the active skill name + description, and rounded right-side corners.
+
+**Critical**: If your host app has no Spring Security / Shiro, provide a `SecurityGateway` bean so `anchor.js` can verify authorization:
+
+```java
+@Configuration
+public class MySecurityGateway implements SecurityGateway {
+    @Override public String currentUserId() { return "demo-user"; }
+    @Override public boolean hasPermission(String code) { return true; }
+}
+```
+
+Without a `SecurityGateway`, `anchor.js` silently renders no icons. Full setup (SPA compat, mobile, config) in the [Anchor Q&A Integration Guide](docs/site/integration/en/anchor-feature-guide.md).
+
 ## Architecture
 
 ```
@@ -180,6 +211,7 @@ Open `http://localhost:8080/snap-agent/`, select a Skill, type your question, an
 | **Zero impact** | `enabled=false` creates no Beans, Filters, or thread pools |
 | **Cross-pod routing** | K8s multi-instance SSE relay, auto-discovers the pod holding a task |
 | **Chat SPA** | Out-of-the-box Web UI with Markdown rendering, no build tools |
+| **Page-Section Anchor Q&A** (v0.4) | Embed `<script src="/snap-agent/anchor.js">` + annotate regions with `data-snap-anchor` → users click 💬 → right-side drawer opens for in-context LLM Q&A, with smart skill routing, pre-summary cache, and Shadow DOM isolation |
 
 ## Configuration Reference
 
@@ -214,6 +246,16 @@ snap-agent:
     audit-log: true
   routing:
     mode: none                           # none / static / k8s-api / headless-dns
+  anchor:                                # v0.4: page-section anchor Q&A
+    enabled: true                        # default true; false disables anchor.js + AnchorOrchestrator
+    disabled-paths:                      # blacklist paths (no scanning)
+      - "/payment/**"
+    max-context-chars: 8000              # max chars sent to LLM per request
+    preprocess-enabled: true             # pre-summarize + pre-classify on click
+    summary-threshold-chars: 4000        # skip summarizer for content shorter than this
+    summary-cache-ttl-seconds: 600       # Caffeine LRU cache TTL
+    classifier-model: ""                 # empty = use default model; use a cheap model to save cost
+    classifier-confidence-threshold: 0.5 # below this, fall back to general LLM
 ```
 
 ## Extend: Custom Tools
@@ -248,10 +290,13 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/snap-agent/` | Web UI (SPA) |
+| GET | `/snap-agent/anchor.js` | Anchor Q&A script (static asset, v0.4) |
+| GET | `/snap-agent/anchor/config` | Anchor feature config (public) |
+| POST | `/snap-agent/anchor/preprocess` | Pre-summarize + pre-classify on anchor click |
 | GET | `/snap-agent/skills` | List all skills |
 | GET | `/snap-agent/models` | List available models |
 | GET | `/snap-agent/tools` | List available tools |
-| POST | `/snap-agent/runs` | Create an Agent task |
+| POST | `/snap-agent/runs` | Create an Agent task (use `skillId: "auto"` + `anchor` field for anchor Q&A) |
 | GET | `/snap-agent/runs/{id}` | Query task status |
 | GET | `/snap-agent/runs/{id}/stream` | SSE real-time stream |
 | GET | `/snap-agent/runs/{id}/transcript` | Full transcript |
@@ -261,7 +306,7 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 
 ## Roadmap
 
-### v0.1-alpha (current)
+### v0.1-alpha
 
 - Embedded framework core: AgentExecutor multi-turn loop + LLM streaming + SSE push
 - Skill Markdown system: YAML frontmatter + step-based body
@@ -286,12 +331,17 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 - Project context injection: auto-scan project structure as system prompt
 - Skill auto-generation from code + database analysis
 
-### v0.4 — Operations Diagnostics
+### v0.4 — Page-Section Anchor Q&A + Ops Diagnostics (current)
 
+- **Page-Section Anchor Q&A**: embed `anchor.js` on host pages → users click 💬 icon → right-side drawer opens for in-context LLM Q&A about that section's content
+  - Smart skill routing (`AnchorSkillClassifier`) with confidence-based fallback
+  - Pre-summary + cache (`AnchorContextSummarizer` + Caffeine LRU) reduces first-token latency
+  - Shadow DOM isolation, rounded right corners, content summary subtitle, skill info bar
+  - `data-snap-anchor` + `data-snap-skill="auto|<name>|off"` annotation API
+- **Ops diagnostic skills**: `ops-health-check`, `slow-query-analysis`, `error-spike-investigation`, `config-diff`
 - **MetricsToolProvider**: query Prometheus / Grafana metrics
 - **LogAnalysisToolProvider**: search ELK / Loki logs, analyze error patterns
 - **TraceAnalysisToolProvider**: analyze Jaeger / SkyWalking call chains
-- Built-in Skill templates: health-check, slow-query-analysis, error-spike-investigation
 
 ### v0.5 — Proactive Monitoring & Bugfix Push
 
@@ -320,7 +370,17 @@ mvn test -pl snap-agent-core
 
 # SqlGuard tests only
 mvn test -pl snap-agent-spring-boot-2x-starter -Dtest=SqlGuardTest
+
+# Anchor E2E tests only
+mvn test -pl snap-agent-spring-boot-2x-starter -Dtest=AnchorE2ETest
 ```
+
+## Documentation
+
+- [User Manual (EN)](docs/site/manual/en/user-manual.md) | [中文](docs/site/manual/zh/user-manual.md)
+- [Host Integration Guide (EN)](docs/site/integration/en/host-integration-guide.md) | [中文](docs/site/integration/zh/host-integration-guide.md)
+- [Anchor Q&A Integration Guide (EN)](docs/site/integration/en/anchor-feature-guide.md) | [中文](docs/site/integration/zh/anchor-feature-guide.md)
+- [Architecture Overview (EN)](docs/site/architecture/en/system-architecture.md) | [中文](docs/site/architecture/zh/system-architecture.md)
 
 ## Tech Stack
 

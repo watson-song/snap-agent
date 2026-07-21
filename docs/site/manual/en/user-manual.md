@@ -309,6 +309,7 @@ When a skill runs, `KnowledgeInjector` (implements `SystemPromptExtender`) build
 |--------|-----------|-------------|
 | `GET` | `/snap-agent/knowledge/status` | Knowledge base status: fragment count, injection cap, minScore, source list |
 | `GET` | `/snap-agent/knowledge/search?q={query}` | Retrieval test (topK = max-fragments × 3, min 10) |
+| `GET` | `/snap-agent/knowledge/fragments` | List all knowledge fragments (no score); used by the "knowledge stat" card click-to-expand view (new in v1.1) |
 
 Example:
 
@@ -589,6 +590,116 @@ The sidebar "💰 Cost Dashboard" button queries the last 7 days via `GET /cost/
 
 ---
 
+## 9.5 Anchor Q&A
+
+> New in v0.4. Lets host app users click an anchor icon on any page region → a right-side drawer slides out → they ask LLM questions about that section's content, without leaving the current page.
+
+For full integration (SecurityGateway setup, SPA compat, mobile) see the [Anchor Q&A Integration Guide](../integration/en/anchor-feature-guide.md). This section covers usage.
+
+### 9.5.1 Overview
+
+After the host page includes `<script src="/snap-agent/anchor.js" defer></script>`, the script auto-scans the `<main>` region for `data-snap-anchor` annotations and injects a purple 💬 icon (28×28) at the top-right of each region. Clicking the icon opens a right-side drawer where users ask LLM questions about that section's content.
+
+```
+┌─ Host page ────────────────────┐    ┌─ Right drawer (rounded) ─┐
+│ <section data-snap-anchor=    │    │ 💬 SKU Overview      ✕   │
+│   "SKU Overview" data-snap-   │    │ ## SKU Overview / ...    │
+│   skill="auto">              │ →  │ ⚡ Smart Routing (Auto)  │
+│   ...table content...         │    │ User: How many here?     │
+│ </section>                    │    │ AI: Based on the table...│
+└───────────────────────────────┘    └──────────────────────────┘
+```
+
+### 9.5.2 User Interaction
+
+1. User visits the host page; `anchor.js` loads and scans anchors automatically
+2. User clicks an anchor icon → right drawer slides out (Shadow DOM isolation, rounded right corners)
+3. **Header** shows the anchor name + content summary subtitle (first 80 chars single-line)
+4. **Skill info bar** shows the active skill:
+   - `data-snap-skill="auto"` → "Smart Routing (Auto)"
+   - Specific skill name → fetches `GET /skills` for displayName + description
+5. Background pre-summarize + pre-classify starts (`POST /anchor/preprocess`)
+6. User types a question and clicks Send
+7. `POST /runs` initiates the run (`skillId: "auto"` + `anchor` field)
+8. SSE streams tokens to the drawer in real time
+
+### 9.5.3 Annotating Anchors
+
+Add the `data-snap-anchor` attribute in HTML:
+
+```html
+<section data-snap-anchor="SKU Overview" data-snap-skill="auto">
+  <h2>SKU Overview</h2>
+  <table>
+    <tr><th>Category</th><th>SKU Count</th></tr>
+    <tr><td>Bakery</td><td>3</td></tr>
+  </table>
+</section>
+```
+
+| Attribute | Required | Value |
+|-----------|----------|-------|
+| `data-snap-anchor` | Yes | Anchor name (shown in the drawer header) |
+| `data-snap-skill` | No | `auto` (default, smart routing) / `<skill-name>` (specific skill) / `off` (show content only, no Q&A) |
+
+If the page has no annotations, the script auto-discovers `<section>` and `<h2>` / `<h3>` with `id` as fallback anchors.
+
+### 9.5.4 REST API Usage
+
+Anchor Q&A extends `POST /snap-agent/runs` with an `anchor` field and `skillId: "auto"`:
+
+```bash
+curl -u alice:secret -X POST http://localhost:8080/snap-agent/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "skillId": "auto",
+    "inputs": {"message": "How many SKUs are in this category?"},
+    "anchor": {
+      "name": "SKU Overview",
+      "content": "## SKU Overview\n\n| Category | SKU Count |\n|---|---|\n| Bakery | 3 |",
+      "truncated": false,
+      "originalLength": 0,
+      "pageUrl": "/skus"
+    },
+    "preprocessId": "550e8400-e29b-41d4-a716-446655440000"
+  }'
+```
+
+Response (202 Accepted):
+
+```json
+{
+  "taskId": "sa_1784556364221_60c600a7a559",
+  "status": "PENDING",
+  "streamUrl": "/snap-agent/runs/sa_1784556364221_60c600a7a559/stream"
+}
+```
+
+Subscribe via `GET /snap-agent/runs/{taskId}/stream` to receive SSE events — the format is identical to a normal skill run (see [§3.3 Streaming Output Lifecycle](#33-streaming-output-lifecycle)). Audit log records `action=RUN_ANCHOR_QA`.
+
+See [§10 REST API Reference](#10-rest-api-reference) for the full endpoint list.
+
+### 9.5.5 Related Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/snap-agent/anchor.js` | Static asset: anchor script (public) |
+| `GET` | `/snap-agent/anchor/config` | Returns `{enabled, disabledPaths}` for the client (public) |
+| `POST` | `/snap-agent/anchor/preprocess` | Pre-summarize + pre-classify on anchor click (auth required) |
+| `POST` | `/snap-agent/runs` | Extended: `skillId="auto"` + `anchor` field triggers anchor Q&A (auth required) |
+
+### 9.5.6 Common Use Cases
+
+| Scenario | HTML |
+|----------|------|
+| Docs site: auto Q&A on any section | No annotation needed; script auto-scans `<section>` / `<h2[id]>` |
+| Business list page: per-section Q&A | `<section data-snap-anchor="SKU Overview">` |
+| Ops dashboard: abnormal metric Q&A | `<div data-snap-anchor="QPS Anomaly" data-snap-skill="patrol">` |
+| Form: field help | `<div data-snap-anchor="Order ID Field" data-snap-skill="off">` |
+| SKU detail: basic info Q&A | `<section data-snap-anchor="Basic Info" data-snap-skill="auto">` |
+
+---
+
 ## 10. REST API Reference
 
 All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except for `GET /auth-config` (public), every endpoint requires an authenticated user through the host security framework and passes `SecurityGateway.hasPermission(required-permission)`.
@@ -623,6 +734,7 @@ All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except fo
 | 24 | `DELETE` | `/conversations/{id}` | Delete a conversation |
 | 25 | `GET` | `/knowledge/status` | Knowledge base status |
 | 26 | `GET` | `/knowledge/search?q=` | Knowledge retrieval |
+| 26.5 | `GET` | `/knowledge/fragments` | List all knowledge fragments (new in v1.1) |
 | 27 | `GET` | `/workflows` | Workflow list |
 | 28 | `GET` | `/workflows/{name}` | Workflow detail (with steps) |
 | 29 | `POST` | `/workflows/{name}/run` | Trigger workflow execution |
@@ -642,6 +754,9 @@ All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except fo
 | 43 | `GET` | `/patrol/reports/{id}` | Patrol report detail |
 | 44 | `GET` | `/alerts` | Active alert list |
 | 45 | `POST` | `/alerts/{id}/resolve` | Resolve an alert |
+| 46 | `GET` | `/anchor.js` | Static asset: anchor script (public, no auth) |
+| 47 | `GET` | `/anchor/config` | Anchor feature config (public): `{enabled, disabledPaths}` |
+| 48 | `POST` | `/anchor/preprocess` | Anchor pre-summarize + pre-classify (auth required, returns `preprocessId`) |
 
 ### 10.2 End-to-end example: run health-check with curl
 
@@ -694,7 +809,7 @@ Browsers' `EventSource` cannot send custom headers, so the SSE endpoint is `perm
 | 403 | `FORBIDDEN` | Lacks `required-permission` |
 | 404 | `SKILL_NOT_FOUND` / `TASK_NOT_FOUND` / `CONVERSATION_NOT_FOUND` / `ISSUE_NOT_FOUND` / `WORKFLOW_NOT_FOUND` | Resource does not exist |
 | 400 | `INVALID_INPUT` / `INVALID_STATUS` / `MODEL_NOT_ALLOWED` | Bad input |
-| 409 | `SKILL_UNAVAILABLE` | Skill's required tool is not assembled |
+| 409 | `SKILL_UNAVAILABLE` / `ANCHOR_DISABLED` | Skill's required tool is not assembled / Anchor feature is disabled (`skillId="auto"` + `anchor` field but `snap-agent.anchor.enabled=false`) |
 | 429 | `RATE_LIMITED` | Rate-limited (`Retry-After: 30`) |
 | 503 | `*_DISABLED` | Corresponding subsystem not enabled (conversation / cost / workflow / issue-closure / audit) |
 
@@ -704,6 +819,7 @@ Browsers' `EventSource` cannot send custom headers, so the SSE endpoint is `perm
 
 - [System Architecture Overview](../architecture/en/system-architecture.md)
 - [Host Integration Guide](../integration/en/host-integration-guide.md)
+- [Anchor Q&A Integration Guide](../integration/en/anchor-feature-guide.md)
 - [Knowledge Search Algorithm](../search/en/knowledge-search.md)
 - [Tool Plugin Architecture](../plugins/en/tool-plugin-architecture.md)
 - [Workflow Engine Architecture](../workflow/en/workflow-engine-architecture.md)

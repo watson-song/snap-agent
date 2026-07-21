@@ -17,6 +17,8 @@ public class UserInfo {
     private String message;
     /** Host application's active Spring profiles, surfaced to the web UI as environment context. */
     private List<String> activeProfiles = new ArrayList<String>();
+    /** Whether issue-closure (问题闭环) feature is enabled and the /runs/{taskId}/issue endpoints are active. */
+    private boolean issueClosureEnabled;
 
     public UserInfo() {
     }
@@ -92,5 +94,13 @@ public class UserInfo {
                 }
             }
         }
+    }
+
+    public boolean isIssueClosureEnabled() {
+        return issueClosureEnabled;
+    }
+
+    public void setIssueClosureEnabled(boolean issueClosureEnabled) {
+        this.issueClosureEnabled = issueClosureEnabled;
     }
 }

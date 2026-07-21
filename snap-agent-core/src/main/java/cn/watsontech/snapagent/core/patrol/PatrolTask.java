@@ -15,6 +15,7 @@ public class PatrolTask {
     private String userId;
     private boolean enabled;
     private Map<String, String> inputs;
+    private String alertKeywords;
 
     public PatrolTask() {
         this.enabled = true;
@@ -23,6 +24,11 @@ public class PatrolTask {
 
     public PatrolTask(String id, String skillName, String cron, String userId,
                       Map<String, String> inputs) {
+        this(id, skillName, cron, userId, inputs, null);
+    }
+
+    public PatrolTask(String id, String skillName, String cron, String userId,
+                      Map<String, String> inputs, String alertKeywords) {
         this.id = id;
         this.skillName = skillName;
         this.cron = cron;
@@ -30,6 +36,7 @@ public class PatrolTask {
         this.enabled = true;
         this.inputs = inputs == null ? new LinkedHashMap<String, String>()
                 : new LinkedHashMap<String, String>(inputs);
+        this.alertKeywords = alertKeywords;
     }
 
     public String getId() { return id; }
@@ -53,9 +60,14 @@ public class PatrolTask {
                 : new LinkedHashMap<String, String>(inputs);
     }
 
+    /** Comma-separated keywords; if the patrol report contains any, an anomaly is flagged. */
+    public String getAlertKeywords() { return alertKeywords; }
+    public void setAlertKeywords(String alertKeywords) { this.alertKeywords = alertKeywords; }
+
     @Override
     public String toString() {
         return "PatrolTask{id='" + id + "', skillName='" + skillName
-                + "', cron='" + cron + "', enabled=" + enabled + "}";
+                + "', cron='" + cron + "', enabled=" + enabled
+                + ", alertKeywords='" + alertKeywords + "'}";
     }
 }

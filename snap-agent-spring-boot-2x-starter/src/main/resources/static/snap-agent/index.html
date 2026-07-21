@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SnapAgent</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=29">
 </head>
 <body>
 <div id="app">
@@ -38,6 +38,8 @@
                 <span class="skill-count" id="skillCount">0</span>
             </div>
         </div>
+        <!-- Collapsed view: first-letter icons with hover tooltips (must precede skill-sections for CSS ~ selector) -->
+        <ul class="skill-icons" id="skillIcons"></ul>
         <div class="skill-sections" id="skillSections">
             <div class="skill-section">
                 <div class="skill-section-header" id="hostSectionHeader" data-collapsed="false">
@@ -57,8 +59,6 @@
             </div>
             <ul class="skill-list disabled-skills-list" id="disabledSkills" style="display:none;"></ul>
         </div>
-        <!-- Collapsed view: first-letter icons with hover tooltips -->
-        <ul class="skill-icons" id="skillIcons"></ul>
         <!-- Feature navigation bar -->
         <div class="feature-nav" id="featureNav">
             <button class="feature-nav-btn" id="navToolsBtn" title="工具 & 插件">🔧</button>
@@ -120,6 +120,6 @@
     </main>
 </div>
 <script src="md.js"></script>
-<script src="app.js?v=25"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>

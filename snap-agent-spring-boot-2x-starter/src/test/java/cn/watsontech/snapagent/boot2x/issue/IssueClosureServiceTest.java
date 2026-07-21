@@ -166,7 +166,7 @@ class IssueClosureServiceTest {
     void shouldCreateExternalIssueAndUpdateStatus() {
         IssueClosure existing = new IssueClosure(
                 "issue-001", null, "task-100",
-                null, "query", "root cause text",
+                null, null, "query", "root cause text",
                 suggestionOf("solution A", "solution B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
@@ -200,7 +200,7 @@ class IssueClosureServiceTest {
     void shouldHandleNullExternalIssueIdFromNoopTracker() {
         IssueClosure existing = new IssueClosure(
                 "issue-002", null, "task-200",
-                null, "query", "root cause",
+                null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
@@ -224,7 +224,7 @@ class IssueClosureServiceTest {
     void shouldVerifyFixAndUpdateIssue() {
         IssueClosure existing = new IssueClosure(
                 "issue-003", "EXT-1", "task-300",
-                null, "order timeout", "connection pool exhausted",
+                null, null, "order timeout", "connection pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
@@ -267,7 +267,7 @@ class IssueClosureServiceTest {
     void shouldReturnNullWhenVerifyFixSkillNotFound() {
         IssueClosure existing = new IssueClosure(
                 "issue-004", null, "task-400",
-                null, "query", "root cause",
+                null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
@@ -287,7 +287,7 @@ class IssueClosureServiceTest {
     void shouldCloseIssueAndSedimentKnowledge() {
         IssueClosure existing = new IssueClosure(
                 "issue-005", "EXT-5", "task-500",
-                null, "order timeout", "pool exhausted",
+                null, null, "order timeout", "pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.VERIFIED, null,
                 verificationOf(true, "verification passed"), null,
@@ -322,7 +322,7 @@ class IssueClosureServiceTest {
 
         IssueClosure existing = new IssueClosure(
                 "issue-006", null, "task-600",
-                null, "query", "root cause",
+                null, null, "query", "root cause",
                 suggestionOf("sol"), "sol",
                 IssueStatus.VERIFIED, null,
                 verificationOf(true, "verified"), null,
@@ -412,7 +412,7 @@ class IssueClosureServiceTest {
 
         IssueClosure existing = new IssueClosure(
                 "issue-spi", "EXT-1", "task-spi",
-                null, "order timeout", "connection pool exhausted",
+                null, null, "order timeout", "connection pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
@@ -429,6 +429,51 @@ class IssueClosureServiceTest {
         assertThat(result.getVerificationResult().isPassed()).isTrue();
         assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
         verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
+        verify(issueStore).save(any(IssueClosure.class));
+    }
+
+    @Test
+    void shouldFallBackToVerifyFixSkillWhenRunnerReturnsNull() {
+        // Scenario: after app restart, TaskStore is wiped but FileIssueStore
+        // persists issues. SimpleVerificationRunner can't find the original
+        // task and returns null. IssueClosureService should fall back to the
+        // verify-fix skill which uses issue data (root_cause, original_query).
+        VerificationRunner runner = mock(VerificationRunner.class);
+        IssueClosureService serviceWithRunner = newIssueClosureService(null, runner);
+
+        IssueClosure existing = new IssueClosure(
+                "issue-orphan", "EXT-9", "task-gone",
+                null, null, "order timeout", "pool exhausted",
+                suggestionOf("increase pool"), "increase pool",
+                IssueStatus.FIX_IN_PROGRESS, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.load("issue-orphan")).thenReturn(existing);
+
+        // Runner returns null (task no longer in memory)
+        when(runner.verify(any(IssueClosure.class))).thenReturn(null);
+
+        // verify-fix skill is available
+        SkillMeta skill = new SkillMeta("verify-fix", "desc",
+                Collections.<String>emptyList(), Collections.<cn.watsontech.snapagent.core.skill.InputSpec>emptyList(),
+                "body", SkillAvailability.AVAILABLE, null);
+        when(skillRegistry.get("verify-fix")).thenReturn(skill);
+
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setReport("verify-fix skill: 通过");
+            task.setStatus(TaskStatus.SUCCEEDED);
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        IssueClosure result = serviceWithRunner.verify("issue-orphan");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getVerificationResult()).isNotNull();
+        assertThat(result.getVerificationResult().isPassed()).isTrue();
+        assertThat(result.getVerificationResult().getSummary()).contains("通过");
+        assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
+        verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
         verify(issueStore).save(any(IssueClosure.class));
     }
 }

@@ -1,12 +1,23 @@
 # SnapAgent Proactive Monitoring Architecture
 
-> Version: v0.5 | Updated: 2026-07-17
+> Version: v1.1 | Updated: 2026-07-20
 
 SnapAgent's proactive monitoring capability is provided jointly by the `patrol`
 package in `snap-agent-core` (SPI + data models) and the `patrol` package in
 `snap-agent-spring-boot-2x-starter` (default implementations + auto-configuration).
 This document describes the complete architecture of two complementary monitoring
 modes — **Patrol** and **Alert**.
+
+> **v1.1 highlights** (2026-07-20):
+> - `PatrolReportStore` refactored from a concrete class to an SPI interface; the
+>   ring-buffer implementation now lives in `boot2x/patrol/InMemoryPatrolReportStore`
+>   and hosts can replace it with DB/Redis storage
+> - New `PatrolLockProvider` SPI for multi-Pod coordination. Default
+>   `NoopPatrolLockProvider` always grants (single-Pod); hosts with multiple Pods
+>   inject a Redis / k8s lease / DB row lock implementation
+> - New `AlertPushChannel` SPI with two default implementations
+>   (`WebhookAlertPushChannel` + `EmailAlertPushChannel`) — anomaly reports are now
+>   pushed to external channels automatically
 
 ---
 
@@ -62,9 +73,11 @@ core/patrol/
 ├── AlertConverger.java         (SPI: alert dedup + query)
 ├── AnomalyEventListener.java   (SPI: receive anomaly events)
 ├── BugfixSuggester.java        (SPI: extract fix suggestions from transcript)
+├── PatrolLockProvider.java     (SPI: multi-Pod patrol coordination lock, new in v1.1)
+├── AlertPushChannel.java       (SPI: anomaly report push channel, new in v1.1)
 ├── PatrolTask.java             (value object: scheduled task definition)
 ├── PatrolReport.java           (value object: patrol/alert report)
-├── PatrolReportStore.java     (ring buffer report storage)
+├── PatrolReportStore.java     (SPI: report storage interface, refactored in v1.1)
 ├── AnomalyEvent.java           (value object: anomaly event)
 ├── AlertConvergence.java       (value object: deduplicated alert record)
 └── BugfixSuggestion.java       (value object: fix suggestion)
@@ -73,7 +86,11 @@ boot2x/patrol/
 ├── ScheduledPatrolScheduler.java      (PatrolScheduler default impl)
 ├── InMemoryAlertConverger.java        (AlertConverger default impl)
 ├── DefaultAnomalyEventListener.java   (AnomalyEventListener default impl)
-└── TemplateBugfixSuggester.java       (BugfixSuggester default impl)
+├── TemplateBugfixSuggester.java       (BugfixSuggester default impl)
+├── InMemoryPatrolReportStore.java     (PatrolReportStore default impl, new in v1.1)
+├── NoopPatrolLockProvider.java        (PatrolLockProvider default impl, new in v1.1)
+├── WebhookAlertPushChannel.java       (AlertPushChannel default impl - Webhook, new in v1.1)
+└── EmailAlertPushChannel.java         (AlertPushChannel default impl - Email, new in v1.1)
 ```
 
 ---
@@ -142,7 +159,109 @@ public interface BugfixSuggester {
 }
 ```
 
-### 2.5 Data Models
+### 2.5 PatrolLockProvider (multi-Pod coordination lock, new in v1.1)
+
+```java
+public interface PatrolLockProvider {
+    /**
+     * Try to acquire the patrol lock. In multi-Pod deployments, only the Pod
+     * that acquires the lock runs the patrol — others skip to avoid duplicate
+     * execution and duplicate reports.
+     * @param patrolId patrol task ID
+     * @param ttlSeconds lock TTL in seconds (auto-expires if the Pod crashes)
+     * @return true = acquired (this Pod runs), false = held by another Pod
+     */
+    boolean tryAcquire(String patrolId, long ttlSeconds);
+
+    /** Release the lock. Should be called in a finally block to ensure cleanup on failures. */
+    void release(String patrolId);
+
+    /** Lock implementation type identifier (e.g. "noop" / "redis" / "k8s-lease"), used in logs. */
+    default String type() { return "noop"; }
+}
+```
+
+**Default implementation**: `NoopPatrolLockProvider` (`boot2x/patrol/`) — in single-Pod
+mode `tryAcquire` always returns `true` and `release` is a no-op. Hosts running
+multiple Pods can replace it with:
+
+| Implementation | Use case | Typical API |
+|----------------|----------|-------------|
+| Redis `SET NX EX` | Multi-Pod with shared Redis | `SET lock:{patrolId} {podName} NX EX {ttl}` |
+| Kubernetes Lease | K8s-native | `coordination.k8s.io/v1` Lease object |
+| DB row lock | Shared RDBMS | `SELECT ... FOR UPDATE` or optimistic versioning |
+
+### 2.6 AlertPushChannel (anomaly report push channel, new in v1.1)
+
+```java
+public interface AlertPushChannel {
+    /**
+     * Push an anomaly patrol report. Implementations should only push for
+     * anomalyDetected=true reports — normal patrol runs do not push.
+     * @param report patrol report (non-null)
+     * @param event anomaly event that triggered this report; may be null for patrol-triggered anomalies
+     */
+    void push(PatrolReport report, AnomalyEvent event);
+
+    /** Push channel type identifier (e.g. "webhook" / "email" / "dingtalk"), used in logs. */
+    default String type() { return "unknown"; }
+}
+```
+
+**Default implementations** (`boot2x/patrol/`):
+
+| Implementation | type() | Trigger condition | Dependencies |
+|----------------|--------|-------------------|--------------|
+| `WebhookAlertPushChannel` | `webhook` | `report.isAnomalyDetected()==true` | JDK `HttpURLConnection` (no external deps) |
+| `EmailAlertPushChannel` | `email` | `report.isAnomalyDetected()==true` | `spring-context-support` + `javax.mail` (optional) |
+
+`WebhookAlertPushChannel` uses `ObservabilityHttpClient.httpPost()` to send a JSON
+payload (containing `report_id` / `patrol_id` / `task_id` / `skill_name` /
+`status` / `triggered_at` / `report_summary` / `event` fields) to the configured
+webhook URL.
+
+`EmailAlertPushChannel` uses Spring `JavaMailSender` to send a plain-text email
+whose body includes time, skill, status, report ID, patrol ID, task ID, event
+details, and diagnostic summary. When `spring-context-support` or `javax.mail`
+is not on the classpath, this bean is skipped.
+
+### 2.7 PatrolReportStore (report storage SPI, refactored in v1.1)
+
+As of v1.1, `PatrolReportStore` is an interface rather than a concrete class;
+the original ring-buffer implementation moved to
+`boot2x/patrol/InMemoryPatrolReportStore.java`:
+
+```java
+public interface PatrolReportStore {
+    /** Save a report. Implementations must be concurrency-safe and auto-generate an ID if null. */
+    void save(PatrolReport report);
+
+    /** Paginated query (sorted by triggeredAt desc, filtered by userId; null userId returns system reports). */
+    List<PatrolReport> getReports(String userId, int limit, int offset);
+
+    /** Total report count for the user. */
+    long count(String userId);
+
+    /** Fetch a single report by ID; null if not found. */
+    PatrolReport get(String reportId);
+}
+```
+
+Hosts can implement this interface to replace the in-memory store with DB/Redis/file:
+
+```java
+@Component
+public class JdbcPatrolReportStore implements PatrolReportStore {
+    private final JdbcTemplate jdbc;
+    // INSERT INTO patrol_report (...) VALUES (...)
+    // SELECT ... FROM patrol_report WHERE user_id = ? ORDER BY triggered_at DESC LIMIT ? OFFSET ?
+}
+```
+
+`@ConditionalOnMissingBean` lets the custom implementation take precedence over
+the in-memory default.
+
+### 2.8 Data Models
 
 **PatrolTask** (scheduled task definition):
 
@@ -237,54 +356,114 @@ ScheduledPatrolScheduler.schedule(task)
 
 ### 3.2 executePatrol Logic
 
-When the cron fires, `executePatrol(task)` runs in the scheduling thread pool:
+When the cron fires, `executePatrol(task)` runs in the scheduling thread pool. As of
+v1.1, it now uses a **multi-Pod coordination lock** (`PatrolLockProvider`) and pushes
+anomaly reports to all configured **`AlertPushChannel`**s:
 
 ```java
 private void executePatrol(PatrolTask task) {
     long triggeredAt = System.currentTimeMillis();
 
-    // 1. Look up skill
-    SkillMeta skill = skillRegistry.get(task.getSkillName());
-    if (skill == null) {
-        // Skill not found → record FAILED report
-        PatrolReport report = new PatrolReport(
-            null, task.getId(), null,
-            task.getSkillName(), triggeredAt, "FAILED",
-            "Skill not found: " + task.getSkillName(), false);
-        report.setUserId(task.getUserId());
-        reportStore.save(report);
+    // 0. Multi-Pod coordination: try to acquire the lock; skip if another Pod holds it.
+    //    NoopPatrolLockProvider always returns true (single-Pod mode).
+    if (!lockProvider.tryAcquire(task.getId(), lockTtlSeconds)) {
+        log.info("Patrol {} skipped (lock held by another Pod, lockProvider={})",
+                task.getId(), lockProvider.type());
         return;
     }
-
     try {
-        // 2. Create AgentTask and execute
-        AgentTask agentTask = AgentTask.create(
-            task.getUserId(), task.getSkillName(),
-            task.getInputs(), null);
-        agentExecutor.execute(agentTask, skill);
+        // 1. Look up skill
+        SkillMeta skill = skillRegistry.get(task.getSkillName());
+        if (skill == null) {
+            // Skill not found → record FAILED report
+            PatrolReport report = new PatrolReport(
+                null, task.getId(), null,
+                task.getSkillName(), triggeredAt, "FAILED",
+                "Skill not found: " + task.getSkillName(), false);
+            report.setUserId(task.getUserId());
+            reportStore.save(report);
+            return;
+        }
 
-        // 3. Extract result, store report
-        TaskStatus status = agentTask.getStatus();
-        String summary = agentTask.getReport() != null
-            ? agentTask.getReport() : "Patrol completed";
+        try {
+            // 2. Create AgentTask and execute
+            AgentTask agentTask = AgentTask.create(
+                task.getUserId(), task.getSkillName(),
+                task.getInputs(), null);
+            agentExecutor.execute(agentTask, skill);
 
-        PatrolReport report = new PatrolReport(
-            null, task.getId(), agentTask.getTaskId(),
-            task.getSkillName(), triggeredAt,
-            status.name(), summary, false);
-        report.setUserId(task.getUserId());
-        reportStore.save(report);
-    } catch (Exception e) {
-        // 4. Exception → record FAILED report
-        PatrolReport report = new PatrolReport(
-            null, task.getId(), null,
-            task.getSkillName(), triggeredAt, "FAILED",
-            e.getMessage(), false);
-        report.setUserId(task.getUserId());
-        reportStore.save(report);
+            // 3. Extract result, store report
+            TaskStatus status = agentTask.getStatus();
+            String summary = agentTask.getReport() != null
+                ? agentTask.getReport() : "Patrol completed";
+
+            // 4. Heuristic anomaly detection: status or summary contains anomaly keywords → anomalyDetected=true
+            boolean anomaly = detectAnomaly(summary, status.name());
+
+            PatrolReport report = new PatrolReport(
+                null, task.getId(), agentTask.getTaskId(),
+                task.getSkillName(), triggeredAt,
+                status.name(), summary, anomaly);
+            report.setUserId(task.getUserId());
+            reportStore.save(report);
+
+            // 5. Anomaly → invoke all AlertPushChannels (Webhook / Email / custom)
+            if (anomaly) {
+                pushToChannels(report, null);
+            }
+        } catch (Exception e) {
+            // 4. Exception → record FAILED report (also pushed to channels as anomaly)
+            PatrolReport report = new PatrolReport(
+                null, task.getId(), null,
+                task.getSkillName(), triggeredAt, "FAILED",
+                e.getMessage(), false);
+            report.setUserId(task.getUserId());
+            reportStore.save(report);
+        }
+    } finally {
+        // 6. Release the lock (always, regardless of success/failure)
+        lockProvider.release(task.getId());
+    }
+}
+
+/** Heuristic: status FAILED/TIMEOUT or summary contains keywords → true */
+protected boolean detectAnomaly(String summary, String statusStr) {
+    if ("FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr)) {
+        return true;
+    }
+    if (summary == null || summary.isEmpty()) return false;
+    String lower = summary.toLowerCase(Locale.ROOT);
+    String[] markers = {"critical", "warning", "error", "exception", "failed",
+            "异常", "错误", "失败", "告警", "风险"};
+    for (String m : markers) {
+        if (lower.contains(m)) return true;
+    }
+    return false;
+}
+
+/** Iterate all AlertPushChannels, push one-by-one (single channel failure doesn't affect others) */
+private void pushToChannels(PatrolReport report, AnomalyEvent event) {
+    if (pushChannels.isEmpty()) return;
+    for (AlertPushChannel channel : pushChannels) {
+        try {
+            channel.push(report, event);
+        } catch (Exception e) {
+            log.error("Push channel '{}' failed (reportId={}): {}",
+                    channel.type(), report.getId(), e.getMessage());
+        }
     }
 }
 ```
+
+#### Multi-Pod coordination deployment modes
+
+| Deployment | lockProvider.type() | tryAcquire behavior | Recommended for |
+|------------|---------------------|---------------------|-----------------|
+| Single Pod | `noop` | Always `true` | Dev/test/small production |
+| Multi Pod | Custom impl (Redis / k8s lease / DB row lock) | Only one Pod wins per `patrolId` | Multi-replica K8s deployments |
+
+Hosts implement `PatrolLockProvider` + `@Component` (or `@Bean`); `@ConditionalOnMissingBean`
+prefers the custom bean over `NoopPatrolLockProvider`.
 
 ### 3.3 Canceling a Patrol
 
@@ -570,12 +749,21 @@ via `@ConditionalOnProperty`:
 
 | Bean | Condition | Default Impl | Description |
 |------|-----------|-------------|-------------|
-| `patrolReportStore` | `snap-agent.patrol.enabled=true` | `PatrolReportStore` | Ring buffer report storage |
+| `patrolReportStore` | `snap-agent.patrol.enabled=true` | `InMemoryPatrolReportStore` | Ring buffer report storage (v1.1 SPI) |
+| `patrolLockProvider` | `snap-agent.patrol.enabled=true` | `NoopPatrolLockProvider` | Multi-Pod patrol coordination lock (new in v1.1) |
 | `patrolTaskScheduler` | `snap-agent.patrol.enabled=true` | `ThreadPoolTaskScheduler` | Dedicated scheduling pool (pool-size=2, prefix `patrol-`) |
-| `scheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | `ScheduledPatrolScheduler` | Cron scheduler |
+| `scheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | `ScheduledPatrolScheduler` | Cron scheduler (v1.1 injects lockProvider + pushChannels) |
 | `inMemoryAlertConverger` | `snap-agent.alert.enabled=true` | `InMemoryAlertConverger` | Alert deduplicator |
-| `defaultAnomalyEventListener` | `snap-agent.patrol.enabled=true` | `DefaultAnomalyEventListener` | Anomaly event listener |
+| `defaultAnomalyEventListener` | `snap-agent.patrol.enabled=true` | `DefaultAnomalyEventListener` | Anomaly event listener (v1.1 injects pushChannels) |
 | `templateBugfixSuggester` | Unconditional (`@ConditionalOnMissingBean`) | `TemplateBugfixSuggester` | Fix suggestion generator |
+| `webhookAlertPushChannel` | `snap-agent.alert.push.webhook.enabled=true` and `url` non-empty | `WebhookAlertPushChannel` | Webhook push channel (new in v1.1) |
+| `emailAlertPushChannel` | `snap-agent.alert.push.email.enabled=true` and classpath contains `JavaMailSender` | `EmailAlertPushChannel` | Email push channel (new in v1.1, optional deps) |
+
+> **Optional dependencies for `emailAlertPushChannel`**: `spring-context-support`
+> and `javax.mail` are marked `<optional>true</optional>` in the starter pom. When
+> the host doesn't include them, `@ConditionalOnClass(name =
+> "org.springframework.mail.javamail.JavaMailSender")` skips the bean. Add
+> `spring-boot-starter-mail` to enable Email push.
 
 ### 7.2 Lifecycle
 
@@ -613,10 +801,26 @@ snap-agent:
     enabled: false                    # Patrol master switch (default off)
     scheduler-pool-size: 2            # Scheduling thread pool size
     report-buffer-size: 500           # Report ring buffer capacity
+    lock-ttl-seconds: 300             # Multi-Pod coordination lock TTL (new in v1.1, default 5 min)
   alert:
     enabled: false                    # Alert convergence master switch (default off)
     buffer-size: 1000                  # Alert ring buffer capacity
     auto-resolve-minutes: 30           # Auto-resolve threshold (minutes)
+    push:                              # Anomaly report push (new in v1.1)
+      email:
+        enabled: false                # Email push switch (default off)
+        from: snap-agent@example.com  # Sender
+        to:                            # Recipients list
+          - ops@example.com
+          - dev@example.com
+        subject-prefix: "[SnapAgent Alert]"  # Subject prefix
+      webhook:
+        enabled: false                # Webhook push switch (default off)
+        url: https://hook.example.com/snap-agent  # Push URL
+        auth-header: Authorization     # Auth header name
+        auth-token: Bearer secret      # Auth token (supports ${ENV} placeholder)
+        connect-timeout-ms: 5000       # Connect timeout (default 5000ms)
+        read-timeout-ms: 10000         # Read timeout (default 10000ms)
 ```
 
 | Property | Default | Description |
@@ -624,9 +828,20 @@ snap-agent:
 | `snap-agent.patrol.enabled` | `false` | Patrol master switch |
 | `snap-agent.patrol.scheduler-pool-size` | `2` | Scheduling thread pool size |
 | `snap-agent.patrol.report-buffer-size` | `500` | Report storage capacity (evicts oldest when full) |
+| `snap-agent.patrol.lock-ttl-seconds` | `300` | Multi-Pod coordination lock TTL (new in v1.1) |
 | `snap-agent.alert.enabled` | `false` | Alert dedup master switch |
 | `snap-agent.alert.buffer-size` | `1000` | Alert storage capacity (evicts oldest when full) |
 | `snap-agent.alert.auto-resolve-minutes` | `30` | Threshold for auto-marking RESOLVED |
+| `snap-agent.alert.push.email.enabled` | `false` | Email push switch (new in v1.1) |
+| `snap-agent.alert.push.email.from` | `snap-agent@local` | Email sender |
+| `snap-agent.alert.push.email.to` | `[]` | Email recipient list |
+| `snap-agent.alert.push.email.subject-prefix` | `[SnapAgent Alert]` | Email subject prefix |
+| `snap-agent.alert.push.webhook.enabled` | `false` | Webhook push switch (new in v1.1) |
+| `snap-agent.alert.push.webhook.url` | _empty_ | Webhook push URL; bean only wired when non-empty |
+| `snap-agent.alert.push.webhook.auth-header` | `Authorization` | Webhook auth header name |
+| `snap-agent.alert.push.webhook.auth-token` | _empty_ | Webhook auth token |
+| `snap-agent.alert.push.webhook.connect-timeout-ms` | `5000` | Webhook connect timeout |
+| `snap-agent.alert.push.webhook.read-timeout-ms` | `10000` | Webhook read timeout |
 
 ### 8.2 Custom PatrolScheduler
 
@@ -698,7 +913,126 @@ public class LlmBugfixSuggester implements BugfixSuggester {
 }
 ```
 
-### 8.6 Built-in Skills
+### 8.6 Custom PatrolLockProvider (multi-Pod coordination, new in v1.1)
+
+Implement the `PatrolLockProvider` interface to replace the default
+`NoopPatrolLockProvider`. Common patterns:
+
+**Redis-based**:
+
+```java
+@Component
+public class RedisPatrolLockProvider implements PatrolLockProvider {
+    private final StringRedisTemplate redis;
+    private final String podName = System.getenv().getOrDefault("MY_POD_NAME", "pod-0");
+
+    @Override
+    public boolean tryAcquire(String patrolId, long ttlSeconds) {
+        String key = "patrol:lock:" + patrolId;
+        return Boolean.TRUE.equals(redis.opsForValue()
+                .setIfAbsent(key, podName, Duration.ofSeconds(ttlSeconds)));
+    }
+
+    @Override
+    public void release(String patrolId) {
+        // Use a Lua script to verify owner before deleting, to avoid releasing someone else's lock
+        String script = "if redis.call('get', KEYS[1]) == ARGV[1] then "
+                + "return redis.call('del', KEYS[1]) else return 0 end";
+        redis.execute(new DefaultRedisScript<>(script, Long.class),
+                Collections.singletonList("patrol:lock:" + patrolId), podName);
+    }
+
+    @Override
+    public String type() { return "redis"; }
+}
+```
+
+**Kubernetes Lease-based**:
+
+```java
+@Component
+public class K8sLeasePatrolLockProvider implements PatrolLockProvider {
+    private final KubernetesClient k8s;
+    private final String namespace = System.getenv().getOrDefault("POD_NAMESPACE", "default");
+    private final String holder = System.getenv().getOrDefault("MY_POD_NAME", "pod-0");
+
+    @Override
+    public boolean tryAcquire(String patrolId, long ttlSeconds) {
+        // Create coordination.k8s.io/v1 Lease; spec.holderIdentity = holder
+        // spec.leaseDurationSeconds = ttlSeconds; update fails if already held → false
+        return createLeaseOrRenew(patrolId, ttlSeconds);
+    }
+
+    @Override
+    public void release(String patrolId) {
+        // Delete the Lease (only if holderIdentity matches)
+    }
+
+    @Override
+    public String type() { return "k8s-lease"; }
+}
+```
+
+### 8.7 Custom AlertPushChannel (push channel extension, new in v1.1)
+
+Implement `AlertPushChannel` to extend push channels (DingTalk, Feishu, PagerDuty, etc.):
+
+```java
+@Component
+public class DingTalkAlertPushChannel implements AlertPushChannel {
+    private final String webhookUrl;
+    private final String secret;
+
+    @Override
+    public void push(PatrolReport report, AnomalyEvent event) {
+        if (report == null || !report.isAnomalyDetected()) return;
+        // Build DingTalk markdown message
+        // POST https://oapi.dingtalk.com/robot/send?access_token=...
+        // { "msgtype": "markdown", "markdown": { "title": ..., "text": ... } }
+    }
+
+    @Override
+    public String type() { return "dingtalk"; }
+}
+```
+
+> Custom `AlertPushChannel` beans work alongside the default Webhook/Email channels.
+> All `AlertPushChannel` Spring beans are collected as a `List<AlertPushChannel>` by
+> both `scheduledPatrolScheduler` and `defaultAnomalyEventListener`. Anomaly reports
+> are pushed to all channels; a single channel failure doesn't affect others.
+
+### 8.8 Custom PatrolReportStore (storage extension, new in v1.1)
+
+Implement `PatrolReportStore` to persist reports to DB/Redis/file:
+
+```java
+@Component
+public class JdbcPatrolReportStore implements PatrolReportStore {
+    private final JdbcTemplate jdbc;
+
+    @Override
+    public void save(PatrolReport report) {
+        if (report.getId() == null) report.setId("rep_" + UUID.randomUUID());
+        jdbc.update("INSERT INTO patrol_report (id, patrol_id, task_id, user_id, "
+                + "skill_name, triggered_at, status, summary, anomaly_detected) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?)", ...);
+    }
+
+    @Override
+    public List<PatrolReport> getReports(String userId, int limit, int offset) {
+        return jdbc.query("SELECT * FROM patrol_report WHERE user_id = ? "
+                + "ORDER BY triggered_at DESC LIMIT ? OFFSET ?", ...);
+    }
+
+    @Override
+    public long count(String userId) { ... }
+
+    @Override
+    public PatrolReport get(String reportId) { ... }
+}
+```
+
+### 8.9 Built-in Skills
 
 | Skill | Tools | Purpose |
 |-------|-------|---------|

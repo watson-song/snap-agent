@@ -34,6 +34,11 @@ public class CostSummaryService {
         this.globalDaily = globalDaily;
     }
 
+    /** Returns the underlying cost store (for record-level queries). */
+    public CostStore getStore() {
+        return costStore;
+    }
+
     /**
      * Builds a cost summary for a specific user within the time range.
      *
@@ -70,6 +75,26 @@ public class CostSummaryService {
     public CostSummary getGlobalSummary(long from, long to) {
         List<CostRecord> records = costStore.list(from, to);
         return buildSummary("global", "global", records, globalDaily);
+    }
+
+    /**
+     * Lists individual cost records within the time range (newest first).
+     *
+     * @param from inclusive lower bound (epoch millis)
+     * @param to   inclusive upper bound (epoch millis)
+     * @return list of records (never null, empty if none); sorted by timestamp desc
+     */
+    public List<CostRecord> listRecords(long from, long to) {
+        List<CostRecord> records = costStore.list(from, to);
+        // Defensive copy sorted by timestamp descending (newest first)
+        List<CostRecord> sorted = new java.util.ArrayList<CostRecord>(records);
+        java.util.Collections.sort(sorted, new java.util.Comparator<CostRecord>() {
+            @Override
+            public int compare(CostRecord a, CostRecord b) {
+                return Long.compare(b.getTimestamp(), a.getTimestamp());
+            }
+        });
+        return sorted;
     }
 
     // ---- helpers ----

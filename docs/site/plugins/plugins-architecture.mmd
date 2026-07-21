@@ -1,0 +1,57 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef ai fill:#dcfce7,stroke:#4ade80,stroke-width:1.5px,color:#166534,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        Modal["Tools Modal<br/>工具列表 + 详情 + 插件元数据"]
+    end
+
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        Registry["ToolPluginRegistry<br/>插件元数据收集"]
+    end
+
+    subgraph AI ["AI 引擎层 (AI Layer)"]
+        direction LR
+        Executor["AgentExecutor<br/>LLM → tool_use → dispatch 循环"]
+        Dispatcher["ToolDispatcher<br/>按名路由 + 截断保护"]
+        Provider["ToolProvider SPI<br/>工具执行 name + schema"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        None["(无持久化)<br/>工具执行不持久化结果"]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        MySQL[("MySQL<br/>JdbcQuery 只读")]
+        Redis[("Redis<br/>RedisRead 只读")]
+        Prom["Prometheus<br/>Metrics 指标查询"]
+        Loki["Loki<br/>LogSearch 日志搜索"]
+    end
+
+    Modal --> Registry
+    Executor --> Dispatcher
+    Dispatcher --> Provider
+    Provider --> MySQL
+    Provider --> Redis
+    Provider --> Prom
+    Provider --> Loki
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style AI fill:#22c55e,stroke:#22c55e,stroke-width:2px,color:#86efac
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class Modal client
+    class Registry api
+    class Executor,Dispatcher,Provider ai
+    class None storage
+    class MySQL,Redis,Prom,Loki external

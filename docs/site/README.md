@@ -15,9 +15,10 @@
 | 7 | 问题闭环架构 Issue Closure Architecture | [中文](issue/zh/issue-closure-architecture.md) | [English](issue/en/issue-closure-architecture.md) |
 | 8 | 主动监控架构 Proactive Monitoring Architecture | [中文](proactive/zh/proactive-monitoring-architecture.md) | [English](proactive/en/proactive-monitoring-architecture.md) |
 | 9 | 用户手册 User Manual | [中文](manual/zh/user-manual.md) | [English](manual/en/user-manual.md) |
+| 10 | 锚点问答接入指南 Anchor Q&A Integration Guide | [中文](integration/zh/anchor-feature-guide.md) | [English](integration/en/anchor-feature-guide.md) |
 
 ## 版本 | Version
 
-本文档基于 SnapAgent v1.0 现状编写。
+本文档基于 SnapAgent v1.1 现状编写（v1.1 新增：PatrolLockProvider SPI、AlertPushChannel SPI、PatrolReportStore SPI 化、知识点列表 API、页面区域锚点问答 AnchorOrchestrator）。
 
-Documentation based on SnapAgent v1.0 current state.
+Documentation based on SnapAgent v1.1 current state (v1.1 additions: PatrolLockProvider SPI, AlertPushChannel SPI, PatrolReportStore SPI refactor, knowledge fragment list API, page-section anchor Q&A AnchorOrchestrator).

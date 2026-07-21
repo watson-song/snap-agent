@@ -1,0 +1,47 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    # Demo DB — replace with your own read-only datasource
+    url: ${DEMO_DB_URL:jdbc:mysql://localhost:3306/demo?useUnicode=true&characterEncoding=UTF-8&useSSL=false&serverTimezone=Asia/Shanghai}
+    username: ${DEMO_DB_USER:demo}
+    password: ${DEMO_DB_PASSWORD:demo}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 10000
+
+  thymeleaf:
+    cache: false
+
+# SnapAgent configuration — anchor feature enabled
+snap-agent:
+  enabled: true
+  base-path: /snap-agent
+  llm:
+    api-type: anthropic
+    base-url: ${SNAP_AGENT_LLM_BASE_URL:https://api.anthropic.com}
+    auth-token: ${SNAP_AGENT_LLM_AUTH_TOKEN:}
+    model: ${SNAP_AGENT_LLM_MODEL:claude-sonnet-4-6}
+    api-key: ""
+    max-tokens: 8192
+    timeout-seconds: 120
+    streaming: true
+  anchor:
+    enabled: true
+    max-context-chars: 8000
+    preprocess-enabled: true
+    preprocess-timeout-ms: 5000
+    summary-threshold-chars: 4000
+    classifier-confidence-threshold: 0.5
+    summary-cache-ttl-seconds: 600
+    classifier-model: ${SNAP_AGENT_LLM_MODEL:claude-sonnet-4-6}
+    disabled-paths:
+      - /payment/**
+
+logging:
+  level:
+    cn.watsontech.snapagent: INFO
+    org.springframework.jdbc.core: DEBUG
