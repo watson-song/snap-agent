@@ -344,7 +344,8 @@ public class SnapAgentController {
             return ResponseEntity.ok(info);
         }
         info.setUserId(userId);
-        info.setUsername(userId);
+        String displayName = securityGateway.currentUserName();
+        info.setUsername(displayName != null ? displayName : userId);
         info.setAuthenticated(true);
         boolean authorized = securityGateway.hasPermission(
                 properties.getSecurity().getRequiredPermission());

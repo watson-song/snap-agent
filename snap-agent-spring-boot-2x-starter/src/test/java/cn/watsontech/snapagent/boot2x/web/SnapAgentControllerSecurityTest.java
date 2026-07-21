@@ -250,6 +250,27 @@ class SnapAgentControllerSecurityTest {
     }
 
     @Test
+    void userInfoShouldReturnDisplayNameWhenCurrentUserNameProvided() throws Exception {
+        when(securityGateway.currentUserName()).thenReturn("Alice Wang");
+
+        mockMvc.perform(get("/snap-agent/user-info"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.userId").value("user001"))
+                .andExpect(jsonPath("$.username").value("Alice Wang"));
+    }
+
+    @Test
+    void userInfoShouldFallbackToUserIdWhenCurrentUserNameIsNull() throws Exception {
+        // currentUserName() default method on mock returns null → fallback to userId
+        mockMvc.perform(get("/snap-agent/user-info"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authenticated").value(true))
+                .andExpect(jsonPath("$.userId").value("user001"))
+                .andExpect(jsonPath("$.username").value("user001"));
+    }
+
+    @Test
     void userInfoShouldHandleNullSecurityGateway() throws Exception {
         controller = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
