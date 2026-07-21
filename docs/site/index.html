@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" id="metaDescription"
-          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力"
-          data-en="SnapAgent — an embeddable LLM diagnostic Agent giving Spring Boot 2.x apps built-in read-only diagnostics"
-          content="SnapAgent — 嵌入式 LLM 诊断 Agent，让 Spring Boot 2.x 应用获得内嵌只读诊断能力">
+          data-zh="SnapAgent — 嵌入式 AI 技能框架，让 Spring Boot 2.x 应用获得内嵌只读诊断与锚点问答能力"
+          data-en="SnapAgent — an embeddable AI skill framework giving Spring Boot 2.x apps built-in read-only diagnostics and anchor Q&A"
+          content="SnapAgent — 嵌入式 AI 技能框架，让 Spring Boot 2.x 应用获得内嵌只读诊断与锚点问答能力">
     <title id="pageTitle"
-           data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
-           data-en="SnapAgent — Embeddable LLM Diagnostic Agent">SnapAgent — 嵌入式 LLM 诊断 Agent</title>
+           data-zh="SnapAgent — 嵌入式 AI 技能框架"
+           data-en="SnapAgent — Embeddable AI Skill Framework">SnapAgent — 嵌入式 AI 技能框架</title>
     <link rel="canonical" href="https://watson-song.github.io/snap-agent/">
     <link rel="alternate" hreflang="zh-CN" href="https://watson-song.github.io/snap-agent/">
     <link rel="alternate" hreflang="en" href="https://watson-song.github.io/snap-agent/">
@@ -19,13 +19,13 @@
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="SnapAgent">
     <meta property="og:title" id="ogTitle"
-          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
-          data-en="SnapAgent — Embeddable LLM Diagnostic Agent"
-          content="SnapAgent — 嵌入式 LLM 诊断 Agent">
+          data-zh="SnapAgent — 嵌入式 AI 技能框架"
+          data-en="SnapAgent — Embeddable AI Skill Framework"
+          content="SnapAgent — 嵌入式 AI 技能框架">
     <meta property="og:description" id="ogDescription"
-          data-zh="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力：自然语言对话、只读工具调用、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。"
-          data-en="Give your Spring Boot 2.x app an embedded LLM diagnostician: natural-language chat, read-only tool calls, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols."
-          content="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力：自然语言对话、只读工具调用、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。">
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检与成本核算。"
+          data-en="Give your Spring Boot 2.x app an embedded AI skill agent: natural-language chat, read-only tool calls, page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, and cost tracking."
+          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检与成本核算。">
     <meta property="og:url" content="https://watson-song.github.io/snap-agent/">
     <meta property="og:locale" id="ogLocale"
           data-zh="zh_CN" data-en="en_US"
@@ -36,13 +36,13 @@
     <!-- ===== Twitter Card (text-only summary, no image) ===== -->
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" id="twitterTitle"
-          data-zh="SnapAgent — 嵌入式 LLM 诊断 Agent"
-          data-en="SnapAgent — Embeddable LLM Diagnostic Agent"
-          content="SnapAgent — 嵌入式 LLM 诊断 Agent">
+          data-zh="SnapAgent — 嵌入式 AI 技能框架"
+          data-en="SnapAgent — Embeddable AI Skill Framework"
+          content="SnapAgent — 嵌入式 AI 技能框架">
     <meta name="twitter:description" id="twitterDescription"
-          data-zh="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力。"
-          data-en="Give your Spring Boot 2.x app an embedded LLM diagnostician."
-          content="让 Spring Boot 2.x 应用获得内嵌的 LLM 诊断能力。">
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力。"
+          data-en="Give your Spring Boot 2.x app an embedded AI skill agent."
+          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力。">
     <style>
         /* ===== CSS Variables (matches embedded UI) ===== */
         :root {
@@ -392,16 +392,16 @@
     <div class="container hero-content">
         <div class="hero-badge">
             <span class="dot"></span>
-            <span data-lang="zh">v1.0 已发布 · 工具插件 + 工作流 + 成本核算</span>
-            <span data-lang="en">v1.0 Released · Tool Plugins + Workflows + Cost Tracking</span>
+            <span data-lang="zh">v0.4 已发布 · 锚点问答 + 运维诊断工具</span>
+            <span data-lang="en">v0.4 Released · Anchor Q&A + Ops Diagnostic Tools</span>
         </div>
         <h1>
-            <span data-lang="zh">让 Spring Boot 应用<br>获得内嵌的 <span class="accent">LLM 诊断</span> 能力</span>
-            <span data-lang="en">Give your Spring Boot app<br>an embedded <span class="accent">LLM diagnostician</span></span>
+            <span data-lang="zh">让 Spring Boot 应用<br>获得内嵌的 <span class="accent">AI 技能</span> 能力</span>
+            <span data-lang="en">Give your Spring Boot app<br>an embedded <span class="accent">AI skill agent</span></span>
         </h1>
         <p class="hero-sub">
-            <span data-lang="zh">SnapAgent 是一个嵌入式诊断 Agent 库。Spring Boot 2.x 应用引入一行 Maven 依赖，即可获得：自然语言诊断对话、只读工具调用（JDBC / Redis / 代码 / 日志 / 指标 / 链路）、业务知识自动注入、代码图谱、多步工作流、问题闭环与主动巡检。</span>
-            <span data-lang="en">SnapAgent is an embeddable diagnostic Agent library. Add one Maven dependency to your Spring Boot 2.x app and gain: natural-language diagnostic chat, read-only tool calls (JDBC / Redis / code / logs / metrics / traces), auto-injected business knowledge, code graph, multi-step workflows, issue closure loops, and proactive patrols.</span>
+            <span data-lang="zh">SnapAgent 是一个嵌入式 AI 技能框架。Spring Boot 2.x 应用引入一行 Maven 依赖，即可获得：自然语言诊断对话、只读工具调用（JDBC / Redis / 代码 / 日志 / 指标 / 链路）、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检与成本核算。</span>
+            <span data-lang="en">SnapAgent is an embeddable AI skill framework. Add one Maven dependency to your Spring Boot 2.x app and gain: natural-language diagnostic chat, read-only tool calls (JDBC / Redis / code / logs / metrics / traces), page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, and cost tracking.</span>
         </p>
         <div class="hero-cta">
             <a href="#quickstart" class="btn-primary">
@@ -413,12 +413,12 @@
         </div>
         <div class="hero-stats">
             <div class="stat">
-                <div class="stat-num">v1.0</div>
+                <div class="stat-num">v0.4</div>
                 <div class="stat-label" data-lang="zh">当前版本</div>
                 <div class="stat-label" data-lang="en">Current version</div>
             </div>
             <div class="stat">
-                <div class="stat-num">11+</div>
+                <div class="stat-num">12</div>
                 <div class="stat-label" data-lang="zh">内置只读工具</div>
                 <div class="stat-label" data-lang="en">Built-in tools</div>
             </div>
@@ -433,7 +433,7 @@
                 <div class="stat-label" data-lang="en">LLM providers</div>
             </div>
             <div class="stat">
-                <div class="stat-num">930</div>
+                <div class="stat-num">1000+</div>
                 <div class="stat-label" data-lang="zh">测试用例</div>
                 <div class="stat-label" data-lang="en">Test cases</div>
             </div>
@@ -469,6 +469,15 @@
             </div>
 
             <div class="feature-card c-purple">
+                <div class="feature-icon">💬</div>
+                <h3 data-lang="zh">页面锚点问答</h3>
+                <h3 data-lang="en" style="display:none">Page-Section Anchor Q&A</h3>
+                <p data-lang="zh">宿主页面加一行 script + 标注 data-snap-anchor，用户点击 💬 图标即可在右侧抽屉中对当前区块内容提问。智能技能路由 + 预摘要缓存 + Shadow DOM 隔离。</p>
+                <p data-lang="en" style="display:none">Add one script tag + annotate with data-snap-anchor. Users click 💬 icon → a right-side drawer opens for in-context LLM Q&A about that section. Smart skill routing + pre-summary cache + Shadow DOM isolation.</p>
+                <div class="feature-meta">v0.4 · AnchorOrchestrator</div>
+            </div>
+
+            <div class="feature-card c-purple">
                 <div class="feature-icon">🧠</div>
                 <h3 data-lang="zh">多 LLM 对接</h3>
                 <h3 data-lang="en" style="display:none">Multi-LLM Support</h3>
@@ -481,8 +490,8 @@
                 <div class="feature-icon">🔧</div>
                 <h3 data-lang="zh">工具插件生态</h3>
                 <h3 data-lang="en" style="display:none">Tool Plugin Ecosystem</h3>
-                <p data-lang="zh">11+ 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph_tools。</p>
-                <p data-lang="en" style="display:none">11+ built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph_tools.</p>
+                <p data-lang="zh">12 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp。</p>
+                <p data-lang="en" style="display:none">12 built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp.</p>
                 <div class="feature-meta">v0.1-v0.4 · ToolProvider SPI</div>
             </div>
 
@@ -501,7 +510,7 @@
                 <h3 data-lang="en" style="display:none">Code Knowledge Graph</h3>
                 <p data-lang="zh">扫描 Java 源码构建调用图谱：调用链 / 反向调用链 / 影响范围分析。LLM 不再"瞎猜"，而是沿着真实调用边追溯。</p>
                 <p data-lang="en" style="display:none">Scans Java sources to build a call graph: call chain / reverse chain / impact analysis. The LLM traces real call edges instead of guessing.</p>
-                <div class="feature-meta">v0.8 · CodeGraph SPI</div>
+                <div class="feature-meta">v0.3 · CodeGraph SPI</div>
             </div>
 
             <div class="feature-card c-purple">
@@ -564,7 +573,7 @@
                 <h3 data-lang="en" style="display:none">Conversation History + SSE Streaming</h3>
                 <p data-lang="zh">每条诊断对话自动保存为可下载的 Markdown；切换 skill 不丢失上下文；多 skill 并行流式输出思考过程、工具调用与最终结论。</p>
                 <p data-lang="en" style="display:none">Each diagnostic chat auto-saved as downloadable Markdown; switching skills keeps context; multi-skill parallel streaming of thoughts, tool calls, and final answer.</p>
-                <div class="feature-meta">v0.1-v1.0 · ConversationStore</div>
+                <div class="feature-meta">v0.1 · ConversationStore</div>
             </div>
 
         </div>
@@ -596,16 +605,17 @@
 │   ┌───────────────────────▼──────────────────────────────────┐    │
 │   │              SnapAgent Spring Boot Starter                │    │
 │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
-│   │  │ Skills  │ │ Tools   │ │ Know-   │ │ Code    │  ...    │    │
-│   │  │ Registry│ │ Dispat. │ │ ledgeBase│ │ Graph   │         │    │
+│   │  │ Skills  │ │ Tools   │ │ Anchor  │ │ Code    │         │    │
+│   │  │ Registry│ │ Dispat. │ │ Q&A     │ │ Graph   │         │    │
 │   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │    │
 │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
-│   │  │ Issue   │ │ Cost    │ │ Workflow│ │ Patrol  │         │    │
-│   │  │ Closure │ │ Tracker │ │ Engine  │ │ + Alert │         │    │
+│   │  │ Know-   │ │ Issue   │ │ Cost    │ │ Workflow│         │    │
+│   │  │ ledgeBase│ │ Closure │ │ Tracker │ │ Engine  │         │    │
 │   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │    │
-│   │  ┌──────────────────────────────────────────────────┐     │    │
-│   │  │  AgentExecutor · SSE Controller · SecurityGateway│     │    │
-│   │  └──────────────────────┬───────────────────────────┘     │    │
+│   │  ┌─────────┐ ┌──────────────────────────────────────┐     │    │
+│   │  │ Patrol  │ │  AgentExecutor · SSE Controller       │     │    │
+│   │  │ + Alert │ │  · SecurityGateway                    │     │    │
+│   │  └─────────┘ └──────────────────────┬───────────────┘     │    │
 │   └─────────────────────────┼────────────────────────────────┘    │
 └─────────────────────────────┼────────────────────────────────────┘
                               │
@@ -622,13 +632,14 @@
                         <li><span class="arch-node">SnapAgent Spring Boot Starter</span> <em>(auto-configuration)</em>
                             <ul>
                                 <li><strong>Skills Registry</strong> — skill 注册与调度</li>
-                                <li><strong>Tools Dispatch</strong> — 11+ 只读工具</li>
-                                <li><strong>KnowledgeBase</strong> — 业务知识自动注入</li>
-                                <li><strong>Code Graph</strong> — 调用链 / 影响分析</li>
-                                <li><strong>Issue Closure</strong> — 问题闭环 + 知识沉淀</li>
-                                <li><strong>Cost Tracker</strong> — token 记账 + 预算管控</li>
-                                <li><strong>Workflow Engine</strong> — 多步诊断流水线</li>
-                                <li><strong>Patrol + Alert</strong> — 主动巡检 + 告警收敛</li>
+                                <li><strong>Tools Dispatch</strong> — 12 只读工具</li>
+                                <li><strong>Anchor Q&A</strong> — 页面锚点问答（v0.4）</li>
+                                <li><strong>Code Graph</strong> — 调用链 / 影响分析（v0.3）</li>
+                                <li><strong>KnowledgeBase</strong> — 业务知识自动注入（v0.7）</li>
+                                <li><strong>Issue Closure</strong> — 问题闭环 + 知识沉淀（v0.9）</li>
+                                <li><strong>Cost Tracker</strong> — token 记账 + 预算管控（v1.0）</li>
+                                <li><strong>Workflow Engine</strong> — 多步诊断流水线（v1.0）</li>
+                                <li><strong>Patrol + Alert</strong> — 主动巡检 + 告警收敛（v0.5）</li>
                                 <li><strong>AgentExecutor</strong> · SSE Controller · SecurityGateway</li>
                             </ul>
                         </li>
@@ -663,6 +674,9 @@
             <button class="qs-tab" data-qs="run">
                 <span data-lang="zh">启动</span><span data-lang="en">Run</span>
             </button>
+            <button class="qs-tab" data-qs="anchor">
+                <span data-lang="zh">锚点问答</span><span data-lang="en">Anchor</span>
+            </button>
         </div>
 
         <div class="code-block" id="qs-maven">
@@ -670,14 +684,14 @@
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-spring-boot-2x-starter</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">1.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.0</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
 
 <span class="c-com">&lt;!-- 2. (可选) REST API SDK 用于外部调用 --&gt;</span>
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-client</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">1.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.0</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
         </div>
 
@@ -723,6 +737,27 @@ curl -u <span class="c-str">demo:demo</span> -X POST http://localhost:8080/snap-
 <span class="c-com"># 订阅 SSE 流式输出：</span>
 curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent/runs/task-abc123/stream
         </div>
+
+        <div class="code-block" id="qs-anchor" style="display:none">
+<span class="c-com">&lt;!-- 1. 在宿主页面引入 anchor.js --&gt;</span>
+<span class="c-tag">&lt;script</span> <span class="c-attr">src</span>=<span class="c-str">"/snap-agent/anchor.js"</span> <span class="c-attr">defer</span><span class="c-tag">&gt;&lt;/script&gt;</span>
+
+<span class="c-com">&lt;!-- 2. 在需要问答的区块标注 data-snap-anchor --&gt;</span>
+<span class="c-tag">&lt;section</span> <span class="c-attr">data-snap-anchor</span>=<span class="c-str">"SKU Overview"</span> <span class="c-attr">data-snap-skill</span>=<span class="c-str">"auto"</span><span class="c-tag">&gt;</span>
+    <span class="c-tag">&lt;h2&gt;</span>SKU Overview<span class="c-tag">&lt;/h2&gt;</span>
+    <span class="c-tag">&lt;table&gt;</span>...<span class="c-tag">&lt;/table&gt;</span>
+<span class="c-tag">&lt;/section&gt;</span>
+
+<span class="c-com">&lt;!-- 3. (关键) 提供 SecurityGateway bean，否则 anchor.js 不渲染图标 --&gt;</span>
+<span class="c-key">@Configuration</span>
+<span class="c-key">public class</span> MySecurityGateway <span class="c-key">implements</span> SecurityGateway {
+    <span class="c-key">@Override</span> <span class="c-key">public</span> String currentUserId() { <span class="c-key">return</span> <span class="c-str">"demo-user"</span>; }
+    <span class="c-key">@Override</span> <span class="c-key">public boolean</span> hasPermission(String code) { <span class="c-key">return true</span>; }
+}
+
+<span class="c-com">&lt;!-- 用户点击 💬 紫色图标 → 右侧抽屉打开 → 对当前区块提问 --&gt;</span>
+<span class="c-com">&lt;!-- 完整接入指南：docs/site/integration/zh/anchor-feature-guide.md --&gt;</span>
+        </div>
     </div>
 </section>
 
@@ -734,8 +769,8 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                 <span data-lang="zh">文档</span><span data-lang="en">Documentation</span>
             </div>
             <h2 class="section-title">
-                <span data-lang="zh">中英双语 · 9 篇技术文档</span>
-                <span data-lang="en">Bilingual · 9 technical docs</span>
+                <span data-lang="zh">中英双语 · 10 篇技术文档</span>
+                <span data-lang="en">Bilingual · 10 technical docs</span>
             </h2>
             <p class="section-desc">
                 <span data-lang="zh">从系统架构到用户手册，每个主题都有中英文对照的深度文档。</span>
@@ -751,12 +786,29 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">系统架构总览</span><span data-lang="en">System Architecture</span>
                     </h4>
                     <p>
-                        <span data-lang="zh">三层 SPI 架构、模块划分、执行循环、Web 层、安全模型、自动装配、v0.1→v1.0 路线图。</span>
-                        <span data-lang="en">Three-layer SPI, module split, execution loop, web layer, security model, auto-config, v0.1→v1.0 roadmap.</span>
+                        <span data-lang="zh">三层 SPI 架构、模块划分、执行循环、Web 层、安全模型、自动装配、v0.1→v1.0 完整演进路线。</span>
+                        <span data-lang="en">Three-layer SPI, module split, execution loop, web layer, security model, auto-config, v0.1→v1.0 full evolution.</span>
                     </p>
                     <div class="doc-links">
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/zh/system-architecture.md" target="_blank" rel="noopener">中文</a>
                         <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/architecture/en/system-architecture.md" target="_blank" rel="noopener">English</a>
+                    </div>
+                </div>
+            </a>
+
+            <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/anchor-feature-guide.md" class="doc-card" target="_blank" rel="noopener">
+                <div class="doc-icon">💬</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">锚点问答接入指南</span><span data-lang="en">Anchor Q&A Integration Guide</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">anchor.js 引入、data-snap-anchor 标注 API、SecurityGateway 集成、智能技能路由、预摘要缓存、Shadow DOM 隔离、SPA 适配、移动端。</span>
+                        <span data-lang="en">anchor.js setup, data-snap-anchor API, SecurityGateway integration, smart skill routing, pre-summary cache, Shadow DOM isolation, SPA compat, mobile.</span>
+                    </p>
+                    <div class="doc-links">
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/zh/anchor-feature-guide.md" target="_blank" rel="noopener">中文</a>
+                        <a href="https://github.com/watson-song/snap-agent/blob/main/docs/site/integration/en/anchor-feature-guide.md" target="_blank" rel="noopener">English</a>
                     </div>
                 </div>
             </a>
@@ -906,13 +958,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
     <div class="container footer-inner">
         <div class="footer-brand">
             <span class="logo-icon">⚡</span>
-            <span>SnapAgent v1.0</span>
-            <span style="margin-left: 16px;" data-lang="zh">嵌入式 LLM 诊断 Agent</span>
-            <span style="margin-left: 16px;" data-lang="en">Embeddable LLM diagnostic Agent</span>
+            <span>SnapAgent v0.4</span>
+            <span style="margin-left: 16px;" data-lang="zh">嵌入式 AI 技能框架</span>
+            <span style="margin-left: 16px;" data-lang="en">Embeddable AI Skill Framework</span>
         </div>
         <div class="footer-meta">
-            <span data-lang="zh">基于 v1.0 现状编写 · </span>
-            <span data-lang="en">Documented against v1.0 · </span>
+            <span data-lang="zh">基于 v0.4 现状编写 · </span>
+            <span data-lang="en">Documented against v0.4 · </span>
             <a href="README.md">文档索引 / Index</a>
         </div>
     </div>
