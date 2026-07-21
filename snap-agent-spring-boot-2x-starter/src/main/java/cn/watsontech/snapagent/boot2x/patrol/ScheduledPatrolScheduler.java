@@ -156,7 +156,8 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 // Heuristic: if the report summary mentions anomaly keywords, mark as
                 // anomaly-detected so push channels fire. This lets patrol skills signal
                 // problems purely via their final text output, without code changes.
-                boolean anomaly = detectAnomaly(summary, statusStr);
+                // Custom alert keywords from the task config are also checked.
+                boolean anomaly = detectAnomaly(summary, statusStr, task.getAlertKeywords());
                 PatrolReport report = new PatrolReport(
                         null, task.getId(), agentTask.getTaskId(),
                         task.getSkillName(), triggeredAt, statusStr, summary, anomaly);
@@ -182,8 +183,14 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
      * Detects anomaly indicators in the patrol report summary. Looks for
      * keywords like "CRITICAL", "WARNING", "异常", "错误", "失败". Override
      * threshold by subclassing if a different heuristic is needed.
+     *
+     * @param summary       the patrol report summary text
+     * @param statusStr     the task status string (SUCCEEDED, FAILED, TIMEOUT, etc.)
+     * @param alertKeywords comma-separated custom keywords from the patrol task config;
+     *                      if the summary contains any of these, an anomaly is flagged.
+     *                      May be null or empty to use only the default markers.
      */
-    protected boolean detectAnomaly(String summary, String statusStr) {
+    protected boolean detectAnomaly(String summary, String statusStr, String alertKeywords) {
         if ("FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr)) {
             return true;
         }
@@ -193,6 +200,16 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 "异常", "错误", "失败", "告警", "风险"};
         for (String m : markers) {
             if (lower.contains(m)) return true;
+        }
+        // Custom alert keywords from task config
+        if (alertKeywords != null && !alertKeywords.isEmpty()) {
+            for (String kw : alertKeywords.split(",")) {
+                String trimmed = kw.trim();
+                if (!trimmed.isEmpty() && lower.contains(trimmed.toLowerCase(Locale.ROOT))) {
+                    log.info("Patrol anomaly detected via custom keyword '{}'", trimmed);
+                    return true;
+                }
+            }
         }
         return false;
     }

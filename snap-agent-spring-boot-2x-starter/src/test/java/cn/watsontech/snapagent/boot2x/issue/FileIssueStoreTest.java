@@ -35,7 +35,7 @@ class FileIssueStoreTest {
                                    long createdAt, long updatedAt) {
         return new IssueClosure(
                 issueId, null, taskId,
-                "conv-100", "为什么订单服务超时?", "连接池打满",
+                "conv-100", "user1", "为什么订单服务超时?", "连接池打满",
                 sampleSuggestion(), null,
                 status, null,
                 null, null,
@@ -76,6 +76,7 @@ class FileIssueStoreTest {
         assertThat(loaded).isNotNull();
         assertThat(loaded.getIssueId()).isEqualTo("issue-001");
         assertThat(loaded.getTaskId()).isEqualTo("task-100");
+        assertThat(loaded.getUserId()).isEqualTo("user1");
         assertThat(loaded.getUserQuery()).isEqualTo("为什么订单服务超时?");
         assertThat(loaded.getRootCause()).isEqualTo("连接池打满");
         assertThat(loaded.getStatus()).isEqualTo(IssueStatus.DIAGNOSED);
@@ -101,7 +102,7 @@ class FileIssueStoreTest {
 
         IssueClosure updated = new IssueClosure(
                 "issue-002", "EXT-1", "task-200",
-                null, "updated query", "updated root cause",
+                null, null, "updated query", "updated root cause",
                 suggestionOf("new solution"), "selected",
                 IssueStatus.FIX_IN_PROGRESS, "commit-abc",
                 verificationOf(true, "verified ok"), "kb-1",
@@ -223,7 +224,7 @@ class FileIssueStoreTest {
     void shouldHandleNullSolutionsOnSaveAndLoad() {
         IssueClosure issue = new IssueClosure(
                 "issue-null-sols", null, "task-null",
-                null, "query", "root cause",
+                null, null, "query", "root cause",
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -239,7 +240,7 @@ class FileIssueStoreTest {
     void shouldPreserveAllFieldsWithExternalIssue() {
         IssueClosure issue = new IssueClosure(
                 "issue-full", "JIRA-42", "task-full",
-                "conv-42", "full query", "full root cause",
+                "conv-42", "user1", "full query", "full root cause",
                 suggestionOf("sol1", "sol2"), "sol1",
                 IssueStatus.FIX_IN_PROGRESS, "commit-xyz",
                 verificationOf(true, "verification summary"), "kb-entry-1",

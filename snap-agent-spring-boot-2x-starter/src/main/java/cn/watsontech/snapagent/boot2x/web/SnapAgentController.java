@@ -1650,12 +1650,13 @@ public class SnapAgentController {
 
         String skillName = (String) body.get("skillName");
         String cron = (String) body.get("cron");
+        String alertKeywords = (String) body.get("alertKeywords");
         String userId = currentUserId();
         @SuppressWarnings("unchecked")
         Map<String, String> inputs = (Map<String, String>) body.get("inputs");
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
-        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs);
+        PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
@@ -1911,12 +1912,7 @@ public class SnapAgentController {
 
             IssueClosure ic = issueByTaskId.get(task.getTaskId());
             if (ic != null) {
-                Map<String, Object> issueDto = new LinkedHashMap<String, Object>();
-                issueDto.put("issueId", ic.getIssueId());
-                issueDto.put("status", ic.getStatus() != null ? ic.getStatus().name() : null);
-                issueDto.put("rootCause", ic.getRootCause());
-                issueDto.put("updatedAt", ic.getUpdatedAt());
-                dto.put("issue", issueDto);
+                dto.put("issue", toIssueDto(ic));
             } else {
                 dto.put("issue", null);
             }
@@ -1930,8 +1926,9 @@ public class SnapAgentController {
         for (IssueClosure ic : allIssues) {
             String tid = ic.getTaskId();
             if (tid == null || seenTaskIds.contains(tid)) continue;
-            // Only include issues belonging to the current user (heuristic: issues created by this user's tasks)
-            // IssueClosure doesn't carry userId, so we include all orphans — the audit log provides user attribution.
+            // Only include issues belonging to the current user. IssueClosure now
+            // carries userId (propagated from the original task), so we can filter.
+            if (ic.getUserId() != null && !ic.getUserId().equals(userId)) continue;
             orphanIssues.add(ic);
         }
         orphanIssues.sort((a, b) -> Long.compare(b.getUpdatedAt(), a.getUpdatedAt()));
@@ -1943,12 +1940,7 @@ public class SnapAgentController {
             dto.put("status", "UNKNOWN");
             dto.put("done", false);
             dto.put("createdAt", ic.getCreatedAt());
-            Map<String, Object> issueDto = new LinkedHashMap<String, Object>();
-            issueDto.put("issueId", ic.getIssueId());
-            issueDto.put("status", ic.getStatus() != null ? ic.getStatus().name() : null);
-            issueDto.put("rootCause", ic.getRootCause());
-            issueDto.put("updatedAt", ic.getUpdatedAt());
-            dto.put("issue", issueDto);
+            dto.put("issue", toIssueDto(ic));
             runs.add(dto);
         }
 
@@ -2567,6 +2559,7 @@ public class SnapAgentController {
         dto.put("externalIssueId", issue.getExternalIssueId());
         dto.put("taskId", issue.getTaskId());
         dto.put("conversationId", issue.getConversationId());
+        dto.put("userId", issue.getUserId());
         dto.put("userQuery", issue.getUserQuery());
         dto.put("rootCause", issue.getRootCause());
         dto.put("solution", solutionToDtoMap(issue.getSolution()));

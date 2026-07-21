@@ -28,7 +28,7 @@ class TemplateSolutionSuggesterTest {
     private IssueClosure issueWithRootCause(String rootCause) {
         return new IssueClosure(
                 "issue-test", null, "task-test",
-                null, "为什么订单服务超时?", rootCause,
+                null, null, "为什么订单服务超时?", rootCause,
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
@@ -38,7 +38,7 @@ class TemplateSolutionSuggesterTest {
     private IssueClosure issueWithRootCauseAndTranscript(String rootCause, String transcriptSummary) {
         return new IssueClosure(
                 "issue-test", null, "task-test",
-                null, "为什么订单服务超时?", rootCause,
+                null, null, "为什么订单服务超时?", rootCause,
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,

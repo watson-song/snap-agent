@@ -109,6 +109,7 @@ public class IssueClosureService {
 
         String rootCause = task.getReport();
         String userQuery = extractUserQuery(task.getInputs());
+        String userId = task.getUserId();
 
         long now = System.currentTimeMillis();
         // Build the issue first with DIAGNOSED status and no solution, so the
@@ -118,6 +119,7 @@ public class IssueClosureService {
                 null,
                 taskId,
                 null,
+                userId,
                 userQuery,
                 rootCause,
                 null,
@@ -223,13 +225,16 @@ public class IssueClosureService {
     /**
      * Verify the fix for an issue.
      *
-     * <p>When a {@link VerificationRunner} is configured, it is invoked directly.
-     * Otherwise the "verify-fix" skill is run and a {@link VerificationResult} is
-     * derived from its report (passed when the report mentions "通过"/"pass").
-     * The issue is transitioned to {@link IssueStatus#VERIFIED}.</p>
+     * <p>When a {@link VerificationRunner} is configured, it is invoked first.
+     * If the runner returns {@code null} (e.g. when the original diagnostic task
+     * is no longer in the in-memory TaskStore after an app restart), this method
+     * falls back to running the "verify-fix" skill, which relies on data stored
+     * on the issue itself (root_cause, original_query) rather than the lost task.
+     * Otherwise the issue is transitioned to {@link IssueStatus#VERIFIED}.</p>
      *
      * @param issueId the issue ID
      * @return the updated issue closure, or {@code null} if the issue is not found
+     *         or both the verification runner and the verify-fix skill are unavailable
      */
     public IssueClosure verify(String issueId) {
         IssueClosure issue = issueStore.load(issueId);
@@ -242,12 +247,16 @@ public class IssueClosureService {
         if (verificationRunner != null) {
             log.info("Verifying fix for issue {} via VerificationRunner", issueId);
             result = verificationRunner.verify(issue);
+            if (result == null) {
+                log.info("VerificationRunner returned null for issue {}; falling back to verify-fix skill", issueId);
+                result = verifyViaSkill(issueId, issue);
+            }
         } else {
             result = verifyViaSkill(issueId, issue);
-            if (result == null) {
-                // verify-fix skill not found — preserve legacy null result.
-                return null;
-            }
+        }
+        if (result == null) {
+            // verify-fix skill not found — preserve legacy null result.
+            return null;
         }
 
         long now = System.currentTimeMillis();

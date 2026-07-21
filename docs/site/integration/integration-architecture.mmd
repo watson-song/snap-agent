@@ -1,0 +1,57 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+
+    subgraph Client ["接入层 (Clients)"]
+        direction LR
+        UI["SnapAgent Web UI<br/>嵌入宿主的诊断界面"]
+    end
+
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        HostApp["Host App<br/>业务 Controller + Security 框架"]
+        AutoConfig["AutoConfiguration<br/>条件装配入口"]
+        Filter["SnapAgentFilter<br/>注入用户到 ThreadLocal"]
+        SecurityAdapter["SecurityAdapter<br/>SpringSecurity / Shiro 适配"]
+    end
+
+    subgraph Service ["核心业务层 (Service Layer)"]
+        direction LR
+        ToolSPI["ToolProvider SPI<br/>Jdbc / Redis / Code / Ops 工具"]
+    end
+
+    subgraph Data ["数据与存储层 (Data Layer)"]
+        direction LR
+        DS[("Host DataSource<br/>宿主数据源只读")]
+        Redis[("Host RedisTemplate<br/>宿主 Redis 只读")]
+    end
+
+    subgraph External ["基础设施与外部系统 (Infra & External)"]
+        direction LR
+        LLM["LLM Provider<br/>Anthropic / OpenAI 兼容 API"]
+    end
+
+    UI --> HostApp
+    HostApp --> AutoConfig
+    AutoConfig --> Filter
+    Filter --> SecurityAdapter
+    AutoConfig --> ToolSPI
+    ToolSPI --> DS
+    ToolSPI --> Redis
+    AutoConfig --> LLM
+
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    class UI client
+    class HostApp,AutoConfig,Filter,SecurityAdapter api
+    class ToolSPI service
+    class DS,Redis storage
+    class LLM external

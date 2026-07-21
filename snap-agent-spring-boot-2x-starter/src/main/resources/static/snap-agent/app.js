@@ -2132,6 +2132,9 @@ function buildIssueDetail(run) {
     if (run.skillId) {
         html += '<div><strong>Skill:</strong> ' + escapeHtml(run.skillId) + '</div>';
     }
+    if (i.userId) {
+        html += '<div><strong>创建人:</strong> ' + escapeHtml(i.userId) + '</div>';
+    }
     if (i.userQuery) {
         html += '<div style="margin-top:6px;"><strong>用户问题:</strong> ' + escapeHtml(i.userQuery) + '</div>';
     }
@@ -2203,22 +2206,23 @@ async function showIssuesModal() {
         if (issuesList.length > 0) {
             html += '<div style="margin-bottom:16px;">';
             html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">已记录问题 (' + issuesList.length + ')</div>';
-            html += '<table class="feature-table"><thead><tr><th>Issue ID</th><th>任务</th><th>状态</th><th>根因摘要</th><th>更新时间</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>Issue / 任务</th><th>状态</th><th>根因摘要</th><th>更新时间</th><th>操作</th></tr></thead><tbody>';
             issuesList.forEach(function(r) {
                 var i = r.issue;
+                // Ensure taskId is available on issue object for buildIssueActions
+                if (!i.taskId) i.taskId = r.taskId;
                 var statusBadge = (i.status === 'CLOSED' || i.status === 'VERIFIED') ? 'green' : 'orange';
                 var rootSummary = (i.rootCause || '').substring(0, 60);
                 var updated = i.updatedAt ? new Date(i.updatedAt).toLocaleString() : '';
                 html += '<tr class="issue-row" data-issue-id="' + escapeHtml(i.issueId || '') + '" data-task-id="' + escapeHtml(r.taskId || '') + '" style="cursor:pointer;">' +
-                    '<td><code>' + escapeHtml(i.issueId || '') + '</code></td>' +
-                    '<td><code style="font-size:10px;">' + escapeHtml(r.taskId || '') + '</code></td>' +
+                    '<td><code>' + escapeHtml(i.issueId || '') + '</code><br><code style="font-size:10px;color:var(--text-secondary);">' + escapeHtml(r.taskId || '') + '</code></td>' +
                     '<td><span class="feature-badge ' + statusBadge + '">' + escapeHtml(i.status || '') + '</span></td>' +
                     '<td style="font-size:12px;">' + escapeHtml(rootSummary) + '</td>' +
                     '<td style="font-size:11px;">' + escapeHtml(updated) + '</td>' +
                     '<td>' + buildIssueActions(i) + '</td>' +
                     '</tr>';
                 // Hidden detail row — toggled by clicking the row
-                html += '<tr class="issue-detail-row" style="display:none;"><td colspan="6">' + buildIssueDetail(r) + '</td></tr>';
+                html += '<tr class="issue-detail-row" style="display:none;"><td colspan="5">' + buildIssueDetail(r) + '</td></tr>';
             });
             html += '</tbody></table></div>';
         }
@@ -2328,24 +2332,24 @@ async function showIssuesModal() {
                 if (issueRow) {
                     var newStatus = data2.status;
                     var newIssueId = data2.issueId || issueId;
-                    // Update status badge (3rd column)
+                    // Update status badge (2nd column) and action buttons (5th column)
                     var rowCells = issueRow.querySelectorAll('td');
-                    if (rowCells.length >= 6) {
+                    if (rowCells.length >= 5) {
                         var badgeColor = (newStatus === 'CLOSED' || newStatus === 'VERIFIED') ? 'green' : 'orange';
-                        rowCells[2].innerHTML = '<span class="feature-badge ' + badgeColor + '">' + escapeHtml(newStatus || '') + '</span>';
-                        // Rebuild action buttons (6th column)
-                        rowCells[5].innerHTML = buildIssueActions({ status: newStatus, issueId: newIssueId, taskId: taskId });
+                        rowCells[1].innerHTML = '<span class="feature-badge ' + badgeColor + '">' + escapeHtml(newStatus || '') + '</span>';
+                        // Rebuild action buttons (5th column)
+                        rowCells[4].innerHTML = buildIssueActions({ status: newStatus, issueId: newIssueId, taskId: taskId });
                     }
                     // Refresh the detail panel (if visible)
                     var detailRow = issueRow.nextElementSibling;
                     if (detailRow && detailRow.classList.contains('issue-detail-row') && detailRow.style.display !== 'none') {
                         // Build a synthetic run object for buildIssueDetail
                         var syntheticRun = { taskId: taskId, skillId: null, issue: data2 };
-                        detailRow.innerHTML = '<td colspan="6">' + buildIssueDetail(syntheticRun) + '</td>';
+                        detailRow.innerHTML = '<td colspan="5">' + buildIssueDetail(syntheticRun) + '</td>';
                     } else if (detailRow && detailRow.classList.contains('issue-detail-row')) {
                         // Update hidden detail too, so it's fresh when expanded
                         var syntheticRun2 = { taskId: taskId, skillId: null, issue: data2 };
-                        detailRow.innerHTML = '<td colspan="6">' + buildIssueDetail(syntheticRun2) + '</td>';
+                        detailRow.innerHTML = '<td colspan="5">' + buildIssueDetail(syntheticRun2) + '</td>';
                     }
                 }
             } catch (e) {
@@ -2394,9 +2398,20 @@ async function showPatrolModal() {
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">Cron 表达式</label>' +
             '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * ? (每15分钟)" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></div>';
-        html += '<div><label style="font-size:12px;color:var(--text-secondary);">输入参数 (JSON, 可选)</label>' +
+        // Dynamic input area: text mode (for skills without inputs) or JSON mode (for skills with inputs)
+        html += '<div id="patrolTextInputWrap" style="display:none;">' +
+            '<label style="font-size:12px;color:var(--text-secondary);">自然语言指令</label>' +
+            '<textarea id="patrolTextInput" placeholder="例如: 检查drp_allocation_plan表是否有generate_date等于当前日期的记录" rows="3" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></textarea>' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">该 Skill 无预定义参数, 直接输入自然语言指令即可 (等价于在聊天框输入)。</div></div>';
+        html += '<div id="patrolJsonInputWrap">' +
+            '<label style="font-size:12px;color:var(--text-secondary);">输入参数 (JSON)</label>' +
             '<textarea id="patrolInputsInput" placeholder="{}" rows="3" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;"></textarea></div>';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">告警关键词 (可选, 逗号分隔)</label>' +
+            '<input type="text" id="patrolAlertKeywordsInput" placeholder="例如: 未生成, 0行, 无记录, 失败" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">巡检报告中出现这些词时触发告警推送; 留空则仅用内置关键词 (异常/错误/失败/critical/warning 等)。</div></div>';
         html += '<div style="display:flex;gap:8px;">' +
             '<button class="feature-action-btn" id="patrolSubmitBtn">创建</button>' +
             '<button class="feature-action-btn" id="patrolCancelBtn" style="background:var(--bg-input);">取消</button></div>';
@@ -2406,12 +2421,13 @@ async function showPatrolModal() {
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>状态</th><th>上次运行</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>上次运行</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
                 var badge = t.active || t.enabled ? 'green' : 'orange';
                 var isActive = t.active || t.enabled;
                 html += '<tr><td><code>' + escapeHtml(t.taskId || t.id) + '</code></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
                     '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
+                    '<td style="font-size:11px;">' + escapeHtml(t.alertKeywords || '—') + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
                     '<td style="font-size:11px;">' + escapeHtml(t.lastRun || '—') + '</td>' +
                     '<td><button class="feature-action-btn" data-patrol-id="' + escapeHtml(t.taskId || t.id) + '">删除</button></td></tr>';
@@ -2444,8 +2460,28 @@ async function showPatrolModal() {
         var cancelBtn = body.querySelector('#patrolCancelBtn');
         var skillSelect = body.querySelector('#patrolSkillSelect');
         var cronInput = body.querySelector('#patrolCronInput');
-        var inputsInput = body.querySelector('#patrolInputsInput');
+        var textInput = body.querySelector('#patrolTextInput');
+        var jsonInput = body.querySelector('#patrolInputsInput');
+        var textWrap = body.querySelector('#patrolTextInputWrap');
+        var jsonWrap = body.querySelector('#patrolJsonInputWrap');
+        var alertKwInput = body.querySelector('#patrolAlertKeywordsInput');
         var statusDiv = body.querySelector('#patrolCreateStatus');
+
+        // Toggle between text mode (no inputs) and JSON mode (has inputs) based on skill selection
+        function toggleInputMode() {
+            var skillName = skillSelect.value;
+            var skill = (skillsData || []).find(function(s) { return s.name === skillName; });
+            var hasInputs = skill && skill.inputs && skill.inputs.length > 0;
+            if (hasInputs) {
+                textWrap.style.display = 'none';
+                jsonWrap.style.display = 'block';
+            } else {
+                textWrap.style.display = 'block';
+                jsonWrap.style.display = 'none';
+            }
+        }
+        skillSelect.addEventListener('change', toggleInputMode);
+        toggleInputMode(); // initialize for the default selection
 
         createBtn.addEventListener('click', function() {
             if (createForm.style.display === 'none') {
@@ -2464,12 +2500,23 @@ async function showPatrolModal() {
         submitBtn.addEventListener('click', async function() {
             var skillName = skillSelect.value;
             var cron = cronInput.value.trim();
-            var inputsText = inputsInput.value.trim() || '{}';
+            var alertKeywords = alertKwInput.value.trim();
             if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
             if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
+
+            // Build inputs: text mode wraps as _user_message, JSON mode parses directly
             var inputsObj;
-            try { inputsObj = JSON.parse(inputsText); }
-            catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
+            var textMode = textWrap.style.display !== 'none';
+            if (textMode) {
+                var text = textInput.value.trim();
+                if (!text) { statusDiv.textContent = '请输入自然语言指令'; return; }
+                inputsObj = { _user_message: text };
+            } else {
+                var inputsText = jsonInput.value.trim() || '{}';
+                try { inputsObj = JSON.parse(inputsText); }
+                catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
+            }
+
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
             statusDiv.textContent = '';
@@ -2477,7 +2524,7 @@ async function showPatrolModal() {
                 var resp = await fetch(BASE + '/patrol/tasks', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ skillName: skillName, cron: cron, inputs: inputsObj })
+                    body: JSON.stringify({ skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
                 });
                 var data = await resp.json();
                 if (!resp.ok) {
