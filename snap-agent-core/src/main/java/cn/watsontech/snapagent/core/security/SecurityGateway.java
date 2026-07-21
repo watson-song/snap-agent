@@ -21,6 +21,19 @@ public interface SecurityGateway {
     String currentUserId();
 
     /**
+     * Return the current authenticated user's display name (real name /
+     * nickname). Used for UI display; {@link #currentUserId()} is still
+     * used for ownership and audit. Implementations should return
+     * {@code null} when a display name is not available — the controller
+     * will fall back to the user id.
+     *
+     * @return display name, or {@code null} if unavailable
+     */
+    default String currentUserName() {
+        return null;
+    }
+
+    /**
      * Check whether the current user has the given permission code.
      *
      * @param code permission code; when empty, returns {@code true}
