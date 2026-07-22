@@ -9,6 +9,7 @@ import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
@@ -46,6 +47,8 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
+import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
 import cn.watsontech.snapagent.core.workflow.StepResult;
 import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
@@ -67,6 +70,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -124,6 +128,8 @@ public class SnapAgentController {
     private final WorkflowEngine workflowEngine;
     private final ToolPluginRegistry toolPluginRegistry;
     private final AuditStore auditStore;
+    private final PluginRegistry pluginRegistry;
+    private final PluginUploader pluginUploader;
     private AnchorOrchestrator anchorOrchestrator;
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -213,7 +219,7 @@ public class SnapAgentController {
                                 AuditStore auditStore) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
-                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore);
+                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -255,7 +261,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, null, null, null, null, null);
+                issueClosureService, null, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -278,7 +284,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, costSummaryService, null, null, null, null);
+                issueClosureService, costSummaryService, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -301,7 +307,9 @@ public class SnapAgentController {
                                 YamlWorkflowLoader workflowLoader,
                                 WorkflowEngine workflowEngine,
                                 ToolPluginRegistry toolPluginRegistry,
-                                AuditStore auditStore) {
+                                AuditStore auditStore,
+                                PluginRegistry pluginRegistry,
+                                PluginUploader pluginUploader) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -323,6 +331,8 @@ public class SnapAgentController {
         this.workflowEngine = workflowEngine;
         this.toolPluginRegistry = toolPluginRegistry;
         this.auditStore = auditStore;
+        this.pluginRegistry = pluginRegistry;
+        this.pluginUploader = pluginUploader;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -438,11 +448,10 @@ public class SnapAgentController {
 
         audit(currentUserId(), "GET", "/tools", "LIST_TOOLS", null);
 
-        // ToolDispatcher.providers() returns ToolProvider instances with name() and schema()
+        // Use activePlugins() to iterate over the PluginDescriptor list (v0.5)
         List<Map<String, Object>> toolList = new ArrayList<Map<String, Object>>();
-        for (Object provider : toolDispatcher.providers()) {
-            cn.watsontech.snapagent.core.tool.ToolProvider tp =
-                    (cn.watsontech.snapagent.core.tool.ToolProvider) provider;
+        for (PluginDescriptor desc : toolDispatcher.activePlugins()) {
+            cn.watsontech.snapagent.core.tool.ToolProvider tp = desc.getProvider();
             Map<String, Object> tool = new LinkedHashMap<String, Object>();
             tool.put("name", tp.name());
             // Parse the JSON schema string to extract description + parameters
@@ -2297,28 +2306,168 @@ public class SnapAgentController {
         return ResponseEntity.ok(toWorkflowResultDto(result));
     }
 
-    // ---- GET /tools/plugins (v1.0 tool plugin metadata) ----
+    // ---- Plugin management endpoints (v0.5) ----
+
     @GetMapping("/tools/plugins")
-    public ResponseEntity<Object> listToolPlugins() {
-        ResponseEntity<Object> authError = requireAuth();
+    public ResponseEntity<Object> listPlugins() {
+        ResponseEntity<Object> authError = requirePluginReadPermission();
         if (authError != null) return authError;
 
-        if (toolPluginRegistry == null) {
-            return ResponseEntity.ok(new ArrayList<Object>());
-        }
-
-        audit(currentUserId(), "GET", "/tools/plugins", "LIST_TOOL_PLUGINS", null);
-
         List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-        for (ToolPlugin plugin : toolPluginRegistry.getPlugins()) {
-            Map<String, Object> dto = new LinkedHashMap<String, Object>();
-            dto.put("name", plugin.name());
-            dto.put("version", plugin.version());
-            dto.put("description", plugin.description());
-            dto.put("toolNames", plugin.toolNames());
-            result.add(dto);
+        if (pluginRegistry != null) {
+            for (PluginDescriptor desc : pluginRegistry.list()) {
+                result.add(toPluginDto(desc));
+            }
         }
+        audit(currentUserId(), "GET", "/tools/plugins", "LIST_PLUGINS", null);
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/tools/plugins/{id}")
+    public ResponseEntity<Object> getPlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginReadPermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        return ResponseEntity.ok(toPluginDto(desc));
+    }
+
+    @PostMapping("/tools/plugins/upload")
+    public ResponseEntity<Object> uploadPlugin(@RequestParam("file") MultipartFile file) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginUploader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "PLUGIN_DISABLED",
+                    "plugin upload not configured");
+        }
+        if (file == null || file.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "file is required");
+        }
+        try {
+            PluginDescriptor desc = pluginUploader.upload(file);
+            Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+            auditDetails.put("pluginId", desc.getPluginId());
+            auditDetails.put("toolType", desc.getToolType());
+            auditDetails.put("jarSize", file.getSize());
+            audit(currentUserId(), "POST", "/tools/plugins/upload", "PLUGIN_UPLOAD", auditDetails);
+            return ResponseEntity.status(HttpStatus.CREATED).body(toPluginDto(desc));
+        } catch (IllegalStateException e) {
+            return errorResponse(HttpStatus.CONFLICT, "PLUGIN_CONFLICT", e.getMessage());
+        } catch (RuntimeException e) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "PLUGIN_UPLOAD_FAILED", e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/tools/plugins/{id}")
+    public ResponseEntity<Object> deletePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        try {
+            pluginRegistry.unregister(id);
+        } catch (UnsupportedOperationException e) {
+            return errorResponse(HttpStatus.FORBIDDEN, "SYSTEM_PLUGIN",
+                    "cannot unregister system plugin: " + id);
+        }
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("pluginId", id);
+        audit(currentUserId(), "DELETE", "/tools/plugins/" + id, "PLUGIN_UNREGISTER", auditDetails);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/tools/plugins/{id}/enable")
+    public ResponseEntity<Object> enablePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null || pluginRegistry.getPlugin(id) == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.enable(id);
+        audit(currentUserId(), "POST", "/tools/plugins/" + id + "/enable",
+                "PLUGIN_ENABLE", Collections.singletonMap("pluginId", id));
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/tools/plugins/{id}/disable")
+    public ResponseEntity<Object> disablePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null || pluginRegistry.getPlugin(id) == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.disable(id);
+        audit(currentUserId(), "POST", "/tools/plugins/" + id + "/disable",
+                "PLUGIN_DISABLE", Collections.singletonMap("pluginId", id));
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/tools/plugins/{id}/default")
+    public ResponseEntity<Object> setDefaultPlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.setDefault(desc.getToolType(), id);
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("pluginId", id);
+        auditDetails.put("toolType", desc.getToolType());
+        audit(currentUserId(), "PUT", "/tools/plugins/" + id + "/default",
+                "PLUGIN_SET_DEFAULT", auditDetails);
+        return ResponseEntity.ok().build();
+    }
+
+    private ResponseEntity<Object> requirePluginReadPermission() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+        if (!securityGateway.hasPermission(properties.getSecurity().getPluginReadPermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin read permission denied");
+        }
+        return null;
+    }
+
+    private ResponseEntity<Object> requirePluginManagePermission() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+        if (!securityGateway.hasPermission(properties.getSecurity().getPluginManagePermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin manage permission denied");
+        }
+        return null;
+    }
+
+    private Map<String, Object> toPluginDto(PluginDescriptor desc) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("pluginId", desc.getPluginId());
+        dto.put("toolType", desc.getToolType());
+        dto.put("displayName", desc.getDisplayName());
+        dto.put("description", desc.getDescription());
+        dto.put("version", desc.getVersion());
+        dto.put("isDefault", desc.isDefault());
+        dto.put("enabled", desc.isEnabled());
+        dto.put("system", desc.isSystem());
+        dto.put("jarPath", desc.getJarPath() != null ? desc.getJarPath().toString() : null);
+        return dto;
     }
 
     // ---- helpers ----

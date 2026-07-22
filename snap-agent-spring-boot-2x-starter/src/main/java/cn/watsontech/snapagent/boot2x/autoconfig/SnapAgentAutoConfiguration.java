@@ -715,7 +715,8 @@ public class SnapAgentAutoConfiguration {
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
-                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore);
+                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore,
+                null, null);
 
         // Wire anchor orchestrator if anchor feature is enabled and LLM is available
         if (properties.getAnchor().isEnabled() && llmClient != null) {
