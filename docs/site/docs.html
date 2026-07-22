@@ -325,17 +325,19 @@
     <div class="container footer-inner">
         <div class="footer-brand">
             <span class="logo-icon">⚡</span>
-            <span>SnapAgent v0.4</span>
+            <span>SnapAgent v0.4.1</span>
             <span style="margin-left: 16px;" class="lang-inline" data-lang="zh">嵌入式 AI 技能框架</span>
             <span style="margin-left: 16px;" class="lang-inline" data-lang="en">Embeddable AI Skill Framework</span>
         </div>
         <div class="footer-meta">
-            <span class="lang-inline" data-lang="zh">文档基于 v0.4 · </span>
-            <span class="lang-inline" data-lang="en">Documented against v0.4 · </span>
-            <a href="index.html">
+            <span class="lang-inline" data-lang="zh">文档基于 v0.4.1 · </span>
+            <span class="lang-inline" data-lang="en">Documented against v0.4.1 · </span>
+            <a href="index.html" id="backHomeLink">
                 <span class="lang-inline" data-lang="zh">返回主页</span>
                 <span class="lang-inline" data-lang="en">Back to Home</span>
             </a>
+            |
+            <a href="README.md">文档索引 / Index</a>
         </div>
     </div>
 </footer>
@@ -351,8 +353,8 @@
           zh: { title: '系统架构总览', path: './architecture/zh/system-architecture.md' },
           en: { title: 'System Architecture', path: './architecture/en/system-architecture.md' } },
         { slug: 'anchor-feature-guide', icon: '💬',
-          zh: { title: '锚点问答接入指南', path: './integration/zh/anchor-feature-guide.md' },
-          en: { title: 'Anchor Q&A Integration Guide', path: './integration/en/anchor-feature-guide.md' } },
+          zh: { title: '锚点问答与内容注入指南', path: './integration/zh/anchor-feature-guide.md' },
+          en: { title: 'Anchor Q&A + Injection Guide', path: './integration/en/anchor-feature-guide.md' } },
         { slug: 'knowledge-search', icon: '🔍',
           zh: { title: '知识搜索算法', path: './search/zh/knowledge-search.md' },
           en: { title: 'Knowledge Search Algorithm', path: './search/en/knowledge-search.md' } },
@@ -449,6 +451,66 @@
             }
             docRender.innerHTML = html;
 
+            // Rewrite relative links to work within docs.html
+            // marked.js renders links relative to the .md file location, but the page
+            // is docs.html at site root. We need to resolve them properly.
+            const docDir = meta.path.replace(/^\.\//, '').replace(/[^/]+$/, '');
+
+            // Build a reverse lookup: .md path → slug
+            const pathToSlug = {};
+            DOCS.forEach(d => {
+                ['zh', 'en'].forEach(l => {
+                    const p = d[l].path.replace(/^\.\//, '');
+                    pathToSlug[p] = d.slug;
+                });
+            });
+
+            docRender.querySelectorAll('a[href]').forEach(a => {
+                const href = a.getAttribute('href');
+                if (href.startsWith('http://') || href.startsWith('https://') || href.startsWith('#') || href.startsWith('mailto:')) return;
+
+                // Split off hash anchor
+                const hashIdx = href.indexOf('#');
+                let pathPart = hashIdx >= 0 ? href.substring(0, hashIdx) : href;
+                const anchorPart = hashIdx >= 0 ? href.substring(hashIdx) : '';
+
+                // Resolve relative path against the doc's directory
+                const fullParts = (docDir + pathPart).split('/');
+                const resolved = [];
+                for (const p of fullParts) {
+                    if (p === '..') { resolved.pop(); continue; }
+                    if (p === '.' || p === '') continue;
+                    resolved.push(p);
+                }
+                const resolvedPath = resolved.join('/');
+
+                // If this resolves to a known doc .md path, link to docs.html#slug
+                if (pathToSlug[resolvedPath]) {
+                    a.setAttribute('href', '#');
+                    a.style.cursor = 'pointer';
+                    // Make it load the doc via hash routing
+                    a.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        location.hash = pathToSlug[resolvedPath];
+                    });
+                } else if (resolvedPath.endsWith('.md')) {
+                    // External .md link (e.g. design spec) — link to GitHub blob
+                    // resolvedPath may be relative to docs/ if it was a ../../../ link
+                    var ghPath = resolvedPath;
+                    // If the path starts with superpowers/ or docs/, prepend docs/
+                    if (ghPath.startsWith('superpowers/') || ghPath.startsWith('docs/')) {
+                        ghPath = 'docs/' + ghPath.replace(/^docs\//, '');
+                    } else {
+                        ghPath = 'docs/site/' + ghPath;
+                    }
+                    a.setAttribute('href', 'https://github.com/watson-song/snap-agent/blob/main/' + ghPath);
+                    a.setAttribute('target', '_blank');
+                    a.setAttribute('rel', 'noopener');
+                } else {
+                    a.setAttribute('href', resolvedPath + anchorPart);
+                }
+            });
+
             // Edit-on-GitHub footer
             const ghBase = 'https://github.com/watson-song/snap-agent/edit/main/docs/site/';
             const relPath = meta.path.replace('./', '');
@@ -504,7 +566,10 @@
     langToggle.addEventListener('click', () => {
         const next = currentLang === 'zh' ? 'en' : 'zh';
         applyLang(next);
-        try { localStorage.setItem('snapagent-lang', next); } catch (e) {}
+        // Update URL without reload
+        const url = new URL(window.location);
+        url.searchParams.set('lang', next);
+        window.history.replaceState({}, '', url);
     });
 
     // ===== Hash routing =====
@@ -537,13 +602,24 @@
     // ===== Init =====
     renderSidebar();
 
-    // Restore language preference
-    try {
-        const saved = localStorage.getItem('snapagent-lang');
-        if (saved === 'en') {
-            applyLang('en');
+    // Read language from URL ?lang=en
+    (function initLang() {
+        const params = new URLSearchParams(window.location.search);
+        const lang = params.get('lang');
+        if (lang === 'en' || lang === 'zh') {
+            applyLang(lang);
         }
-    } catch (e) {}
+    })();
+
+    // Make "Back to Home" link carry language
+    const backHomeLink = document.getElementById('backHomeLink');
+    if (backHomeLink) {
+        backHomeLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            const lang = htmlEl.getAttribute('data-lang') || 'zh';
+            window.location.href = 'index.html?lang=' + lang;
+        });
+    }
 
     // Initial route
     routeFromHash();
