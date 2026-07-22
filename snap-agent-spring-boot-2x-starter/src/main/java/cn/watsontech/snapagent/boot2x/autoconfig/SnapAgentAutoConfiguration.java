@@ -47,6 +47,8 @@ import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorContextSummarizer;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorInjectionCache;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorInjectionOrchestrator;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorSkillClassifier;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorSummaryCache;
@@ -726,6 +728,15 @@ public class SnapAgentAutoConfiguration {
                     classifier, skillRegistry, properties.getAnchor());
             controller.setAnchorOrchestrator(orchestrator);
             log.info("AnchorOrchestrator wired (anchor feature enabled)");
+
+            // Wire injection orchestrator
+            AnchorInjectionCache injectionCache = new AnchorInjectionCache(
+                    properties.getAnchor().getInjectionCacheMaxSize());
+            AnchorInjectionOrchestrator injectionOrchestrator = new AnchorInjectionOrchestrator(
+                    llmClient, skillRegistry, workflowLoader, workflowEngine,
+                    injectionCache, gateway, properties.getAnchor());
+            controller.setInjectionOrchestrator(injectionOrchestrator);
+            log.info("AnchorInjectionOrchestrator wired (anchor injection feature enabled)");
         }
 
         return controller;

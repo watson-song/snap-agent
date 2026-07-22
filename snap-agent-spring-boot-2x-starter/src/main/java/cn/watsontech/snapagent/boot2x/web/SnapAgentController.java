@@ -2,7 +2,10 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorContext;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorInjectionOrchestrator;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
+import cn.watsontech.snapagent.boot2x.anchor.InjectionRequest;
+import cn.watsontech.snapagent.boot2x.anchor.InjectionResult;
 import cn.watsontech.snapagent.boot2x.anchor.PreprocessResult;
 import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
@@ -125,6 +128,7 @@ public class SnapAgentController {
     private final ToolPluginRegistry toolPluginRegistry;
     private final AuditStore auditStore;
     private AnchorOrchestrator anchorOrchestrator;
+    private AnchorInjectionOrchestrator injectionOrchestrator;
 
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentExecutor agentExecutor,
@@ -378,9 +382,72 @@ public class SnapAgentController {
         return ResponseEntity.ok(response);
     }
 
+    // ---- POST /anchor/inject (requires auth; content injection) ----
+    @PostMapping("/anchor/inject")
+    public ResponseEntity<Object> injectAnchor(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (injectionOrchestrator == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ANCHOR_DISABLED",
+                    "anchor injection feature is not configured");
+        }
+
+        // Parse and validate request
+        InjectionRequest req = InjectionRequest.fromMap(body);
+        if (req == null || req.getAnchorName() == null || req.getAnchorName().isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
+                    "anchorName is required");
+        }
+        if (!req.hasSource()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT",
+                    "skillId or workflowId is required");
+        }
+
+        String userId = securityGateway.currentUserId();
+
+        try {
+            InjectionResult result = injectionOrchestrator.inject(userId, req);
+
+            Map<String, Object> response = new LinkedHashMap<String, Object>();
+            response.put("html", result.getHtml());
+            response.put("cached", result.isCached());
+            response.put("generatedAt", result.getGeneratedAt().toString());
+
+            // Audit
+            Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+            auditDetails.put("anchorName", req.getAnchorName());
+            auditDetails.put("sourceId", req.getSourceId());
+            auditDetails.put("cached", result.isCached());
+            audit(userId, "POST", "/anchor/inject", "ANCHOR_INJECT", auditDetails);
+
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException e) {
+            String message = e.getMessage();
+            if (message != null && message.startsWith("SKILL_NOT_FOUND")) {
+                return errorResponse(HttpStatus.NOT_FOUND, "SKILL_NOT_FOUND",
+                        message.substring(message.indexOf(':') + 1).trim());
+            }
+            if (message != null && message.startsWith("WORKFLOW_NOT_FOUND")) {
+                return errorResponse(HttpStatus.NOT_FOUND, "WORKFLOW_NOT_FOUND",
+                        message.substring(message.indexOf(':') + 1).trim());
+            }
+            return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "INJECTION_FAILED",
+                    message != null ? message : "injection failed");
+        } catch (RuntimeException e) {
+            return errorResponse(HttpStatus.INTERNAL_SERVER_ERROR, "INJECTION_FAILED",
+                    e.getMessage() != null ? e.getMessage() : "injection failed");
+        }
+    }
+
     /** Injects the AnchorOrchestrator (optional dependency, set by auto-config). */
     public void setAnchorOrchestrator(AnchorOrchestrator anchorOrchestrator) {
         this.anchorOrchestrator = anchorOrchestrator;
+    }
+
+    /** Injects the AnchorInjectionOrchestrator (optional dependency, set by auto-config). */
+    public void setInjectionOrchestrator(AnchorInjectionOrchestrator injectionOrchestrator) {
+        this.injectionOrchestrator = injectionOrchestrator;
     }
 
     // ---- GET /user-info (requires auth; returns auth status + authorization) ----
