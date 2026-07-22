@@ -2524,7 +2524,7 @@ async function showPatrolModal() {
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>Cron</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
                 var taskId = escapeHtml(t.taskId || t.id);
                 var taskName = escapeHtml(t.name || t.taskName || taskId);
@@ -2532,53 +2532,81 @@ async function showPatrolModal() {
                 var badge = isActive ? 'green' : 'orange';
                 html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + taskId + '</span></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
                     '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
-                    '<td style="font-size:11px;">' + escapeHtml(t.alertKeywords || '—') + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
-                    '<td><button class="feature-action-btn" data-patrol-toggle="' + taskId + '" style="margin-right:4px;">' + (isActive ? '禁用' : '启用') + '</button>' +
+                    '<td><button class="feature-action-btn" data-patrol-log="' + taskId + '" style="margin-right:4px;">日志</button>' +
+                    '<button class="feature-action-btn" data-patrol-toggle="' + taskId + '" style="margin-right:4px;">' + (isActive ? '禁用' : '启用') + '</button>' +
                     '<button class="feature-action-btn" data-patrol-id="' + taskId + '" style="background:var(--red-light);border-color:var(--red);color:var(--red);">删除</button></td></tr>';
             });
             html += '</tbody></table>';
         }
         html += '</div>';
 
-        html += '<div>';
-        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">巡检报告 (' + reports.length + ')</div>';
-        if (reports.length === 0) {
-            html += featureEmpty('无巡检报告');
-        } else {
-            // Build a map from patrolId → task name for display
-            var taskNameMap = {};
-            tasks.forEach(function(t) {
-                var tid = t.taskId || t.id;
-                if (tid) taskNameMap[tid] = t.name || t.taskName || tid;
-            });
-            reports.forEach(function(r, idx) {
-                var isAnomaly = r.anomalyDetected === true;
-                var badge = isAnomaly ? 'red' : 'green';
-                var label = isAnomaly ? '告警' : '正常';
-                var timeStr = r.triggeredAt ? new Date(r.triggeredAt).toLocaleString('zh-CN', {hour12:false}) : '—';
-                var summary = r.summary || '';
-                var summaryPreview = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
-                var patrolId = r.patrolId || r.id || '';
-                var patrolName = taskNameMap[patrolId] || patrolId;
-                html += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isAnomaly ? 'border-left:3px solid var(--red);' : '') + '">';
-                html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-                html += '<div style="display:flex;align-items:center;gap:8px;">';
-                html += '<span class="feature-badge ' + badge + '">' + label + '</span>';
-                html += '<span style="font-size:11px;font-weight:600;color:var(--text-primary);">' + escapeHtml(patrolName) + '</span>';
-                html += '<span style="font-size:11px;color:var(--text-secondary);">' + escapeHtml(r.skillName || '') + '</span>';
-                html += '<span style="font-size:11px;color:var(--text-muted);">' + timeStr + '</span>';
-                html += '</div>';
-                html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(patrolId) + '</span>';
-                html += '</div>';
-                html += '<details style="margin-top:6px;"><summary style="font-size:12px;color:var(--text-link);cursor:pointer;">' + escapeHtml(summaryPreview) + '</summary>';
-                html += '<div style="margin-top:6px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(summary) + '</div>';
-                html += '</details>';
-                html += '</div>';
-            });
-        }
-        html += '</div>';
+        // Dynamic log viewer (shown when "日志" button is clicked)
+        html += '<div id="patrolLogViewer" style="display:none;margin-top:16px;"></div>';
+
         body.innerHTML = html;
+
+        // Store reports data for log viewer
+        var allReports = reports;
+        var allTasks = tasks;
+
+        // --- Log viewer function ---
+        function showPatrolLog(patrolId) {
+            var viewer = body.querySelector('#patrolLogViewer');
+            var task = allTasks.find(function(t) { return (t.taskId || t.id) === patrolId; });
+            var taskName = task ? (task.name || task.taskName || patrolId) : patrolId;
+            var taskReports = allReports.filter(function(r) { return r.patrolId === patrolId; });
+
+            var logHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);">' +
+                escapeHtml(taskName) + ' — 执行日志 (' + taskReports.length + ')</span>' +
+                '<button class="feature-action-btn" id="closeLogViewer">关闭</button></div>';
+
+            if (taskReports.length === 0) {
+                logHtml += featureEmpty('该任务暂无执行记录');
+            } else {
+                taskReports.forEach(function(r) {
+                    var isAnomaly = r.anomalyDetected === true;
+                    var badge = isAnomaly ? 'red' : 'green';
+                    var label = isAnomaly ? '告警' : '正常';
+                    var timeStr = r.triggeredAt ? new Date(r.triggeredAt).toLocaleString('zh-CN', {hour12:false}) : '—';
+                    var summary = r.summary || '';
+                    var statusStr = r.status || '';
+                    var summaryPreview = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
+                    logHtml += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isAnomaly ? 'border-left:3px solid var(--red);' : '') + '">';
+                    logHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                    logHtml += '<div style="display:flex;align-items:center;gap:8px;">';
+                    logHtml += '<span class="feature-badge ' + badge + '">' + label + '</span>';
+                    logHtml += '<span style="font-size:11px;color:var(--text-secondary);">' + escapeHtml(statusStr) + '</span>';
+                    logHtml += '<span style="font-size:11px;color:var(--text-muted);">' + timeStr + '</span>';
+                    logHtml += '</div>';
+                    logHtml += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(r.taskId || '') + '</span>';
+                    logHtml += '</div>';
+                    logHtml += '<details style="margin-top:6px;"><summary style="font-size:12px;color:var(--text-link);cursor:pointer;">' + escapeHtml(summaryPreview) + '</summary>';
+                    logHtml += '<div style="margin-top:6px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(summary) + '</div>';
+                    logHtml += '</details>';
+                    logHtml += '</div>';
+                });
+            }
+            viewer.innerHTML = logHtml;
+            viewer.style.display = 'block';
+            viewer.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+            var closeBtn = viewer.querySelector('#closeLogViewer');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    viewer.style.display = 'none';
+                    viewer.innerHTML = '';
+                });
+            }
+        }
+
+        // Attach log buttons
+        body.querySelectorAll('[data-patrol-log]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                showPatrolLog(btn.dataset.patrolLog);
+            });
+        });
 
         // Attach toggle and delete buttons
         body.querySelectorAll('[data-patrol-toggle]').forEach(function(btn) {
@@ -2636,6 +2664,80 @@ async function showPatrolModal() {
         }
         skillSelect.addEventListener('change', toggleInputMode);
         toggleInputMode(); // initialize for the default selection
+
+        // Auto-infer alert keywords from natural language input
+        function inferKeywords(text) {
+            if (!text) return [];
+            var lower = text.toLowerCase();
+            var inferred = [];
+            // "是否有新增/创建/插入" → "没有, 0条, 空"
+            if (/新增|创建|插入|写入|导入/.test(text)) {
+                inferred = inferred.concat(['没有', '0', '空']);
+            }
+            // "是否成功/完成" → "失败, error"
+            if (/成功|完成/.test(text)) {
+                inferred = inferred.concat(['失败', 'error']);
+            }
+            // "是否有数据/记录" → "无数据, 无记录"
+            if (/数据|记录/.test(text)) {
+                inferred = inferred.concat(['无数据', '无记录']);
+            }
+            // "是否正常/异常" → "异常, 错误"
+            if (/正常|异常/.test(text)) {
+                inferred = inferred.concat(['异常', '错误']);
+            }
+            // "是否超时/延迟" → "超时, timeout"
+            if (/超时|延迟|慢/.test(text)) {
+                inferred = inferred.concat(['超时', 'timeout']);
+            }
+            // "是否生成/产生" → "未生成, 无"
+            if (/生成|产生/.test(text)) {
+                inferred = inferred.concat(['未生成', '无']);
+            }
+            // "检查/监控" generic → add anomaly markers
+            if (/检查|监控|巡检/.test(text)) {
+                inferred = inferred.concat(['异常', '失败']);
+            }
+            // Deduplicate
+            return inferred.filter(function(v, i, arr) { return arr.indexOf(v) === i; });
+        }
+
+        // Auto-suggest keywords when user finishes typing
+        function updateSuggestedKeywords() {
+            var text = textInput.value.trim() || jsonInput.value.trim();
+            var existing = alertKwInput.value.trim();
+            var suggested = inferKeywords(text);
+            if (suggested.length === 0) return;
+            // Only suggest if the user hasn't already set keywords
+            if (existing) {
+                var existingArr = existing.split(',').map(function(s) { return s.trim(); });
+                suggested = suggested.filter(function(s) { return existingArr.indexOf(s) === -1; });
+                if (suggested.length === 0) return;
+            }
+            var suggestion = suggested.join(', ');
+            var hint = '💡 建议补充关键词: ' + suggestion;
+            // Show hint as placeholder if input is empty, otherwise show as status hint
+            if (!existing) {
+                alertKwInput.placeholder = hint + ' (点击此处可手动输入)';
+            }
+            // Append a suggest button
+            var kwWrap = alertKwInput.parentElement;
+            var existingHint = kwWrap.querySelector('.kw-suggest');
+            if (existingHint) existingHint.remove();
+            var hintEl = document.createElement('div');
+            hintEl.className = 'kw-suggest';
+            hintEl.style.cssText = 'font-size:11px;color:var(--text-link);margin-top:2px;cursor:pointer;text-decoration:underline;';
+            hintEl.textContent = '💡 点击补充建议关键词: ' + suggestion;
+            hintEl.addEventListener('click', function() {
+                var cur = alertKwInput.value.trim();
+                alertKwInput.value = cur ? (cur + ',' + suggested.join(',')) : suggested.join(',');
+                hintEl.remove();
+            });
+            kwWrap.appendChild(hintEl);
+        }
+
+        textInput.addEventListener('blur', updateSuggestedKeywords);
+        jsonInput.addEventListener('blur', updateSuggestedKeywords);
 
         createBtn.addEventListener('click', function() {
             if (createForm.style.display === 'none') {
@@ -2742,48 +2844,48 @@ async function showAlertsModal() {
             var isActive = (a.status || 'ACTIVE') === 'ACTIVE';
             var badgeColor = isActive ? 'red' : 'green';
             var statusLabel = isActive ? '告警中' : '已解决';
-            var firstTime = a.firstSeen ? new Date(a.firstSeen).toLocaleString('zh-CN', {hour12:false}) : '—';
             var lastTime = a.lastSeen ? new Date(a.lastSeen).toLocaleString('zh-CN', {hour12:false}) : '—';
+            var firstTime = a.firstSeen ? new Date(a.firstSeen).toLocaleString('zh-CN', {hour12:false}) : '—';
             var count = a.count || 1;
             var isContinuous = count > 1;
             var msg = a.firstMessage || a.message || '';
-            var msgPreview = msg.length > 120 ? msg.substring(0, 120) + '...' : msg;
             var alertTitle = a.source || a.type || '未知告警';
             var typeLabel = a.type === 'patrol' ? '巡检告警' : (a.type || '告警');
+            // Extract first meaningful line as summary (before any markdown headers or tables)
+            var summary = '';
+            if (msg) {
+                var lines = msg.split('\n');
+                for (var li = 0; li < lines.length; li++) {
+                    var line = lines[li].trim();
+                    if (line && !line.startsWith('#') && !line.startsWith('|') && !line.startsWith('```') && line.length > 10) {
+                        summary = line.length > 150 ? line.substring(0, 150) + '...' : line;
+                        break;
+                    }
+                }
+                if (!summary) summary = msg.length > 150 ? msg.substring(0, 150) + '...' : msg;
+            }
 
             html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isActive ? 'border-left:3px solid var(--red);' : '') + '">';
-            // Header row — title + status badge
-            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+            // Title row
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
             html += '<div style="display:flex;align-items:center;gap:8px;">';
             html += '<span class="feature-badge ' + badgeColor + '">' + statusLabel + '</span>';
             html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);">' + escapeHtml(alertTitle) + '</span>';
             html += '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(typeLabel) + '</span>';
             html += '</div>';
-            html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(a.id || '') + '</span>';
-            html += '</div>';
-
-            // Stats row
-            html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-secondary);margin-bottom:8px;">';
-            html += '<span>告警次数: <strong style="color:' + (isContinuous ? 'var(--red)' : 'var(--text-primary)') + ';">' + count + '</strong>' + (isContinuous ? ' (连续告警)' : '') + '</span>';
-            html += '<span>首次: ' + firstTime + '</span>';
-            html += '<span>最近: ' + lastTime + '</span>';
-            html += '</div>';
-
-            // Message (expandable)
-            if (msg) {
-                html += '<details style="margin-bottom:8px;"><summary style="font-size:12px;color:var(--text-link);cursor:pointer;">' + escapeHtml(msgPreview) + '</summary>';
-                html += '<div style="margin-top:6px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:300px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(msg) + '</div>';
-                html += '</details>';
-            }
-
-            // Footer
-            html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-            html += '<span style="font-size:11px;color:var(--text-muted);">推送通道: ' + (isContinuous ? 'webhook/email (若已配置)' : '未触发推送') + '</span>';
             if (isActive) {
                 html += '<button class="feature-action-btn" data-alert-id="' + escapeHtml(a.id) + '">标记已解决</button>';
-            } else {
-                html += '<span style="font-size:11px;color:var(--green);">已解决</span>';
             }
+            html += '</div>';
+            // Summary text
+            if (summary) {
+                html += '<div style="font-size:12px;color:var(--text-primary);margin-bottom:6px;line-height:1.4;">' + escapeHtml(summary) + '</div>';
+            }
+            // Time + count info
+            html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-secondary);">';
+            html += '<span>最近告警: <strong>' + lastTime + '</strong></span>';
+            html += '<span>首次: ' + firstTime + '</span>';
+            html += '<span>告警次数: <strong style="color:' + (isContinuous ? 'var(--red)' : 'var(--text-primary)') + ';">' + count + '</strong>' + (isContinuous ? ' (连续告警)' : '') + '</span>';
             html += '</div>';
             html += '</div>';
         });

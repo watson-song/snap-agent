@@ -231,12 +231,15 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
         }
         if (summary == null || summary.isEmpty()) return false;
         String lower = summary.toLowerCase(Locale.ROOT);
+
+        // Phase 1: built-in keyword matching (cheap, no tokens)
         String[] markers = {"critical", "warning", "error", "exception", "failed",
                 "异常", "错误", "失败", "告警", "风险"};
         for (String m : markers) {
             if (lower.contains(m)) return true;
         }
-        // Custom alert keywords from task config
+
+        // Phase 2: custom alert keywords from task config
         if (alertKeywords != null && !alertKeywords.isEmpty()) {
             for (String kw : alertKeywords.split(",")) {
                 String trimmed = kw.trim();
@@ -244,6 +247,25 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                     log.info("Patrol anomaly detected via custom keyword '{}'", trimmed);
                     return true;
                 }
+            }
+        }
+
+        // Phase 3: smart regex fallback — catches common phrasings that keywords miss
+        // e.g. "无数据" keyword won't match "没有新增数据", but these patterns will
+        String[] anomalyPatterns = {
+                "没有.*数据", "没有.*记录", "没有.*新增",
+                "无.*数据", "无.*记录", "无.*新增",
+                "0条", "0行", "count.*0",
+                "为空", "不存在", "未找到", "未.*发现",
+                "not found", "no data", "no records", "empty result",
+                "未运行", "未执行", "未完成",
+                "超时", "timeout", "不可用", "unavailable"
+        };
+        for (String pattern : anomalyPatterns) {
+            if (java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE)
+                    .matcher(lower).find()) {
+                log.info("Patrol anomaly detected via smart pattern '{}'", pattern);
+                return true;
             }
         }
         return false;
