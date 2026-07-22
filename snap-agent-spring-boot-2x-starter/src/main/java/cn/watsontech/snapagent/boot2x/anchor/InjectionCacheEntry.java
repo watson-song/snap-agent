@@ -20,9 +20,14 @@ public class InjectionCacheEntry {
         this.expiresAt = expiresAt;
     }
 
+    /** Returns true if the given time is past the expiration time. */
+    public boolean isExpired(Instant now) {
+        return now.isAfter(expiresAt);
+    }
+
     /** Returns true if the current time is past the expiration time. */
     public boolean isExpired() {
-        return Instant.now().isAfter(expiresAt);
+        return isExpired(Instant.now());
     }
 
     public String getHtml() { return html; }

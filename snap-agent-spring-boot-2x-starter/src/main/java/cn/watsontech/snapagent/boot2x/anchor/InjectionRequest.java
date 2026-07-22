@@ -24,7 +24,6 @@ public class InjectionRequest {
     }
 
     /** Parse from a Map (typically deserialized from JSON request body). */
-    @SuppressWarnings("unchecked")
     public static InjectionRequest fromMap(java.util.Map<String, Object> map) {
         if (map == null) return null;
         String anchorName = str(map.get("anchorName"));
