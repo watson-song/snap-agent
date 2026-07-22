@@ -1557,6 +1557,23 @@ public class SnapAgentProperties {
         /** Confidence below this falls back to general LLM. */
         private double classifierConfidenceThreshold = 0.5;
 
+        // ---- Injection mode ----
+
+        /** Max entries in the injection cache. Default 512. */
+        private int injectionCacheMaxSize = 512;
+
+        /** Minimum TTL for injection cache entries (seconds). Frontend TTLs below this are raised. Default 60. */
+        private int injectionCacheMinTtlSeconds = 60;
+
+        /** Hard ceiling TTL for injection cache entries (seconds). Default 604800 (7 days). */
+        private long injectionCacheMaxTtlSeconds = 604800;
+
+        /** Max tokens for injection LLM calls. Default 4096. */
+        private int injectionMaxTokens = 4096;
+
+        /** Default cache TTL when frontend doesn't declare data-snap-cache-ttl (seconds). Default 3600. */
+        private int injectionDefaultCacheTtl = 3600;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -1631,6 +1648,32 @@ public class SnapAgentProperties {
 
         public void setClassifierConfidenceThreshold(double classifierConfidenceThreshold) {
             this.classifierConfidenceThreshold = classifierConfidenceThreshold;
+        }
+
+        public int getInjectionCacheMaxSize() { return injectionCacheMaxSize; }
+        public void setInjectionCacheMaxSize(int injectionCacheMaxSize) { this.injectionCacheMaxSize = injectionCacheMaxSize; }
+
+        public int getInjectionCacheMinTtlSeconds() { return injectionCacheMinTtlSeconds; }
+        public void setInjectionCacheMinTtlSeconds(int injectionCacheMinTtlSeconds) { this.injectionCacheMinTtlSeconds = injectionCacheMinTtlSeconds; }
+
+        public long getInjectionCacheMaxTtlSeconds() { return injectionCacheMaxTtlSeconds; }
+        public void setInjectionCacheMaxTtlSeconds(long injectionCacheMaxTtlSeconds) { this.injectionCacheMaxTtlSeconds = injectionCacheMaxTtlSeconds; }
+
+        public int getInjectionMaxTokens() { return injectionMaxTokens; }
+        public void setInjectionMaxTokens(int injectionMaxTokens) { this.injectionMaxTokens = injectionMaxTokens; }
+
+        public int getInjectionDefaultCacheTtl() { return injectionDefaultCacheTtl; }
+        public void setInjectionDefaultCacheTtl(int injectionDefaultCacheTtl) { this.injectionDefaultCacheTtl = injectionDefaultCacheTtl; }
+
+        /**
+         * Resolves the effective TTL: uses default if <=0, enforces minimum,
+         * caps at maximum.
+         */
+        public long resolveEffectiveTtl(int requestedTtl) {
+            if (requestedTtl <= 0) return injectionDefaultCacheTtl;
+            if (requestedTtl < injectionCacheMinTtlSeconds) return injectionCacheMinTtlSeconds;
+            if (requestedTtl > injectionCacheMaxTtlSeconds) return injectionCacheMaxTtlSeconds;
+            return requestedTtl;
         }
 
         /**
