@@ -630,3 +630,54 @@ public class WeatherToolPlugin implements ToolPlugin {
 当没有 `ToolPlugin` bean 时，返回空数组 `[]`。
 
 > 端点均需认证（`requireAuth()`），通过 `SecurityGateway` 校验权限。审计日志记录 `LIST_TOOLS` 和 `LIST_TOOL_PLUGINS` 操作。
+
+---
+
+## 9. v0.5 Plugin 架构（PluginDescriptor + PluginRegistry + 路由）
+
+> 版本：v0.5 | 更新日期：2026-07-22
+
+### 9.1 概述
+
+v0.5 引入真正的 Plugin 抽象，取代 v1.0 的元数据层。新架构支持:
+
+- 运行时注册/反注册/启停/设默认
+- 同一 `toolType` 多个 Plugin (默认 + 显式覆盖)
+- JAR 上传 + URLClassLoader 隔离
+- `pluginOverrides` 路由 — LLM 只看 `toolType`，dispatcher 按覆盖路由
+
+### 9.2 核心组件
+
+ToolDispatcher 路由逻辑: dispatch(toolType, args, ctx) 先查 ctx.pluginOverrides[toolType] -> pluginId, 再查 registry.getDefault(toolType) -> pluginId, 最后 plugin.provider.execute(args, ctx)。
+
+PluginRegistry 管理 plugins: Map<pluginId, PluginDescriptor>, 支持 register/unregister/enable/disable/setDefault。
+
+PluginDescriptor 不可变数据模型: pluginId, toolType, displayName, description, version, isDefault(volatile), enabled(volatile), system(boolean), provider(ToolProvider), classLoader(URLClassLoader|null), jarPath(Path|null), pluginContext(PluginContext|null)。
+
+### 9.3 @ToolPluginAnnotation 注解
+
+RUNTIME retention 注解, 字段: id, toolType, displayName, description, version, isDefault。注解优先于 plugin-info.yml。扫描顺序: 先找注解类，若多个则用 YAML 指定的 providerClass，若无注解则用 YAML 全字段。
+
+### 9.4 ToolContext 扩展
+
+ToolContext 新增 pluginOverrides (Map<toolType, pluginId>) 和 pluginContext 字段。pluginOverrides 由 POST /runs 请求体传入，dispatcher 按 override 路由。pluginContext 由 ToolDispatcher 从 PluginDescriptor 取出注入。
+
+### 9.5 Built-in 工具的透明包装
+
+启动时所有 @Component ToolProvider bean 自动包装为 system plugin: pluginId=ToolProvider.name(), toolType=ToolProvider.name(), system=true(不可 unregister), isDefault=true(每 toolType 第一个注册者)。
+
+向后兼容: 现有 skill 不传 pluginOverrides -> 走 default -> 命中 system plugin -> 行为与 v1.0 完全一致。
+
+### 9.6 REST API 端点
+
+- GET /tools/plugins — 列出所有 plugin (需要 snap-agent:plugin:read 权限)
+- GET /tools/plugins/{id} — 获取单个 plugin 详情
+- POST /tools/plugins/upload — 上传 plugin JAR (需要 snap-agent:plugin:manage 权限)
+- DELETE /tools/plugins/{id} — 反注册 plugin (system plugin 返回 403)
+- POST /tools/plugins/{id}/enable — 启用 plugin
+- POST /tools/plugins/{id}/disable — 禁用 plugin
+- PUT /tools/plugins/{id}/default — 设为该 toolType 的默认 plugin
+
+### 9.7 v1.0 ToolPlugin SPI 兼容性
+
+v1.0 的 ToolPlugin 接口已被 v0.5 架构取代，但接口保留以兼容现有实现。v0.5 的 @ToolPluginAnnotation 是新的元数据声明方式。GET /tools/plugins 响应格式已扩展。迁移建议: 新 Plugin 使用 @ToolPluginAnnotation + ToolProvider 实现。

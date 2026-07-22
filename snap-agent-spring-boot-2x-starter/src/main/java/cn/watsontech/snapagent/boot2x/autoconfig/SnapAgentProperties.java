@@ -806,6 +806,25 @@ public class SnapAgentProperties {
         public void setAuthTokenLocalStorageKey(String authTokenLocalStorageKey) {
             this.authTokenLocalStorageKey = authTokenLocalStorageKey;
         }
+
+        private String pluginReadPermission = "snap-agent:plugin:read";
+        private String pluginManagePermission = "snap-agent:plugin:manage";
+
+        public String getPluginReadPermission() {
+            return pluginReadPermission;
+        }
+
+        public void setPluginReadPermission(String pluginReadPermission) {
+            this.pluginReadPermission = pluginReadPermission;
+        }
+
+        public String getPluginManagePermission() {
+            return pluginManagePermission;
+        }
+
+        public void setPluginManagePermission(String pluginManagePermission) {
+            this.pluginManagePermission = pluginManagePermission;
+        }
     }
 
     /**

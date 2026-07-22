@@ -1,0 +1,3 @@
+id: minimal-plugin
+toolType: metrics_query
+providerClass: com.example.MinimalProvider
