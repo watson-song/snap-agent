@@ -10,6 +10,7 @@ import java.util.Map;
 public class PatrolTask {
 
     private String id;
+    private String name;
     private String skillName;
     private String cron;
     private String userId;
@@ -41,6 +42,10 @@ public class PatrolTask {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+
+    /** Human-readable name for this patrol task, set by the user at creation time. */
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
 
     public String getSkillName() { return skillName; }
     public void setSkillName(String skillName) { this.skillName = skillName; }

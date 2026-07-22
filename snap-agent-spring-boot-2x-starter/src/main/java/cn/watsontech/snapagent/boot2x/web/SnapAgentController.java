@@ -33,7 +33,9 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.LlmEventSink;
+import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
@@ -68,6 +70,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -1733,6 +1736,7 @@ public class SnapAgentController {
 
         String skillName = (String) body.get("skillName");
         String cron = (String) body.get("cron");
+        String name = (String) body.get("name");
         String alertKeywords = (String) body.get("alertKeywords");
         String userId = currentUserId();
         @SuppressWarnings("unchecked")
@@ -1740,6 +1744,23 @@ public class SnapAgentController {
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
         PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
+        // Auto-generate name from skill + first input value if not provided (max 20 chars)
+        if (name == null || name.trim().isEmpty()) {
+            StringBuilder autoName = new StringBuilder(skillName != null ? skillName : "patrol");
+            if (inputs != null && !inputs.isEmpty()) {
+                String firstVal = inputs.values().iterator().next();
+                if (firstVal != null) {
+                    String snippet = firstVal.replaceAll("[\\n\\r]", " ").trim();
+                    int maxSnippet = Math.max(1, 20 - autoName.length() - 2);
+                    if (snippet.length() > maxSnippet) snippet = snippet.substring(0, maxSnippet);
+                    autoName.append(": ").append(snippet);
+                }
+            }
+            String finalName = autoName.toString();
+            task.setName(finalName.length() > 20 ? finalName.substring(0, 20) : finalName);
+        } else {
+            task.setName(name.trim().length() > 20 ? name.trim().substring(0, 20) : name.trim());
+        }
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
@@ -1747,6 +1768,7 @@ public class SnapAgentController {
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("id", task.getId());
+        result.put("name", task.getName());
         result.put("skillName", task.getSkillName());
         result.put("cron", task.getCron());
         result.put("enabled", task.isEnabled());
@@ -1779,6 +1801,142 @@ public class SnapAgentController {
         }
         scheduler.cancel(id);
         return ResponseEntity.ok(Collections.singletonMap("deleted", true));
+    }
+
+    // ---- PATCH /patrol/tasks/{id}/toggle ----
+    @PatchMapping("/patrol/tasks/{id}/toggle")
+    public ResponseEntity<Object> togglePatrolTask(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        Boolean enabled = scheduler.toggleEnabled(id);
+        if (enabled == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "PATROL_NOT_FOUND",
+                    "patrol task not found: " + id);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", id);
+        result.put("enabled", enabled);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /patrol/infer ----
+    /** Uses LLM to infer patrol name and keywords from natural language instruction. */
+    @PostMapping("/patrol/infer")
+    public ResponseEntity<Object> inferPatrolMeta(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (llmClient == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "LLM client is not configured"));
+        }
+
+        String instruction = (String) body.get("instruction");
+        String skillName = (String) body.get("skillName");
+        if (instruction == null || instruction.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Collections.singletonMap("error", "instruction is required"));
+        }
+
+        String systemPrompt = "你是巡检任务助手。根据用户给定的巡检指令，推断巡检名称和告警关键词。\n"
+                + "要求:\n"
+                + "- name: 从指令中提取核心目的，简洁明了，不超过20个中文字符\n"
+                + "- keywords: 如果巡检结果包含这些关键词说明可能存在异常，用逗号分隔\n"
+                + "直接输出JSON，不要解释、不要分析、不要思考过程。格式: {\"name\":\"名称\",\"keywords\":\"关键词1,关键词2\"}";
+
+        String userMsg = "请根据以下信息推断巡检名称和告警关键词。\n"
+                + "Skill: " + (skillName != null ? skillName : "unknown")
+                + "\n指令: " + instruction
+                + "\n\n请直接输出JSON结果:";
+
+        String llmResponse = callLlmSync(systemPrompt, userMsg, 1024);
+        if (llmResponse == null || llmResponse.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Collections.singletonMap("error", "LLM returned empty response"));
+        }
+
+        // Extract JSON object from the response (LLM may add surrounding text)
+        String jsonStr = null;
+        int braceStart = llmResponse.indexOf('{');
+        int braceEnd = llmResponse.lastIndexOf('}');
+        if (braceStart >= 0 && braceEnd > braceStart) {
+            jsonStr = llmResponse.substring(braceStart, braceEnd + 1);
+        }
+
+        String inferredName = null;
+        String inferredKeywords = null;
+        if (jsonStr != null) {
+            // Simple JSON parsing without external dependency
+            inferredName = extractJsonField(jsonStr, "name");
+            inferredKeywords = extractJsonField(jsonStr, "keywords");
+        }
+
+        // Enforce 20-char limit on name
+        if (inferredName != null && inferredName.length() > 20) {
+            inferredName = inferredName.substring(0, 20);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("name", inferredName);
+        result.put("keywords", inferredKeywords);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Makes a synchronous (non-streaming) LLM call and returns the full text response.
+     * Uses {@link LlmClient#stream} with a simple sink that collects all text.
+     */
+    private String callLlmSync(String systemPrompt, String userMessage, int maxTokens) {
+        final StringBuilder sb = new StringBuilder();
+        LlmRequest req = new LlmRequest(
+                systemPrompt,
+                Collections.singletonList(Message.user(userMessage)),
+                Collections.<ToolDef>emptyList(),
+                properties.getLlm().getModel(),
+                maxTokens,
+                true);
+        try {
+            llmClient.stream(req, new LlmEventSink() {
+                @Override public void onThought(String text) { sb.append(text); }
+                @Override public void onToolUse(String id, String name, Map<String, Object> input) {}
+                @Override public void onToolResult(String toolUseId, String result) {}
+                @Override public void onStop(String stopReason) {}
+                @Override public void onError(String message) {
+                    log.warn("LLM sync call error: {}", message);
+                }
+            }, "patrol-infer-" + System.currentTimeMillis());
+        } catch (Exception e) {
+            log.error("LLM sync call failed: {}", e.getMessage());
+            return null;
+        }
+        return sb.toString();
+    }
+
+    /** Extracts a string field value from a simple JSON object (no nested objects). */
+    private static String extractJsonField(String json, String fieldName) {
+        String key = "\"" + fieldName + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return null;
+        int colonIdx = json.indexOf(':', idx + key.length());
+        if (colonIdx < 0) return null;
+        // Find the opening quote
+        int startQuote = json.indexOf('"', colonIdx + 1);
+        if (startQuote < 0) return null;
+        // Find the closing quote (handle escaped quotes)
+        int endQuote = startQuote + 1;
+        while (endQuote < json.length()) {
+            if (json.charAt(endQuote) == '\\') { endQuote += 2; continue; }
+            if (json.charAt(endQuote) == '"') break;
+            endQuote++;
+        }
+        if (endQuote >= json.length()) return null;
+        return json.substring(startQuote + 1, endQuote);
     }
 
     // ---- GET /patrol/reports ----
