@@ -138,4 +138,20 @@ class InMemoryPluginRegistryTest {
         assertThat(registry.getDefault("log_read")).isSameAs(second);
         assertThat(second.isDefault()).isTrue();
     }
+
+    @Test
+    void shouldClearOldDefaultWhenRegisteringNewDefaultForSameType() {
+        PluginDescriptor first = newPlugin("log1", "log_read", true, true);
+        registry.register(first);
+        assertThat(first.isDefault()).isTrue();
+
+        // Register a second plugin with isDefault=true for the same toolType
+        PluginDescriptor second = newPlugin("log2", "log_read", true, true);
+        registry.register(second);
+
+        // The old default should be cleared
+        assertThat(first.isDefault()).isFalse();
+        assertThat(second.isDefault()).isTrue();
+        assertThat(registry.getDefault("log_read")).isSameAs(second);
+    }
 }

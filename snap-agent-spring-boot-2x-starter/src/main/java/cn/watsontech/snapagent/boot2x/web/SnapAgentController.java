@@ -2389,6 +2389,10 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.FORBIDDEN, "SYSTEM_PLUGIN",
                     "cannot unregister system plugin: " + id);
         }
+        // Clean up resources: close URLClassLoader and delete JAR file
+        if (pluginUploader != null) {
+            pluginUploader.cleanupPlugin(desc);
+        }
         Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
         auditDetails.put("pluginId", id);
         audit(currentUserId(), "DELETE", "/tools/plugins/" + id, "PLUGIN_UNREGISTER", auditDetails);

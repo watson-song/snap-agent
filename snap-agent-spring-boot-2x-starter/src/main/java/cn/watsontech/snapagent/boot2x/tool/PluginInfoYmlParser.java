@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.LoaderOptions;
 
 import java.io.InputStream;
 import java.util.Map;
@@ -14,7 +15,10 @@ public class PluginInfoYmlParser {
 
     @SuppressWarnings("unchecked")
     public PluginInfoYml parse(InputStream yamlStream) {
-        Yaml yaml = new Yaml();
+        LoaderOptions options = new LoaderOptions();
+        // Prevent YAML bombing (billion laughs attack)
+        options.setMaxAliasesForCollections(50);
+        Yaml yaml = new Yaml(options);
         Map<String, Object> raw = yaml.load(yamlStream);
         if (raw == null || raw.isEmpty()) {
             return null;

@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Handles uploading and registration of plugin JARs.
@@ -31,6 +32,9 @@ import java.util.Map;
  * </ol>
  */
 public class PluginUploader {
+
+    /** Allowed pattern for pluginId — alphanumeric, hyphens, underscores only (prevents path traversal). */
+    private static final Pattern PLUGIN_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]+$");
 
     private final Path uploadDirPath;
     private final PluginRegistry registry;
@@ -73,6 +77,16 @@ public class PluginUploader {
 
         // Step 3: Scan for metadata
         PluginMetadata metadata = scanner.scan(scanClassLoader);
+
+        // Step 3b: Validate pluginId format (prevent path traversal)
+        if (metadata.getPluginId() == null
+                || !PLUGIN_ID_PATTERN.matcher(metadata.getPluginId()).matches()) {
+            closeQuietly(scanClassLoader);
+            deleteQuietly(tempJar);
+            throw new IllegalArgumentException(
+                    "invalid pluginId: " + metadata.getPluginId()
+                            + " (only alphanumeric, hyphens, underscores allowed)");
+        }
 
         // Step 4: Check for duplicate registration
         if (registry.getPlugin(metadata.getPluginId()) != null) {
@@ -152,6 +166,36 @@ public class PluginUploader {
         registry.register(descriptor);
 
         return descriptor;
+    }
+
+    /**
+     * Cleans up resources associated with an unregistered plugin:
+     * closes the URLClassLoader and deletes the JAR file from disk.
+     *
+     * @param descriptor the descriptor of the plugin being unregistered
+     */
+    public void cleanupPlugin(PluginDescriptor descriptor) {
+        if (descriptor == null) return;
+
+        // Close the URLClassLoader to release the JAR file handle
+        ClassLoader cl = descriptor.getClassLoader();
+        if (cl instanceof URLClassLoader) {
+            try {
+                ((URLClassLoader) cl).close();
+            } catch (IOException e) {
+                // ignore — best-effort cleanup
+            }
+        }
+
+        // Delete the JAR file and its parent directory from disk
+        Path jarPath = descriptor.getJarPath();
+        if (jarPath != null) {
+            deleteQuietly(jarPath);
+            Path parentDir = jarPath.getParent();
+            if (parentDir != null) {
+                deleteQuietly(parentDir);
+            }
+        }
     }
 
     private void closeQuietly(URLClassLoader classLoader) {

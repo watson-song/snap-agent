@@ -27,7 +27,7 @@ public class InMemoryPluginRegistry implements PluginRegistry {
     private final ConcurrentHashMap<String, String> defaultsByType = new ConcurrentHashMap<>();
 
     @Override
-    public void register(PluginDescriptor descriptor) {
+    public synchronized void register(PluginDescriptor descriptor) {
         if (descriptor == null || descriptor.getPluginId() == null) {
             throw new IllegalArgumentException("descriptor and pluginId must not be null");
         }
@@ -35,16 +35,27 @@ public class InMemoryPluginRegistry implements PluginRegistry {
         if (existing != null) {
             throw new IllegalArgumentException("plugin already registered: " + descriptor.getPluginId());
         }
-        if (descriptor.isDefault() || defaultsByType.putIfAbsent(descriptor.getToolType(), descriptor.getPluginId()) == null) {
+        if (descriptor.isDefault()) {
+            // Clear the old default for this toolType to avoid inconsistent state
+            String oldDefaultId = defaultsByType.get(descriptor.getToolType());
+            if (oldDefaultId != null) {
+                PluginDescriptor oldDefault = plugins.get(oldDefaultId);
+                if (oldDefault != null) {
+                    oldDefault.setDefault(false);
+                }
+            }
             descriptor.setDefault(true);
             defaultsByType.put(descriptor.getToolType(), descriptor.getPluginId());
+        } else if (defaultsByType.putIfAbsent(descriptor.getToolType(), descriptor.getPluginId()) == null) {
+            // No existing default — this plugin becomes the default
+            descriptor.setDefault(true);
         } else {
             descriptor.setDefault(false);
         }
     }
 
     @Override
-    public void unregister(String pluginId) {
+    public synchronized void unregister(String pluginId) {
         if (pluginId == null) return;
         PluginDescriptor desc = plugins.get(pluginId);
         if (desc == null) return;
@@ -77,7 +88,7 @@ public class InMemoryPluginRegistry implements PluginRegistry {
     }
 
     @Override
-    public void setDefault(String toolType, String pluginId) {
+    public synchronized void setDefault(String toolType, String pluginId) {
         PluginDescriptor target = plugins.get(pluginId);
         if (target == null) return;
         for (PluginDescriptor p : plugins.values()) {

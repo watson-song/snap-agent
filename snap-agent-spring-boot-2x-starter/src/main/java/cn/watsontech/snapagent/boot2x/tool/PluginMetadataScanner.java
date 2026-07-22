@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.file.Paths;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -62,7 +63,7 @@ public class PluginMetadataScanner {
     }
 
     private PluginMetadata scanJarForAnnotation(URL jarUrl, URLClassLoader classLoader) {
-        try (JarFile jarFile = new JarFile(jarUrl.getFile())) {
+        try (JarFile jarFile = new JarFile(Paths.get(jarUrl.toURI()).toFile())) {
             Enumeration<JarEntry> entries = jarFile.entries();
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
@@ -93,7 +94,7 @@ public class PluginMetadataScanner {
                     );
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | java.net.URISyntaxException e) {
             // JAR could not be opened; skip
         }
         return null;
@@ -106,7 +107,7 @@ public class PluginMetadataScanner {
                 if (!url.getFile().endsWith(".jar")) {
                     continue;
                 }
-                try (JarFile jarFile = new JarFile(url.getFile())) {
+                try (JarFile jarFile = new JarFile(Paths.get(url.toURI()).toFile())) {
                     JarEntry ymlEntry = jarFile.getJarEntry("META-INF/snap-agent/plugin-info.yml");
                     if (ymlEntry != null) {
                         try (InputStream is = jarFile.getInputStream(ymlEntry)) {
@@ -146,7 +147,7 @@ public class PluginMetadataScanner {
                     }
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException | java.net.URISyntaxException e) {
             // Resource access failed; fall through to null
         }
         return null;

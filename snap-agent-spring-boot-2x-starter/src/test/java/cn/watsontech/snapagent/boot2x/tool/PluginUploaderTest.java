@@ -45,6 +45,99 @@ class PluginUploaderTest {
     }
 
     @Test
+    void shouldRejectPluginIdWithPathTraversal() throws Exception {
+        Path jarPath = tempDir.resolve("input.jar");
+        buildTestJar(jarPath, Paths.get("target/test-classes"));
+
+        MockMultipartFile jarFile = new MockMultipartFile(
+                "file", "evil.jar", "application/java-archive",
+                Files.readAllBytes(jarPath)
+        );
+
+        PluginMetadata metadata = new PluginMetadata(
+                "../../etc/evil", "log_read", "Evil", "Evil plugin",
+                "1.0.0", false,
+                "cn.watsontech.snapagent.boot2x.tool.SimpleTestToolProvider"
+        );
+        when(scanner.scan(any())).thenReturn(metadata);
+
+        assertThatThrownBy(() -> uploader.upload(jarFile))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid pluginId")
+                .hasMessageContaining("../../etc/evil");
+
+        verify(registry, never()).register(any());
+    }
+
+    @Test
+    void shouldRejectPluginIdWithSpecialCharacters() throws Exception {
+        Path jarPath = tempDir.resolve("input.jar");
+        buildTestJar(jarPath, Paths.get("target/test-classes"));
+
+        MockMultipartFile jarFile = new MockMultipartFile(
+                "file", "bad.jar", "application/java-archive",
+                Files.readAllBytes(jarPath)
+        );
+
+        PluginMetadata metadata = new PluginMetadata(
+                "evil/plugin", "log_read", "Bad", "Bad", "1.0.0", false,
+                "cn.watsontech.snapagent.boot2x.tool.SimpleTestToolProvider"
+        );
+        when(scanner.scan(any())).thenReturn(metadata);
+
+        assertThatThrownBy(() -> uploader.upload(jarFile))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invalid pluginId");
+
+        verify(registry, never()).register(any());
+    }
+
+    @Test
+    void shouldCleanupUrlClassLoaderAndJarFileOnUnregister() throws Exception {
+        // First upload a plugin to get a real descriptor with URLClassLoader and jarPath
+        Path jarPath = tempDir.resolve("input.jar");
+        buildTestJar(jarPath, Paths.get("target/test-classes"));
+
+        MockMultipartFile jarFile = new MockMultipartFile(
+                "file", "cleanup.jar", "application/java-archive",
+                Files.readAllBytes(jarPath)
+        );
+
+        PluginMetadata metadata = new PluginMetadata(
+                "cleanup-test", "log_read", "Cleanup", "Cleanup", "1.0.0", false,
+                "cn.watsontech.snapagent.boot2x.tool.SimpleTestToolProvider"
+        );
+        when(scanner.scan(any())).thenReturn(metadata);
+        when(registry.getPlugin("cleanup-test")).thenReturn(null);
+
+        PluginDescriptor descriptor = uploader.upload(jarFile);
+        assertThat(descriptor.getJarPath()).exists();
+        assertThat(descriptor.getClassLoader()).isNotNull();
+
+        // Act: cleanup
+        uploader.cleanupPlugin(descriptor);
+
+        // Assert: JAR file and parent directory deleted
+        assertThat(descriptor.getJarPath()).doesNotExist();
+        assertThat(descriptor.getJarPath().getParent()).doesNotExist();
+    }
+
+    @Test
+    void shouldCleanupPluginWithNullDescriptorGracefully() {
+        uploader.cleanupPlugin(null);
+        // No exception thrown
+    }
+
+    @Test
+    void shouldCleanupPluginWithNullClassLoaderAndJarPath() {
+        PluginDescriptor desc = new PluginDescriptor(
+                "no-jar", "log_read", "NoJar", "NoJar", "1.0.0",
+                false, true, false, mock(ToolProvider.class), null, null, null);
+        uploader.cleanupPlugin(desc);
+        // No exception thrown
+    }
+
+    @Test
     void shouldUploadJarAndRegisterPlugin() throws Exception {
         // Arrange: a JAR containing SimpleTestToolProvider
         Path testClassesDir = Paths.get("target/test-classes");
