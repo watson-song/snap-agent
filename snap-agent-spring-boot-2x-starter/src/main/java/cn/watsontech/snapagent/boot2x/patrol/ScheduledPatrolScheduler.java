@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.patrol;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
+import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.AlertPushChannel;
 import cn.watsontech.snapagent.core.patrol.AnomalyEvent;
 import cn.watsontech.snapagent.core.patrol.PatrolLockProvider;
@@ -44,6 +45,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private final PatrolLockProvider lockProvider;
     private final long lockTtlSeconds;
     private final List<AlertPushChannel> pushChannels;
+    private final AlertConverger alertConverger;
     private final ConcurrentHashMap<String, PatrolTask> tasks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledFutures = new ConcurrentHashMap<>();
     private final AtomicLong idCounter = new AtomicLong(0);
@@ -51,20 +53,29 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore) {
         this(taskScheduler, agentExecutor, skillRegistry, reportStore,
-                new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList());
+                new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList(), null);
     }
 
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds) {
         this(taskScheduler, agentExecutor, skillRegistry, reportStore,
-                lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList());
+                lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList(), null);
     }
 
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds,
                                     List<AlertPushChannel> pushChannels) {
+        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+                lockProvider, lockTtlSeconds, pushChannels, null);
+    }
+
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+                                    SkillRegistry skillRegistry, PatrolReportStore reportStore,
+                                    PatrolLockProvider lockProvider, long lockTtlSeconds,
+                                    List<AlertPushChannel> pushChannels,
+                                    AlertConverger alertConverger) {
         this.taskScheduler = taskScheduler;
         this.agentExecutor = agentExecutor;
         this.skillRegistry = skillRegistry;
@@ -73,6 +84,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
         this.lockTtlSeconds = lockTtlSeconds;
         this.pushChannels = pushChannels != null ? new ArrayList<>(pushChannels)
                 : new ArrayList<>();
+        this.alertConverger = alertConverger;
     }
 
     @Override
@@ -99,6 +111,28 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
         }
         tasks.remove(patrolId);
         log.info("Cancelled patrol task {}", patrolId);
+    }
+
+    @Override
+    public Boolean toggleEnabled(String patrolId) {
+        PatrolTask task = tasks.get(patrolId);
+        if (task == null) return null;
+        boolean newEnabled = !task.isEnabled();
+        task.setEnabled(newEnabled);
+        if (newEnabled) {
+            ScheduledFuture<?> future = taskScheduler.schedule(
+                    () -> executePatrol(task),
+                    new CronTrigger(task.getCron()));
+            scheduledFutures.put(patrolId, future);
+            log.info("Patrol task {} enabled", patrolId);
+        } else {
+            ScheduledFuture<?> future = scheduledFutures.remove(patrolId);
+            if (future != null) {
+                future.cancel(false);
+            }
+            log.info("Patrol task {} disabled", patrolId);
+        }
+        return newEnabled;
     }
 
     @Override
@@ -164,6 +198,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 report.setUserId(task.getUserId());
                 reportStore.save(report);
                 if (anomaly) {
+                    recordAlert(report, task);
                     pushToChannels(report, null);
                 }
             } catch (Exception e) {
@@ -212,6 +247,21 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
             }
         }
         return false;
+    }
+
+    private void recordAlert(PatrolReport report, PatrolTask task) {
+        if (alertConverger == null) return;
+        try {
+            AnomalyEvent event = new AnomalyEvent(
+                    "patrol", task.getId(),
+                    report.getSummary() != null ? report.getSummary() : "Anomaly detected",
+                    task.getSkillName(),
+                    null, task.getInputs());
+            alertConverger.record(event);
+            log.info("Patrol anomaly recorded as alert (patrolId={})", task.getId());
+        } catch (Exception e) {
+            log.error("Failed to record alert for patrol {}: {}", task.getId(), e.getMessage());
+        }
     }
 
     private void pushToChannels(PatrolReport report, AnomalyEvent event) {

@@ -42,4 +42,12 @@ public interface PatrolScheduler {
      * Returns the total number of patrol reports for a given user.
      */
     long countReports(String userId);
+
+    /**
+     * Toggles the enabled state of a patrol task.
+     *
+     * @param patrolId the patrol task ID
+     * @return the new enabled state, or {@code null} if the task was not found
+     */
+    default Boolean toggleEnabled(String patrolId) { return null; }
 }

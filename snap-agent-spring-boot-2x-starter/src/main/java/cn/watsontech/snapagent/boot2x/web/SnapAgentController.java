@@ -62,6 +62,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -1696,6 +1697,28 @@ public class SnapAgentController {
         }
         scheduler.cancel(id);
         return ResponseEntity.ok(Collections.singletonMap("deleted", true));
+    }
+
+    // ---- PATCH /patrol/tasks/{id}/toggle ----
+    @PatchMapping("/patrol/tasks/{id}/toggle")
+    public ResponseEntity<Object> togglePatrolTask(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        Boolean enabled = scheduler.toggleEnabled(id);
+        if (enabled == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "PATROL_NOT_FOUND",
+                    "patrol task not found: " + id);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", id);
+        result.put("enabled", enabled);
+        return ResponseEntity.ok(result);
     }
 
     // ---- GET /patrol/reports ----

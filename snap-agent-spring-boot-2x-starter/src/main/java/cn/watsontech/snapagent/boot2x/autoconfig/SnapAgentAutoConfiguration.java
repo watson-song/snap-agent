@@ -792,16 +792,19 @@ public class SnapAgentAutoConfiguration {
             cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
             cn.watsontech.snapagent.core.patrol.PatrolLockProvider patrolLockProvider,
             SnapAgentProperties props,
-            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider) {
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider) {
         List<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannels =
                 new ArrayList<cn.watsontech.snapagent.core.patrol.AlertPushChannel>();
         pushChannels.addAll(pushChannelProvider.orderedStream()
                 .collect(java.util.stream.Collectors.toList()));
-        log.info("ScheduledPatrolScheduler assembled (lockProvider={}, pushChannels={}, lockTtl={}s)",
-                patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds());
+        cn.watsontech.snapagent.core.patrol.AlertConverger alertConverger = alertConvergerProvider.getIfAvailable();
+        log.info("ScheduledPatrolScheduler assembled (lockProvider={}, pushChannels={}, lockTtl={}s, alertConverger={})",
+                patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds(),
+                alertConverger != null ? alertConverger.getClass().getSimpleName() : "none");
         return new cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler(
                 patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore,
-                patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels);
+                patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels, alertConverger);
     }
 
     // ---- InMemoryAlertConverger (v0.5) ----
