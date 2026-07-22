@@ -1,56 +1,114 @@
 <!DOCTYPE html>
-<html xmlns:th="http://www.thymeleaf.org">
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>SnapAgent Inject Demo</title>
+    <title>注入模式 Demo — SnapAgent</title>
     <style>
-        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #1a1a1a; }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { color: #4f46e5; }
-        .section { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; color: #1e293b; }
+        .nav { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; display: flex; align-items: center; gap: 24px; padding: 12px 32px; }
+        .nav .logo { font-size: 18px; font-weight: 700; }
+        .nav a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 14px; padding: 4px 12px; border-radius: 6px; transition: all 0.2s; }
+        .nav a:hover { background: rgba(255,255,255,0.15); color: white; }
+        .nav a.active { background: rgba(255,255,255,0.2); color: white; }
+        .nav .spacer { flex: 1; }
+        .hero { text-align: center; padding: 40px 32px 24px; }
+        .hero h1 { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+        .hero p { color: #64748b; font-size: 14px; max-width: 560px; margin: 0 auto; line-height: 1.6; }
+        main { max-width: 800px; margin: 0 auto; padding: 0 32px 48px; }
+        .section { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; margin-bottom: 16px; overflow: hidden; }
+        .section-header { padding: 12px 20px; background: #f1f5f9; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; }
+        .section-header h2 { font-size: 14px; font-weight: 600; color: #1e293b; }
+        .section-header .attrs { display: flex; gap: 6px; flex-wrap: wrap; }
+        .attr-tag { font-family: "SF Mono", monospace; font-size: 11px; padding: 2px 8px; border-radius: 4px; background: white; color: #475569; border: 1px solid #e2e8f0; }
+        .section-body { padding: 20px; min-height: 60px; }
+        .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; }
     </style>
 </head>
 <body>
-    <main class="container">
-        <h1>SnapAgent 锚点注入 Demo</h1>
 
-        <p>以下区域使用 <code>data-snap-mode="inject"</code> 标记，
-        页面加载时会自动触发后端 skill 生成 HTML 内容并注入。</p>
+<div class="nav">
+    <span class="logo">SnapAgent</span>
+    <a href="/demo">首页</a>
+    <a href="/">SKU 列表</a>
+    <a href="/anchor-showcase">功能全览</a>
+    <a href="/inject-demo" class="active">注入 Demo</a>
+    <span class="spacer"></span>
+</div>
 
-        <!-- 公告锚点：skill 源，1 小时缓存，有 fallback -->
-        <section class="section">
-            <h2>公告区域</h2>
+<div class="hero">
+    <h1>注入模式 Demo</h1>
+    <p>以下区域使用 <code style="background:#e0e7ff;padding:1px 6px;border-radius:4px;font-size:13px;">data-snap-mode="inject"</code> 标记，
+    页面加载时自动触发后端 skill 生成 HTML 内容并注入。每个卡片标注了使用的属性组合。</p>
+</div>
+
+<main>
+    <!-- 公告锚点：skill 源，1 小时缓存，有 fallback -->
+    <div class="section">
+        <div class="section-header">
+            <h2>📢 公告区域</h2>
+            <div class="attrs">
+                <span class="attr-tag">skill=announcement</span>
+                <span class="attr-tag">ttl=3600</span>
+                <span class="attr-tag">fallback ✓</span>
+            </div>
+        </div>
+        <div class="section-body">
             <div data-snap-anchor="公告区域"
                  data-snap-mode="inject"
                  data-snap-skill="announcement"
                  data-snap-cache-ttl="3600"
                  data-snap-fallback='<p style="color:#999;text-align:center;">公告暂不可用</p>'>
             </div>
-        </section>
+        </div>
+    </div>
 
-        <!-- 每日提示锚点：skill 源，24 小时缓存 -->
-        <section class="section">
-            <h2>每日提示</h2>
+    <!-- 每日提示锚点：skill 源，24 小时缓存 -->
+    <div class="section">
+        <div class="section-header">
+            <h2>💡 每日提示</h2>
+            <div class="attrs">
+                <span class="attr-tag">skill=daily-tips</span>
+                <span class="attr-tag">ttl=86400</span>
+            </div>
+        </div>
+        <div class="section-body">
             <div data-snap-anchor="每日提示"
                  data-snap-mode="inject"
                  data-snap-skill="daily-tips"
                  data-snap-cache-ttl="86400">
             </div>
-        </section>
+        </div>
+    </div>
 
-        <!-- 不缓存的实时内容 -->
-        <section class="section">
-            <h2>实时推荐</h2>
+    <!-- 不缓存的实时内容 -->
+    <div class="section">
+        <div class="section-header">
+            <h2>⚡ 实时推荐（不缓存）</h2>
+            <div class="attrs">
+                <span class="attr-tag">skill=realtime-recommend</span>
+                <span class="attr-tag">ttl=0</span>
+                <span class="attr-tag">fallback ✓</span>
+            </div>
+        </div>
+        <div class="section-body">
             <div data-snap-anchor="实时推荐"
                  data-snap-mode="inject"
                  data-snap-skill="realtime-recommend"
                  data-snap-cache-ttl="0"
-                 data-snap-fallback='<p style="color:#999;">推荐加载中...</p>'>
+                 data-snap-fallback='<p style="color:#999;text-align:center;">推荐加载中...</p>'>
             </div>
-        </section>
-    </main>
+        </div>
+    </div>
+</main>
 
-    <script src="/snap-agent/anchor.js" defer></script>
+<div class="footer">
+    SnapAgent Anchor Demo v0.4 — 注入模式独立演示
+</div>
+
+<!-- SnapAgent Anchor Script -->
+<script src="/snap-agent/anchor.js" defer></script>
+
 </body>
 </html>

@@ -17,6 +17,9 @@ import java.util.Map;
  * <p>Each SKU category (一级分类) is rendered as a separate section
  * with {@code data-snap-anchor}, allowing the anchor Q&A feature
  * to provide context-aware answers about each product group.</p>
+ *
+ * <p>Also provides demo routes for the anchor showcase pages that
+ * demonstrate both Q&A and inject anchor modes.</p>
  */
 @Controller
 public class SkuController {
@@ -90,5 +93,15 @@ public class SkuController {
     @GetMapping("/inject-demo")
     public String injectDemo() {
         return "inject-demo";
+    }
+
+    @GetMapping("/anchor-showcase")
+    public String anchorShowcase() {
+        return "anchor-showcase";
+    }
+
+    @GetMapping("/demo")
+    public String demoIndex() {
+        return "demo-index";
     }
 }
