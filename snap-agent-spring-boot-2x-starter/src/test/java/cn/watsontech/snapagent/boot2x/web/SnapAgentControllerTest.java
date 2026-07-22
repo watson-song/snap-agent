@@ -15,7 +15,9 @@ import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.Shortcut;
 import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -114,8 +116,14 @@ class SnapAgentControllerTest {
 
     @Test
     void shouldReturnToolsWhenGetTools() throws Exception {
-        when(toolDispatcher.availableToolNames())
-                .thenReturn(new java.util.HashSet<String>(Arrays.asList("mysql_query")));
+        ToolProvider mockProvider = org.mockito.Mockito.mock(ToolProvider.class);
+        when(mockProvider.name()).thenReturn("mysql_query");
+        when(mockProvider.schema()).thenReturn("{}");
+        PluginDescriptor desc = new PluginDescriptor(
+                "mysql_query", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mockProvider, null, null, null);
+        when(toolDispatcher.activePlugins())
+                .thenReturn(Collections.singletonList(desc));
 
         mockMvc.perform(get("/snap-agent/tools"))
                 .andExpect(status().isOk())

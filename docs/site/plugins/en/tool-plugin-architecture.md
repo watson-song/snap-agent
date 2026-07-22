@@ -631,3 +631,54 @@ Returns metadata for all registered plugins (v1.0):
 When no `ToolPlugin` beans exist, an empty array `[]` is returned.
 
 > Both endpoints require authentication (`requireAuth()`), validated through the `SecurityGateway`. Audit logs record `LIST_TOOLS` and `LIST_TOOL_PLUGINS` operations.
+
+---
+
+## 9. v0.5 Plugin Architecture (PluginDescriptor + PluginRegistry + Routing)
+
+> Version: v0.5 | Updated: 2026-07-22
+
+### 9.1 Overview
+
+v0.5 introduces a true Plugin abstraction, superseding the v1.0 metadata layer. The new architecture supports:
+
+- Runtime register/unregister/enable/disable/set-default
+- Multiple Plugins per `toolType` (default + explicit override)
+- JAR upload + URLClassLoader isolation
+- `pluginOverrides` routing — LLM only sees `toolType`, dispatcher routes by override
+
+### 9.2 Core Components
+
+ToolDispatcher routing logic: dispatch(toolType, args, ctx) checks ctx.pluginOverrides[toolType] -> pluginId, then registry.getDefault(toolType) -> pluginId, then plugin.provider.execute(args, ctx).
+
+PluginRegistry manages plugins: Map<pluginId, PluginDescriptor>, supports register/unregister/enable/disable/setDefault.
+
+PluginDescriptor immutable data model: pluginId, toolType, displayName, description, version, isDefault(volatile), enabled(volatile), system(boolean), provider(ToolProvider), classLoader(URLClassLoader|null), jarPath(Path|null), pluginContext(PluginContext|null).
+
+### 9.3 @ToolPluginAnnotation Annotation
+
+RUNTIME retention annotation, fields: id, toolType, displayName, description, version, isDefault. Annotation takes precedence over plugin-info.yml. Scan order: annotation classes first; if multiple, use YAML providerClass; if no annotation, use all YAML fields.
+
+### 9.4 ToolContext Extensions
+
+ToolContext adds pluginOverrides (Map<toolType, pluginId>) and pluginContext fields. pluginOverrides passed from POST /runs request body, dispatcher routes by override. pluginContext injected by ToolDispatcher from PluginDescriptor.
+
+### 9.5 Built-in Tool Transparent Wrapping
+
+At startup, all @Component ToolProvider beans are auto-wrapped as system plugins: pluginId=ToolProvider.name(), toolType=ToolProvider.name(), system=true (cannot unregister), isDefault=true (first registered per toolType).
+
+Backward compatibility: existing skills without pluginOverrides -> default -> system plugin -> behavior identical to v1.0.
+
+### 9.6 REST API Endpoints
+
+- GET /tools/plugins — list all plugins (requires snap-agent:plugin:read permission)
+- GET /tools/plugins/{id} — get single plugin details
+- POST /tools/plugins/upload — upload plugin JAR (requires snap-agent:plugin:manage permission)
+- DELETE /tools/plugins/{id} — unregister plugin (system plugins return 403)
+- POST /tools/plugins/{id}/enable — enable plugin
+- POST /tools/plugins/{id}/disable — disable plugin
+- PUT /tools/plugins/{id}/default — set as default plugin for this toolType
+
+### 9.7 v1.0 ToolPlugin SPI Compatibility
+
+The v1.0 ToolPlugin interface has been superseded by the v0.5 architecture, but the interface is retained for compatibility. v0.5's @ToolPluginAnnotation is the new metadata declaration method. GET /tools/plugins response format has been extended. Migration recommendation: new Plugins should use @ToolPluginAnnotation + ToolProvider implementation.

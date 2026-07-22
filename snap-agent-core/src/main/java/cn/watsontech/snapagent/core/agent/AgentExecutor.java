@@ -11,6 +11,7 @@ import cn.watsontech.snapagent.core.llm.ToolUseBlock;
 import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.tool.AuditCallback;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
@@ -138,7 +139,7 @@ public class AgentExecutor {
         taskStore.save(task);
 
         String systemPrompt = buildSystemPrompt(skill, task);
-        List<ToolDef> tools = buildToolDefs();
+        List<ToolDef> tools = buildToolDefs(task);
         List<Message> messages = new ArrayList<Message>();
 
         // Add conversation history (for multi-turn follow-up questions)
@@ -366,14 +367,20 @@ public class AgentExecutor {
      * Builds tool definitions for the LLM {@code tools} array by parsing each
      * {@link ToolProvider#schema()} JSON to extract name, description, and
      * input_schema. Falls back to an empty schema if parsing fails.
+     *
+     * <p>Uses {@link AgentTask#getPluginOverrides()} to select which plugins
+     * are active for this run — the override plugin (if specified) or the
+     * default plugin (if enabled) for each toolType.</p>
      */
-    private List<ToolDef> buildToolDefs() {
+    private List<ToolDef> buildToolDefs(AgentTask task) {
         if (toolDispatcher == null) {
             return Collections.emptyList();
         }
+        java.util.Map<String, String> overrides = task != null ? task.getPluginOverrides() : null;
         List<ToolDef> defs = new ArrayList<ToolDef>();
-        for (ToolProvider provider : toolDispatcher.providers()) {
-            String name = provider.name();
+        for (PluginDescriptor desc : toolDispatcher.activePlugins(overrides)) {
+            ToolProvider provider = desc.getProvider();
+            String name = desc.getToolType();
             String description = "tool: " + name;
             String inputSchema = "{}";
             try {
@@ -400,7 +407,8 @@ public class AgentExecutor {
                     System.currentTimeMillis(), result.getDurationMs());
             task.addAuditRecord(record);
         };
-        return new ToolContext(task.getTaskId(), task.getUserId(), auditCallback);
+        return new ToolContext(task.getTaskId(), task.getUserId(), auditCallback,
+                task.getPluginOverrides());
     }
 
     private String serializeResult(ToolResult result) {

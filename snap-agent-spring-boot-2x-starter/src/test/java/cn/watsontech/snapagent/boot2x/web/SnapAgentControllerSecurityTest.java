@@ -155,8 +155,6 @@ class SnapAgentControllerSecurityTest {
 
     @Test
     void shouldAuditListTools() throws Exception {
-        when(toolDispatcher.availableToolNames()).thenReturn(Collections.<String>emptySet());
-
         mockMvc.perform(get("/snap-agent/tools"));
 
         verify(auditLogger).onApiAccess(

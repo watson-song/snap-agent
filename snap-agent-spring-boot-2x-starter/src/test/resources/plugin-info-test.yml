@@ -1,0 +1,7 @@
+id: remote-log
+toolType: log_read
+displayName: 远程日志查询
+description: 查询 Loki 历史日志
+version: 1.2.0
+isDefault: false
+providerClass: com.example.RemoteLogToolProvider

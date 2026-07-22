@@ -6,7 +6,7 @@
 
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-parent</artifactId>
-    <version>0.4.0-SNAPSHOT</version>
+    <version>0.4.0-feat-v0.5-plugin-improvement-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>SnapAgent Parent</name>
@@ -52,6 +52,7 @@
         <module>snap-agent-spring-boot-2x-starter</module>
         <module>snap-agent-client</module>
         <module>snap-agent-anchor-demo</module>
+        <module>snap-agent-plugin-archetype</module>
     </modules>
 
     <properties>

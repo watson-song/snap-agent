@@ -29,6 +29,7 @@ public class AgentTask {
     private final String model;
     private final long createdAt;
     private final List<Message> history;
+    private final Map<String, String> pluginOverrides;
 
     private volatile TaskStatus status;
     private final List<TranscriptEvent> transcript;
@@ -45,27 +46,45 @@ public class AgentTask {
 
     public AgentTask(String taskId, String userId, String skillId,
                      Map<String, String> inputs, String model) {
-        this(taskId, userId, skillId, inputs, model, null);
+        this(taskId, userId, skillId, inputs, model,
+                DEFAULT_TRANSCRIPT_LIMIT, DEFAULT_AUDIT_LIMIT, null, null);
     }
 
     public AgentTask(String taskId, String userId, String skillId,
                      Map<String, String> inputs, String model,
                      List<Message> history) {
         this(taskId, userId, skillId, inputs, model,
-                DEFAULT_TRANSCRIPT_LIMIT, DEFAULT_AUDIT_LIMIT, history);
+                DEFAULT_TRANSCRIPT_LIMIT, DEFAULT_AUDIT_LIMIT, history, null);
     }
 
     public AgentTask(String taskId, String userId, String skillId,
                      Map<String, String> inputs, String model,
                      int transcriptLimit, int auditLimit) {
         this(taskId, userId, skillId, inputs, model,
-                transcriptLimit, auditLimit, null);
+                transcriptLimit, auditLimit, null, null);
     }
 
     public AgentTask(String taskId, String userId, String skillId,
                      Map<String, String> inputs, String model,
                      int transcriptLimit, int auditLimit,
                      List<Message> history) {
+        this(taskId, userId, skillId, inputs, model,
+                transcriptLimit, auditLimit, history, null);
+    }
+
+    public AgentTask(String taskId, String userId, String skillId,
+                     Map<String, String> inputs, String model,
+                     List<Message> history,
+                     Map<String, String> pluginOverrides) {
+        this(taskId, userId, skillId, inputs, model,
+                DEFAULT_TRANSCRIPT_LIMIT, DEFAULT_AUDIT_LIMIT, history, pluginOverrides);
+    }
+
+    public AgentTask(String taskId, String userId, String skillId,
+                     Map<String, String> inputs, String model,
+                     int transcriptLimit, int auditLimit,
+                     List<Message> history,
+                     Map<String, String> pluginOverrides) {
         this.taskId = taskId;
         this.userId = userId;
         this.skillId = skillId;
@@ -74,6 +93,9 @@ public class AgentTask {
         this.model = model;
         this.createdAt = System.currentTimeMillis();
         this.history = history != null ? new ArrayList<Message>(history) : null;
+        this.pluginOverrides = pluginOverrides != null
+                ? Collections.unmodifiableMap(new java.util.LinkedHashMap<String, String>(pluginOverrides))
+                : Collections.<String, String>emptyMap();
         this.status = TaskStatus.PENDING;
         this.transcript = Collections.synchronizedList(new ArrayList<TranscriptEvent>());
         this.auditRecords = Collections.synchronizedList(new ArrayList<AuditRecord>());
@@ -97,6 +119,15 @@ public class AgentTask {
         String id = "sa_" + System.currentTimeMillis() + "_"
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
         return new AgentTask(id, userId, skillId, inputs, model, history);
+    }
+
+    public static AgentTask create(String userId, String skillId,
+                                   Map<String, String> inputs, String model,
+                                   List<Message> history,
+                                   Map<String, String> pluginOverrides) {
+        String id = "sa_" + System.currentTimeMillis() + "_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        return new AgentTask(id, userId, skillId, inputs, model, history, pluginOverrides);
     }
 
     public void addTranscriptEvent(TranscriptEvent event) {
@@ -167,6 +198,7 @@ public class AgentTask {
     public Map<String, String> getInputs() { return inputs; }
     public String getModel() { return model; }
     public List<Message> getHistory() { return history; }
+    public Map<String, String> getPluginOverrides() { return pluginOverrides; }
     public long getCreatedAt() { return createdAt; }
     public TaskStatus getStatus() { return status; }
     public String getReport() { return report; }

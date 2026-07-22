@@ -1,0 +1,7 @@
+id: yaml-only-plugin
+toolType: trace_search
+displayName: YAML Fallback Plugin
+description: Plugin discovered via plugin-info.yml
+version: 0.9.1
+isDefault: false
+providerClass: com.example.TraceToolProvider
