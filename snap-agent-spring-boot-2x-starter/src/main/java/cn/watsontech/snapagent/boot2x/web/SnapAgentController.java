@@ -1659,7 +1659,21 @@ public class SnapAgentController {
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
         PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
-        task.setName(name);
+        // Auto-generate name from skill + first input value if not provided
+        if (name == null || name.trim().isEmpty()) {
+            StringBuilder autoName = new StringBuilder(skillName != null ? skillName : "patrol");
+            if (inputs != null && !inputs.isEmpty()) {
+                String firstVal = inputs.values().iterator().next();
+                if (firstVal != null) {
+                    String snippet = firstVal.replaceAll("[\\n\\r]", " ").trim();
+                    if (snippet.length() > 25) snippet = snippet.substring(0, 25);
+                    autoName.append(": ").append(snippet);
+                }
+            }
+            task.setName(autoName.toString());
+        } else {
+            task.setName(name);
+        }
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",

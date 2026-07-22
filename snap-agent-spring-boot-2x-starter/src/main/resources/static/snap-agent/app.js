@@ -2505,10 +2505,10 @@ async function showPatrolModal() {
         html += '<div id="patrolCreateForm" style="display:none;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">';
         html += '<div style="font-weight:600;margin-bottom:8px;">新建巡检任务</div>';
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
-        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称</label>' +
-            '<input type="text" id="patrolNameInput" placeholder="例如: SKU详情表数据巡检" ' +
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称 (可选)</label>' +
+            '<input type="text" id="patrolNameInput" placeholder="留空则自动从 Skill 和指令推断" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">给人看的名字, 方便在告警中快速识别来源。</div></div>';
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">给人看的名字; 留空时自动生成 (如: database-query: 检查drp_sku_detail表...)</div></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">Skill</label>' +
             '<select id="patrolSkillSelect" style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
             skillOptions + '</select></div>';
@@ -2526,9 +2526,9 @@ async function showPatrolModal() {
             '<textarea id="patrolInputsInput" placeholder="{}" rows="3" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;"></textarea></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">告警关键词 (可选, 逗号分隔)</label>' +
-            '<input type="text" id="patrolAlertKeywordsInput" placeholder="例如: 未生成, 0行, 无记录, 失败" ' +
+            '<input type="text" id="patrolAlertKeywordsInput" placeholder="留空则自动推断" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">巡检报告中出现这些词时触发告警推送; 留空则仅用内置关键词 (异常/错误/失败/critical/warning 等)。</div></div>';
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">留空时从自然语言指令自动推断; 后端还有正则兜底 (没有.*数据/0条/为空等)。</div></div>';
         html += '<div style="display:flex;gap:8px;">' +
             '<button class="feature-action-btn" id="patrolSubmitBtn">创建</button>' +
             '<button class="feature-action-btn" id="patrolCancelBtn" style="background:var(--bg-input);">取消</button></div>';
@@ -2787,7 +2787,6 @@ async function showPatrolModal() {
             var alertKeywords = alertKwInput.value.trim();
             if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
             if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
-            if (!patrolName) { statusDiv.textContent = '请输入巡检名称'; return; }
 
             // Build inputs: text mode wraps as _user_message, JSON mode parses directly
             var inputsObj;
@@ -2802,6 +2801,20 @@ async function showPatrolModal() {
                 catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
             }
 
+            // Auto-infer name from skill + natural language if not provided
+            if (!patrolName) {
+                var inferSource = textMode ? textInput.value.trim() : JSON.stringify(inputsObj);
+                // Extract first meaningful chunk (up to 25 chars, no line breaks)
+                var snippet = inferSource.replace(/[\n\r]/g, ' ').trim().substring(0, 25);
+                patrolName = skillName + (snippet ? ': ' + snippet : '');
+            }
+            // Auto-infer keywords from natural language if not provided
+            if (!alertKeywords) {
+                var kwSource = textMode ? textInput.value.trim() : JSON.stringify(inputsObj);
+                var inferred = inferKeywords(kwSource);
+                if (inferred.length > 0) alertKeywords = inferred.join(',');
+            }
+
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
             statusDiv.textContent = '';
@@ -2809,7 +2822,7 @@ async function showPatrolModal() {
                 var resp = await fetch(BASE + '/patrol/tasks', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ name: patrolName, skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
+                    body: JSON.stringify({ name: patrolName || null, skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
                 });
                 var data = await resp.json();
                 if (!resp.ok) {
@@ -2819,7 +2832,7 @@ async function showPatrolModal() {
                     return;
                 }
                 statusDiv.style.color = 'var(--green)';
-                statusDiv.textContent = '✓ 创建成功, ID: ' + (data.id || '');
+                statusDiv.textContent = '✓ 创建成功: ' + (data.name || data.id || '');
                 submitBtn.textContent = '✓';
                 setTimeout(function() { showPatrolModal(); }, 800);
             } catch (e) {
