@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.patrol;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
+import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.AlertPushChannel;
 import cn.watsontech.snapagent.core.patrol.AnomalyEvent;
 import cn.watsontech.snapagent.core.patrol.PatrolLockProvider;
@@ -19,11 +20,14 @@ import org.springframework.scheduling.support.CronTrigger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Spring {@link TaskScheduler}-backed implementation of {@link PatrolScheduler}.
@@ -44,6 +48,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private final PatrolLockProvider lockProvider;
     private final long lockTtlSeconds;
     private final List<AlertPushChannel> pushChannels;
+    private final AlertConverger alertConverger;
     private final ConcurrentHashMap<String, PatrolTask> tasks = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledFutures = new ConcurrentHashMap<>();
     private final AtomicLong idCounter = new AtomicLong(0);
@@ -51,20 +56,29 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore) {
         this(taskScheduler, agentExecutor, skillRegistry, reportStore,
-                new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList());
+                new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList(), null);
     }
 
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds) {
         this(taskScheduler, agentExecutor, skillRegistry, reportStore,
-                lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList());
+                lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList(), null);
     }
 
     public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds,
                                     List<AlertPushChannel> pushChannels) {
+        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+                lockProvider, lockTtlSeconds, pushChannels, null);
+    }
+
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+                                    SkillRegistry skillRegistry, PatrolReportStore reportStore,
+                                    PatrolLockProvider lockProvider, long lockTtlSeconds,
+                                    List<AlertPushChannel> pushChannels,
+                                    AlertConverger alertConverger) {
         this.taskScheduler = taskScheduler;
         this.agentExecutor = agentExecutor;
         this.skillRegistry = skillRegistry;
@@ -73,6 +87,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
         this.lockTtlSeconds = lockTtlSeconds;
         this.pushChannels = pushChannels != null ? new ArrayList<>(pushChannels)
                 : new ArrayList<>();
+        this.alertConverger = alertConverger;
     }
 
     @Override
@@ -99,6 +114,28 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
         }
         tasks.remove(patrolId);
         log.info("Cancelled patrol task {}", patrolId);
+    }
+
+    @Override
+    public Boolean toggleEnabled(String patrolId) {
+        PatrolTask task = tasks.get(patrolId);
+        if (task == null) return null;
+        boolean newEnabled = !task.isEnabled();
+        task.setEnabled(newEnabled);
+        if (newEnabled) {
+            ScheduledFuture<?> future = taskScheduler.schedule(
+                    () -> executePatrol(task),
+                    new CronTrigger(task.getCron()));
+            scheduledFutures.put(patrolId, future);
+            log.info("Patrol task {} enabled", patrolId);
+        } else {
+            ScheduledFuture<?> future = scheduledFutures.remove(patrolId);
+            if (future != null) {
+                future.cancel(false);
+            }
+            log.info("Patrol task {} disabled", patrolId);
+        }
+        return newEnabled;
     }
 
     @Override
@@ -143,9 +180,25 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
             }
 
             try {
+                // Inject patrol-mode instruction: tell the LLM to output an
+                // ALERT_SUMMARY line when an anomaly is detected. This replaces
+                // all keyword/regex matching — the LLM itself decides whether
+                // the result constitutes an anomaly and writes a human-readable
+                // conclusion that is shown verbatim on the alert page.
+                Map<String, String> patrolInputs = new LinkedHashMap<>(
+                        task.getInputs() != null ? task.getInputs()
+                                : Collections.<String, String>emptyMap());
+                String patrolSuffix = "\n\n[巡检模式] 如果检测到异常，请在回复最后一行严格输出: ALERT_SUMMARY: <一句话告警总结>";
+                String existingMsg = patrolInputs.get("_user_message");
+                if (existingMsg != null) {
+                    patrolInputs.put("_user_message", existingMsg + patrolSuffix);
+                } else {
+                    patrolInputs.put("_user_message", patrolSuffix.trim());
+                }
+
                 AgentTask agentTask = AgentTask.create(
                         task.getUserId(), task.getSkillName(),
-                        task.getInputs(), null);
+                        patrolInputs, null);
                 agentExecutor.execute(agentTask, skill);
 
                 TaskStatus status = agentTask.getStatus();
@@ -153,17 +206,22 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 String summary = agentTask.getReport() != null
                         ? agentTask.getReport() : "Patrol completed";
 
-                // Heuristic: if the report summary mentions anomaly keywords, mark as
-                // anomaly-detected so push channels fire. This lets patrol skills signal
-                // problems purely via their final text output, without code changes.
-                // Custom alert keywords from the task config are also checked.
-                boolean anomaly = detectAnomaly(summary, statusStr, task.getAlertKeywords());
+                // Extract the ALERT_SUMMARY line that the LLM was asked to emit.
+                // If present, it's a definitive anomaly signal and its text is
+                // used as the alert message (no further matching needed).
+                String alertSummary = extractAlertSummary(summary);
+
+                // Anomaly if: LLM emitted ALERT_SUMMARY, or task FAILED/TIMEOUT.
+                boolean anomaly = alertSummary != null
+                        || "FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr);
+
                 PatrolReport report = new PatrolReport(
                         null, task.getId(), agentTask.getTaskId(),
                         task.getSkillName(), triggeredAt, statusStr, summary, anomaly);
                 report.setUserId(task.getUserId());
                 reportStore.save(report);
                 if (anomaly) {
+                    recordAlert(report, task, alertSummary);
                     pushToChannels(report, null);
                 }
             } catch (Exception e) {
@@ -180,38 +238,49 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     }
 
     /**
-     * Detects anomaly indicators in the patrol report summary. Looks for
-     * keywords like "CRITICAL", "WARNING", "异常", "错误", "失败". Override
-     * threshold by subclassing if a different heuristic is needed.
+     * Extracts the {@code ALERT_SUMMARY:} line from the patrol report, if present.
      *
-     * @param summary       the patrol report summary text
-     * @param statusStr     the task status string (SUCCEEDED, FAILED, TIMEOUT, etc.)
-     * @param alertKeywords comma-separated custom keywords from the patrol task config;
-     *                      if the summary contains any of these, an anomaly is flagged.
-     *                      May be null or empty to use only the default markers.
+     * <p>During patrol execution, the LLM is instructed to output a final line
+     * starting with {@code ALERT_SUMMARY:} when it detects an anomaly. This method
+     * finds that line and returns the text after the prefix. The LLM — not
+     * keyword/regex matching — decides whether the result is anomalous.</p>
+     *
+     * @param summary the full patrol report text
+     * @return the alert summary text, or {@code null} if no ALERT_SUMMARY line found
      */
-    protected boolean detectAnomaly(String summary, String statusStr, String alertKeywords) {
-        if ("FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr)) {
-            return true;
+    protected String extractAlertSummary(String summary) {
+        if (summary == null || summary.isEmpty()) return null;
+        Pattern p = Pattern.compile("ALERT_SUMMARY:\\s*(.+)", Pattern.CASE_INSENSITIVE);
+        Matcher m = p.matcher(summary);
+        if (m.find()) {
+            String text = m.group(1).trim();
+            // Remove trailing markdown or quotes
+            text = text.replaceAll("\\*+$", "").trim();
+            return text.isEmpty() ? null : text;
         }
-        if (summary == null || summary.isEmpty()) return false;
-        String lower = summary.toLowerCase(Locale.ROOT);
-        String[] markers = {"critical", "warning", "error", "exception", "failed",
-                "异常", "错误", "失败", "告警", "风险"};
-        for (String m : markers) {
-            if (lower.contains(m)) return true;
+        return null;
+    }
+
+    private void recordAlert(PatrolReport report, PatrolTask task, String alertSummary) {
+        if (alertConverger == null) return;
+        try {
+            String alertSource = task.getName() != null && !task.getName().isEmpty()
+                    ? task.getName() : task.getId();
+            // Use the LLM-generated alert summary if available; otherwise fall back
+            // to the full report summary.
+            String alertMessage = alertSummary != null ? alertSummary
+                    : (report.getSummary() != null ? report.getSummary() : "Anomaly detected");
+            AnomalyEvent event = new AnomalyEvent(
+                    "patrol", alertSource,
+                    alertMessage,
+                    task.getSkillName(),
+                    null, task.getInputs());
+            alertConverger.record(event);
+            log.info("Patrol anomaly recorded as alert (patrolId={}, source={}, summary={})",
+                    task.getId(), alertSource, alertSummary);
+        } catch (Exception e) {
+            log.error("Failed to record alert for patrol {}: {}", task.getId(), e.getMessage());
         }
-        // Custom alert keywords from task config
-        if (alertKeywords != null && !alertKeywords.isEmpty()) {
-            for (String kw : alertKeywords.split(",")) {
-                String trimmed = kw.trim();
-                if (!trimmed.isEmpty() && lower.contains(trimmed.toLowerCase(Locale.ROOT))) {
-                    log.info("Patrol anomaly detected via custom keyword '{}'", trimmed);
-                    return true;
-                }
-            }
-        }
-        return false;
     }
 
     private void pushToChannels(PatrolReport report, AnomalyEvent event) {

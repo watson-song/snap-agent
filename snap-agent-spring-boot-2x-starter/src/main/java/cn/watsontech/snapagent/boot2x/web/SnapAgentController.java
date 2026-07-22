@@ -12,6 +12,7 @@ import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
 import cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester;
 import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
@@ -32,7 +33,9 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.LlmEventSink;
+import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
@@ -49,6 +52,8 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
+import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
 import cn.watsontech.snapagent.core.workflow.StepResult;
 import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
@@ -65,11 +70,13 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -127,6 +134,8 @@ public class SnapAgentController {
     private final WorkflowEngine workflowEngine;
     private final ToolPluginRegistry toolPluginRegistry;
     private final AuditStore auditStore;
+    private final PluginRegistry pluginRegistry;
+    private final PluginUploader pluginUploader;
     private AnchorOrchestrator anchorOrchestrator;
     private AnchorInjectionOrchestrator injectionOrchestrator;
 
@@ -217,7 +226,7 @@ public class SnapAgentController {
                                 AuditStore auditStore) {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
-                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore);
+                auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -259,7 +268,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, null, null, null, null, null);
+                issueClosureService, null, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -282,7 +291,7 @@ public class SnapAgentController {
         this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
-                issueClosureService, costSummaryService, null, null, null, null);
+                issueClosureService, costSummaryService, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
@@ -305,7 +314,9 @@ public class SnapAgentController {
                                 YamlWorkflowLoader workflowLoader,
                                 WorkflowEngine workflowEngine,
                                 ToolPluginRegistry toolPluginRegistry,
-                                AuditStore auditStore) {
+                                AuditStore auditStore,
+                                PluginRegistry pluginRegistry,
+                                PluginUploader pluginUploader) {
         this.skillRegistry = skillRegistry;
         this.agentExecutor = agentExecutor;
         this.taskStore = taskStore;
@@ -327,6 +338,8 @@ public class SnapAgentController {
         this.workflowEngine = workflowEngine;
         this.toolPluginRegistry = toolPluginRegistry;
         this.auditStore = auditStore;
+        this.pluginRegistry = pluginRegistry;
+        this.pluginUploader = pluginUploader;
     }
 
     // ---- GET /auth-config (public, returns frontend auth config) ----
@@ -505,11 +518,10 @@ public class SnapAgentController {
 
         audit(currentUserId(), "GET", "/tools", "LIST_TOOLS", null);
 
-        // ToolDispatcher.providers() returns ToolProvider instances with name() and schema()
+        // Use activePlugins() to iterate over the PluginDescriptor list (v0.5)
         List<Map<String, Object>> toolList = new ArrayList<Map<String, Object>>();
-        for (Object provider : toolDispatcher.providers()) {
-            cn.watsontech.snapagent.core.tool.ToolProvider tp =
-                    (cn.watsontech.snapagent.core.tool.ToolProvider) provider;
+        for (PluginDescriptor desc : toolDispatcher.activePlugins()) {
+            cn.watsontech.snapagent.core.tool.ToolProvider tp = desc.getProvider();
             Map<String, Object> tool = new LinkedHashMap<String, Object>();
             tool.put("name", tp.name());
             // Parse the JSON schema string to extract description + parameters
@@ -926,7 +938,13 @@ public class SnapAgentController {
 
         // Create task (with optional conversation history for follow-up questions)
         List<Message> history = extractHistory(body.get("history"));
-        AgentTask task = AgentTask.create(userId, skillId, inputs, model, history);
+        // Parse and validate plugin overrides (v0.5)
+        Map<String, String> pluginOverrides = extractPluginOverrides(body.get("pluginOverrides"));
+        String overrideError = validatePluginOverrides(pluginOverrides);
+        if (overrideError != null) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_PLUGIN_OVERRIDE", overrideError);
+        }
+        AgentTask task = AgentTask.create(userId, skillId, inputs, model, history, pluginOverrides);
         taskStore.save(task);
 
         // Submit to executor
@@ -1718,6 +1736,7 @@ public class SnapAgentController {
 
         String skillName = (String) body.get("skillName");
         String cron = (String) body.get("cron");
+        String name = (String) body.get("name");
         String alertKeywords = (String) body.get("alertKeywords");
         String userId = currentUserId();
         @SuppressWarnings("unchecked")
@@ -1725,6 +1744,23 @@ public class SnapAgentController {
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
         PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
+        // Auto-generate name from skill + first input value if not provided (max 20 chars)
+        if (name == null || name.trim().isEmpty()) {
+            StringBuilder autoName = new StringBuilder(skillName != null ? skillName : "patrol");
+            if (inputs != null && !inputs.isEmpty()) {
+                String firstVal = inputs.values().iterator().next();
+                if (firstVal != null) {
+                    String snippet = firstVal.replaceAll("[\\n\\r]", " ").trim();
+                    int maxSnippet = Math.max(1, 20 - autoName.length() - 2);
+                    if (snippet.length() > maxSnippet) snippet = snippet.substring(0, maxSnippet);
+                    autoName.append(": ").append(snippet);
+                }
+            }
+            String finalName = autoName.toString();
+            task.setName(finalName.length() > 20 ? finalName.substring(0, 20) : finalName);
+        } else {
+            task.setName(name.trim().length() > 20 ? name.trim().substring(0, 20) : name.trim());
+        }
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
@@ -1732,6 +1768,7 @@ public class SnapAgentController {
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("id", task.getId());
+        result.put("name", task.getName());
         result.put("skillName", task.getSkillName());
         result.put("cron", task.getCron());
         result.put("enabled", task.isEnabled());
@@ -1764,6 +1801,142 @@ public class SnapAgentController {
         }
         scheduler.cancel(id);
         return ResponseEntity.ok(Collections.singletonMap("deleted", true));
+    }
+
+    // ---- PATCH /patrol/tasks/{id}/toggle ----
+    @PatchMapping("/patrol/tasks/{id}/toggle")
+    public ResponseEntity<Object> togglePatrolTask(@PathVariable String id) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        PatrolScheduler scheduler = patrolScheduler;
+        if (scheduler == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "patrol is not enabled"));
+        }
+        Boolean enabled = scheduler.toggleEnabled(id);
+        if (enabled == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "PATROL_NOT_FOUND",
+                    "patrol task not found: " + id);
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("id", id);
+        result.put("enabled", enabled);
+        return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /patrol/infer ----
+    /** Uses LLM to infer patrol name and keywords from natural language instruction. */
+    @PostMapping("/patrol/infer")
+    public ResponseEntity<Object> inferPatrolMeta(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (llmClient == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "LLM client is not configured"));
+        }
+
+        String instruction = (String) body.get("instruction");
+        String skillName = (String) body.get("skillName");
+        if (instruction == null || instruction.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Collections.singletonMap("error", "instruction is required"));
+        }
+
+        String systemPrompt = "你是巡检任务助手。根据用户给定的巡检指令，推断巡检名称和告警关键词。\n"
+                + "要求:\n"
+                + "- name: 从指令中提取核心目的，简洁明了，不超过20个中文字符\n"
+                + "- keywords: 如果巡检结果包含这些关键词说明可能存在异常，用逗号分隔\n"
+                + "直接输出JSON，不要解释、不要分析、不要思考过程。格式: {\"name\":\"名称\",\"keywords\":\"关键词1,关键词2\"}";
+
+        String userMsg = "请根据以下信息推断巡检名称和告警关键词。\n"
+                + "Skill: " + (skillName != null ? skillName : "unknown")
+                + "\n指令: " + instruction
+                + "\n\n请直接输出JSON结果:";
+
+        String llmResponse = callLlmSync(systemPrompt, userMsg, 1024);
+        if (llmResponse == null || llmResponse.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Collections.singletonMap("error", "LLM returned empty response"));
+        }
+
+        // Extract JSON object from the response (LLM may add surrounding text)
+        String jsonStr = null;
+        int braceStart = llmResponse.indexOf('{');
+        int braceEnd = llmResponse.lastIndexOf('}');
+        if (braceStart >= 0 && braceEnd > braceStart) {
+            jsonStr = llmResponse.substring(braceStart, braceEnd + 1);
+        }
+
+        String inferredName = null;
+        String inferredKeywords = null;
+        if (jsonStr != null) {
+            // Simple JSON parsing without external dependency
+            inferredName = extractJsonField(jsonStr, "name");
+            inferredKeywords = extractJsonField(jsonStr, "keywords");
+        }
+
+        // Enforce 20-char limit on name
+        if (inferredName != null && inferredName.length() > 20) {
+            inferredName = inferredName.substring(0, 20);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("name", inferredName);
+        result.put("keywords", inferredKeywords);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Makes a synchronous (non-streaming) LLM call and returns the full text response.
+     * Uses {@link LlmClient#stream} with a simple sink that collects all text.
+     */
+    private String callLlmSync(String systemPrompt, String userMessage, int maxTokens) {
+        final StringBuilder sb = new StringBuilder();
+        LlmRequest req = new LlmRequest(
+                systemPrompt,
+                Collections.singletonList(Message.user(userMessage)),
+                Collections.<ToolDef>emptyList(),
+                properties.getLlm().getModel(),
+                maxTokens,
+                true);
+        try {
+            llmClient.stream(req, new LlmEventSink() {
+                @Override public void onThought(String text) { sb.append(text); }
+                @Override public void onToolUse(String id, String name, Map<String, Object> input) {}
+                @Override public void onToolResult(String toolUseId, String result) {}
+                @Override public void onStop(String stopReason) {}
+                @Override public void onError(String message) {
+                    log.warn("LLM sync call error: {}", message);
+                }
+            }, "patrol-infer-" + System.currentTimeMillis());
+        } catch (Exception e) {
+            log.error("LLM sync call failed: {}", e.getMessage());
+            return null;
+        }
+        return sb.toString();
+    }
+
+    /** Extracts a string field value from a simple JSON object (no nested objects). */
+    private static String extractJsonField(String json, String fieldName) {
+        String key = "\"" + fieldName + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return null;
+        int colonIdx = json.indexOf(':', idx + key.length());
+        if (colonIdx < 0) return null;
+        // Find the opening quote
+        int startQuote = json.indexOf('"', colonIdx + 1);
+        if (startQuote < 0) return null;
+        // Find the closing quote (handle escaped quotes)
+        int endQuote = startQuote + 1;
+        while (endQuote < json.length()) {
+            if (json.charAt(endQuote) == '\\') { endQuote += 2; continue; }
+            if (json.charAt(endQuote) == '"') break;
+            endQuote++;
+        }
+        if (endQuote >= json.length()) return null;
+        return json.substring(startQuote + 1, endQuote);
     }
 
     // ---- GET /patrol/reports ----
@@ -2364,28 +2537,172 @@ public class SnapAgentController {
         return ResponseEntity.ok(toWorkflowResultDto(result));
     }
 
-    // ---- GET /tools/plugins (v1.0 tool plugin metadata) ----
+    // ---- Plugin management endpoints (v0.5) ----
+
     @GetMapping("/tools/plugins")
-    public ResponseEntity<Object> listToolPlugins() {
-        ResponseEntity<Object> authError = requireAuth();
+    public ResponseEntity<Object> listPlugins() {
+        ResponseEntity<Object> authError = requirePluginReadPermission();
         if (authError != null) return authError;
 
-        if (toolPluginRegistry == null) {
-            return ResponseEntity.ok(new ArrayList<Object>());
-        }
-
-        audit(currentUserId(), "GET", "/tools/plugins", "LIST_TOOL_PLUGINS", null);
-
         List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
-        for (ToolPlugin plugin : toolPluginRegistry.getPlugins()) {
-            Map<String, Object> dto = new LinkedHashMap<String, Object>();
-            dto.put("name", plugin.name());
-            dto.put("version", plugin.version());
-            dto.put("description", plugin.description());
-            dto.put("toolNames", plugin.toolNames());
-            result.add(dto);
+        if (pluginRegistry != null) {
+            for (PluginDescriptor desc : pluginRegistry.list()) {
+                result.add(toPluginDto(desc));
+            }
         }
+        audit(currentUserId(), "GET", "/tools/plugins", "LIST_PLUGINS", null);
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/tools/plugins/{id}")
+    public ResponseEntity<Object> getPlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginReadPermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        return ResponseEntity.ok(toPluginDto(desc));
+    }
+
+    @PostMapping("/tools/plugins/upload")
+    public ResponseEntity<Object> uploadPlugin(@RequestParam("file") MultipartFile file) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginUploader == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "PLUGIN_DISABLED",
+                    "plugin upload not configured");
+        }
+        if (file == null || file.isEmpty()) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "file is required");
+        }
+        try {
+            PluginDescriptor desc = pluginUploader.upload(file);
+            Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+            auditDetails.put("pluginId", desc.getPluginId());
+            auditDetails.put("toolType", desc.getToolType());
+            auditDetails.put("jarSize", file.getSize());
+            audit(currentUserId(), "POST", "/tools/plugins/upload", "PLUGIN_UPLOAD", auditDetails);
+            return ResponseEntity.status(HttpStatus.CREATED).body(toPluginDto(desc));
+        } catch (IllegalStateException e) {
+            return errorResponse(HttpStatus.CONFLICT, "PLUGIN_CONFLICT", e.getMessage());
+        } catch (RuntimeException e) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "PLUGIN_UPLOAD_FAILED", e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/tools/plugins/{id}")
+    public ResponseEntity<Object> deletePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        try {
+            pluginRegistry.unregister(id);
+        } catch (UnsupportedOperationException e) {
+            return errorResponse(HttpStatus.FORBIDDEN, "SYSTEM_PLUGIN",
+                    "cannot unregister system plugin: " + id);
+        }
+        // Clean up resources: close URLClassLoader and delete JAR file
+        if (pluginUploader != null) {
+            pluginUploader.cleanupPlugin(desc);
+        }
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("pluginId", id);
+        audit(currentUserId(), "DELETE", "/tools/plugins/" + id, "PLUGIN_UNREGISTER", auditDetails);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/tools/plugins/{id}/enable")
+    public ResponseEntity<Object> enablePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null || pluginRegistry.getPlugin(id) == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.enable(id);
+        audit(currentUserId(), "POST", "/tools/plugins/" + id + "/enable",
+                "PLUGIN_ENABLE", Collections.singletonMap("pluginId", id));
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/tools/plugins/{id}/disable")
+    public ResponseEntity<Object> disablePlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null || pluginRegistry.getPlugin(id) == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.disable(id);
+        audit(currentUserId(), "POST", "/tools/plugins/" + id + "/disable",
+                "PLUGIN_DISABLE", Collections.singletonMap("pluginId", id));
+        return ResponseEntity.ok().build();
+    }
+
+    @PutMapping("/tools/plugins/{id}/default")
+    public ResponseEntity<Object> setDefaultPlugin(@PathVariable String id) {
+        ResponseEntity<Object> authError = requirePluginManagePermission();
+        if (authError != null) return authError;
+
+        if (pluginRegistry == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        PluginDescriptor desc = pluginRegistry.getPlugin(id);
+        if (desc == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", "plugin not found: " + id);
+        }
+        pluginRegistry.setDefault(desc.getToolType(), id);
+        Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
+        auditDetails.put("pluginId", id);
+        auditDetails.put("toolType", desc.getToolType());
+        audit(currentUserId(), "PUT", "/tools/plugins/" + id + "/default",
+                "PLUGIN_SET_DEFAULT", auditDetails);
+        return ResponseEntity.ok().build();
+    }
+
+    private ResponseEntity<Object> requirePluginReadPermission() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+        if (!securityGateway.hasPermission(properties.getSecurity().getPluginReadPermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin read permission denied");
+        }
+        return null;
+    }
+
+    private ResponseEntity<Object> requirePluginManagePermission() {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+        if (!securityGateway.hasPermission(properties.getSecurity().getPluginManagePermission())) {
+            return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin manage permission denied");
+        }
+        return null;
+    }
+
+    private Map<String, Object> toPluginDto(PluginDescriptor desc) {
+        Map<String, Object> dto = new LinkedHashMap<String, Object>();
+        dto.put("pluginId", desc.getPluginId());
+        dto.put("toolType", desc.getToolType());
+        dto.put("displayName", desc.getDisplayName());
+        dto.put("description", desc.getDescription());
+        dto.put("version", desc.getVersion());
+        dto.put("isDefault", desc.isDefault());
+        dto.put("enabled", desc.isEnabled());
+        dto.put("system", desc.isSystem());
+        dto.put("jarPath", desc.getJarPath() != null ? desc.getJarPath().toString() : null);
+        return dto;
     }
 
     // ---- helpers ----
@@ -2716,5 +3033,39 @@ public class SnapAgentController {
             }
         }
         return messages.isEmpty() ? null : messages;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> extractPluginOverrides(Object raw) {
+        if (raw == null || !(raw instanceof Map)) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        Map<String, Object> map = (Map<String, Object>) raw;
+        for (Map.Entry<String, Object> e : map.entrySet()) {
+            if (e.getValue() != null) {
+                result.put(e.getKey(), String.valueOf(e.getValue()));
+            }
+        }
+        return result;
+    }
+
+    private String validatePluginOverrides(Map<String, String> overrides) {
+        if (overrides == null || overrides.isEmpty()) return null;
+        if (pluginRegistry == null) {
+            return "plugin overrides specified but plugin registry not configured";
+        }
+        for (Map.Entry<String, String> e : overrides.entrySet()) {
+            String toolType = e.getKey();
+            String pluginId = e.getValue();
+            PluginDescriptor desc = pluginRegistry.getPlugin(pluginId);
+            if (desc == null) {
+                return "plugin '" + pluginId + "' for toolType '" + toolType + "' not found";
+            }
+            if (!desc.isEnabled()) {
+                return "plugin '" + pluginId + "' for toolType '" + toolType + "' is disabled";
+            }
+        }
+        return null;
     }
 }

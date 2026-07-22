@@ -40,6 +40,9 @@ import cn.watsontech.snapagent.boot2x.tool.MetricsToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
+import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
+import cn.watsontech.snapagent.boot2x.tool.PluginMetadataScanner;
+import cn.watsontech.snapagent.boot2x.tool.PluginConfigExtractor;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
 import cn.watsontech.snapagent.boot2x.tool.TraceSearchToolProvider;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
@@ -72,6 +75,9 @@ import cn.watsontech.snapagent.core.security.PrincipalResolver;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
+import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
+import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
@@ -435,26 +441,58 @@ public class SnapAgentAutoConfiguration {
         return new ConfigReadToolProvider(props.getConfigRead(), environment);
     }
 
+    // ---- PluginRegistry (v0.5) ----
+    // Wraps every built-in ToolProvider bean as a system plugin so the
+    // ToolDispatcher routes via PluginRegistry instead of a static map.
+    @Bean
+    @ConditionalOnMissingBean
+    public PluginRegistry pluginRegistry(
+            ObjectProvider<ToolProvider> toolProviders,
+            ObjectProvider<McpBootstrap> mcpBootstrapProvider) {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        List<ToolProvider> providers = new ArrayList<ToolProvider>(
+                toolProviders.orderedStream().collect(java.util.stream.Collectors.toList()));
+        McpBootstrap mcp = mcpBootstrapProvider.getIfAvailable();
+        if (mcp != null) {
+            providers.addAll(mcp.getProviders());
+        }
+        for (ToolProvider p : providers) {
+            if (p == null || p.name() == null) continue;
+            PluginDescriptor desc = new PluginDescriptor(
+                    p.name(), p.name(), p.name(), "", "built-in",
+                    true, true, true, p, null, null, null);
+            registry.register(desc);
+        }
+        log.info("PluginRegistry assembled with {} system plugin(s)", providers.size());
+        return registry;
+    }
+
     // ---- ToolDispatcher ----
     @Bean
     @ConditionalOnMissingBean
     public ToolDispatcher toolDispatcher(
-            ObjectProvider<ToolProvider> toolProviders,
-            ObjectProvider<McpBootstrap> mcpBootstrapProvider,
+            PluginRegistry pluginRegistry,
             SnapAgentProperties props) {
-        // Collect every ToolProvider bean in the context (Jdbc, Redis, custom).
-        List<ToolProvider> providers = new ArrayList<ToolProvider>(
-                toolProviders.orderedStream().collect(java.util.stream.Collectors.toList()));
-        // Add MCP providers that were registered as singletons on the bean factory.
-        // They may also be visible via ObjectProvider<ToolProvider> depending on
-        // creation order, but adding them explicitly here guarantees inclusion
-        // regardless of timing (see mcpBootstrap bean below).
-        McpBootstrap mcpBootstrap = mcpBootstrapProvider.getIfAvailable();
-        if (mcpBootstrap != null) {
-            providers.addAll(mcpBootstrap.getProviders());
-        }
-        log.info("ToolDispatcher assembled with {} provider(s)", providers.size());
-        return new ToolDispatcher(providers, props.getAgent().getMaxToolResultChars());
+        log.info("ToolDispatcher assembled with PluginRegistry ({} plugin(s))",
+                pluginRegistry.list().size());
+        return new ToolDispatcher(pluginRegistry, props.getAgent().getMaxToolResultChars());
+    }
+
+    // ---- PluginUploader (v0.5) ----
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "snap-agent.tools", name = "plugin-upload-enabled", havingValue = "true", matchIfMissing = true)
+    public PluginUploader pluginUploader(
+            SnapAgentProperties props,
+            PluginRegistry pluginRegistry,
+            org.springframework.core.env.Environment environment) {
+        java.nio.file.Path uploadDir = java.nio.file.Paths.get(
+                props.getUploadSkillsDir(), "plugins");
+        uploadDir.toFile().mkdirs();
+        PluginMetadataScanner scanner = new PluginMetadataScanner();
+        PluginConfigExtractor configExtractor = new PluginConfigExtractor();
+        log.info("PluginUploader assembled, upload dir: {}", uploadDir);
+        return new PluginUploader(uploadDir, pluginRegistry, scanner, configExtractor, environment);
     }
 
     // ---- McpBootstrap (MCP server discovery) ----
@@ -679,6 +717,8 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<WorkflowEngine> workflowEngineProvider,
             ObjectProvider<ToolPluginRegistry> toolPluginRegistryProvider,
             ObjectProvider<AuditStore> auditStoreProvider,
+            PluginRegistry pluginRegistry,
+            ObjectProvider<PluginUploader> pluginUploaderProvider,
             org.springframework.core.env.Environment environment) {
         SecurityGateway gateway = securityGatewayProvider.getIfAvailable();
         PeerSseRelay relay = peerSseRelayProvider.getIfAvailable();
@@ -694,6 +734,7 @@ public class SnapAgentAutoConfiguration {
         WorkflowEngine workflowEngine = workflowEngineProvider.getIfAvailable();
         ToolPluginRegistry toolPluginRegistry = toolPluginRegistryProvider.getIfAvailable();
         AuditStore auditStore = auditStoreProvider.getIfAvailable();
+        PluginUploader pluginUploader = pluginUploaderProvider.getIfAvailable();
         // Auto-resolve app log file path from Spring's logging.file.name
         if (properties.getLogs().getAppLogFile() == null || properties.getLogs().getAppLogFile().isEmpty()) {
             String logFile = environment.getProperty("logging.file.name");
@@ -717,7 +758,8 @@ public class SnapAgentAutoConfiguration {
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
-                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore);
+                costSummaryService, workflowLoader, workflowEngine, toolPluginRegistry, auditStore,
+                pluginRegistry, pluginUploader);
 
         // Wire anchor orchestrator if anchor feature is enabled and LLM is available
         if (properties.getAnchor().isEnabled() && llmClient != null) {
@@ -803,16 +845,19 @@ public class SnapAgentAutoConfiguration {
             cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
             cn.watsontech.snapagent.core.patrol.PatrolLockProvider patrolLockProvider,
             SnapAgentProperties props,
-            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider) {
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannelProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider) {
         List<cn.watsontech.snapagent.core.patrol.AlertPushChannel> pushChannels =
                 new ArrayList<cn.watsontech.snapagent.core.patrol.AlertPushChannel>();
         pushChannels.addAll(pushChannelProvider.orderedStream()
                 .collect(java.util.stream.Collectors.toList()));
-        log.info("ScheduledPatrolScheduler assembled (lockProvider={}, pushChannels={}, lockTtl={}s)",
-                patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds());
+        cn.watsontech.snapagent.core.patrol.AlertConverger alertConverger = alertConvergerProvider.getIfAvailable();
+        log.info("ScheduledPatrolScheduler assembled (lockProvider={}, pushChannels={}, lockTtl={}s, alertConverger={})",
+                patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds(),
+                alertConverger != null ? alertConverger.getClass().getSimpleName() : "none");
         return new cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler(
                 patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore,
-                patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels);
+                patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels, alertConverger);
     }
 
     // ---- InMemoryAlertConverger (v0.5) ----

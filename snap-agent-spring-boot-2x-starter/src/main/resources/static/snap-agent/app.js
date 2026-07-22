@@ -1799,7 +1799,16 @@ async function reconnectRunningTasks() {
 
 function openFeatureModal(title, bodyHtml) {
     var existing = document.getElementById('featureModal');
-    if (existing) existing.remove();
+    if (existing) {
+        // Reuse existing modal — update title, only replace body if bodyHtml provided
+        var titleEl = existing.querySelector('.history-modal-title');
+        if (titleEl) titleEl.textContent = title;
+        if (bodyHtml) {
+            var bodyEl = existing.querySelector('.history-modal-body');
+            if (bodyEl) bodyEl.innerHTML = bodyHtml;
+        }
+        return existing;
+    }
     var modal = document.createElement('div');
     modal.className = 'history-modal';
     modal.id = 'featureModal';
@@ -1809,7 +1818,7 @@ function openFeatureModal(title, bodyHtml) {
                 '<span class="history-modal-title">' + escapeHtml(title) + '</span>' +
                 '<button class="history-modal-close" id="featureModalClose">✕</button>' +
             '</div>' +
-            '<div class="history-modal-body">' + bodyHtml + '</div>' +
+            '<div class="history-modal-body">' + (bodyHtml || '') + '</div>' +
         '</div>';
     document.body.appendChild(modal);
     modal.addEventListener('click', function(e) {
@@ -1824,7 +1833,8 @@ function featureEmpty(msg) {
 
 // --- Tools & Plugins ---
 async function showToolsModal() {
-    var modal = openFeatureModal('工具 & 插件', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('工具 & 插件', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var toolsResp = await fetch(BASE + '/tools', { headers: authHeaders() });
@@ -1917,8 +1927,73 @@ async function showToolsModal() {
 }
 
 // --- Workflows ---
+function extractTriggerVars(steps) {
+    var vars = [];
+    var seen = {};
+    var pattern = /\$\{trigger\.(\w+)\}/g;
+    steps.forEach(function(step) {
+        var inputs = step.inputs || {};
+        for (var key in inputs) {
+            var val = String(inputs[key] || '');
+            var m;
+            while ((m = pattern.exec(val)) !== null) {
+                if (!seen[m[1]]) { seen[m[1]] = true; vars.push(m[1]); }
+            }
+        }
+        var cond = String(step.condition || '');
+        var m2;
+        pattern.lastIndex = 0;
+        while ((m2 = pattern.exec(cond)) !== null) {
+            if (!seen[m2[1]]) { seen[m2[1]] = true; vars.push(m2[1]); }
+        }
+    });
+    return vars;
+}
+
+function renderWorkflowResult(runData) {
+    var html = '<div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">';
+    var statusColor = runData.success ? 'var(--green)' : 'var(--red)';
+    html += '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">';
+    html += '<span style="font-size:12px;font-weight:600;color:' + statusColor + ';">状态: ' + escapeHtml(runData.status || (runData.success ? 'COMPLETED' : 'FAILED')) + '</span>';
+    if (runData.durationMs) {
+        html += '<span style="font-size:11px;color:var(--text-secondary);">耗时: ' + (runData.durationMs / 1000).toFixed(1) + 's</span>';
+    }
+    if (runData.failedStep) {
+        html += '<span style="font-size:11px;color:var(--red);">失败步骤: ' + escapeHtml(runData.failedStep) + '</span>';
+    }
+    if (runData.errorMessage) {
+        html += '<span style="font-size:11px;color:var(--red);">' + escapeHtml(runData.errorMessage) + '</span>';
+    }
+    html += '</div>';
+    var stepResults = runData.stepResults || {};
+    for (var stepName in stepResults) {
+        var sr = stepResults[stepName];
+        var stStatus = sr.status || 'SKIPPED';
+        var stColor = stStatus === 'SUCCEEDED' ? 'var(--green)' : (stStatus === 'FAILED' ? 'var(--red)' : 'var(--text-secondary)');
+        var stBg = stStatus === 'SUCCEEDED' ? 'var(--green-light)' : (stStatus === 'FAILED' ? 'var(--red-light)' : 'var(--bg-hover)');
+        html += '<div style="margin-bottom:8px;padding:8px;background:' + stBg + ';border-radius:6px;border:1px solid var(--border);">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        html += '<span style="font-size:12px;font-weight:600;">' + escapeHtml(stepName) + '</span>';
+        html += '<span style="font-size:11px;font-weight:600;color:' + stColor + ';">' + escapeHtml(stStatus) + '</span>';
+        html += '</div>';
+        if (sr.taskId) {
+            html += '<div style="font-size:10px;color:var(--text-secondary);margin-top:2px;">Task: ' + escapeHtml(sr.taskId) + '</div>';
+        }
+        if (sr.report) {
+            var preview = sr.report.length > 500 ? sr.report.substring(0, 500) + '...' : sr.report;
+            html += '<details style="margin-top:6px;"><summary style="font-size:11px;color:var(--text-link);cursor:pointer;">报告 (' + sr.report.length + ' 字符)</summary>';
+            html += '<div style="margin-top:4px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:6px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(sr.report) + '</div>';
+            html += '</details>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    return html;
+}
+
 async function showWorkflowsModal() {
-    var modal = openFeatureModal('工作流', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('工作流', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/workflows', { headers: authHeaders() });
@@ -1942,6 +2017,7 @@ async function showWorkflowsModal() {
             body.innerHTML = featureEmpty('无已注册工作流');
             return;
         }
+
         var html = '<table class="feature-table"><thead><tr><th>名称</th><th>描述</th><th>步骤数</th><th>操作</th></tr></thead><tbody>';
         workflows.forEach(function(wf) {
             var steps = wf.steps || [];
@@ -1950,11 +2026,11 @@ async function showWorkflowsModal() {
         });
         html += '</tbody></table>';
 
-        // Steps detail
-        html += '<div style="margin-top:16px;">';
+        // Steps detail + trigger inputs + result placeholder
         workflows.forEach(function(wf) {
             var steps = wf.steps || [];
-            html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
+            var triggerVars = extractTriggerVars(steps);
+            html += '<div id="wf-card-' + wf.name.replace(/[^a-zA-Z0-9]/g, '') + '" style="margin-top:16px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
             html += '<div style="font-weight:600;margin-bottom:8px;">' + escapeHtml(wf.name) + ' — 步骤</div>';
             steps.forEach(function(step, idx) {
                 var condHtml = step.condition ? ' <span class="feature-badge orange">条件: ' + escapeHtml(step.condition) + '</span>' : '';
@@ -1962,9 +2038,21 @@ async function showWorkflowsModal() {
                 html += '<div style="padding:4px 0;font-size:12px;color:var(--text-secondary);">' +
                     (idx+1) + '. <strong>' + escapeHtml(step.skill) + '</strong>' + condHtml + failHtml + '</div>';
             });
+            // Trigger inputs
+            if (triggerVars.length > 0) {
+                html += '<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">';
+                html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">触发参数:</div>';
+                triggerVars.forEach(function(v) {
+                    html += '<div style="margin-bottom:4px;display:flex;align-items:center;gap:8px;">';
+                    html += '<label style="font-size:12px;width:100px;flex-shrink:0;">' + escapeHtml(v) + '</label>';
+                    html += '<input type="text" data-wf-trigger="' + escapeHtml(wf.name) + '" data-var="' + escapeHtml(v) + '" placeholder="输入 ' + escapeHtml(v) + '" style="flex:1;padding:4px 8px;font-size:12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-input);"></div>';
+                });
+                html += '</div>';
+            }
+            // Result placeholder
+            html += '<div data-wf-result="' + escapeHtml(wf.name) + '"></div>';
             html += '</div>';
         });
-        html += '</div>';
 
         body.innerHTML = html;
 
@@ -1974,13 +2062,31 @@ async function showWorkflowsModal() {
                 var wfName = btn.dataset.workflow;
                 btn.disabled = true;
                 btn.textContent = '运行中...';
+
+                // Build trigger inputs from fields
+                var triggerInputs = {};
+                body.querySelectorAll('[data-wf-trigger="' + wfName + '"]').forEach(function(el) {
+                    var varName = el.dataset.var;
+                    if (el.value) triggerInputs[varName] = el.value;
+                });
+
+                var resultDiv = body.querySelector('[data-wf-result="' + wfName + '"]');
+                if (resultDiv) resultDiv.innerHTML = '<div style="margin-top:8px;font-size:12px;color:var(--text-secondary);">运行中，请稍候...</div>';
+
                 try {
                     var runResp = await fetch(BASE + '/workflows/' + encodeURIComponent(wfName) + '/run', {
                         method: 'POST',
                         headers: authHeaders({ 'Content-Type': 'application/json' }),
-                        body: '{}'
+                        body: JSON.stringify(triggerInputs)
                     });
                     var runData = await runResp.json();
+
+                    // Render results
+                    if (resultDiv) {
+                        resultDiv.innerHTML = renderWorkflowResult(runData);
+                    }
+
+                    // Button state
                     if (runData.success) {
                         btn.textContent = '成功';
                         btn.style.background = 'var(--green-light)';
@@ -1998,10 +2104,14 @@ async function showWorkflowsModal() {
                         btn.style.cssText = '';
                     }, 3000);
                 } catch (e) {
+                    if (resultDiv) {
+                        resultDiv.innerHTML = '<div style="margin-top:8px;padding:8px;color:var(--red);font-size:12px;">运行出错: ' + escapeHtml(e.message) + '</div>';
+                    }
                     btn.textContent = '错误';
                     setTimeout(function() {
                         btn.disabled = false;
                         btn.textContent = '运行';
+                        btn.style.cssText = '';
                     }, 3000);
                 }
             });
@@ -2013,7 +2123,8 @@ async function showWorkflowsModal() {
 
 // --- Cost Dashboard ---
 async function showCostModal() {
-    var modal = openFeatureModal('成本看板', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('成本看板', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var now = Date.now();
@@ -2177,7 +2288,8 @@ function buildIssueDetail(run) {
 }
 
 async function showIssuesModal() {
-    var modal = openFeatureModal('问题闭环', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('问题闭环', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         // Single fetch: backend returns terminal runs pre-joined with issue status
@@ -2366,7 +2478,8 @@ async function showIssuesModal() {
 
 // --- Patrol Tasks ---
 async function showPatrolModal() {
-    var modal = openFeatureModal('巡检任务', '<div class="feature-empty">加载中...</div>');
+    var isFirstOpen = !document.getElementById('featureModal');
+    var modal = openFeatureModal('巡检任务', isFirstOpen ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var tasksResp = await fetch(BASE + '/patrol/tasks', { headers: authHeaders() });
@@ -2392,12 +2505,26 @@ async function showPatrolModal() {
         html += '<div id="patrolCreateForm" style="display:none;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">';
         html += '<div style="font-weight:600;margin-bottom:8px;">新建巡检任务</div>';
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称 (可选, 最多20字)</label>' +
+            '<input type="text" id="patrolNameInput" placeholder="留空则自动推断" maxlength="20" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">留空时从 Skill + 指令自动生成 (截断20字)</div></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">Skill</label>' +
             '<select id="patrolSkillSelect" style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
             skillOptions + '</select></div>';
-        html += '<div><label style="font-size:12px;color:var(--text-secondary);">Cron 表达式</label>' +
-            '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * ? (每15分钟)" ' +
-            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></div>';
+        // Cron: quick-select buttons + advanced custom input
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">执行频率</label>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 * * * * *" style="font-size:12px;">每分钟</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0/15 * * * *" style="font-size:12px;">每15分钟</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 * * * *" style="font-size:12px;">每小时</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 8 * * *" style="font-size:12px;">每天8点</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 8 1 * *" style="font-size:12px;">每月1号</button>' +
+            '<button type="button" class="feature-action-btn" id="cronAdvancedBtn" style="font-size:12px;background:var(--bg-input);">高级</button>' +
+            '</div>' +
+            '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * * (6字段, 含秒)" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-family:monospace;display:none;">' +
+            '<div id="cronHint" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div></div>';
         // Dynamic input area: text mode (for skills without inputs) or JSON mode (for skills with inputs)
         html += '<div id="patrolTextInputWrap" style="display:none;">' +
             '<label style="font-size:12px;color:var(--text-secondary);">自然语言指令</label>' +
@@ -2409,9 +2536,9 @@ async function showPatrolModal() {
             '<textarea id="patrolInputsInput" placeholder="{}" rows="3" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;"></textarea></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">告警关键词 (可选, 逗号分隔)</label>' +
-            '<input type="text" id="patrolAlertKeywordsInput" placeholder="例如: 未生成, 0行, 无记录, 失败" ' +
+            '<input type="text" id="patrolAlertKeywordsInput" placeholder="留空则自动推断" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">巡检报告中出现这些词时触发告警推送; 留空则仅用内置关键词 (异常/错误/失败/critical/warning 等)。</div></div>';
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">留空时从自然语言指令自动推断; 后端还有正则兜底 (没有.*数据/0条/为空等)。</div></div>';
         html += '<div style="display:flex;gap:8px;">' +
             '<button class="feature-action-btn" id="patrolSubmitBtn">创建</button>' +
             '<button class="feature-action-btn" id="patrolCancelBtn" style="background:var(--bg-input);">取消</button></div>';
@@ -2421,37 +2548,130 @@ async function showPatrolModal() {
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>上次运行</th><th>操作</th></tr></thead><tbody>';
+            // Build per-task stats from reports
+            var taskStats = {};
+            reports.forEach(function(r) {
+                var pid = r.patrolId;
+                if (!taskStats[pid]) taskStats[pid] = { count: 0, lastTime: 0 };
+                taskStats[pid].count++;
+                var ts = r.triggeredAt || 0;
+                if (ts > taskStats[pid].lastTime) taskStats[pid].lastTime = ts;
+            });
+            html += '<table class="feature-table"><thead><tr><th>名称 / Skill</th><th>Cron</th><th>运行次数</th><th>最后运行</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
-                var badge = t.active || t.enabled ? 'green' : 'orange';
+                var taskId = escapeHtml(t.taskId || t.id);
+                var taskName = escapeHtml(t.name || t.taskName || taskId);
                 var isActive = t.active || t.enabled;
-                html += '<tr><td><code>' + escapeHtml(t.taskId || t.id) + '</code></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
-                    '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
-                    '<td style="font-size:11px;">' + escapeHtml(t.alertKeywords || '—') + '</td>' +
+                var badge = isActive ? 'green' : 'orange';
+                var rawId = t.taskId || t.id;
+                var stats = taskStats[rawId] || { count: 0, lastTime: 0 };
+                var lastRunStr = stats.lastTime ? new Date(stats.lastTime).toLocaleString('zh-CN', {hour12:false}) : '—';
+                html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(t.skillName || t.skillId || t.skill || '') + ' · ' + taskId + '</span></td>' +
+                    '<td><code style="font-size:11px;">' + escapeHtml(t.cron || '') + '</code></td>' +
+                    '<td style="text-align:center;">' + stats.count + '</td>' +
+                    '<td style="font-size:11px;">' + lastRunStr + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
-                    '<td style="font-size:11px;">' + escapeHtml(t.lastRun || '—') + '</td>' +
-                    '<td><button class="feature-action-btn" data-patrol-id="' + escapeHtml(t.taskId || t.id) + '">删除</button></td></tr>';
+                    '<td><button class="feature-action-btn" data-patrol-log="' + taskId + '" style="margin-right:4px;">日志</button>' +
+                    '<button class="feature-action-btn" data-patrol-toggle="' + taskId + '" style="margin-right:4px;">' + (isActive ? '禁用' : '启用') + '</button>' +
+                    '<button class="feature-action-btn" data-patrol-id="' + taskId + '" style="background:var(--red-light);border-color:var(--red);color:var(--red);">删除</button></td></tr>';
             });
             html += '</tbody></table>';
         }
         html += '</div>';
 
-        html += '<div>';
-        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">巡检报告 (' + reports.length + ')</div>';
-        if (reports.length === 0) {
-            html += featureEmpty('无巡检报告');
-        } else {
-            html += '<table class="feature-table"><thead><tr><th>报告 ID</th><th>时间</th><th>状态</th><th>摘要</th></tr></thead><tbody>';
-            reports.forEach(function(r) {
-                var badge = r.severity === 'CRITICAL' ? 'red' : (r.severity === 'WARN' ? 'orange' : 'green');
-                html += '<tr><td><code>' + escapeHtml(r.reportId || r.id) + '</code></td><td style="font-size:11px;">' + escapeHtml(r.timestamp || '') + '</td>' +
-                    '<td><span class="feature-badge ' + badge + '">' + escapeHtml(r.severity || 'INFO') + '</span></td>' +
-                    '<td>' + escapeHtml((r.summary || '').substring(0, 80)) + '</td></tr>';
-            });
-            html += '</tbody></table>';
-        }
-        html += '</div>';
+        // Dynamic log viewer (shown when "日志" button is clicked)
+        html += '<div id="patrolLogViewer" style="display:none;margin-top:16px;"></div>';
+
         body.innerHTML = html;
+
+        // Store reports data for log viewer
+        var allReports = reports;
+        var allTasks = tasks;
+
+        // --- Log viewer function ---
+        function showPatrolLog(patrolId) {
+            var viewer = body.querySelector('#patrolLogViewer');
+            var task = allTasks.find(function(t) { return (t.taskId || t.id) === patrolId; });
+            var taskName = task ? (task.name || task.taskName || patrolId) : patrolId;
+            var taskReports = allReports.filter(function(r) { return r.patrolId === patrolId; });
+
+            var logHtml = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                '<span style="font-size:13px;font-weight:600;color:var(--text-secondary);">' +
+                escapeHtml(taskName) + ' — 执行日志 (' + taskReports.length + ')</span>' +
+                '<button class="feature-action-btn" id="closeLogViewer">关闭</button></div>';
+
+            if (taskReports.length === 0) {
+                logHtml += featureEmpty('该任务暂无执行记录');
+            } else {
+                taskReports.forEach(function(r) {
+                    var isAnomaly = r.anomalyDetected === true;
+                    var badge = isAnomaly ? 'red' : 'green';
+                    var label = isAnomaly ? '告警' : '正常';
+                    var timeStr = r.triggeredAt ? new Date(r.triggeredAt).toLocaleString('zh-CN', {hour12:false}) : '—';
+                    var summary = r.summary || '';
+                    var statusStr = r.status || '';
+                    var summaryPreview = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
+                    logHtml += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isAnomaly ? 'border-left:3px solid var(--red);' : '') + '">';
+                    logHtml += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                    logHtml += '<div style="display:flex;align-items:center;gap:8px;">';
+                    logHtml += '<span class="feature-badge ' + badge + '">' + label + '</span>';
+                    logHtml += '<span style="font-size:11px;color:var(--text-secondary);">' + escapeHtml(statusStr) + '</span>';
+                    logHtml += '<span style="font-size:11px;color:var(--text-muted);">' + timeStr + '</span>';
+                    logHtml += '</div>';
+                    logHtml += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(r.taskId || '') + '</span>';
+                    logHtml += '</div>';
+                    logHtml += '<details style="margin-top:6px;"><summary style="font-size:12px;color:var(--text-link);cursor:pointer;">' + escapeHtml(summaryPreview) + '</summary>';
+                    logHtml += '<div style="margin-top:6px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(summary) + '</div>';
+                    logHtml += '</details>';
+                    logHtml += '</div>';
+                });
+            }
+            viewer.innerHTML = logHtml;
+            viewer.style.display = 'block';
+            viewer.scrollIntoView({behavior:'smooth', block:'nearest'});
+
+            var closeBtn = viewer.querySelector('#closeLogViewer');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    viewer.style.display = 'none';
+                    viewer.innerHTML = '';
+                });
+            }
+        }
+
+        // Attach log buttons
+        body.querySelectorAll('[data-patrol-log]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                showPatrolLog(btn.dataset.patrolLog);
+            });
+        });
+
+        // Attach toggle and delete buttons
+        body.querySelectorAll('[data-patrol-toggle]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                var id = btn.dataset.patrolToggle;
+                btn.disabled = true;
+                try {
+                    var resp = await fetch(BASE + '/patrol/tasks/' + encodeURIComponent(id) + '/toggle', {
+                        method: 'PATCH', headers: authHeaders()
+                    });
+                    if (resp.ok) { showPatrolModal(); }
+                } catch (e) { /* ignore */ }
+                btn.disabled = false;
+            });
+        });
+        body.querySelectorAll('[data-patrol-id]').forEach(function(btn) {
+            btn.addEventListener('click', async function() {
+                var id = btn.dataset.patrolId;
+                if (!confirm('删除巡检任务 ' + id + '?')) return;
+                try {
+                    var resp = await fetch(BASE + '/patrol/tasks/' + encodeURIComponent(id), {
+                        method: 'DELETE', headers: authHeaders()
+                    });
+                    if (resp.ok) { showPatrolModal(); }
+                } catch (e) { /* ignore */ }
+            });
+        });
 
         // Attach create button toggle
         var createBtn = body.querySelector('#createPatrolBtn');
@@ -2460,6 +2680,8 @@ async function showPatrolModal() {
         var cancelBtn = body.querySelector('#patrolCancelBtn');
         var skillSelect = body.querySelector('#patrolSkillSelect');
         var cronInput = body.querySelector('#patrolCronInput');
+        var cronHint = body.querySelector('#cronHint');
+        var nameInput = body.querySelector('#patrolNameInput');
         var textInput = body.querySelector('#patrolTextInput');
         var jsonInput = body.querySelector('#patrolInputsInput');
         var textWrap = body.querySelector('#patrolTextInputWrap');
@@ -2467,7 +2689,52 @@ async function showPatrolModal() {
         var alertKwInput = body.querySelector('#patrolAlertKeywordsInput');
         var statusDiv = body.querySelector('#patrolCreateStatus');
 
-        // Toggle between text mode (no inputs) and JSON mode (has inputs) based on skill selection
+        // Cron preset buttons
+        var cronLabels = {
+            '0 * * * * *': '每分钟',
+            '0 0/15 * * * *': '每15分钟',
+            '0 0 * * * *': '每小时',
+            '0 0 8 * * *': '每天8点',
+            '0 0 8 1 * *': '每月1号8点'
+        };
+        var selectedCron = null;
+
+        body.querySelectorAll('.cron-preset').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                selectedCron = btn.dataset.cron;
+                // Highlight selected preset, dim others
+                body.querySelectorAll('.cron-preset').forEach(function(b) {
+                    b.style.borderColor = 'var(--border)';
+                    b.style.background = 'var(--bg-input)';
+                });
+                btn.style.borderColor = 'var(--text-link)';
+                btn.style.background = 'var(--bg-card)';
+                if (cronHint) cronHint.textContent = '已选择: ' + cronLabels[selectedCron] + ' (' + selectedCron + ')';
+            });
+        });
+
+        // Advanced toggle — show custom cron input
+        body.querySelector('#cronAdvancedBtn').addEventListener('click', function() {
+            var input = cronInput;
+            if (input.style.display === 'none') {
+                input.style.display = 'block';
+                input.focus();
+                if (cronHint) cronHint.textContent = '输入 6 字段 Cron 表达式 (秒 分 时 日 月 周)';
+            } else {
+                input.style.display = 'none';
+                if (cronHint) cronHint.textContent = '';
+            }
+        });
+        // If user types in advanced input, use that as the cron value
+        cronInput.addEventListener('input', function() {
+            selectedCron = cronInput.value.trim();
+            // Clear preset highlight
+            body.querySelectorAll('.cron-preset').forEach(function(b) {
+                b.style.borderColor = 'var(--border)';
+                b.style.background = 'var(--bg-input)';
+            });
+        });
+
         function toggleInputMode() {
             var skillName = skillSelect.value;
             var skill = (skillsData || []).find(function(s) { return s.name === skillName; });
@@ -2482,6 +2749,52 @@ async function showPatrolModal() {
         }
         skillSelect.addEventListener('change', toggleInputMode);
         toggleInputMode(); // initialize for the default selection
+
+        // LLM-based inference for patrol name and keywords
+        var inferTimer = null;
+        function inferPatrolMeta(text, skillName) {
+            if (!text || text.trim().length < 5) return;
+            if (inferTimer) clearTimeout(inferTimer);
+            inferTimer = setTimeout(async function() {
+                try {
+                    var resp = await fetch(BASE + '/patrol/infer', {
+                        method: 'POST',
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ instruction: text, skillName: skillName })
+                    });
+                    if (!resp.ok) return;
+                    var data = await resp.json();
+                    // Auto-fill name if empty
+                    if (!nameInput.value.trim() && data.name) {
+                        nameInput.value = data.name;
+                        nameInput.placeholder = '';
+                    }
+                    // Auto-fill keywords if empty
+                    if (!alertKwInput.value.trim() && data.keywords) {
+                        alertKwInput.value = data.keywords;
+                        alertKwInput.placeholder = '';
+                    }
+                    // Show hint that inference was applied
+                    var hintEl = document.createElement('div');
+                    hintEl.style.cssText = 'font-size:11px;color:var(--green);margin-top:4px;';
+                    hintEl.textContent = '✓ 已通过 LLM 自动推断名称和关键词';
+                    var existing = createForm.querySelector('.infer-hint');
+                    if (existing) existing.remove();
+                    hintEl.className = 'infer-hint';
+                    alertKwInput.parentElement.appendChild(hintEl);
+                    setTimeout(function() { if (hintEl.parentNode) hintEl.remove(); }, 5000);
+                } catch (e) {
+                    // Silent fail — user can still type manually
+                }
+            }, 800);
+        }
+
+        textInput.addEventListener('blur', function() {
+            inferPatrolMeta(textInput.value.trim(), skillSelect.value);
+        });
+        jsonInput.addEventListener('blur', function() {
+            inferPatrolMeta(jsonInput.value.trim(), skillSelect.value);
+        });
 
         createBtn.addEventListener('click', function() {
             if (createForm.style.display === 'none') {
@@ -2499,10 +2812,11 @@ async function showPatrolModal() {
         });
         submitBtn.addEventListener('click', async function() {
             var skillName = skillSelect.value;
-            var cron = cronInput.value.trim();
+            var cron = selectedCron || cronInput.value.trim();
+            var patrolName = nameInput.value.trim();
             var alertKeywords = alertKwInput.value.trim();
             if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
-            if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
+            if (!cron) { statusDiv.textContent = '请选择执行频率或输入 Cron 表达式'; return; }
 
             // Build inputs: text mode wraps as _user_message, JSON mode parses directly
             var inputsObj;
@@ -2517,6 +2831,9 @@ async function showPatrolModal() {
                 catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
             }
 
+            // Name and keywords are auto-filled via LLM inference on blur.
+            // If still empty, the backend will auto-generate a name.
+
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
             statusDiv.textContent = '';
@@ -2524,7 +2841,7 @@ async function showPatrolModal() {
                 var resp = await fetch(BASE + '/patrol/tasks', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
+                    body: JSON.stringify({ name: patrolName || null, skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
                 });
                 var data = await resp.json();
                 if (!resp.ok) {
@@ -2534,7 +2851,7 @@ async function showPatrolModal() {
                     return;
                 }
                 statusDiv.style.color = 'var(--green)';
-                statusDiv.textContent = '✓ 创建成功, ID: ' + (data.id || '');
+                statusDiv.textContent = '✓ 创建成功: ' + (data.name || data.id || '');
                 submitBtn.textContent = '✓';
                 setTimeout(function() { showPatrolModal(); }, 800);
             } catch (e) {
@@ -2571,7 +2888,8 @@ async function showPatrolModal() {
 
 // --- Alerts ---
 async function showAlertsModal() {
-    var modal = openFeatureModal('告警', '<div class="feature-empty">加载中...</div>');
+    var isFirstOpen = !document.getElementById('featureModal');
+    var modal = openFeatureModal('告警', isFirstOpen ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/alerts', { headers: authHeaders() });
@@ -2581,15 +2899,46 @@ async function showAlertsModal() {
             body.innerHTML = featureEmpty('无活跃告警');
             return;
         }
-        var html = '<table class="feature-table"><thead><tr><th>告警 ID</th><th>类型</th><th>服务</th><th>严重级别</th><th>消息</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+        var html = '';
         alerts.forEach(function(a) {
-            var badge = a.severity === 'CRITICAL' ? 'red' : (a.severity === 'WARN' ? 'orange' : 'green');
-            html += '<tr><td><code>' + escapeHtml(a.alertId || a.id) + '</code></td><td>' + escapeHtml(a.type || '') + '</td>' +
-                '<td>' + escapeHtml(a.service || '') + '</td><td><span class="feature-badge ' + badge + '">' + escapeHtml(a.severity || 'INFO') + '</span></td>' +
-                '<td>' + escapeHtml(a.message || '') + '</td><td>' + escapeHtml(a.timestamp || '') + '</td>' +
-                '<td><button class="feature-action-btn" data-alert-id="' + escapeHtml(a.alertId || a.id) + '">解决</button></td></tr>';
+            var isActive = (a.status || 'ACTIVE') === 'ACTIVE';
+            var badgeColor = isActive ? 'red' : 'green';
+            var statusLabel = isActive ? '告警中' : '已解决';
+            var lastTime = a.lastSeen ? new Date(a.lastSeen).toLocaleString('zh-CN', {hour12:false}) : '—';
+            var firstTime = a.firstSeen ? new Date(a.firstSeen).toLocaleString('zh-CN', {hour12:false}) : '—';
+            var count = a.count || 1;
+            var isContinuous = count > 1;
+            var msg = a.firstMessage || a.message || '';
+            var alertTitle = a.source || a.type || '未知告警';
+            var typeLabel = a.type === 'patrol' ? '巡检告警' : (a.type || '告警');
+            // The alert message is already the LLM-generated ALERT_SUMMARY conclusion
+            // (or the full report for FAILED/TIMEOUT). Display it directly.
+            var summary = msg.length > 200 ? msg.substring(0, 200) + '...' : msg;
+
+            html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isActive ? 'border-left:3px solid var(--red);' : '') + '">';
+            // Title row
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">';
+            html += '<div style="display:flex;align-items:center;gap:8px;">';
+            html += '<span class="feature-badge ' + badgeColor + '">' + statusLabel + '</span>';
+            html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);">' + escapeHtml(alertTitle) + '</span>';
+            html += '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(typeLabel) + '</span>';
+            html += '</div>';
+            if (isActive) {
+                html += '<button class="feature-action-btn" data-alert-id="' + escapeHtml(a.id) + '">标记已解决</button>';
+            }
+            html += '</div>';
+            // Summary text
+            if (summary) {
+                html += '<div style="font-size:12px;color:var(--text-primary);margin-bottom:6px;line-height:1.4;">' + escapeHtml(summary) + '</div>';
+            }
+            // Time + count info
+            html += '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--text-secondary);">';
+            html += '<span>最近告警: <strong>' + lastTime + '</strong></span>';
+            html += '<span>首次: ' + firstTime + '</span>';
+            html += '<span>告警次数: <strong style="color:' + (isContinuous ? 'var(--red)' : 'var(--text-primary)') + ';">' + count + '</strong>' + (isContinuous ? ' (连续告警)' : '') + '</span>';
+            html += '</div>';
+            html += '</div>';
         });
-        html += '</tbody></table>';
         body.innerHTML = html;
 
         body.querySelectorAll('[data-alert-id]').forEach(function(btn) {
@@ -2602,12 +2951,11 @@ async function showAlertsModal() {
                         method: 'POST',
                         headers: authHeaders()
                     });
-                    btn.textContent = '已解决';
-                    btn.style.background = 'var(--green-light)';
-                    btn.style.borderColor = 'var(--green)';
-                    btn.style.color = 'var(--green)';
+                    showAlertsModal();
+                    refreshAlertBadge();
                 } catch (e) {
                     btn.textContent = '失败';
+                    btn.disabled = false;
                 }
             });
         });
@@ -2625,9 +2973,40 @@ document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModa
 document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
 document.getElementById('navKnowledgeBtn').addEventListener('click', showKnowledgeModal);
 
+// --- Alert badge polling ---
+async function refreshAlertBadge() {
+    var badge = document.getElementById('alertBadge');
+    if (!badge) return;
+    try {
+        var resp = await fetch(BASE + '/alerts?page=0&size=1', { headers: authHeaders() });
+        if (!resp.ok) { badge.style.display = 'none'; return; }
+        var data = await resp.json();
+        var activeCount = 0;
+        var alerts = data.alerts || [];
+        alerts.forEach(function(a) {
+            if ((a.status || 'ACTIVE') === 'ACTIVE') activeCount++;
+        });
+        // The API returns paginated; use total as a rough indicator for active count
+        // when the page only fetched 1 item. For accuracy, check if the fetched item is active.
+        // We use total as the badge number since all alerts (active + recently resolved) matter.
+        var total = data.total || 0;
+        if (total > 0) {
+            badge.textContent = total > 99 ? '99+' : total;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (e) {
+        badge.style.display = 'none';
+    }
+}
+refreshAlertBadge();
+setInterval(refreshAlertBadge, 30000);
+
 // --- Knowledge Base ---
 async function showKnowledgeModal() {
-    var modal = openFeatureModal('知识库', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('知识库', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/knowledge/status', { headers: authHeaders() });

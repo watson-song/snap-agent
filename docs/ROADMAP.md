@@ -1278,13 +1278,43 @@ snap-agent:
 
 ---
 
+## v0.5 Plugin Architecture Refactor — 热插拔工具插件（已交付）
 
+**目标**：将工具插件从编译时 SPI 升级为运行时热插拔能力，支持 JAR 上传、动态注册/卸载、启停、设默认，并通过 `pluginOverrides` 实现请求级路由覆盖。
+
+### 已完成
+
+| 项 | 说明 |
+|----|------|
+| PluginDescriptor + PluginRegistry | Core SPI：`PluginDescriptor`(pluginId/toolType/jarPath/classLoader/isDefault/isEnabled) + `PluginRegistry`(register/unregister/setEnabled/setDefault/getDefault/getAll/isRegistered)；`InMemoryPluginRegistry` 线程安全实现（synchronized + 默认覆盖清除旧标记） |
+| JAR 上传 + 元数据扫描 | `PluginUploader`：临时 JAR → `PluginMetadataScanner`(JarFile 扫描 `plugin-info.yml`) → `PluginInfoYmlParser`(SnakeYAML + LoaderOptions 防 billion laughs) → 正则校验 pluginId(`^[a-zA-Z0-9_-]+$` 防 path traversal) → 持久化 JAR + URLClassLoader 隔离加载 |
+| 运行时管理 REST API | `SnapAgentController` 新增端点：`POST /plugins/upload`(multipart)、`DELETE /plugins/{id}`(卸载+清理 ClassLoader+删 JAR)、`POST /plugins/{id}/enable`、`POST /plugins/{id}/disable`、`POST /plugins/{id}/set-default`、`GET /plugins`(列表) |
+| pluginOverrides 路由 | `POST /runs` 请求体支持 `pluginOverrides` Map<String,String>（toolType→pluginId），AgentExecutor 执行前覆盖默认插件路由，实现请求级插件选择 |
+| URLClassLoader 隔离 | 每个插件 JAR 独立 `URLClassLoader`（parent=AppClassLoader），卸载时 `close()` + 删除 JAR 文件，防止资源泄漏 |
+| Maven Archetype 脚手架 | `snap-agent-plugin-archetype` 模块：`mvn archetype:generate` 生成标准插件项目骨架（pom.xml + PluginInfo.yml + 示例 ToolProvider + @ToolPluginAnnotation） |
+
+### 安全加固
+
+- pluginId 正则校验 `^[a-zA-Z0-9_-]+$`，防止 path traversal
+- URLClassLoader.close() + JAR 文件删除，卸载时防止资源泄漏
+- synchronized registry 方法，防止竞态条件
+- SnakeYAML `LoaderOptions.setMaxAliasesForCollections(50)`，防止 YAML billion laughs 攻击
+- JarFile 路径用 `Paths.get(jarUrl.toURI()).toFile()` 代替 `new File(jarUrl.getFile())`，处理空格/中文路径
+
+### 测试
+
+- `InMemoryPluginRegistryTest`（12 cases）: 注册/注销/启停/设默认/覆盖默认清除旧标记/未注册插件操作
+- `PluginUploaderTest`（9 cases）: 上传成功/空文件/无效 YAML/path traversal 拒绝/特殊字符拒绝/cleanupPlugin 生命周期/null 描述符/null ClassLoader/JAR 路径
+- `PluginInfoYmlParserTest`（5 cases）: 正常解析/空文件/缺失字段/无 pluginId/maxAliases 防护
+- `PluginMetadataScannerTest`（3 cases）: 扫描 plugin-info.yml/无元数据 JAR/URI 异常处理
+
+---
 
 1. **嵌入式优先** — 永远是库，不是独立服务。不增加运维负担。
 2. **只读优先** — 内置工具默认只读。写操作需要自定义 ToolProvider 且明确标注风险。
 3. **零影响** — `enabled=false` 时不创建任何 Bean。宿主不感知。
 4. **Skill 驱动** — 新场景 = 新 Markdown 文件，不需要写代码（除非需要新工具）。
-5. **工具可扩展** — `ToolProvider` SPI + `@Component`，零配置自动发现。
+5. **工具可扩展** — `ToolProvider` SPI + `@Component` 零配置自动发现；v0.5 起支持 JAR 热插拔（PluginRegistry 运行时注册/卸载/启停/设默认）。
 6. **安全内建** — SqlGuard、限流、审计、SecurityGateway，安全不是后加的。
 7. **成本透明** — 从 v1.0 起，每次 LLM 调用的成本可追溯、可预算、可控制。
 8. **知识沉淀** — 诊断不是一次性的，经验自动提取、人工确认、反哺知识库。
