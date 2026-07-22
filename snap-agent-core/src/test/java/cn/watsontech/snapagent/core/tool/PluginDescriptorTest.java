@@ -9,13 +9,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PluginDescriptorTest {
 
-    private ToolProvider mockProvider() {
-        return Mockito.mock(ToolProvider.class);
-    }
-
     @Test
     void shouldHoldAllFields() {
-        ToolProvider provider = mockProvider();
+        ToolProvider provider = Mockito.mock(ToolProvider.class);
         PluginContext ctx = Mockito.mock(PluginContext.class);
         PluginDescriptor desc = new PluginDescriptor(
                 "remote-log", "log_read", "Remote Log", "Query Loki", "1.2.0",
@@ -36,10 +32,10 @@ class PluginDescriptorTest {
     }
 
     @Test
-    void shouldDefaultEnabledToTrue() {
+    void shouldStoreEnabledFromConstructor() {
         PluginDescriptor desc = new PluginDescriptor(
                 "p1", "t1", "P1", "", "1.0",
-                false, true, true, mockProvider(), null, null, null);
+                false, true, true, Mockito.mock(ToolProvider.class), null, null, null);
 
         assertThat(desc.isEnabled()).isTrue();
     }
@@ -48,7 +44,7 @@ class PluginDescriptorTest {
     void shouldAllowModifyingDefaultFlag() {
         PluginDescriptor desc = new PluginDescriptor(
                 "p1", "t1", "P1", "", "1.0",
-                true, true, true, mockProvider(), null, null, null);
+                true, true, true, Mockito.mock(ToolProvider.class), null, null, null);
 
         desc.setDefault(false);
         assertThat(desc.isDefault()).isFalse();
@@ -61,7 +57,7 @@ class PluginDescriptorTest {
     void shouldAllowModifyingEnabledFlag() {
         PluginDescriptor desc = new PluginDescriptor(
                 "p1", "t1", "P1", "", "1.0",
-                true, true, true, mockProvider(), null, null, null);
+                true, true, true, Mockito.mock(ToolProvider.class), null, null, null);
 
         desc.setEnabled(false);
         assertThat(desc.isEnabled()).isFalse();
@@ -74,7 +70,7 @@ class PluginDescriptorTest {
     void shouldAllowNullableClassLoaderJarPathAndPluginContext() {
         PluginDescriptor desc = new PluginDescriptor(
                 "p1", "t1", "P1", "", "1.0",
-                false, true, true, mockProvider(), null, null, null);
+                false, true, true, Mockito.mock(ToolProvider.class), null, null, null);
 
         assertThat(desc.getClassLoader()).isNull();
         assertThat(desc.getJarPath()).isNull();
