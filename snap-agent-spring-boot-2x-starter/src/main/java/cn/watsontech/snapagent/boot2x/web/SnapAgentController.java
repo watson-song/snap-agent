@@ -868,7 +868,13 @@ public class SnapAgentController {
 
         // Create task (with optional conversation history for follow-up questions)
         List<Message> history = extractHistory(body.get("history"));
-        AgentTask task = AgentTask.create(userId, skillId, inputs, model, history);
+        // Parse and validate plugin overrides (v0.5)
+        Map<String, String> pluginOverrides = extractPluginOverrides(body.get("pluginOverrides"));
+        String overrideError = validatePluginOverrides(pluginOverrides);
+        if (overrideError != null) {
+            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_PLUGIN_OVERRIDE", overrideError);
+        }
+        AgentTask task = AgentTask.create(userId, skillId, inputs, model, history, pluginOverrides);
         taskStore.save(task);
 
         // Submit to executor
@@ -2798,5 +2804,39 @@ public class SnapAgentController {
             }
         }
         return messages.isEmpty() ? null : messages;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> extractPluginOverrides(Object raw) {
+        if (raw == null || !(raw instanceof Map)) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        Map<String, Object> map = (Map<String, Object>) raw;
+        for (Map.Entry<String, Object> e : map.entrySet()) {
+            if (e.getValue() != null) {
+                result.put(e.getKey(), String.valueOf(e.getValue()));
+            }
+        }
+        return result;
+    }
+
+    private String validatePluginOverrides(Map<String, String> overrides) {
+        if (overrides == null || overrides.isEmpty()) return null;
+        if (pluginRegistry == null) {
+            return "plugin overrides specified but plugin registry not configured";
+        }
+        for (Map.Entry<String, String> e : overrides.entrySet()) {
+            String toolType = e.getKey();
+            String pluginId = e.getValue();
+            PluginDescriptor desc = pluginRegistry.getPlugin(pluginId);
+            if (desc == null) {
+                return "plugin '" + pluginId + "' for toolType '" + toolType + "' not found";
+            }
+            if (!desc.isEnabled()) {
+                return "plugin '" + pluginId + "' for toolType '" + toolType + "' is disabled";
+            }
+        }
+        return null;
     }
 }
