@@ -701,6 +701,45 @@ curl -u alice:secret -X POST http://localhost:8080/snap-agent/runs \
 
 ---
 
+## 9.6 锚点内容注入（Anchor Content Injection）
+
+### 功能概述
+
+锚点内容注入模式（`data-snap-mode="inject"`）在页面加载时自动请求后端 skill 或 workflow 生成 HTML 内容，并注入到锚点标记位置。适合个性化推荐、系统公告、每日提示等无需用户主动交互的场景。
+
+### 标注注入锚点
+
+```html
+<div data-snap-anchor="公告区域"
+     data-snap-mode="inject"
+     data-snap-skill="announcement"
+     data-snap-cache-ttl="3600"
+     data-snap-fallback='<p>暂不可用</p>'>
+</div>
+```
+
+| 属性 | 说明 |
+|------|------|
+| `data-snap-mode="inject"` | 启用注入模式 |
+| `data-snap-skill` | 技能 ID（与 workflow 二选一，skill 优先） |
+| `data-snap-workflow` | 工作流 ID |
+| `data-snap-cache-ttl` | 缓存 TTL（秒），0=不缓存 |
+| `data-snap-fallback` | 降级 HTML |
+
+### 千人千面
+
+缓存 key 格式：`userId:sourceId:anchorName:pageUrl`。不同用户看到不同的注入内容。
+
+### REST API 调用
+
+```bash
+curl -X POST /snap-agent/anchor/inject \
+  -H "Content-Type: application/json" \
+  -d '{"anchorName":"公告","pageUrl":"/dashboard","skillId":"announcement","cacheTtl":3600}'
+```
+
+---
+
 ## 10. REST API 参考
 
 所有端点挂载在 `${snap-agent.base-path:/snap-agent}` 下。除 `GET /auth-config` 公开外，其余端点要求宿主安全框架已认证用户，并通过 `SecurityGateway.hasPermission(required-permission)` 权限校验。
@@ -758,6 +797,7 @@ curl -u alice:secret -X POST http://localhost:8080/snap-agent/runs \
 | 46 | `GET` | `/anchor.js` | 锚点脚本静态资源（公开，无需认证） |
 | 47 | `GET` | `/anchor/config` | 锚点功能配置（公开）：`{enabled, disabledPaths}` |
 | 48 | `POST` | `/anchor/preprocess` | 锚点预摘要 + 预分类（需认证，返回 `preprocessId`） |
+| 49 | `POST` | `/anchor/inject` | 锚点内容注入（需认证）：skill/workflow 生成 HTML 并缓存 |
 
 ### 10.2 端到端示例：用 curl 跑一次 health-check
 

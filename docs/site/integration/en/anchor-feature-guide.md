@@ -459,6 +459,132 @@ AnchorSkillClassifier ────┘
 
 Log line to confirm: `AnchorOrchestrator wired (anchor feature enabled)`
 
+---
+
+## Content Injection Mode (v0.4.1 New)
+
+### Overview
+
+Content injection mode complements the Q&A mode. On page load, SnapAgent automatically requests the backend skill or workflow to generate HTML content, which is injected at the anchor position. No user interaction is needed — ideal for personalized recommendations, announcements, tips, etc.
+
+### Differences from Q&A Mode
+
+| Feature | Q&A Mode | Injection Mode |
+|---------|---------|----------------|
+| Trigger | User clicks 💬 icon | Automatic on page load |
+| Content source | User question → AI answer | skill/workflow → AI generates HTML |
+| Response | SSE streaming | POST synchronous |
+| Cache | Summary cache (preprocessing) | per-user per-anchor TTL cache |
+| Personalization | Context-based | Per-user (千人千面) |
+
+### HTML Attributes
+
+| Attribute | Required | Description |
+|-----------|----------|-------------|
+| `data-snap-anchor` | Yes | Anchor name for context identification |
+| `data-snap-mode` | Yes | Set to `"inject"` to enable injection mode |
+| `data-snap-skill` | One of two | Skill ID — which skill generates content |
+| `data-snap-workflow` | One of two | Workflow ID — which workflow generates content |
+| `data-snap-cache-ttl` | No | Cache TTL (seconds), 0=no cache, default 3600 |
+| `data-snap-fallback` | No | Fallback HTML when injection fails |
+
+> **Note**: `data-snap-skill` and `data-snap-workflow` can coexist — skill takes precedence. If neither is present, a 400 error is returned.
+
+### Usage Examples
+
+```html
+<!-- Basic injection: skill generates content, 1-hour cache -->
+<div data-snap-anchor="announcement"
+     data-snap-mode="inject"
+     data-snap-skill="announcement"
+     data-snap-cache-ttl="3600">
+</div>
+
+<!-- No-cache realtime content -->
+<div data-snap-anchor="realtime-recommend"
+     data-snap-mode="inject"
+     data-snap-skill="realtime-recommend"
+     data-snap-cache-ttl="0">
+</div>
+
+<!-- Workflow injection -->
+<div data-snap-anchor="daily-summary"
+     data-snap-mode="inject"
+     data-snap-workflow="daily-summary"
+     data-snap-cache-ttl="3600">
+</div>
+
+<!-- With fallback -->
+<div data-snap-anchor="weather"
+     data-snap-mode="inject"
+     data-snap-skill="weather-widget"
+     data-snap-cache-ttl="7200"
+     data-snap-fallback='<p>Weather unavailable</p>'>
+</div>
+```
+
+### Loading State
+
+After the injection request is sent, the anchor position displays a blinking SnapAgent loading animation. On success, the animation is replaced with the generated HTML content. On failure, the `data-snap-fallback` content is shown (if configured).
+
+### Per-User Personalization
+
+The injection cache key includes the user ID (`userId:sourceId:anchorName:pageUrl`), so different users see different content. Even with the same skill and anchor, each user's cache is independent.
+
+### REST API
+
+#### `POST /anchor/inject`
+
+Executes a content injection request.
+
+**Headers**: Authentication required (same as other APIs)
+
+**Request body**:
+```json
+{
+  "anchorName": "announcement",
+  "pageUrl": "/dashboard",
+  "skillId": "announcement",
+  "workflowId": null,
+  "cacheTtl": 3600
+}
+```
+
+**Response**:
+```json
+{
+  "html": "<div>...</div>",
+  "cached": false,
+  "generatedAt": "2024-01-01T08:00:00Z"
+}
+```
+
+**Error codes**:
+| HTTP | error | Description |
+|------|-------|-------------|
+| 400 | `INVALID_INPUT` | Missing anchorName or skillId/workflowId |
+| 401 | `UNAUTHORIZED` | Not authenticated |
+| 403 | `FORBIDDEN` | Permission denied |
+| 404 | `SKILL_NOT_FOUND` | Skill not found |
+| 404 | `WORKFLOW_NOT_FOUND` | Workflow not found |
+| 503 | `ANCHOR_DISABLED` | Injection feature not configured |
+
+### Configuration Reference
+
+```yaml
+snap-agent:
+  anchor:
+    enabled: true
+    # Injection mode config
+    injection-cache-max-size: 512          # Max cache entries
+    injection-cache-min-ttl-seconds: 60    # Minimum TTL (seconds)
+    injection-cache-max-ttl-seconds: 604800 # Maximum TTL (seconds), 7-day hard ceiling
+    injection-max-tokens: 4096             # Max tokens for injection LLM calls
+    injection-default-cache-ttl: 3600      # Default TTL (seconds)
+  workflows:
+    enabled: true                          # Required if using workflow injection
+```
+
 ## Further Reading
 
 - [Design Spec](../../../superpowers/specs/2026-07-20-host-page-anchor-qa-design.md)
