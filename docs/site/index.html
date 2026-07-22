@@ -293,8 +293,9 @@
             border-top: none;
             border-radius: 0 0 var(--radius) var(--radius);
             padding: 24px; overflow-x: auto;
-            font-family: var(--mono); font-size: 13px; line-height: 1.6;
+            font-family: var(--mono); font-size: 13px; line-height: 1.7;
             color: var(--text-primary);
+            white-space: pre;
         }
         .code-block .c-key { color: #c792ea; }
         .code-block .c-str { color: #c3e88d; }
@@ -365,6 +366,52 @@
         html[data-lang="zh"] [data-lang="zh"] { display: block; }
         html[data-lang="zh"] [data-lang="en"] { display: none; }
         .lang-block { display: inline; }
+
+        /* ===== Anchor Showcase Section ===== */
+        .anchor-section { background: var(--bg-secondary); }
+        .anchor-showcase {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+            margin-top: 48px;
+        }
+        .anchor-mode-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 28px; transition: all 0.25s;
+        }
+        .anchor-mode-card:hover { border-color: var(--border-hover); }
+        .anchor-mode-card .mode-badge {
+            display: inline-block; font-size: 11px; font-weight: 600;
+            padding: 3px 10px; border-radius: 999px; margin-bottom: 16px;
+            font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .mode-badge.qa { background: var(--purple-light); color: var(--purple); }
+        .mode-badge.inject { background: var(--green-light); color: var(--green); }
+        .anchor-mode-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); }
+        .anchor-mode-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
+        .anchor-attrs {
+            display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;
+        }
+        .anchor-attr {
+            font-family: var(--mono); font-size: 11px;
+            padding: 3px 8px; border-radius: 4px;
+            background: var(--bg-tertiary); color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+        .anchor-code {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 14px 18px;
+            font-family: var(--mono); font-size: 12px; line-height: 1.6;
+            color: var(--text-primary); overflow-x: auto;
+        }
+        .anchor-code .c-com { color: var(--text-muted); }
+        .anchor-code .c-tag { color: #f07178; }
+        .anchor-code .c-attr { color: #ffcb6b; }
+        .anchor-code .c-str { color: #c3e88d; }
+        .anchor-cta {
+            margin-top: 32px; text-align: center;
+        }
+        @media (max-width: 768px) {
+            .anchor-showcase { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body data-lang="zh">
@@ -379,6 +426,9 @@
         <div class="nav-right">
             <a href="#features" class="nav-link">
                 <span data-lang="zh">特性</span><span data-lang="en">Features</span>
+            </a>
+            <a href="#anchor" class="nav-link">
+                <span data-lang="zh">锚点</span><span data-lang="en">Anchor</span>
             </a>
             <a href="#quickstart" class="nav-link">
                 <span data-lang="zh">快速开始</span><span data-lang="en">Quick Start</span>
@@ -420,7 +470,7 @@
         </div>
         <div class="hero-stats">
             <div class="stat">
-                <div class="stat-num">v0.4</div>
+                <div class="stat-num">v0.4.1</div>
                 <div class="stat-label" data-lang="zh">当前版本</div>
                 <div class="stat-label" data-lang="en">Current version</div>
             </div>
@@ -587,6 +637,76 @@
     </div>
 </section>
 
+<!-- ===== Anchor Feature Showcase ===== -->
+<section class="section anchor-section" id="anchor">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">核心功能</span><span data-lang="en">Core Feature</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">页面锚点 — 让每个区块都能 AI 交互</span>
+                <span data-lang="en">Page Anchor — AI interaction for every section</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">一行 script + 一个 data-snap-anchor 属性，让页面上的任意区块获得 AI 驱动的问答和内容注入能力。支持 Q&A 对话和自动注入两种模式。</span>
+                <span data-lang="en">One script tag + one data-snap-anchor attribute gives any page section AI-powered Q&A and content injection. Two modes: Q&A dialog and auto-inject.</span>
+            </p>
+        </div>
+
+        <div class="anchor-showcase">
+            <!-- Q&A Mode -->
+            <div class="anchor-mode-card">
+                <span class="mode-badge qa" data-lang="zh">Q&A 模式</span>
+                <span class="mode-badge qa" data-lang="en" style="display:none">Q&A Mode</span>
+                <h3 data-lang="zh">点击 💬 图标，对区块内容提问</h3>
+                <h3 data-lang="en" style="display:none">Click 💬 icon, ask questions about the section</h3>
+                <p data-lang="zh">用户点击区块右侧的紫色 💬 图标，右侧抽屉打开，AI 基于当前区块的 HTML 内容回答问题。支持智能技能路由、预摘要缓存、Shadow DOM 隔离。</p>
+                <p data-lang="en" style="display:none">Users click the purple 💬 icon, a right-side drawer opens, and the AI answers questions based on the section's HTML content. Smart skill routing, pre-summary cache, Shadow DOM isolation.</p>
+                <div class="anchor-attrs">
+                    <span class="anchor-attr">data-snap-anchor</span>
+                    <span class="anchor-attr">data-snap-skill</span>
+                    <span class="anchor-attr">data-snap-disabled</span>
+                </div>
+                <div class="anchor-code"><span class="c-com">&lt;!-- 标注区块即可 --&gt;</span>
+<span class="c-tag">&lt;section</span> <span class="c-attr">data-snap-anchor</span>=<span class="c-str">"SKU Overview"</span> <span class="c-attr">data-snap-skill</span>=<span class="c-str">"auto"</span><span class="c-tag">&gt;</span>
+    <span class="c-tag">&lt;h2&gt;</span>SKU Overview<span class="c-tag">&lt;/h2&gt;</span>
+    <span class="c-tag">&lt;table&gt;</span>...<span class="c-tag">&lt;/table&gt;</span>
+<span class="c-tag">&lt;/section&gt;</span></div>
+            </div>
+
+            <!-- Inject Mode -->
+            <div class="anchor-mode-card">
+                <span class="mode-badge inject" data-lang="zh">注入模式 v0.4.1</span>
+                <span class="mode-badge inject" data-lang="en" style="display:none">Inject Mode v0.4.1</span>
+                <h3 data-lang="zh">页面加载自动生成 HTML 并注入</h3>
+                <h3 data-lang="en" style="display:none">Auto-generate HTML on page load</h3>
+                <p data-lang="zh">无需用户点击，页面加载时自动请求后端 skill/workflow 生成 HTML 内容并注入到锚点位置。支持千人千面（per-user 缓存键）、per-anchor TTL、降级 fallback、workflow 调用。</p>
+                <p data-lang="en" style="display:none">No user interaction needed — on page load, the backend skill/workflow generates HTML and injects it at the anchor position. Per-user cache keys, per-anchor TTL, fallback support, workflow invocation.</p>
+                <div class="anchor-attrs">
+                    <span class="anchor-attr">data-snap-mode="inject"</span>
+                    <span class="anchor-attr">data-snap-skill</span>
+                    <span class="anchor-attr">data-snap-cache-ttl</span>
+                    <span class="anchor-attr">data-snap-fallback</span>
+                    <span class="anchor-attr">data-snap-workflow</span>
+                </div>
+                <div class="anchor-code"><span class="c-com">&lt;!-- 页面加载自动注入公告 --&gt;</span>
+<span class="c-tag">&lt;div</span> <span class="c-attr">data-snap-anchor</span>=<span class="c-str">"公告"</span>
+     <span class="c-attr">data-snap-mode</span>=<span class="c-str">"inject"</span>
+     <span class="c-attr">data-snap-skill</span>=<span class="c-str">"announcement"</span>
+     <span class="c-attr">data-snap-cache-ttl</span>=<span class="c-str">"3600"</span>
+     <span class="c-attr">data-snap-fallback</span>=<span class="c-str">'&lt;p&gt;暂不可用&lt;/p&gt;'</span><span class="c-tag">&gt;&lt;/div&gt;</span></div>
+            </div>
+        </div>
+
+        <div class="anchor-cta">
+            <a href="docs.html#anchor-feature-guide" class="btn-secondary">
+                📖 <span data-lang="zh">查看完整接入指南</span><span data-lang="en">Read Integration Guide</span>
+            </a>
+        </div>
+    </div>
+</section>
+
 <!-- ===== Architecture ===== -->
 <section class="section arch-section" id="architecture">
     <div class="container">
@@ -691,14 +811,14 @@
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-spring-boot-2x-starter</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.0</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.1</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
 
 <span class="c-com">&lt;!-- 2. (可选) REST API SDK 用于外部调用 --&gt;</span>
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-client</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.0</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.1</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
         </div>
 
@@ -808,11 +928,11 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                 <div class="doc-icon">💬</div>
                 <div class="doc-body">
                     <h4>
-                        <span data-lang="zh">锚点问答接入指南</span><span data-lang="en">Anchor Q&A Integration Guide</span>
+                        <span data-lang="zh">锚点问答与内容注入指南</span><span data-lang="en">Anchor Q&A + Injection Guide</span>
                     </h4>
                     <p>
-                        <span data-lang="zh">anchor.js 引入、data-snap-anchor 标注 API、SecurityGateway 集成、智能技能路由、预摘要缓存、Shadow DOM 隔离、SPA 适配、移动端。</span>
-                        <span data-lang="en">anchor.js setup, data-snap-anchor API, SecurityGateway integration, smart skill routing, pre-summary cache, Shadow DOM isolation, SPA compat, mobile.</span>
+                        <span data-lang="zh">anchor.js 引入、data-snap-anchor 标注 API、Q&A 模式、注入模式 (data-snap-mode=inject)、SecurityGateway 集成、智能技能路由、预摘要缓存、Shadow DOM 隔离、SPA 适配、移动端。</span>
+                        <span data-lang="en">anchor.js setup, data-snap-anchor API, Q&A mode, inject mode (data-snap-mode=inject), SecurityGateway integration, smart skill routing, pre-summary cache, Shadow DOM isolation, SPA compat, mobile.</span>
                     </p>
                     <div class="doc-links"><a href="docs.html#anchor-feature-guide"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
@@ -939,25 +1059,24 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
     <div class="container footer-inner">
         <div class="footer-brand">
             <span class="logo-icon">⚡</span>
-            <span>SnapAgent v0.4</span>
+            <span>SnapAgent v0.4.1</span>
             <span style="margin-left: 16px;" data-lang="zh">嵌入式 AI 技能框架</span>
             <span style="margin-left: 16px;" data-lang="en">Embeddable AI Skill Framework</span>
         </div>
         <div class="footer-meta">
-            <span data-lang="zh">基于 v0.4 现状编写 · </span>
-            <span data-lang="en">Documented against v0.4 · </span>
-            <a href="README.md">文档索引 / Index</a>
+            <span data-lang="zh">基于 v0.4.1 现状编写 · </span>
+            <span data-lang="en">Documented against v0.4.1 · </span>
+            <a href="README.md" id="footerReadmeLink">文档索引 / Index</a>
         </div>
     </div>
 </footer>
 
 <script>
-    // ===== Bilingual toggle =====
+    // ===== Bilingual toggle (URL-based: ?lang=en) =====
     const langToggle = document.getElementById('langToggle');
     const pageTitle = document.getElementById('pageTitle');
     const metaDescription = document.getElementById('metaDescription');
     const htmlEl = document.documentElement;
-    const supportedLangs = ['zh', 'en'];
 
     function applyLang(lang) {
         htmlEl.setAttribute('data-lang', lang);
@@ -982,14 +1101,30 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
         const current = htmlEl.getAttribute('data-lang') || 'zh';
         const next = current === 'zh' ? 'en' : 'zh';
         applyLang(next);
-        try { localStorage.setItem('snapagent-lang', next); } catch (e) {}
+        // Update URL without reload
+        const url = new URL(window.location);
+        url.searchParams.set('lang', next);
+        window.history.replaceState({}, '', url);
     });
 
-    // Restore saved language preference on load
-    try {
-        const saved = localStorage.getItem('snapagent-lang');
-        if (saved && supportedLangs.includes(saved) && saved !== 'zh') applyLang(saved);
-    } catch (e) {}
+    // Make doc links carry the current language
+    document.querySelectorAll('a[href^="docs.html#"]').forEach(a => {
+        a.addEventListener('click', function(e) {
+            e.preventDefault();
+            const lang = htmlEl.getAttribute('data-lang') || 'zh';
+            const hash = this.getAttribute('href').replace('docs.html', '');
+            window.location.href = 'docs.html?lang=' + lang + hash;
+        });
+    });
+
+    // Read language from URL ?lang=en
+    (function initLang() {
+        const params = new URLSearchParams(window.location.search);
+        const lang = params.get('lang');
+        if (lang === 'en' || lang === 'zh') {
+            applyLang(lang);
+        }
+    })();
 
     // ===== Quick start tabs =====
     const tabs = document.querySelectorAll('.qs-tab');

@@ -19,6 +19,6 @@
 
 ## 版本 | Version
 
-本文档基于 SnapAgent v1.1 现状编写（v1.1 新增：PatrolLockProvider SPI、AlertPushChannel SPI、PatrolReportStore SPI 化、知识点列表 API、页面区域锚点问答 AnchorOrchestrator、锚点内容注入 AnchorInjectionOrchestrator）。
+本文档基于 SnapAgent v0.4.1 现状编写（v0.4 新增：页面区域锚点问答 AnchorOrchestrator；v0.4.1 新增：锚点内容注入 AnchorInjectionOrchestrator）。
 
-Documentation based on SnapAgent v1.1 current state (v1.1 additions: PatrolLockProvider SPI, AlertPushChannel SPI, PatrolReportStore SPI refactor, knowledge fragment list API, page-section anchor Q&A AnchorOrchestrator, anchor content injection AnchorInjectionOrchestrator).
+Documentation based on SnapAgent v0.4.1 current state (v0.4 additions: page-section anchor Q&A AnchorOrchestrator; v0.4.1 additions: anchor content injection AnchorInjectionOrchestrator).
