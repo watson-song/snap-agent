@@ -86,4 +86,9 @@ public class SkuController {
 
         return "sku-detail";
     }
+
+    @GetMapping("/inject-demo")
+    public String injectDemo() {
+        return "inject-demo";
+    }
 }

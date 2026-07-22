@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>SnapAgent Inject Demo</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #1a1a1a; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #4f46e5; }
+        .section { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <h1>SnapAgent 锚点注入 Demo</h1>
+
+        <p>以下区域使用 <code>data-snap-mode="inject"</code> 标记，
+        页面加载时会自动触发后端 skill 生成 HTML 内容并注入。</p>
+
+        <!-- 公告锚点：skill 源，1 小时缓存，有 fallback -->
+        <section class="section">
+            <h2>公告区域</h2>
+            <div data-snap-anchor="公告区域"
+                 data-snap-mode="inject"
+                 data-snap-skill="announcement"
+                 data-snap-cache-ttl="3600"
+                 data-snap-fallback='<p style="color:#999;text-align:center;">公告暂不可用</p>'>
+            </div>
+        </section>
+
+        <!-- 每日提示锚点：skill 源，24 小时缓存 -->
+        <section class="section">
+            <h2>每日提示</h2>
+            <div data-snap-anchor="每日提示"
+                 data-snap-mode="inject"
+                 data-snap-skill="daily-tips"
+                 data-snap-cache-ttl="86400">
+            </div>
+        </section>
+
+        <!-- 不缓存的实时内容 -->
+        <section class="section">
+            <h2>实时推荐</h2>
+            <div data-snap-anchor="实时推荐"
+                 data-snap-mode="inject"
+                 data-snap-skill="realtime-recommend"
+                 data-snap-cache-ttl="0"
+                 data-snap-fallback='<p style="color:#999;">推荐加载中...</p>'>
+            </div>
+        </section>
+    </main>
+
+    <script src="/snap-agent/anchor.js" defer></script>
+</body>
+</html>
