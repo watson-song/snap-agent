@@ -1237,6 +1237,7 @@ Agent (内置 cost-analysis Skill):
 | FileConversationStore taskId 修复 | `toMap/fromMap` 漏掉 `taskId` 字段导致前端刷新后丢失问题闭环 badge，已修复 |
 | NoopMarkerBean 模式 | 当 optional 依赖（如 JavaMailSender）缺失时，返回 marker bean 而非 null，保持 Spring 兼容性 |
 | AnchorOrchestrator 锚点问答 | 页面区域锚点问答功能：宿主引入 `anchor.js` + `data-snap-anchor` 标注 → 用户点击 💬 图标 → 右侧抽屉打开 → 针对页面区域内容发起 LLM 问答；含智能技能路由 (AnchorSkillClassifier)、预摘要缓存 (AnchorSummaryCache)、Shadow DOM 隔离 |
+| AnchorInjectionOrchestrator 锚点内容注入 | 页面加载时自动请求后端 skill/workflow 生成 HTML 并注入锚点位置；支持 `data-snap-mode="inject"` 标注、per-user per-anchor TTL 缓存（AnchorInjectionCache）、千人千面、workflow 调用、`data-snap-fallback` 降级、`POST /anchor/inject` 端点 |
 
 ### 配置
 
