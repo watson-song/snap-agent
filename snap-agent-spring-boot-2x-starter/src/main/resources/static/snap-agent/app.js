@@ -1799,7 +1799,16 @@ async function reconnectRunningTasks() {
 
 function openFeatureModal(title, bodyHtml) {
     var existing = document.getElementById('featureModal');
-    if (existing) existing.remove();
+    if (existing) {
+        // Reuse existing modal — update title, only replace body if bodyHtml provided
+        var titleEl = existing.querySelector('.history-modal-title');
+        if (titleEl) titleEl.textContent = title;
+        if (bodyHtml) {
+            var bodyEl = existing.querySelector('.history-modal-body');
+            if (bodyEl) bodyEl.innerHTML = bodyHtml;
+        }
+        return existing;
+    }
     var modal = document.createElement('div');
     modal.className = 'history-modal';
     modal.id = 'featureModal';
@@ -1809,7 +1818,7 @@ function openFeatureModal(title, bodyHtml) {
                 '<span class="history-modal-title">' + escapeHtml(title) + '</span>' +
                 '<button class="history-modal-close" id="featureModalClose">✕</button>' +
             '</div>' +
-            '<div class="history-modal-body">' + bodyHtml + '</div>' +
+            '<div class="history-modal-body">' + (bodyHtml || '') + '</div>' +
         '</div>';
     document.body.appendChild(modal);
     modal.addEventListener('click', function(e) {
@@ -1824,7 +1833,8 @@ function featureEmpty(msg) {
 
 // --- Tools & Plugins ---
 async function showToolsModal() {
-    var modal = openFeatureModal('工具 & 插件', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('工具 & 插件', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var toolsResp = await fetch(BASE + '/tools', { headers: authHeaders() });
@@ -1982,7 +1992,8 @@ function renderWorkflowResult(runData) {
 }
 
 async function showWorkflowsModal() {
-    var modal = openFeatureModal('工作流', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('工作流', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/workflows', { headers: authHeaders() });
@@ -2112,7 +2123,8 @@ async function showWorkflowsModal() {
 
 // --- Cost Dashboard ---
 async function showCostModal() {
-    var modal = openFeatureModal('成本看板', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('成本看板', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var now = Date.now();
@@ -2276,7 +2288,8 @@ function buildIssueDetail(run) {
 }
 
 async function showIssuesModal() {
-    var modal = openFeatureModal('问题闭环', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('问题闭环', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         // Single fetch: backend returns terminal runs pre-joined with issue status
@@ -2465,7 +2478,8 @@ async function showIssuesModal() {
 
 // --- Patrol Tasks ---
 async function showPatrolModal() {
-    var modal = openFeatureModal('巡检任务', '<div class="feature-empty">加载中...</div>');
+    var isFirstOpen = !document.getElementById('featureModal');
+    var modal = openFeatureModal('巡检任务', isFirstOpen ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var tasksResp = await fetch(BASE + '/patrol/tasks', { headers: authHeaders() });
@@ -2524,14 +2538,27 @@ async function showPatrolModal() {
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>Cron</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            // Build per-task stats from reports
+            var taskStats = {};
+            reports.forEach(function(r) {
+                var pid = r.patrolId;
+                if (!taskStats[pid]) taskStats[pid] = { count: 0, lastTime: 0 };
+                taskStats[pid].count++;
+                var ts = r.triggeredAt || 0;
+                if (ts > taskStats[pid].lastTime) taskStats[pid].lastTime = ts;
+            });
+            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>运行次数</th><th>最后运行</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
                 var taskId = escapeHtml(t.taskId || t.id);
                 var taskName = escapeHtml(t.name || t.taskName || taskId);
                 var isActive = t.active || t.enabled;
                 var badge = isActive ? 'green' : 'orange';
+                var rawId = t.taskId || t.id;
+                var stats = taskStats[rawId] || { count: 0, lastTime: 0 };
+                var lastRunStr = stats.lastTime ? new Date(stats.lastTime).toLocaleString('zh-CN', {hour12:false}) : '—';
                 html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + taskId + '</span></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
-                    '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
+                    '<td style="text-align:center;">' + stats.count + '</td>' +
+                    '<td style="font-size:11px;">' + lastRunStr + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
                     '<td><button class="feature-action-btn" data-patrol-log="' + taskId + '" style="margin-right:4px;">日志</button>' +
                     '<button class="feature-action-btn" data-patrol-toggle="' + taskId + '" style="margin-right:4px;">' + (isActive ? '禁用' : '启用') + '</button>' +
@@ -2829,7 +2856,8 @@ async function showPatrolModal() {
 
 // --- Alerts ---
 async function showAlertsModal() {
-    var modal = openFeatureModal('告警', '<div class="feature-empty">加载中...</div>');
+    var isFirstOpen = !document.getElementById('featureModal');
+    var modal = openFeatureModal('告警', isFirstOpen ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/alerts', { headers: authHeaders() });
@@ -2902,6 +2930,7 @@ async function showAlertsModal() {
                         headers: authHeaders()
                     });
                     showAlertsModal();
+                    refreshAlertBadge();
                 } catch (e) {
                     btn.textContent = '失败';
                     btn.disabled = false;
@@ -2954,7 +2983,8 @@ setInterval(refreshAlertBadge, 30000);
 
 // --- Knowledge Base ---
 async function showKnowledgeModal() {
-    var modal = openFeatureModal('知识库', '<div class="feature-empty">加载中...</div>');
+    var _first = !document.getElementById('featureModal');
+    var modal = openFeatureModal('知识库', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
         var resp = await fetch(BASE + '/knowledge/status', { headers: authHeaders() });
