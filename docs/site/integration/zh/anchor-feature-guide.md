@@ -459,6 +459,132 @@ AnchorSkillClassifier ────┘
 
 日志可见：`AnchorOrchestrator wired (anchor feature enabled)`
 
+---
+
+## 内容注入模式（v0.4.1 新增）
+
+### 概述
+
+内容注入模式是 Q&A 模式的补充。页面加载时，SnapAgent 自动请求后端 skill 或 workflow 生成 HTML 内容，并注入到锚点标记的位置。无需用户点击，适合个性化推荐、公告、提示等场景。
+
+### 与 Q&A 模式的区别
+
+| 特性 | Q&A 模式 | 注入模式 |
+|------|---------|---------|
+| 触发方式 | 用户点击 💬 图标 | 页面加载自动触发 |
+| 内容来源 | 用户提问 → AI 回答 | skill/workflow → AI 生成 HTML |
+| 响应方式 | SSE 流式 | POST 同步 |
+| 缓存 | 摘要缓存（预处理） | per-user per-anchor TTL 缓存 |
+| 个性化 | 基于上下文 | 千人千面（per-user cache key） |
+
+### HTML 属性
+
+| 属性 | 必填 | 说明 |
+|------|------|------|
+| `data-snap-anchor` | 是 | 锚点名称，用于上下文标识 |
+| `data-snap-mode` | 是 | 设为 `"inject"` 启用注入模式 |
+| `data-snap-skill` | 二选一 | 技能 ID，指定使用哪个 skill 生成内容 |
+| `data-snap-workflow` | 二选一 | 工作流 ID，指定使用哪个 workflow 生成内容 |
+| `data-snap-cache-ttl` | 否 | 缓存 TTL（秒），0=不缓存，默认 3600 |
+| `data-snap-fallback` | 否 | 注入失败时的降级 HTML 内容 |
+
+> **注意**：`data-snap-skill` 和 `data-snap-workflow` 可以同时存在，skill 优先。如果两者都不存在，返回 400 错误。
+
+### 使用示例
+
+```html
+<!-- 基本注入：skill 生成内容，1 小时缓存 -->
+<div data-snap-anchor="公告区域"
+     data-snap-mode="inject"
+     data-snap-skill="announcement"
+     data-snap-cache-ttl="3600">
+</div>
+
+<!-- 不缓存的实时内容 -->
+<div data-snap-anchor="实时推荐"
+     data-snap-mode="inject"
+     data-snap-skill="realtime-recommend"
+     data-snap-cache-ttl="0">
+</div>
+
+<!-- 工作流注入 -->
+<div data-snap-anchor="数据摘要"
+     data-snap-mode="inject"
+     data-snap-workflow="daily-summary"
+     data-snap-cache-ttl="3600">
+</div>
+
+<!-- 带降级 fallback -->
+<div data-snap-anchor="天气"
+     data-snap-mode="inject"
+     data-snap-skill="weather-widget"
+     data-snap-cache-ttl="7200"
+     data-snap-fallback='<p>天气信息暂不可用</p>'>
+</div>
+```
+
+### 加载状态
+
+注入请求发出后，锚点位置会显示一个闪烁的 SnapAgent 加载动画。请求成功后动画被替换为生成的 HTML 内容，失败时显示 `data-snap-fallback` 内容（如果配置了的话）。
+
+### 千人千面
+
+注入模式的缓存 key 包含用户 ID（`userId:sourceId:anchorName:pageUrl`），不同用户看到不同的内容。即使请求相同的 skill 和锚点，不同用户的缓存是独立的。
+
+### REST API
+
+#### `POST /anchor/inject`
+
+执行内容注入请求。
+
+**请求头**：需要认证（同其他 API）
+
+**请求体**：
+```json
+{
+  "anchorName": "公告区域",
+  "pageUrl": "/dashboard",
+  "skillId": "announcement",
+  "workflowId": null,
+  "cacheTtl": 3600
+}
+```
+
+**响应**：
+```json
+{
+  "html": "<div>...</div>",
+  "cached": false,
+  "generatedAt": "2024-01-01T08:00:00Z"
+}
+```
+
+**错误码**：
+| HTTP | error | 说明 |
+|------|-------|------|
+| 400 | `INVALID_INPUT` | 缺少 anchorName 或 skillId/workflowId |
+| 401 | `UNAUTHORIZED` | 未认证 |
+| 403 | `FORBIDDEN` | 无权限 |
+| 404 | `SKILL_NOT_FOUND` | 技能不存在 |
+| 404 | `WORKFLOW_NOT_FOUND` | 工作流不存在 |
+| 503 | `ANCHOR_DISABLED` | 注入功能未配置 |
+
+### 配置参考
+
+```yaml
+snap-agent:
+  anchor:
+    enabled: true
+    # 注入模式配置
+    injection-cache-max-size: 512          # 注入缓存最大条目数
+    injection-cache-min-ttl-seconds: 60    # 最小 TTL（秒）
+    injection-cache-max-ttl-seconds: 604800 # 最大 TTL（秒），7 天硬上限
+    injection-max-tokens: 4096             # 注入 LLM 调用最大 token 数
+    injection-default-cache-ttl: 3600      # 默认 TTL（秒）
+  workflows:
+    enabled: true                          # 如使用 workflow 注入需启用
+```
+
 ## 后续阅读
 
 - [设计 spec](../../../superpowers/specs/2026-07-20-host-page-anchor-qa-design.md)

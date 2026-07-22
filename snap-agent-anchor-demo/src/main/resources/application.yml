@@ -38,8 +38,16 @@ snap-agent:
     classifier-confidence-threshold: 0.5
     summary-cache-ttl-seconds: 600
     classifier-model: ${SNAP_AGENT_LLM_MODEL:claude-sonnet-4-6}
+    # Injection mode config
+    injection-cache-max-size: 512
+    injection-cache-min-ttl-seconds: 60
+    injection-cache-max-ttl-seconds: 604800
+    injection-max-tokens: 4096
+    injection-default-cache-ttl: 3600
     disabled-paths:
       - /payment/**
+  workflows:
+    enabled: true
 
 logging:
   level:

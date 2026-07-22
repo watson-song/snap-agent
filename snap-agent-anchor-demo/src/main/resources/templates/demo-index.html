@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>SnapAgent Anchor Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #f8fafc; color: #1e293b; }
+        .nav { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: white; display: flex; align-items: center; gap: 24px; padding: 12px 32px; }
+        .nav .logo { font-size: 18px; font-weight: 700; }
+        .nav a { color: rgba(255,255,255,0.85); text-decoration: none; font-size: 14px; padding: 4px 12px; border-radius: 6px; transition: all 0.2s; }
+        .nav a:hover { background: rgba(255,255,255,0.15); color: white; }
+        .nav a.active { background: rgba(255,255,255,0.2); color: white; }
+        .nav .spacer { flex: 1; }
+
+        .hero { text-align: center; padding: 60px 32px 40px; }
+        .hero h1 { font-size: 32px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+        .hero .version { color: #6366f1; font-size: 14px; font-weight: 500; margin-bottom: 12px; }
+        .hero p { color: #64748b; font-size: 15px; max-width: 580px; margin: 0 auto; line-height: 1.6; }
+
+        main { max-width: 900px; margin: 0 auto; padding: 0 32px 48px; }
+
+        .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-bottom: 32px; }
+        .feature-card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; overflow: hidden; transition: all 0.2s; text-decoration: none; color: inherit; display: block; }
+        .feature-card:hover { box-shadow: 0 4px 12px rgba(99,102,241,0.15); border-color: #c7d2fe; transform: translateY(-2px); }
+        .feature-card .card-header { padding: 20px; display: flex; align-items: center; gap: 12px; }
+        .feature-card .card-header .icon { width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+        .icon-qa { background: #e0e7ff; }
+        .icon-inject { background: #d1fae5; }
+        .icon-sku { background: #fef3c7; }
+        .icon-doc { background: #fce7f3; }
+        .feature-card h3 { font-size: 15px; font-weight: 600; color: #1e293b; }
+        .feature-card .card-body { padding: 0 20px 20px; }
+        .feature-card .card-body p { font-size: 13px; color: #64748b; line-height: 1.5; }
+        .feature-card .card-body .tags { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+        .feature-card .card-body .tag { font-family: monospace; font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; color: #475569; }
+
+        .arch { background: white; border-radius: 12px; border: 1px solid #e2e8f0; padding: 24px; margin-bottom: 32px; }
+        .arch h2 { font-size: 16px; font-weight: 600; color: #4f46e5; margin-bottom: 16px; }
+        .arch-flow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+        .arch-node { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; text-align: center; }
+        .arch-frontend { background: #dbeafe; color: #1e40af; }
+        .arch-backend { background: #d1fae5; color: #065f46; }
+        .arch-llm { background: #fef3c7; color: #92400e; }
+        .arch-arrow { color: #94a3b8; font-size: 18px; }
+        .arch-note { text-align: center; color: #64748b; font-size: 12px; margin-top: 12px; }
+
+        .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div class="nav">
+    <span class="logo">SnapAgent</span>
+    <a href="/demo" class="active">首页</a>
+    <a href="/">SKU 列表</a>
+    <a href="/anchor-showcase">功能全览</a>
+    <a href="/inject-demo">注入 Demo</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/watsontech/snap-agent" target="_blank">GitHub</a>
+</div>
+
+<div class="hero">
+    <div class="version">SnapAgent v0.4 Anchor Feature Demo</div>
+    <h1>SnapAgent 锚点功能演示</h1>
+    <p>SnapAgent 锚点为 Web 页面提供 AI 驱动的内容交互能力。
+    支持页面快问快答 (Q&A) 和自动内容注入 (Inject) 两种模式，
+    实现千人千面的个性化页面体验。</p>
+</div>
+
+<main>
+    <div class="feature-grid">
+        <a href="/anchor-showcase" class="feature-card">
+            <div class="card-header">
+                <div class="icon icon-qa">💬</div>
+                <h3>Q&A 模式演示</h3>
+            </div>
+            <div class="card-body">
+                <p>点击区块右侧 💬 图标，打开侧边栏向 AI 提问该区域内容。支持自动路由、指定技能、关闭技能、自动发现。</p>
+                <div class="tags">
+                    <span class="tag">data-snap-anchor</span>
+                    <span class="tag">data-snap-skill</span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/anchor-showcase#inject" class="feature-card">
+            <div class="card-header">
+                <div class="icon icon-inject">⚡</div>
+                <h3>注入模式演示</h3>
+            </div>
+            <div class="card-body">
+                <p>页面加载时自动请求后端 skill 生成 HTML 并注入。支持缓存控制、降级 fallback、workflow 调用、千人千面。</p>
+                <div class="tags">
+                    <span class="tag">data-snap-mode="inject"</span>
+                    <span class="tag">data-snap-cache-ttl</span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/" class="feature-card">
+            <div class="card-header">
+                <div class="icon icon-sku">📦</div>
+                <h3>SKU 商品列表</h3>
+            </div>
+            <div class="card-body">
+                <p>真实业务场景演示：商品列表页按分类分组，每个分区均可 Q&A 提问。需要 MySQL 数据库。</p>
+                <div class="tags">
+                    <span class="tag">JdbcTemplate</span>
+                    <span class="tag">Thymeleaf</span>
+                </div>
+            </div>
+        </a>
+
+        <a href="/inject-demo" class="feature-card">
+            <div class="card-header">
+                <div class="icon icon-doc">🎯</div>
+                <h3>注入模式独立 Demo</h3>
+            </div>
+            <div class="card-body">
+                <p>简洁的注入模式演示页面，展示公告、每日提示、实时推荐三种注入场景。</p>
+                <div class="tags">
+                    <span class="tag">announcement</span>
+                    <span class="tag">daily-tips</span>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <div class="arch">
+        <h2>架构概览</h2>
+        <div class="arch-flow">
+            <div class="arch-node arch-frontend">前端 anchor.js<br/><span style="font-size:11px;font-weight:400;">扫描 DOM / 注入 HTML</span></div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node arch-backend">SnapAgent Controller<br/><span style="font-size:11px;font-weight:400;">/anchor/inject</span></div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node arch-backend">InjectionOrchestrator<br/><span style="font-size:11px;font-weight:400;">缓存 + 路由</span></div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node arch-llm">Skill / LLM<br/><span style="font-size:11px;font-weight:400;">生成 HTML</span></div>
+        </div>
+        <p class="arch-note">Q&A 模式走 SSE 流式响应，注入模式走 POST 同步请求</p>
+    </div>
+</main>
+
+<div class="footer">
+    SnapAgent Anchor Demo v0.4 — Powered by SnapAgent
+</div>
+
+</body>
+</html>

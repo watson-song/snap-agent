@@ -399,8 +399,8 @@
     <div class="container hero-content">
         <div class="hero-badge">
             <span class="dot"></span>
-            <span data-lang="zh">v0.4 已发布 · 锚点问答 + 运维诊断工具</span>
-            <span data-lang="en">v0.4 Released · Anchor Q&A + Ops Diagnostic Tools</span>
+            <span data-lang="zh">v0.4.1 已发布 · 锚点问答 + 内容注入 + 运维诊断工具</span>
+            <span data-lang="en">v0.4.1 Released · Anchor Q&A + Content Injection + Ops Diagnostic Tools</span>
         </div>
         <h1>
             <span data-lang="zh">让 Spring Boot 应用<br>获得内嵌的 <span class="accent">AI 技能</span> 能力</span>
@@ -477,11 +477,11 @@
 
             <div class="feature-card c-purple">
                 <div class="feature-icon">💬</div>
-                <h3 data-lang="zh">页面锚点问答</h3>
-                <h3 data-lang="en" style="display:none">Page-Section Anchor Q&A</h3>
-                <p data-lang="zh">宿主页面加一行 script + 标注 data-snap-anchor，用户点击 💬 图标即可在右侧抽屉中对当前区块内容提问。智能技能路由 + 预摘要缓存 + Shadow DOM 隔离。</p>
-                <p data-lang="en" style="display:none">Add one script tag + annotate with data-snap-anchor. Users click 💬 icon → a right-side drawer opens for in-context LLM Q&A about that section. Smart skill routing + pre-summary cache + Shadow DOM isolation.</p>
-                <div class="feature-meta">v0.4 · AnchorOrchestrator</div>
+                <h3 data-lang="zh">页面锚点问答 + 内容注入</h3>
+                <h3 data-lang="en" style="display:none">Page-Section Anchor Q&A + Content Injection</h3>
+                <p data-lang="zh">宿主页面加一行 script + 标注 data-snap-anchor，用户点击 💬 图标即可在右侧抽屉中对当前区块内容提问。新增 data-snap-mode="inject" 注入模式：页面加载自动生成 HTML 并注入，支持千人千面、per-anchor 缓存、降级 fallback。</p>
+                <p data-lang="en" style="display:none">Add one script tag + annotate with data-snap-anchor. Users click 💬 icon → a right-side drawer opens for in-context LLM Q&A. New inject mode (data-snap-mode="inject"): auto-generate HTML on page load with per-user cache, per-anchor TTL, and fallback support.</p>
+                <div class="feature-meta">v0.4 · AnchorOrchestrator + InjectionOrchestrator</div>
             </div>
 
             <div class="feature-card c-purple">
@@ -640,7 +640,7 @@
                             <ul>
                                 <li><strong>Skills Registry</strong> — skill 注册与调度</li>
                                 <li><strong>Tools Dispatch</strong> — 12 只读工具</li>
-                                <li><strong>Anchor Q&A</strong> — 页面锚点问答（v0.4）</li>
+                                <li><strong>Anchor Q&A</strong> — 页面锚点问答（v0.4）+ 内容注入（v0.4.1）</li>
                                 <li><strong>Code Graph</strong> — 调用链 / 影响分析（v0.3）</li>
                                 <li><strong>KnowledgeBase</strong> — 业务知识自动注入（v0.7）</li>
                                 <li><strong>Issue Closure</strong> — 问题闭环 + 知识沉淀（v0.9）</li>
@@ -763,6 +763,10 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
 }
 
 <span class="c-com">&lt;!-- 用户点击 💬 紫色图标 → 右侧抽屉打开 → 对当前区块提问 --&gt;</span>
+
+<span class="c-com">&lt;!-- 注入模式：页面加载自动生成 HTML 并注入 --&gt;</span>
+<span class="c-tag">&lt;div</span> <span class="c-attr">data-snap-anchor</span>=<span class="c-str">"公告"</span> <span class="c-attr">data-snap-mode</span>=<span class="c-str">"inject"</span> <span class="c-attr">data-snap-skill</span>=<span class="c-str">"announcement"</span> <span class="c-attr">data-snap-cache-ttl</span>=<span class="c-str">"3600"</span><span class="c-tag">&gt;&lt;/div&gt;</span>
+
 <span class="c-com">&lt;!-- 完整接入指南：docs/site/integration/zh/anchor-feature-guide.md --&gt;</span>
         </div>
     </div>

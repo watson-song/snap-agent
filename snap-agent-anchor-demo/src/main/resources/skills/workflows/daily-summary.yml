@@ -1,0 +1,8 @@
+name: daily-summary
+description: "每日数据摘要工作流，生成包含关键指标和趋势的 HTML 摘要"
+steps:
+  - name: generate-summary
+    skill: trend-prediction
+    inputs:
+      message: "生成今日数据摘要，包含关键指标和趋势分析，返回 HTML 格式"
+    onFailure: SKIP

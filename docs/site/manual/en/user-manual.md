@@ -700,6 +700,45 @@ See [§10 REST API Reference](#10-rest-api-reference) for the full endpoint list
 
 ---
 
+## 9.6 Anchor Content Injection
+
+### Overview
+
+Anchor content injection mode (`data-snap-mode="inject"`) automatically requests backend skill or workflow to generate HTML content on page load, injecting it at the anchor position. Suitable for personalized recommendations, system announcements, daily tips, and other scenarios that don't require user interaction.
+
+### Annotating Inject Anchors
+
+```html
+<div data-snap-anchor="announcement"
+     data-snap-mode="inject"
+     data-snap-skill="announcement"
+     data-snap-cache-ttl="3600"
+     data-snap-fallback='<p>Unavailable</p>'>
+</div>
+```
+
+| Attribute | Description |
+|-----------|-------------|
+| `data-snap-mode="inject"` | Enable injection mode |
+| `data-snap-skill` | Skill ID (one of skill/workflow, skill preferred) |
+| `data-snap-workflow` | Workflow ID |
+| `data-snap-cache-ttl` | Cache TTL (seconds), 0=no cache |
+| `data-snap-fallback` | Fallback HTML |
+
+### Per-User Personalization
+
+Cache key format: `userId:sourceId:anchorName:pageUrl`. Different users see different injected content.
+
+### REST API
+
+```bash
+curl -X POST /snap-agent/anchor/inject \
+  -H "Content-Type: application/json" \
+  -d '{"anchorName":"announcement","pageUrl":"/dashboard","skillId":"announcement","cacheTtl":3600}'
+```
+
+---
+
 ## 10. REST API Reference
 
 All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except for `GET /auth-config` (public), every endpoint requires an authenticated user through the host security framework and passes `SecurityGateway.hasPermission(required-permission)`.
@@ -757,6 +796,7 @@ All endpoints are mounted under `${snap-agent.base-path:/snap-agent}`. Except fo
 | 46 | `GET` | `/anchor.js` | Static asset: anchor script (public, no auth) |
 | 47 | `GET` | `/anchor/config` | Anchor feature config (public): `{enabled, disabledPaths}` |
 | 48 | `POST` | `/anchor/preprocess` | Anchor pre-summarize + pre-classify (auth required, returns `preprocessId`) |
+| 49 | `POST` | `/anchor/inject` | Anchor content injection (auth required): skill/workflow generates HTML and caches |
 
 ### 10.2 End-to-end example: run health-check with curl
 

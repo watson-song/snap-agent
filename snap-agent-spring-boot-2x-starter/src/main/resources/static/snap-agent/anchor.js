@@ -107,6 +107,15 @@
                 }
             });
         }
+
+        // Inject anchors
+        var injectAnchors = main.querySelectorAll(
+            '[data-snap-mode="inject"]:not([data-snap-anchor-injected])'
+        );
+        injectAnchors.forEach(function (el) {
+            el.setAttribute('data-snap-anchor-injected', 'true');
+            initInjectAnchor(el);
+        });
     }
 
     function injectAnchorIcon(el) {
@@ -319,6 +328,61 @@
         // Start preprocess (pre-summary + pre-classify)
         if (skill !== 'off') {
             startPreprocess(drawer._anchorContext);
+        }
+    }
+
+    // ---- Inject mode ----
+
+    function initInjectAnchor(el) {
+        var anchorName = el.getAttribute('data-snap-anchor');
+        var skillId = el.getAttribute('data-snap-skill');
+        var workflowId = el.getAttribute('data-snap-workflow');
+        var cacheTtl = parseInt(el.getAttribute('data-snap-cache-ttl') || '3600', 10);
+        var fallback = el.getAttribute('data-snap-fallback');
+
+        // Insert loading placeholder
+        var loadingEl = document.createElement('div');
+        loadingEl.className = 'snap-inject-loading';
+        loadingEl.style.cssText = 'display:flex;align-items:center;justify-content:center;min-height:60px;';
+        loadingEl.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" style="animation:snap-blink 1.2s ease-in-out infinite;">'
+            + '<circle cx="12" cy="12" r="10"/>'
+            + '<path d="M8 12h8M12 8v8"/>'
+            + '</svg>'
+            + '<style>@keyframes snap-blink{0%,100%{opacity:0.3}50%{opacity:1}}</style>';
+        el.innerHTML = '';
+        el.appendChild(loadingEl);
+
+        // Fire request
+        doInject(el, loadingEl, anchorName, skillId, workflowId, cacheTtl, fallback);
+    }
+
+    async function doInject(el, loadingEl, anchorName, skillId, workflowId, cacheTtl, fallback) {
+        try {
+            var body = {
+                anchorName: anchorName,
+                pageUrl: window.location.pathname,
+                skillId: skillId,
+                workflowId: workflowId,
+                cacheTtl: cacheTtl
+            };
+            var resp = await fetch(BASE + '/anchor/inject', {
+                method: 'POST',
+                headers: Object.assign(
+                    { 'Content-Type': 'application/json' }, authHeaders()
+                ),
+                body: JSON.stringify(body)
+            });
+
+            if (!resp.ok) throw new Error('inject failed: ' + resp.status);
+
+            var data = await resp.json();
+            loadingEl.outerHTML = data.html;
+        } catch (e) {
+            if (fallback) {
+                loadingEl.outerHTML = fallback;
+            } else {
+                loadingEl.remove();
+            }
         }
     }
 
