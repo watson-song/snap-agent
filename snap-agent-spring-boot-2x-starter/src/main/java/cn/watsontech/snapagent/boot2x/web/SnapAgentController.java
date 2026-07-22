@@ -1651,6 +1651,7 @@ public class SnapAgentController {
 
         String skillName = (String) body.get("skillName");
         String cron = (String) body.get("cron");
+        String name = (String) body.get("name");
         String alertKeywords = (String) body.get("alertKeywords");
         String userId = currentUserId();
         @SuppressWarnings("unchecked")
@@ -1658,6 +1659,7 @@ public class SnapAgentController {
         if (inputs == null) inputs = new LinkedHashMap<String, String>();
 
         PatrolTask task = new PatrolTask(null, skillName, cron, userId, inputs, alertKeywords);
+        task.setName(name);
         scheduler.schedule(task);
 
         audit(userId, "POST", "/patrol/tasks", "CREATE_PATROL_TASK",
@@ -1665,6 +1667,7 @@ public class SnapAgentController {
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("id", task.getId());
+        result.put("name", task.getName());
         result.put("skillName", task.getSkillName());
         result.put("cron", task.getCron());
         result.put("enabled", task.isEnabled());

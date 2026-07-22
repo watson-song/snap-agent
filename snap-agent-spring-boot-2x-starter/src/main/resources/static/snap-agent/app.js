@@ -2491,6 +2491,10 @@ async function showPatrolModal() {
         html += '<div id="patrolCreateForm" style="display:none;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">';
         html += '<div style="font-weight:600;margin-bottom:8px;">新建巡检任务</div>';
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称</label>' +
+            '<input type="text" id="patrolNameInput" placeholder="例如: SKU详情表数据巡检" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">给人看的名字, 方便在告警中快速识别来源。</div></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">Skill</label>' +
             '<select id="patrolSkillSelect" style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
             skillOptions + '</select></div>';
@@ -2520,12 +2524,13 @@ async function showPatrolModal() {
         if (tasks.length === 0) {
             html += featureEmpty('无巡检任务');
         } else {
-            html += '<table class="feature-table"><thead><tr><th>任务 ID</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>Cron</th><th>告警关键词</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
                 var taskId = escapeHtml(t.taskId || t.id);
+                var taskName = escapeHtml(t.name || t.taskName || taskId);
                 var isActive = t.active || t.enabled;
                 var badge = isActive ? 'green' : 'orange';
-                html += '<tr><td><code>' + taskId + '</code></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
+                html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + taskId + '</span></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
                     '<td><code>' + escapeHtml(t.cron || '') + '</code></td>' +
                     '<td style="font-size:11px;">' + escapeHtml(t.alertKeywords || '—') + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
@@ -2541,6 +2546,12 @@ async function showPatrolModal() {
         if (reports.length === 0) {
             html += featureEmpty('无巡检报告');
         } else {
+            // Build a map from patrolId → task name for display
+            var taskNameMap = {};
+            tasks.forEach(function(t) {
+                var tid = t.taskId || t.id;
+                if (tid) taskNameMap[tid] = t.name || t.taskName || tid;
+            });
             reports.forEach(function(r, idx) {
                 var isAnomaly = r.anomalyDetected === true;
                 var badge = isAnomaly ? 'red' : 'green';
@@ -2548,14 +2559,17 @@ async function showPatrolModal() {
                 var timeStr = r.triggeredAt ? new Date(r.triggeredAt).toLocaleString('zh-CN', {hour12:false}) : '—';
                 var summary = r.summary || '';
                 var summaryPreview = summary.length > 100 ? summary.substring(0, 100) + '...' : summary;
+                var patrolId = r.patrolId || r.id || '';
+                var patrolName = taskNameMap[patrolId] || patrolId;
                 html += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isAnomaly ? 'border-left:3px solid var(--red);' : '') + '">';
                 html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
                 html += '<div style="display:flex;align-items:center;gap:8px;">';
                 html += '<span class="feature-badge ' + badge + '">' + label + '</span>';
+                html += '<span style="font-size:11px;font-weight:600;color:var(--text-primary);">' + escapeHtml(patrolName) + '</span>';
                 html += '<span style="font-size:11px;color:var(--text-secondary);">' + escapeHtml(r.skillName || '') + '</span>';
                 html += '<span style="font-size:11px;color:var(--text-muted);">' + timeStr + '</span>';
                 html += '</div>';
-                html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(r.patrolId || r.id || '') + '</span>';
+                html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(patrolId) + '</span>';
                 html += '</div>';
                 html += '<details style="margin-top:6px;"><summary style="font-size:12px;color:var(--text-link);cursor:pointer;">' + escapeHtml(summaryPreview) + '</summary>';
                 html += '<div style="margin-top:6px;font-size:11px;color:var(--text-primary);white-space:pre-wrap;max-height:400px;overflow-y:auto;padding:8px;background:var(--bg-input);border-radius:4px;">' + escapeHtml(summary) + '</div>';
@@ -2600,6 +2614,7 @@ async function showPatrolModal() {
         var cancelBtn = body.querySelector('#patrolCancelBtn');
         var skillSelect = body.querySelector('#patrolSkillSelect');
         var cronInput = body.querySelector('#patrolCronInput');
+        var nameInput = body.querySelector('#patrolNameInput');
         var textInput = body.querySelector('#patrolTextInput');
         var jsonInput = body.querySelector('#patrolInputsInput');
         var textWrap = body.querySelector('#patrolTextInputWrap');
@@ -2639,9 +2654,11 @@ async function showPatrolModal() {
         submitBtn.addEventListener('click', async function() {
             var skillName = skillSelect.value;
             var cron = cronInput.value.trim();
+            var patrolName = nameInput.value.trim();
             var alertKeywords = alertKwInput.value.trim();
             if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
             if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
+            if (!patrolName) { statusDiv.textContent = '请输入巡检名称'; return; }
 
             // Build inputs: text mode wraps as _user_message, JSON mode parses directly
             var inputsObj;
@@ -2663,7 +2680,7 @@ async function showPatrolModal() {
                 var resp = await fetch(BASE + '/patrol/tasks', {
                     method: 'POST',
                     headers: authHeaders({ 'Content-Type': 'application/json' }),
-                    body: JSON.stringify({ skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
+                    body: JSON.stringify({ name: patrolName, skillName: skillName, cron: cron, inputs: inputsObj, alertKeywords: alertKeywords || null })
                 });
                 var data = await resp.json();
                 if (!resp.ok) {
@@ -2731,14 +2748,16 @@ async function showAlertsModal() {
             var isContinuous = count > 1;
             var msg = a.firstMessage || a.message || '';
             var msgPreview = msg.length > 120 ? msg.substring(0, 120) + '...' : msg;
+            var alertTitle = a.source || a.type || '未知告警';
+            var typeLabel = a.type === 'patrol' ? '巡检告警' : (a.type || '告警');
 
             html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isActive ? 'border-left:3px solid var(--red);' : '') + '">';
-            // Header row
+            // Header row — title + status badge
             html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
             html += '<div style="display:flex;align-items:center;gap:8px;">';
             html += '<span class="feature-badge ' + badgeColor + '">' + statusLabel + '</span>';
-            html += '<span style="font-size:12px;font-weight:600;">' + escapeHtml(a.type || 'patrol') + '</span>';
-            html += '<span style="font-size:11px;color:var(--text-secondary);">来源: ' + escapeHtml(a.source || '') + '</span>';
+            html += '<span style="font-size:13px;font-weight:600;color:var(--text-primary);">' + escapeHtml(alertTitle) + '</span>';
+            html += '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(typeLabel) + '</span>';
             html += '</div>';
             html += '<span style="font-size:10px;color:var(--text-muted);font-family:monospace;">' + escapeHtml(a.id || '') + '</span>';
             html += '</div>';
@@ -2800,6 +2819,36 @@ document.getElementById('navIssuesBtn').addEventListener('click', showIssuesModa
 document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModal);
 document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
 document.getElementById('navKnowledgeBtn').addEventListener('click', showKnowledgeModal);
+
+// --- Alert badge polling ---
+async function refreshAlertBadge() {
+    var badge = document.getElementById('alertBadge');
+    if (!badge) return;
+    try {
+        var resp = await fetch(BASE + '/alerts?page=0&size=1', { headers: authHeaders() });
+        if (!resp.ok) { badge.style.display = 'none'; return; }
+        var data = await resp.json();
+        var activeCount = 0;
+        var alerts = data.alerts || [];
+        alerts.forEach(function(a) {
+            if ((a.status || 'ACTIVE') === 'ACTIVE') activeCount++;
+        });
+        // The API returns paginated; use total as a rough indicator for active count
+        // when the page only fetched 1 item. For accuracy, check if the fetched item is active.
+        // We use total as the badge number since all alerts (active + recently resolved) matter.
+        var total = data.total || 0;
+        if (total > 0) {
+            badge.textContent = total > 99 ? '99+' : total;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    } catch (e) {
+        badge.style.display = 'none';
+    }
+}
+refreshAlertBadge();
+setInterval(refreshAlertBadge, 30000);
 
 // --- Knowledge Base ---
 async function showKnowledgeModal() {

@@ -252,13 +252,16 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private void recordAlert(PatrolReport report, PatrolTask task) {
         if (alertConverger == null) return;
         try {
+            String alertSource = task.getName() != null && !task.getName().isEmpty()
+                    ? task.getName() : task.getId();
             AnomalyEvent event = new AnomalyEvent(
-                    "patrol", task.getId(),
+                    "patrol", alertSource,
                     report.getSummary() != null ? report.getSummary() : "Anomaly detected",
                     task.getSkillName(),
                     null, task.getInputs());
             alertConverger.record(event);
-            log.info("Patrol anomaly recorded as alert (patrolId={})", task.getId());
+            log.info("Patrol anomaly recorded as alert (patrolId={}, source={})",
+                    task.getId(), alertSource);
         } catch (Exception e) {
             log.error("Failed to record alert for patrol {}: {}", task.getId(), e.getMessage());
         }
