@@ -2505,16 +2505,26 @@ async function showPatrolModal() {
         html += '<div id="patrolCreateForm" style="display:none;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">';
         html += '<div style="font-weight:600;margin-bottom:8px;">新建巡检任务</div>';
         html += '<div style="display:flex;flex-direction:column;gap:8px;">';
-        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称 (可选)</label>' +
-            '<input type="text" id="patrolNameInput" placeholder="留空则自动从 Skill 和指令推断" ' +
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">巡检名称 (可选, 最多20字)</label>' +
+            '<input type="text" id="patrolNameInput" placeholder="留空则自动推断" maxlength="20" ' +
             'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
-            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">给人看的名字; 留空时自动生成 (如: database-query: 检查drp_sku_detail表...)</div></div>';
+            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">留空时从 Skill + 指令自动生成 (截断20字)</div></div>';
         html += '<div><label style="font-size:12px;color:var(--text-secondary);">Skill</label>' +
             '<select id="patrolSkillSelect" style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;">' +
             skillOptions + '</select></div>';
-        html += '<div><label style="font-size:12px;color:var(--text-secondary);">Cron 表达式</label>' +
-            '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * ? (每15分钟)" ' +
-            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></div>';
+        // Cron: quick-select buttons + advanced custom input
+        html += '<div><label style="font-size:12px;color:var(--text-secondary);">执行频率</label>' +
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 * * * * *" style="font-size:12px;">每分钟</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0/15 * * * *" style="font-size:12px;">每15分钟</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 * * * *" style="font-size:12px;">每小时</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 8 * * *" style="font-size:12px;">每天8点</button>' +
+            '<button type="button" class="feature-action-btn cron-preset" data-cron="0 0 8 1 * *" style="font-size:12px;">每月1号</button>' +
+            '<button type="button" class="feature-action-btn" id="cronAdvancedBtn" style="font-size:12px;background:var(--bg-input);">高级</button>' +
+            '</div>' +
+            '<input type="text" id="patrolCronInput" placeholder="0 0/15 * * * * (6字段, 含秒)" ' +
+            'style="width:100%;padding:6px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-family:monospace;display:none;">' +
+            '<div id="cronHint" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div></div>';
         // Dynamic input area: text mode (for skills without inputs) or JSON mode (for skills with inputs)
         html += '<div id="patrolTextInputWrap" style="display:none;">' +
             '<label style="font-size:12px;color:var(--text-secondary);">自然语言指令</label>' +
@@ -2547,7 +2557,7 @@ async function showPatrolModal() {
                 var ts = r.triggeredAt || 0;
                 if (ts > taskStats[pid].lastTime) taskStats[pid].lastTime = ts;
             });
-            html += '<table class="feature-table"><thead><tr><th>名称</th><th>Skill</th><th>运行次数</th><th>最后运行</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            html += '<table class="feature-table"><thead><tr><th>名称 / Skill</th><th>Cron</th><th>运行次数</th><th>最后运行</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             tasks.forEach(function(t) {
                 var taskId = escapeHtml(t.taskId || t.id);
                 var taskName = escapeHtml(t.name || t.taskName || taskId);
@@ -2556,7 +2566,8 @@ async function showPatrolModal() {
                 var rawId = t.taskId || t.id;
                 var stats = taskStats[rawId] || { count: 0, lastTime: 0 };
                 var lastRunStr = stats.lastTime ? new Date(stats.lastTime).toLocaleString('zh-CN', {hour12:false}) : '—';
-                html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + taskId + '</span></td><td>' + escapeHtml(t.skillName || t.skillId || t.skill) + '</td>' +
+                html += '<tr><td><strong>' + taskName + '</strong><br><span style="font-size:10px;color:var(--text-muted);">' + escapeHtml(t.skillName || t.skillId || t.skill || '') + ' · ' + taskId + '</span></td>' +
+                    '<td><code style="font-size:11px;">' + escapeHtml(t.cron || '') + '</code></td>' +
                     '<td style="text-align:center;">' + stats.count + '</td>' +
                     '<td style="font-size:11px;">' + lastRunStr + '</td>' +
                     '<td><span class="feature-badge ' + badge + '">' + (isActive ? '运行中' : '已停止') + '</span></td>' +
@@ -2669,6 +2680,7 @@ async function showPatrolModal() {
         var cancelBtn = body.querySelector('#patrolCancelBtn');
         var skillSelect = body.querySelector('#patrolSkillSelect');
         var cronInput = body.querySelector('#patrolCronInput');
+        var cronHint = body.querySelector('#cronHint');
         var nameInput = body.querySelector('#patrolNameInput');
         var textInput = body.querySelector('#patrolTextInput');
         var jsonInput = body.querySelector('#patrolInputsInput');
@@ -2676,6 +2688,52 @@ async function showPatrolModal() {
         var jsonWrap = body.querySelector('#patrolJsonInputWrap');
         var alertKwInput = body.querySelector('#patrolAlertKeywordsInput');
         var statusDiv = body.querySelector('#patrolCreateStatus');
+
+        // Cron preset buttons
+        var cronLabels = {
+            '0 * * * * *': '每分钟',
+            '0 0/15 * * * *': '每15分钟',
+            '0 0 * * * *': '每小时',
+            '0 0 8 * * *': '每天8点',
+            '0 0 8 1 * *': '每月1号8点'
+        };
+        var selectedCron = null;
+
+        body.querySelectorAll('.cron-preset').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                selectedCron = btn.dataset.cron;
+                // Highlight selected preset, dim others
+                body.querySelectorAll('.cron-preset').forEach(function(b) {
+                    b.style.borderColor = 'var(--border)';
+                    b.style.background = 'var(--bg-input)';
+                });
+                btn.style.borderColor = 'var(--text-link)';
+                btn.style.background = 'var(--bg-card)';
+                if (cronHint) cronHint.textContent = '已选择: ' + cronLabels[selectedCron] + ' (' + selectedCron + ')';
+            });
+        });
+
+        // Advanced toggle — show custom cron input
+        body.querySelector('#cronAdvancedBtn').addEventListener('click', function() {
+            var input = cronInput;
+            if (input.style.display === 'none') {
+                input.style.display = 'block';
+                input.focus();
+                if (cronHint) cronHint.textContent = '输入 6 字段 Cron 表达式 (秒 分 时 日 月 周)';
+            } else {
+                input.style.display = 'none';
+                if (cronHint) cronHint.textContent = '';
+            }
+        });
+        // If user types in advanced input, use that as the cron value
+        cronInput.addEventListener('input', function() {
+            selectedCron = cronInput.value.trim();
+            // Clear preset highlight
+            body.querySelectorAll('.cron-preset').forEach(function(b) {
+                b.style.borderColor = 'var(--border)';
+                b.style.background = 'var(--bg-input)';
+            });
+        });
 
         function toggleInputMode() {
             var skillName = skillSelect.value;
@@ -2782,11 +2840,11 @@ async function showPatrolModal() {
         });
         submitBtn.addEventListener('click', async function() {
             var skillName = skillSelect.value;
-            var cron = cronInput.value.trim();
+            var cron = selectedCron || cronInput.value.trim();
             var patrolName = nameInput.value.trim();
             var alertKeywords = alertKwInput.value.trim();
             if (!skillName) { statusDiv.textContent = '请选择 Skill'; return; }
-            if (!cron) { statusDiv.textContent = '请输入 Cron 表达式'; return; }
+            if (!cron) { statusDiv.textContent = '请选择执行频率或输入 Cron 表达式'; return; }
 
             // Build inputs: text mode wraps as _user_message, JSON mode parses directly
             var inputsObj;
@@ -2801,12 +2859,13 @@ async function showPatrolModal() {
                 catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
             }
 
-            // Auto-infer name from skill + natural language if not provided
+            // Auto-infer name from skill + natural language if not provided (max 20 chars)
             if (!patrolName) {
                 var inferSource = textMode ? textInput.value.trim() : JSON.stringify(inputsObj);
-                // Extract first meaningful chunk (up to 25 chars, no line breaks)
-                var snippet = inferSource.replace(/[\n\r]/g, ' ').trim().substring(0, 25);
-                patrolName = skillName + (snippet ? ': ' + snippet : '');
+                // Leave room for "skillName: " prefix, truncate snippet to fit 20 chars total
+                var maxSnippet = Math.max(1, 20 - skillName.length - 2);
+                var snippet = inferSource.replace(/[\n\r]/g, ' ').trim().substring(0, maxSnippet);
+                patrolName = (skillName + (snippet ? ': ' + snippet : '')).substring(0, 20);
             }
             // Auto-infer keywords from natural language if not provided
             if (!alertKeywords) {
