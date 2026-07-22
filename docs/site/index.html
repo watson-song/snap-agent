@@ -449,8 +449,8 @@
     <div class="container hero-content">
         <div class="hero-badge">
             <span class="dot"></span>
-            <span data-lang="zh">v0.4.1 已发布 · 锚点问答 + 内容注入 + 运维诊断工具</span>
-            <span data-lang="en">v0.4.1 Released · Anchor Q&A + Content Injection + Ops Diagnostic Tools</span>
+            <span data-lang="zh">v0.5 已发布 · 热插拔工具插件 + JAR 上传 + 运行时管理</span>
+            <span data-lang="en">v0.5 Released · Hot-Pluggable Tool Plugins + JAR Upload + Runtime Management</span>
         </div>
         <h1>
             <span data-lang="zh">让 Spring Boot 应用<br>获得内嵌的 <span class="accent">AI 技能</span> 能力</span>
@@ -470,7 +470,7 @@
         </div>
         <div class="hero-stats">
             <div class="stat">
-                <div class="stat-num">v0.4.1</div>
+                <div class="stat-num">v0.5</div>
                 <div class="stat-label" data-lang="zh">当前版本</div>
                 <div class="stat-label" data-lang="en">Current version</div>
             </div>
@@ -547,9 +547,9 @@
                 <div class="feature-icon">🔧</div>
                 <h3 data-lang="zh">工具插件生态</h3>
                 <h3 data-lang="en" style="display:none">Tool Plugin Ecosystem</h3>
-                <p data-lang="zh">12 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp。</p>
-                <p data-lang="en" style="display:none">12 built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp.</p>
-                <div class="feature-meta">v0.1-v0.4 · ToolProvider SPI</div>
+                <p data-lang="zh">12 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp。v0.5 新增热插拔插件：JAR 上传、运行时注册/卸载/启停/设默认、pluginOverrides 路由。</p>
+                <p data-lang="en" style="display:none">12 built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp. v0.5 adds hot-pluggable plugins: JAR upload, runtime register/unregister/enable/disable/set-default, pluginOverrides routing.</p>
+                <div class="feature-meta">v0.1-v0.5 · ToolProvider SPI + PluginRegistry</div>
             </div>
 
             <div class="feature-card c-orange">
@@ -733,7 +733,7 @@
 │   │              SnapAgent Spring Boot Starter                │    │
 │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
 │   │  │ Skills  │ │ Tools   │ │ Anchor  │ │ Code    │         │    │
-│   │  │ Registry│ │ Dispat. │ │ Q&A     │ │ Graph   │         │    │
+│   │  │ Registry│ │ +Plugin │ │ Q&A     │ │ Graph   │         │    │
 │   │  └─────────┘ └─────────┘ └─────────┘ └─────────┘         │    │
 │   │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐         │    │
 │   │  │ Know-   │ │ Issue   │ │ Cost    │ │ Workflow│         │    │
@@ -759,7 +759,8 @@
                         <li><span class="arch-node">SnapAgent Spring Boot Starter</span> <em>(auto-configuration)</em>
                             <ul>
                                 <li><strong>Skills Registry</strong> — skill 注册与调度</li>
-                                <li><strong>Tools Dispatch</strong> — 12 只读工具</li>
+                                <li><strong>Tools Dispatch</strong> — 12 只读工具 + 热插拔插件（v0.5）</li>
+                                <li><strong>Plugin Registry</strong> — JAR 上传 / 运行时注册 / 卸载 / 启停 / 设默认（v0.5）</li>
                                 <li><strong>Anchor Q&A</strong> — 页面锚点问答（v0.4）+ 内容注入（v0.4.1）</li>
                                 <li><strong>Code Graph</strong> — 调用链 / 影响分析（v0.3）</li>
                                 <li><strong>KnowledgeBase</strong> — 业务知识自动注入（v0.7）</li>
@@ -811,14 +812,14 @@
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-spring-boot-2x-starter</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.1</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.5.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
 
 <span class="c-com">&lt;!-- 2. (可选) REST API SDK 用于外部调用 --&gt;</span>
 <span class="c-tag">&lt;dependency&gt;</span>
     <span class="c-tag">&lt;groupId&gt;</span><span class="c-str">cn.watsontech.snapagent</span><span class="c-tag">&lt;/groupId&gt;</span>
     <span class="c-tag">&lt;artifactId&gt;</span><span class="c-str">snap-agent-client</span><span class="c-tag">&lt;/artifactId&gt;</span>
-    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.4.1</span><span class="c-tag">&lt;/version&gt;</span>
+    <span class="c-tag">&lt;version&gt;</span><span class="c-num">0.5.0-SNAPSHOT</span><span class="c-tag">&lt;/version&gt;</span>
 <span class="c-tag">&lt;/dependency&gt;</span>
         </div>
 
@@ -987,10 +988,24 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
                         <span data-lang="zh">工具插件架构</span><span data-lang="en">Tool Plugin Architecture</span>
                     </h4>
                     <p>
-                        <span data-lang="zh">ToolProvider SPI、ToolPlugin 元数据层、11+ 内置工具、安全约束（SqlGuard / CodePathGuard）、自定义插件示例。</span>
-                        <span data-lang="en">ToolProvider SPI, ToolPlugin metadata, 11+ built-in tools, security constraints, custom plugin example.</span>
+                        <span data-lang="zh">ToolProvider SPI、PluginDescriptor + PluginRegistry（v0.5 热插拔）、@ToolPluginAnnotation 注解、JAR 上传 + 运行时管理、pluginOverrides 路由、安全约束（SqlGuard / CodePathGuard）。</span>
+                        <span data-lang="en">ToolProvider SPI, PluginDescriptor + PluginRegistry (v0.5 hot-pluggable), @ToolPluginAnnotation, JAR upload + runtime management, pluginOverrides routing, security constraints.</span>
                     </p>
                     <div class="doc-links"><a href="docs.html#tool-plugin-architecture"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
+                </div>
+            </div>
+
+            <div class="doc-card">
+                <div class="doc-icon">📦</div>
+                <div class="doc-body">
+                    <h4>
+                        <span data-lang="zh">插件开发指南</span><span data-lang="en">Plugin Development Guide</span>
+                    </h4>
+                    <p>
+                        <span data-lang="zh">Maven Archetype 脚手架生成、ToolProvider 实现、元数据声明（注解/YAML）、打包上传、配置注入、测试与最佳实践。</span>
+                        <span data-lang="en">Maven Archetype scaffolding, ToolProvider implementation, metadata declaration (annotation/YAML), packaging & upload, config injection, testing and best practices.</span>
+                    </p>
+                    <div class="doc-links"><a href="docs.html#plugin-development-guide"><span data-lang="zh">阅读 →</span><span data-lang="en">Read →</span></a></div>
                 </div>
             </div>
 
@@ -1059,13 +1074,13 @@ curl -N -u <span class="c-str">demo:demo</span> http://localhost:8080/snap-agent
     <div class="container footer-inner">
         <div class="footer-brand">
             <span class="logo-icon">⚡</span>
-            <span>SnapAgent v0.4.1</span>
+            <span>SnapAgent v0.5</span>
             <span style="margin-left: 16px;" data-lang="zh">嵌入式 AI 技能框架</span>
             <span style="margin-left: 16px;" data-lang="en">Embeddable AI Skill Framework</span>
         </div>
         <div class="footer-meta">
-            <span data-lang="zh">基于 v0.4.1 现状编写 · </span>
-            <span data-lang="en">Documented against v0.4.1 · </span>
+            <span data-lang="zh">基于 v0.5 现状编写 · </span>
+            <span data-lang="en">Documented against v0.5 · </span>
             <a href="README.md" id="footerReadmeLink">文档索引 / Index</a>
         </div>
     </div>
