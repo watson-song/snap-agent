@@ -2750,79 +2750,51 @@ async function showPatrolModal() {
         skillSelect.addEventListener('change', toggleInputMode);
         toggleInputMode(); // initialize for the default selection
 
-        // Auto-infer alert keywords from natural language input
-        function inferKeywords(text) {
-            if (!text) return [];
-            var lower = text.toLowerCase();
-            var inferred = [];
-            // "是否有新增/创建/插入" → "没有, 0条, 空"
-            if (/新增|创建|插入|写入|导入/.test(text)) {
-                inferred = inferred.concat(['没有', '0', '空']);
-            }
-            // "是否成功/完成" → "失败, error"
-            if (/成功|完成/.test(text)) {
-                inferred = inferred.concat(['失败', 'error']);
-            }
-            // "是否有数据/记录" → "无数据, 无记录"
-            if (/数据|记录/.test(text)) {
-                inferred = inferred.concat(['无数据', '无记录']);
-            }
-            // "是否正常/异常" → "异常, 错误"
-            if (/正常|异常/.test(text)) {
-                inferred = inferred.concat(['异常', '错误']);
-            }
-            // "是否超时/延迟" → "超时, timeout"
-            if (/超时|延迟|慢/.test(text)) {
-                inferred = inferred.concat(['超时', 'timeout']);
-            }
-            // "是否生成/产生" → "未生成, 无"
-            if (/生成|产生/.test(text)) {
-                inferred = inferred.concat(['未生成', '无']);
-            }
-            // "检查/监控" generic → add anomaly markers
-            if (/检查|监控|巡检/.test(text)) {
-                inferred = inferred.concat(['异常', '失败']);
-            }
-            // Deduplicate
-            return inferred.filter(function(v, i, arr) { return arr.indexOf(v) === i; });
+        // LLM-based inference for patrol name and keywords
+        var inferTimer = null;
+        function inferPatrolMeta(text, skillName) {
+            if (!text || text.trim().length < 5) return;
+            if (inferTimer) clearTimeout(inferTimer);
+            inferTimer = setTimeout(async function() {
+                try {
+                    var resp = await fetch(BASE + '/patrol/infer', {
+                        method: 'POST',
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ instruction: text, skillName: skillName })
+                    });
+                    if (!resp.ok) return;
+                    var data = await resp.json();
+                    // Auto-fill name if empty
+                    if (!nameInput.value.trim() && data.name) {
+                        nameInput.value = data.name;
+                        nameInput.placeholder = '';
+                    }
+                    // Auto-fill keywords if empty
+                    if (!alertKwInput.value.trim() && data.keywords) {
+                        alertKwInput.value = data.keywords;
+                        alertKwInput.placeholder = '';
+                    }
+                    // Show hint that inference was applied
+                    var hintEl = document.createElement('div');
+                    hintEl.style.cssText = 'font-size:11px;color:var(--green);margin-top:4px;';
+                    hintEl.textContent = '✓ 已通过 LLM 自动推断名称和关键词';
+                    var existing = createForm.querySelector('.infer-hint');
+                    if (existing) existing.remove();
+                    hintEl.className = 'infer-hint';
+                    alertKwInput.parentElement.appendChild(hintEl);
+                    setTimeout(function() { if (hintEl.parentNode) hintEl.remove(); }, 5000);
+                } catch (e) {
+                    // Silent fail — user can still type manually
+                }
+            }, 800);
         }
 
-        // Auto-suggest keywords when user finishes typing
-        function updateSuggestedKeywords() {
-            var text = textInput.value.trim() || jsonInput.value.trim();
-            var existing = alertKwInput.value.trim();
-            var suggested = inferKeywords(text);
-            if (suggested.length === 0) return;
-            // Only suggest if the user hasn't already set keywords
-            if (existing) {
-                var existingArr = existing.split(',').map(function(s) { return s.trim(); });
-                suggested = suggested.filter(function(s) { return existingArr.indexOf(s) === -1; });
-                if (suggested.length === 0) return;
-            }
-            var suggestion = suggested.join(', ');
-            var hint = '💡 建议补充关键词: ' + suggestion;
-            // Show hint as placeholder if input is empty, otherwise show as status hint
-            if (!existing) {
-                alertKwInput.placeholder = hint + ' (点击此处可手动输入)';
-            }
-            // Append a suggest button
-            var kwWrap = alertKwInput.parentElement;
-            var existingHint = kwWrap.querySelector('.kw-suggest');
-            if (existingHint) existingHint.remove();
-            var hintEl = document.createElement('div');
-            hintEl.className = 'kw-suggest';
-            hintEl.style.cssText = 'font-size:11px;color:var(--text-link);margin-top:2px;cursor:pointer;text-decoration:underline;';
-            hintEl.textContent = '💡 点击补充建议关键词: ' + suggestion;
-            hintEl.addEventListener('click', function() {
-                var cur = alertKwInput.value.trim();
-                alertKwInput.value = cur ? (cur + ',' + suggested.join(',')) : suggested.join(',');
-                hintEl.remove();
-            });
-            kwWrap.appendChild(hintEl);
-        }
-
-        textInput.addEventListener('blur', updateSuggestedKeywords);
-        jsonInput.addEventListener('blur', updateSuggestedKeywords);
+        textInput.addEventListener('blur', function() {
+            inferPatrolMeta(textInput.value.trim(), skillSelect.value);
+        });
+        jsonInput.addEventListener('blur', function() {
+            inferPatrolMeta(jsonInput.value.trim(), skillSelect.value);
+        });
 
         createBtn.addEventListener('click', function() {
             if (createForm.style.display === 'none') {
@@ -2859,20 +2831,8 @@ async function showPatrolModal() {
                 catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
             }
 
-            // Auto-infer name from skill + natural language if not provided (max 20 chars)
-            if (!patrolName) {
-                var inferSource = textMode ? textInput.value.trim() : JSON.stringify(inputsObj);
-                // Leave room for "skillName: " prefix, truncate snippet to fit 20 chars total
-                var maxSnippet = Math.max(1, 20 - skillName.length - 2);
-                var snippet = inferSource.replace(/[\n\r]/g, ' ').trim().substring(0, maxSnippet);
-                patrolName = (skillName + (snippet ? ': ' + snippet : '')).substring(0, 20);
-            }
-            // Auto-infer keywords from natural language if not provided
-            if (!alertKeywords) {
-                var kwSource = textMode ? textInput.value.trim() : JSON.stringify(inputsObj);
-                var inferred = inferKeywords(kwSource);
-                if (inferred.length > 0) alertKeywords = inferred.join(',');
-            }
+            // Name and keywords are auto-filled via LLM inference on blur.
+            // If still empty, the backend will auto-generate a name.
 
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
@@ -2951,19 +2911,9 @@ async function showAlertsModal() {
             var msg = a.firstMessage || a.message || '';
             var alertTitle = a.source || a.type || '未知告警';
             var typeLabel = a.type === 'patrol' ? '巡检告警' : (a.type || '告警');
-            // Extract first meaningful line as summary (before any markdown headers or tables)
-            var summary = '';
-            if (msg) {
-                var lines = msg.split('\n');
-                for (var li = 0; li < lines.length; li++) {
-                    var line = lines[li].trim();
-                    if (line && !line.startsWith('#') && !line.startsWith('|') && !line.startsWith('```') && line.length > 10) {
-                        summary = line.length > 150 ? line.substring(0, 150) + '...' : line;
-                        break;
-                    }
-                }
-                if (!summary) summary = msg.length > 150 ? msg.substring(0, 150) + '...' : msg;
-            }
+            // The alert message is already the LLM-generated ALERT_SUMMARY conclusion
+            // (or the full report for FAILED/TIMEOUT). Display it directly.
+            var summary = msg.length > 200 ? msg.substring(0, 200) + '...' : msg;
 
             html += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);' + (isActive ? 'border-left:3px solid var(--red);' : '') + '">';
             // Title row

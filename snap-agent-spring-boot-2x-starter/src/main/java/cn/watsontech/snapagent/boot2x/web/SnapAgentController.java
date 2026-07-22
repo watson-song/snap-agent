@@ -29,7 +29,9 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.LlmEventSink;
+import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.BugfixSuggestion;
@@ -1738,6 +1740,120 @@ public class SnapAgentController {
         result.put("id", id);
         result.put("enabled", enabled);
         return ResponseEntity.ok(result);
+    }
+
+    // ---- POST /patrol/infer ----
+    /** Uses LLM to infer patrol name and keywords from natural language instruction. */
+    @PostMapping("/patrol/infer")
+    public ResponseEntity<Object> inferPatrolMeta(@RequestBody Map<String, Object> body) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (llmClient == null) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(Collections.singletonMap("error", "LLM client is not configured"));
+        }
+
+        String instruction = (String) body.get("instruction");
+        String skillName = (String) body.get("skillName");
+        if (instruction == null || instruction.trim().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(Collections.singletonMap("error", "instruction is required"));
+        }
+
+        String systemPrompt = "你是巡检任务助手。根据用户给定的巡检指令，推断巡检名称和告警关键词。\n"
+                + "要求:\n"
+                + "- name: 从指令中提取核心目的，简洁明了，不超过20个中文字符\n"
+                + "- keywords: 如果巡检结果包含这些关键词说明可能存在异常，用逗号分隔\n"
+                + "直接输出JSON，不要解释、不要分析、不要思考过程。格式: {\"name\":\"名称\",\"keywords\":\"关键词1,关键词2\"}";
+
+        String userMsg = "请根据以下信息推断巡检名称和告警关键词。\n"
+                + "Skill: " + (skillName != null ? skillName : "unknown")
+                + "\n指令: " + instruction
+                + "\n\n请直接输出JSON结果:";
+
+        String llmResponse = callLlmSync(systemPrompt, userMsg, 1024);
+        if (llmResponse == null || llmResponse.trim().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Collections.singletonMap("error", "LLM returned empty response"));
+        }
+
+        // Extract JSON object from the response (LLM may add surrounding text)
+        String jsonStr = null;
+        int braceStart = llmResponse.indexOf('{');
+        int braceEnd = llmResponse.lastIndexOf('}');
+        if (braceStart >= 0 && braceEnd > braceStart) {
+            jsonStr = llmResponse.substring(braceStart, braceEnd + 1);
+        }
+
+        String inferredName = null;
+        String inferredKeywords = null;
+        if (jsonStr != null) {
+            // Simple JSON parsing without external dependency
+            inferredName = extractJsonField(jsonStr, "name");
+            inferredKeywords = extractJsonField(jsonStr, "keywords");
+        }
+
+        // Enforce 20-char limit on name
+        if (inferredName != null && inferredName.length() > 20) {
+            inferredName = inferredName.substring(0, 20);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("name", inferredName);
+        result.put("keywords", inferredKeywords);
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Makes a synchronous (non-streaming) LLM call and returns the full text response.
+     * Uses {@link LlmClient#stream} with a simple sink that collects all text.
+     */
+    private String callLlmSync(String systemPrompt, String userMessage, int maxTokens) {
+        final StringBuilder sb = new StringBuilder();
+        LlmRequest req = new LlmRequest(
+                systemPrompt,
+                Collections.singletonList(Message.user(userMessage)),
+                Collections.<ToolDef>emptyList(),
+                properties.getLlm().getModel(),
+                maxTokens,
+                true);
+        try {
+            llmClient.stream(req, new LlmEventSink() {
+                @Override public void onThought(String text) { sb.append(text); }
+                @Override public void onToolUse(String id, String name, Map<String, Object> input) {}
+                @Override public void onToolResult(String toolUseId, String result) {}
+                @Override public void onStop(String stopReason) {}
+                @Override public void onError(String message) {
+                    log.warn("LLM sync call error: {}", message);
+                }
+            }, "patrol-infer-" + System.currentTimeMillis());
+        } catch (Exception e) {
+            log.error("LLM sync call failed: {}", e.getMessage());
+            return null;
+        }
+        return sb.toString();
+    }
+
+    /** Extracts a string field value from a simple JSON object (no nested objects). */
+    private static String extractJsonField(String json, String fieldName) {
+        String key = "\"" + fieldName + "\"";
+        int idx = json.indexOf(key);
+        if (idx < 0) return null;
+        int colonIdx = json.indexOf(':', idx + key.length());
+        if (colonIdx < 0) return null;
+        // Find the opening quote
+        int startQuote = json.indexOf('"', colonIdx + 1);
+        if (startQuote < 0) return null;
+        // Find the closing quote (handle escaped quotes)
+        int endQuote = startQuote + 1;
+        while (endQuote < json.length()) {
+            if (json.charAt(endQuote) == '\\') { endQuote += 2; continue; }
+            if (json.charAt(endQuote) == '"') break;
+            endQuote++;
+        }
+        if (endQuote >= json.length()) return null;
+        return json.substring(startQuote + 1, endQuote);
     }
 
     // ---- GET /patrol/reports ----

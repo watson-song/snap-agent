@@ -20,11 +20,14 @@ import org.springframework.scheduling.support.CronTrigger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Spring {@link TaskScheduler}-backed implementation of {@link PatrolScheduler}.
@@ -177,9 +180,25 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
             }
 
             try {
+                // Inject patrol-mode instruction: tell the LLM to output an
+                // ALERT_SUMMARY line when an anomaly is detected. This replaces
+                // all keyword/regex matching — the LLM itself decides whether
+                // the result constitutes an anomaly and writes a human-readable
+                // conclusion that is shown verbatim on the alert page.
+                Map<String, String> patrolInputs = new LinkedHashMap<>(
+                        task.getInputs() != null ? task.getInputs()
+                                : Collections.<String, String>emptyMap());
+                String patrolSuffix = "\n\n[巡检模式] 如果检测到异常，请在回复最后一行严格输出: ALERT_SUMMARY: <一句话告警总结>";
+                String existingMsg = patrolInputs.get("_user_message");
+                if (existingMsg != null) {
+                    patrolInputs.put("_user_message", existingMsg + patrolSuffix);
+                } else {
+                    patrolInputs.put("_user_message", patrolSuffix.trim());
+                }
+
                 AgentTask agentTask = AgentTask.create(
                         task.getUserId(), task.getSkillName(),
-                        task.getInputs(), null);
+                        patrolInputs, null);
                 agentExecutor.execute(agentTask, skill);
 
                 TaskStatus status = agentTask.getStatus();
@@ -187,18 +206,22 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 String summary = agentTask.getReport() != null
                         ? agentTask.getReport() : "Patrol completed";
 
-                // Heuristic: if the report summary mentions anomaly keywords, mark as
-                // anomaly-detected so push channels fire. This lets patrol skills signal
-                // problems purely via their final text output, without code changes.
-                // Custom alert keywords from the task config are also checked.
-                boolean anomaly = detectAnomaly(summary, statusStr, task.getAlertKeywords());
+                // Extract the ALERT_SUMMARY line that the LLM was asked to emit.
+                // If present, it's a definitive anomaly signal and its text is
+                // used as the alert message (no further matching needed).
+                String alertSummary = extractAlertSummary(summary);
+
+                // Anomaly if: LLM emitted ALERT_SUMMARY, or task FAILED/TIMEOUT.
+                boolean anomaly = alertSummary != null
+                        || "FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr);
+
                 PatrolReport report = new PatrolReport(
                         null, task.getId(), agentTask.getTaskId(),
                         task.getSkillName(), triggeredAt, statusStr, summary, anomaly);
                 report.setUserId(task.getUserId());
                 reportStore.save(report);
                 if (anomaly) {
-                    recordAlert(report, task);
+                    recordAlert(report, task, alertSummary);
                     pushToChannels(report, null);
                 }
             } catch (Exception e) {
@@ -215,75 +238,46 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     }
 
     /**
-     * Detects anomaly indicators in the patrol report summary. Looks for
-     * keywords like "CRITICAL", "WARNING", "异常", "错误", "失败". Override
-     * threshold by subclassing if a different heuristic is needed.
+     * Extracts the {@code ALERT_SUMMARY:} line from the patrol report, if present.
      *
-     * @param summary       the patrol report summary text
-     * @param statusStr     the task status string (SUCCEEDED, FAILED, TIMEOUT, etc.)
-     * @param alertKeywords comma-separated custom keywords from the patrol task config;
-     *                      if the summary contains any of these, an anomaly is flagged.
-     *                      May be null or empty to use only the default markers.
+     * <p>During patrol execution, the LLM is instructed to output a final line
+     * starting with {@code ALERT_SUMMARY:} when it detects an anomaly. This method
+     * finds that line and returns the text after the prefix. The LLM — not
+     * keyword/regex matching — decides whether the result is anomalous.</p>
+     *
+     * @param summary the full patrol report text
+     * @return the alert summary text, or {@code null} if no ALERT_SUMMARY line found
      */
-    protected boolean detectAnomaly(String summary, String statusStr, String alertKeywords) {
-        if ("FAILED".equals(statusStr) || "TIMEOUT".equals(statusStr)) {
-            return true;
+    protected String extractAlertSummary(String summary) {
+        if (summary == null || summary.isEmpty()) return null;
+        Pattern p = Pattern.compile("ALERT_SUMMARY:\\s*(.+)", Pattern.CASE_INSENSITIVE);
+        Matcher m = p.matcher(summary);
+        if (m.find()) {
+            String text = m.group(1).trim();
+            // Remove trailing markdown or quotes
+            text = text.replaceAll("\\*+$", "").trim();
+            return text.isEmpty() ? null : text;
         }
-        if (summary == null || summary.isEmpty()) return false;
-        String lower = summary.toLowerCase(Locale.ROOT);
-
-        // Phase 1: built-in keyword matching (cheap, no tokens)
-        String[] markers = {"critical", "warning", "error", "exception", "failed",
-                "异常", "错误", "失败", "告警", "风险"};
-        for (String m : markers) {
-            if (lower.contains(m)) return true;
-        }
-
-        // Phase 2: custom alert keywords from task config
-        if (alertKeywords != null && !alertKeywords.isEmpty()) {
-            for (String kw : alertKeywords.split(",")) {
-                String trimmed = kw.trim();
-                if (!trimmed.isEmpty() && lower.contains(trimmed.toLowerCase(Locale.ROOT))) {
-                    log.info("Patrol anomaly detected via custom keyword '{}'", trimmed);
-                    return true;
-                }
-            }
-        }
-
-        // Phase 3: smart regex fallback — catches common phrasings that keywords miss
-        // e.g. "无数据" keyword won't match "没有新增数据", but these patterns will
-        String[] anomalyPatterns = {
-                "没有.*数据", "没有.*记录", "没有.*新增",
-                "无.*数据", "无.*记录", "无.*新增",
-                "0条", "0行", "count.*0",
-                "为空", "不存在", "未找到", "未.*发现",
-                "not found", "no data", "no records", "empty result",
-                "未运行", "未执行", "未完成",
-                "超时", "timeout", "不可用", "unavailable"
-        };
-        for (String pattern : anomalyPatterns) {
-            if (java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE)
-                    .matcher(lower).find()) {
-                log.info("Patrol anomaly detected via smart pattern '{}'", pattern);
-                return true;
-            }
-        }
-        return false;
+        return null;
     }
 
-    private void recordAlert(PatrolReport report, PatrolTask task) {
+    private void recordAlert(PatrolReport report, PatrolTask task, String alertSummary) {
         if (alertConverger == null) return;
         try {
             String alertSource = task.getName() != null && !task.getName().isEmpty()
                     ? task.getName() : task.getId();
+            // Use the LLM-generated alert summary if available; otherwise fall back
+            // to the full report summary.
+            String alertMessage = alertSummary != null ? alertSummary
+                    : (report.getSummary() != null ? report.getSummary() : "Anomaly detected");
             AnomalyEvent event = new AnomalyEvent(
                     "patrol", alertSource,
-                    report.getSummary() != null ? report.getSummary() : "Anomaly detected",
+                    alertMessage,
                     task.getSkillName(),
                     null, task.getInputs());
             alertConverger.record(event);
-            log.info("Patrol anomaly recorded as alert (patrolId={}, source={})",
-                    task.getId(), alertSource);
+            log.info("Patrol anomaly recorded as alert (patrolId={}, source={}, summary={})",
+                    task.getId(), alertSource, alertSummary);
         } catch (Exception e) {
             log.error("Failed to record alert for patrol {}: {}", task.getId(), e.getMessage());
         }
