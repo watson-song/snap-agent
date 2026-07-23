@@ -136,9 +136,8 @@ public class SkillLoader {
             }
             inputs = parseInputs((List<?>) inputsObj, name);
             if (inputs == null) {
-                // parseInputs already returned an invalid meta via exception path;
-                // but we handle it inline
-                return invalid(name, "invalid input spec: missing key");
+                // parseInputs returns null for: missing key, or enum type without options
+                return invalid(name, "invalid input spec: missing key or enum type without options");
             }
         }
 
@@ -185,6 +184,11 @@ public class SkillLoader {
             List<String> options = Collections.emptyList();
             if (im.get("options") instanceof List) {
                 options = toStringList((List<?>) im.get("options"), "options");
+            }
+            // enum type must declare a non-empty options list (otherwise the UI
+            // cannot render a valid selector and the LLM has no valid choices).
+            if ("enum".equals(type) && options.isEmpty()) {
+                return null;
             }
             String defaultValue = null;
             Object defObj = im.get("default");

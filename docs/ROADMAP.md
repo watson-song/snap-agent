@@ -1322,6 +1322,14 @@ snap-agent:
 
 ---
 
+## 已知缺口 / 技术债
+
+| 缺口ID | 模块 | 描述 | 优先级 | 状态 |
+|--------|------|------|--------|------|
+| GAP-8 | Agent Engine | `task-timeout-minutes`（总时长限制，默认 30 分钟）在 `docs/embeed-skills-agent/03-agent-engine.md` 与 `INTEGRATION.md` 配置示例中已设计，但 `AgentExecutor` 未实现。当前仅有 `max-turns`（轮次限制）和 `max-tokens`（单轮 token 限制）兜底；长时间运行的单轮任务（如超大 SQL）无法被总时长中断。实现时需在 execute 循环中检查 `System.currentTimeMillis() - task.getCreatedAt() >= taskTimeoutMs` 并将 task 标为 `TIMEOUT`。 | P2 | 待实现 |
+
+---
+
 ## 不在路线图（明确拒绝）
 
 - **stdio MCP** — Web 容器不 spawn 子进程

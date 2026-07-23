@@ -357,4 +357,169 @@ class SkillLoaderTest {
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
         assertThat(meta.getRequiredPermission()).isEmpty();
     }
+
+    // ---- GAP-3: ensureYamlValueQuoted (values containing colons) ----
+
+    @Test
+    @DisplayName("value with colon-space is auto-quoted so YAML parses correctly")
+    void shouldAutoQuoteValueContainingColonSpace() {
+        // description = "URI: http://example.com" would normally break YAML parsing
+        // because "URI: http://example.com" looks like a nested mapping.
+        // ensureYamlValueQuoted should auto-quote it.
+        String content = "---\n"
+                + "name: url-skill\n"
+                + "description: URI: http://example.com\n"
+                + "tools: []\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getName()).isEqualTo("url-skill");
+        // The full value should be preserved as the description
+        assertThat(meta.getDescription()).isEqualTo("URI: http://example.com");
+    }
+
+    @Test
+    @DisplayName("value ending with colon is auto-quoted")
+    void shouldAutoQuoteValueEndingWithColon() {
+        String content = "---\n"
+                + "name: label-skill\n"
+                + "description: trailing:\n"
+                + "tools: []\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getDescription()).isEqualTo("trailing:");
+    }
+
+    @Test
+    @DisplayName("already-quoted values are not re-quoted")
+    void shouldNotReQuoteAlreadyQuotedValue() {
+        String content = "---\n"
+                + "name: quoted-skill\n"
+                + "description: \"already quoted: with colon\"\n"
+                + "tools: []\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getDescription()).isEqualTo("already quoted: with colon");
+    }
+
+    @Test
+    @DisplayName("list item lines are not auto-quoted")
+    void shouldNotQuoteListItemLines() {
+        // The "- key: value" lines start with "-" and should not be auto-quoted
+        String content = "---\n"
+                + "name: list-skill\n"
+                + "description: desc\n"
+                + "tools: []\n"
+                + "inputs:\n"
+                + "  - key: env\n"
+                + "    label: env: prod\n"
+                + "    type: string\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getInputs()).hasSize(1);
+        assertThat(meta.getInputs().get(0).getLabel()).isEqualTo("env: prod");
+    }
+
+    // ---- GAP-4: InputSpec type=enum validation (enum must have options) ----
+
+    @Test
+    @DisplayName("enum input with empty options is marked INVALID")
+    void shouldMarkInvalidWhenEnumInputHasNoOptions() {
+        String content = "---\n"
+                + "name: enum-skill\n"
+                + "description: desc\n"
+                + "tools: []\n"
+                + "inputs:\n"
+                + "  - key: env\n"
+                + "    label: 环境\n"
+                + "    required: true\n"
+                + "    type: enum\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        // An enum type without options is invalid — the UI cannot render it
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.INVALID);
+        assertThat(meta.getUnavailableReason()).contains("enum");
+    }
+
+    @Test
+    @DisplayName("enum input with options parses correctly")
+    void shouldParseEnumInputWithOptionsSuccessfully() {
+        String content = "---\n"
+                + "name: enum-skill-ok\n"
+                + "description: desc\n"
+                + "tools: []\n"
+                + "inputs:\n"
+                + "  - key: env\n"
+                + "    label: 环境\n"
+                + "    required: true\n"
+                + "    type: enum\n"
+                + "    options: [sit, prod]\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getInputs().get(0).getOptions()).containsExactly("sit", "prod");
+    }
+
+    // ---- GAP-9: unknown fields handling ----
+
+    @Test
+    @DisplayName("unknown frontmatter fields are ignored, skill stays AVAILABLE")
+    void shouldIgnoreUnknownFrontmatterFields() {
+        String content = "---\n"
+                + "name: unknown-fields-skill\n"
+                + "description: has extra fields\n"
+                + "tools: [mysql_query]\n"
+                + "author: Jane Doe\n"
+                + "version: 1.0\n"
+                + "category: database\n"
+                + "tags: [sql, read-only]\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getName()).isEqualTo("unknown-fields-skill");
+        assertThat(meta.getDescription()).isEqualTo("has extra fields");
+    }
+
+    @Test
+    @DisplayName("unknown fields with nested mapping are ignored")
+    void shouldIgnoreUnknownNestedMappingFields() {
+        String content = "---\n"
+                + "name: nested-unknown\n"
+                + "description: desc\n"
+                + "tools: []\n"
+                + "metadata:\n"
+                + "  created: 2026-01-01\n"
+                + "  owner: team-a\n"
+                + "---\n"
+                + "body\n";
+
+        SkillMeta meta = loader.parse(content);
+
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getName()).isEqualTo("nested-unknown");
+    }
 }

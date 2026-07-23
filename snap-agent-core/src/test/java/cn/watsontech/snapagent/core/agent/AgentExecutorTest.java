@@ -9,6 +9,8 @@ import cn.watsontech.snapagent.core.llm.ToolUseBlock;
 import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
+import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
 import cn.watsontech.snapagent.core.tool.ToolResult;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -710,5 +713,332 @@ class AgentExecutorTest {
         assertThat(prompt).contains("user-1");
         // No project structure context should be present
         assertThat(prompt).doesNotContain("项目结构");
+    }
+
+    // ---- GAP-4: sanitizeInput (truncation + control-char stripping) ----
+
+    @Test
+    void shouldTruncateInputValueWhenLongerThan1000Chars() {
+        AgentExecutor executor = newExecutor();
+        Map<String, String> inputs = new HashMap<>();
+        StringBuilder longValue = new StringBuilder();
+        for (int i = 0; i < 2000; i++) {
+            longValue.append("x");
+        }
+        inputs.put("big", longValue.toString());
+
+        String userMsg = executor.buildInputMessage(inputs);
+
+        // The value should be truncated to 1000 chars (plus the "big=" prefix and newline)
+        int valueStart = userMsg.indexOf("big=") + "big=".length();
+        int valueEnd = userMsg.indexOf("\n", valueStart);
+        String value = userMsg.substring(valueStart, valueEnd);
+        assertThat(value.length()).isEqualTo(1000);
+    }
+
+    @Test
+    void shouldStripControlCharactersFromInputValue() {
+        AgentExecutor executor = newExecutor();
+        Map<String, String> inputs = new HashMap<>();
+        // Tab, newline, carriage return, NUL, DEL, and other control chars mixed with text
+        inputs.put("raw", "a\tb\nc\rd\0e\u001Ff\u007Fg");
+
+        String userMsg = executor.buildInputMessage(inputs);
+
+        // All control chars should be stripped; printable chars (a-g) should remain
+        assertThat(userMsg).contains("raw=abcdefg");
+    }
+
+    @Test
+    void shouldKeepNormalCharsAndUnicodeInInputValue() {
+        AgentExecutor executor = newExecutor();
+        Map<String, String> inputs = new HashMap<>();
+        inputs.put("sku", "A001-中文-é");
+
+        String userMsg = executor.buildInputMessage(inputs);
+
+        assertThat(userMsg).contains("sku=A001-中文-é");
+    }
+
+    @Test
+    void shouldHandleNullInputValueGracefully() {
+        AgentExecutor executor = newExecutor();
+        Map<String, String> inputs = new HashMap<>();
+        inputs.put("key", null);
+
+        String userMsg = executor.buildInputMessage(inputs);
+
+        // null value should become empty string after sanitization
+        assertThat(userMsg).contains("key=");
+    }
+
+    @Test
+    void shouldHandleEmptyInputsMap() {
+        AgentExecutor executor = newExecutor();
+
+        String userMsg = executor.buildInputMessage(new HashMap<>());
+
+        assertThat(userMsg).contains("<user_inputs>");
+        assertThat(userMsg).contains("</user_inputs>");
+    }
+
+    // ---- GAP-5: serializeResult / escape (JSON correctness) ----
+
+    @Test
+    void shouldSerializeToolResultAsJsonForLlm() {
+        // Capture the LlmRequest to inspect the serialized tool_result message
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("查一下。");
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("sql", "SELECT 1");
+            sink.onToolUse("toolu_01", "mysql_query", input);
+            sink.onStop("tool_use");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("done");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        when(mysqlProvider.execute(any(), any()))
+                .thenReturn(ToolResult.success("row1\nrow2", 2, 10L));
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        // The second LlmRequest (turn 1) should contain a tool_result message
+        List<Message> turn1Messages = captor.getAllValues().get(1).getMessages();
+        Message toolResultMsg = turn1Messages.stream()
+                .filter(m -> "tool".equals(m.getRole()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no tool_result message found"));
+
+        String content = toolResultMsg.getContent();
+        // Should be valid JSON: {"content":"...","rowCount":2,"truncated":false}
+        assertThat(content).startsWith("{");
+        assertThat(content).endsWith("}");
+        assertThat(content).contains("\"content\":\"row1\\nrow2\"");
+        assertThat(content).contains("\"rowCount\":2");
+        assertThat(content).contains("\"truncated\":false");
+    }
+
+    @Test
+    void shouldSerializeErrorToolResultAsJsonForLlm() {
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            Map<String, Object> input = new LinkedHashMap<>();
+            input.put("sql", "SELECT 1");
+            sink.onToolUse("toolu_01", "mysql_query", input);
+            sink.onStop("tool_use");
+            return null;
+        }).doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("done");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        when(mysqlProvider.execute(any(), any()))
+                .thenThrow(new RuntimeException("DB connection \"failed\""));
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = newTask();
+        executor.execute(task, skill);
+
+        List<Message> turn1Messages = captor.getAllValues().get(1).getMessages();
+        Message toolResultMsg = turn1Messages.stream()
+                .filter(m -> "tool".equals(m.getRole()))
+                .findFirst().orElseThrow(() -> new AssertionError("no tool_result message"));
+
+        String content = toolResultMsg.getContent();
+        // Error result JSON: {"error":"..."}
+        assertThat(content).contains("\"error\":");
+        // Double quotes in the error message should be escaped
+        assertThat(content).contains("\\\"failed\\\"");
+    }
+
+    // ---- GAP-6: Multi-turn history injection ----
+
+    @Test
+    void shouldInjectHistoryMessagesIntoLlmRequest() {
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("这是续答。");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        // Build a task with conversation history (follow-up question scenario)
+        List<Message> history = new ArrayList<Message>();
+        history.add(Message.user("之前的诊断结果是什么？"));
+        history.add(Message.assistant("SKU A001 库存正常。"));
+        AgentTask task = AgentTask.create("user-1", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6", history);
+
+        executor.execute(task, skill);
+
+        LlmRequest req = captor.getValue();
+        List<Message> messages = req.getMessages();
+        // history should be injected before the current user message
+        assertThat(messages).hasSizeGreaterThanOrEqualTo(3);
+        assertThat(messages.get(0).getRole()).isEqualTo("user");
+        assertThat(messages.get(0).getContent()).contains("之前的诊断");
+        assertThat(messages.get(1).getRole()).isEqualTo("assistant");
+        assertThat(messages.get(1).getContent()).contains("SKU A001");
+        // The last user message is the <user_inputs> message
+        Message lastUser = messages.get(messages.size() - 1);
+        assertThat(lastUser.getRole()).isEqualTo("user");
+        assertThat(lastUser.getContent()).contains("<user_inputs>");
+    }
+
+    @Test
+    void shouldNotInjectHistoryWhenHistoryIsNull() {
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("ok");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = AgentTask.create("u", "s", new HashMap<String, String>(), "m");
+        // history is null (no history constructor used)
+
+        executor.execute(task, skill);
+
+        List<Message> messages = captor.getValue().getMessages();
+        // Only the <user_inputs> message should be present (no history)
+        assertThat(messages).hasSize(1);
+        assertThat(messages.get(0).getContent()).contains("<user_inputs>");
+    }
+
+    @Test
+    void shouldNotInjectHistoryWhenHistoryIsEmpty() {
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("ok");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        AgentExecutor executor = newExecutor();
+        AgentTask task = AgentTask.create("u", "s", new HashMap<String, String>(),
+                "m", new ArrayList<Message>());
+
+        executor.execute(task, skill);
+
+        List<Message> messages = captor.getValue().getMessages();
+        assertThat(messages).hasSize(1);
+    }
+
+    // ---- GAP-9: buildToolDefs pluginOverrides selection ----
+
+    @Test
+    void shouldSelectOverridePluginWhenPluginOverridesSet() throws Exception {
+        // Register two plugins for the same toolType "mysql_query":
+        //  - "default-mysql" (default, schema says "Default MySQL")
+        //  - "remote-mysql"  (non-default, schema says "Remote MySQL")
+        // Task pluginOverrides = {mysql_query: remote-mysql}
+        // Expected: tool defs use "Remote MySQL" description
+        ToolProvider defaultProvider = mock(ToolProvider.class);
+        when(defaultProvider.name()).thenReturn("mysql_query");
+        when(defaultProvider.schema()).thenReturn(
+                "{\"name\":\"mysql_query\",\"description\":\"Default MySQL\","
+                + "\"input_schema\":{\"type\":\"object\","
+                + "\"properties\":{\"sql\":{\"type\":\"string\"}}}}");
+
+        ToolProvider overrideProvider = mock(ToolProvider.class);
+        when(overrideProvider.name()).thenReturn("mysql_query");
+        when(overrideProvider.schema()).thenReturn(
+                "{\"name\":\"mysql_query\",\"description\":\"Remote MySQL\","
+                + "\"input_schema\":{\"type\":\"object\","
+                + "\"properties\":{\"sql\":{\"type\":\"string\"}}}}");
+
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "default-mysql", "mysql_query", "default", "", "1",
+                true, true, true, defaultProvider, null, null, null));
+        registry.register(new PluginDescriptor(
+                "remote-mysql", "mysql_query", "remote", "", "1",
+                false, true, false, overrideProvider, null, null, null));
+
+        ToolDispatcher overrideDispatcher = new ToolDispatcher(registry, 50000);
+
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("ok");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        AgentExecutor executor = new AgentExecutor(llmClient, overrideDispatcher, taskStore, 20, 8192);
+
+        Map<String, String> overrides = new LinkedHashMap<>();
+        overrides.put("mysql_query", "remote-mysql");
+        AgentTask task = AgentTask.create("user-1", "test-skill",
+                new HashMap<String, String>(), "model", null, overrides);
+
+        executor.execute(task, skill);
+
+        List<ToolDef> tools = captor.getValue().getTools();
+        assertThat(tools).hasSize(1);
+        // The override plugin's description should be used
+        assertThat(tools.get(0).getDescription()).isEqualTo("Remote MySQL");
+    }
+
+    @Test
+    void shouldUseDefaultPluginWhenNoOverridesSet() throws Exception {
+        ToolProvider defaultProvider = mock(ToolProvider.class);
+        when(defaultProvider.name()).thenReturn("mysql_query");
+        when(defaultProvider.schema()).thenReturn(
+                "{\"name\":\"mysql_query\",\"description\":\"Default MySQL\","
+                + "\"input_schema\":{\"type\":\"object\","
+                + "\"properties\":{\"sql\":{\"type\":\"string\"}}}}");
+
+        ToolProvider otherProvider = mock(ToolProvider.class);
+        when(otherProvider.name()).thenReturn("mysql_query");
+        when(otherProvider.schema()).thenReturn(
+                "{\"name\":\"mysql_query\",\"description\":\"Other MySQL\","
+                + "\"input_schema\":{\"type\":\"object\","
+                + "\"properties\":{\"sql\":{\"type\":\"string\"}}}}");
+
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "default-mysql", "mysql_query", "default", "", "1",
+                true, true, true, defaultProvider, null, null, null));
+        registry.register(new PluginDescriptor(
+                "other-mysql", "mysql_query", "other", "", "1",
+                false, true, false, otherProvider, null, null, null));
+
+        ToolDispatcher overrideDispatcher = new ToolDispatcher(registry, 50000);
+
+        ArgumentCaptor<LlmRequest> captor = ArgumentCaptor.forClass(LlmRequest.class);
+        doAnswer(invocation -> {
+            LlmEventSink sink = (LlmEventSink) invocation.getArgument(1);
+            sink.onThought("ok");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(captor.capture(), any(), any());
+
+        AgentExecutor executor = new AgentExecutor(llmClient, overrideDispatcher, taskStore, 20, 8192);
+        // No pluginOverrides → default plugin should be selected
+        AgentTask task = AgentTask.create("user-1", "test-skill",
+                new HashMap<String, String>(), "model");
+
+        executor.execute(task, skill);
+
+        List<ToolDef> tools = captor.getValue().getTools();
+        assertThat(tools).hasSize(1);
+        assertThat(tools.get(0).getDescription()).isEqualTo("Default MySQL");
     }
 }
