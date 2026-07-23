@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -154,6 +155,73 @@ class PatrolEndpointIntegrationTest {
         mockMvc.perform(post("/snap-agent/alerts/a1/resolve"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.resolved").value(true));
+    }
+
+    // ── expanded coverage (GAP-5) ─────────────────────────────────
+
+    @Test
+    @DisplayName("PATCH /patrol/tasks/{id}/toggle toggles task enabled state")
+    void shouldTogglePatrolTask() throws Exception {
+        when(patrolScheduler.toggleEnabled("p1")).thenReturn(false);
+
+        mockMvc.perform(patch("/snap-agent/patrol/tasks/p1/toggle"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("p1"))
+                .andExpect(jsonPath("$.enabled").value(false));
+    }
+
+    @Test
+    @DisplayName("PATCH /patrol/tasks/{id}/toggle returns 404 for unknown task")
+    void shouldReturn404WhenToggleUnknownTask() throws Exception {
+        when(patrolScheduler.toggleEnabled("unknown")).thenReturn(null);
+
+        mockMvc.perform(patch("/snap-agent/patrol/tasks/unknown/toggle"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("GET /alerts?type=ERROR_SPIKE filters alerts by type")
+    void shouldListAlertsWithTypeFilter() throws Exception {
+        AlertConvergence alert = new AlertConvergence(
+                "a1", "fp", "ERROR_SPIKE", "svc", "NPE", "task-1");
+        when(alertConverger.query(any(), eq("ERROR_SPIKE"), anyInt(), anyInt()))
+                .thenReturn(Collections.singletonList(alert));
+        when(alertConverger.count(any(), eq("ERROR_SPIKE"))).thenReturn(1L);
+
+        mockMvc.perform(get("/snap-agent/alerts?page=0&size=20&type=ERROR_SPIKE"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alerts[0].id").value("a1"))
+                .andExpect(jsonPath("$.alerts[0].type").value("ERROR_SPIKE"))
+                .andExpect(jsonPath("$.total").value(1));
+    }
+
+    @Test
+    @DisplayName("GET /alerts with no type returns all alerts")
+    void shouldListAllAlertsWithoutTypeFilter() throws Exception {
+        AlertConvergence a1 = new AlertConvergence(
+                "a1", "fp1", "ERROR_SPIKE", "svc-a", "msg1", "t1");
+        AlertConvergence a2 = new AlertConvergence(
+                "a2", "fp2", "DB_DOWN", "svc-b", "msg2", "t2");
+        when(alertConverger.query(any(), isNull(), anyInt(), anyInt()))
+                .thenReturn(Arrays.asList(a1, a2));
+        when(alertConverger.count(any(), isNull())).thenReturn(2L);
+
+        mockMvc.perform(get("/snap-agent/alerts?page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.alerts.length()").value(2))
+                .andExpect(jsonPath("$.total").value(2));
+    }
+
+    @Test
+    @DisplayName("GET /patrol/reports returns 404-style empty for unknown user")
+    void shouldReturnEmptyReportsForUnknownUser() throws Exception {
+        when(patrolScheduler.getReports(anyString(), anyInt(), anyInt()))
+                .thenReturn(Collections.<PatrolReport>emptyList());
+        when(patrolScheduler.countReports(anyString())).thenReturn(0L);
+
+        mockMvc.perform(get("/snap-agent/patrol/reports?page=0&size=20"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0));
     }
 
     @Test
