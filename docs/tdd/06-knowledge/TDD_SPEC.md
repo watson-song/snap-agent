@@ -116,6 +116,50 @@ AC9: Given 源A正常、源B load()抛异常
   Then A片段正常加载，B异常被catch
 ```
 
+### US-6: 检索数量限制 topK
+```gherkin
+作为 系统开发者
+我希望 search 返回结果按 score 降序排列且不超过 topK
+  以便 注入 prompt 的知识片段数量可控
+```
+**AC:**
+```gherkin
+AC10: Given 知识库含 5 个匹配片段且 topK=3
+  When search("query", 3, 0.0)
+  Then 返回最多 3 个片段
+  And 片段按 score 降序排列
+```
+
+### US-7: 最低评分阈值 minScore 过滤
+```gherkin
+作为 系统开发者
+我希望 score 低于 minScore 的片段被过滤
+  以便 只注入高相关度的知识
+```
+**AC:**
+```gherkin
+AC11: Given 片段 A score=0.8, 片段 B score=0.3
+  When search("query", 5, 0.5)
+  Then 仅返回片段 A
+  And 片段 B 被过滤
+```
+
+### US-8: 空查询防御处理
+```gherkin
+作为 系统开发者
+我希望 search 对 null 或空查询安全返回空列表
+  以便 不抛 NPE 影响主流程
+```
+**AC:**
+```gherkin
+AC12: Given 查询为 null
+  When search(null, 5, 0.5)
+  Then 返回空列表且不抛异常
+AC13: Given 查询为空串 ""
+  When search("", 5, 0.5)
+  Then 返回空列表
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -127,6 +171,9 @@ AC9: Given 源A正常、源B load()抛异常
 | 注入 | US-1 | 回答精准 | 相关度+50% | US-3 |
 | 沉淀 | US-4 | 经验复用 | 覆盖率>80% | US-2 |
 | 更新 | US-5 | 无需重启 | <500ms | US-2 |
+| 限量 | US-6 | 数量可控 | topK 限制 100% | US-3 |
+| 质量 | US-7 | 高相关度 | minScore 过滤 100% | US-3 |
+| 防御 | US-8 | 不崩坏 | null 安全 100% | US-3 |
 
 ---
 

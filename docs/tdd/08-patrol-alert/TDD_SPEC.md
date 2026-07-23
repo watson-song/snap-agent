@@ -115,6 +115,26 @@ AC2: Given status=FIX_IN_PROGRESS / When verify / Then 运行verify-fix Skill，
 AC3: Given status=VERIFIED / When close / Then 提取KnowledgeFragment+reload，status=CLOSED
 ```
 
+### US-8: 外部工单创建与状态流转
+```gherkin
+作为 运维工程师
+我希望 告警确认后自动创建外部工单并流转状态
+  以便 问题在工单系统中跟踪而非仅停留在告警
+```
+**AC:**
+```gherkin
+AC1: Given issue 状态为 OPEN 且 issueTracker 配置完成
+  When createExternalIssue(issue)
+  Then issue.status 变为 FIX_IN_PROGRESS
+  And issueTracker.createIssue 被调用一次
+AC2: Given issueTracker 未配置 (NoopIssueTracker)
+  When createExternalIssue(issue)
+  Then 不抛异常，issue.status 保持不变
+AC3: Given issue.status 为 RESOLVED
+  When createExternalIssue(issue)
+  Then 不创建工单 (仅 OPEN 状态可创建)
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -128,6 +148,7 @@ AC3: Given status=VERIFIED / When close / Then 提取KnowledgeFragment+reload，
 | 通知 | US-5 邮件 | 离线通知 | 送达>95% | US-3 |
 | 诊断 | US-6 事件触发 | 事件驱动 | 延迟<30s | US-2 |
 | 治理 | US-7 闭环 | 经验沉淀 | 闭环>80% | US-6 |
+| 闭环 | US-8 | 工单跟踪 | 创建率 100% | US-7 |
 
 ---
 

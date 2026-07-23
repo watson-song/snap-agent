@@ -173,6 +173,49 @@ AC1: JAR skill 优先于 host skill
   And host skill source="host" 仅当 name 不冲突时
 ```
 
+### US-7: InputSpec 参数校验
+```gherkin
+As a skill author
+I want the system to validate InputSpec types and enforce enum options
+So that invalid skill parameters are caught at load time, not at runtime
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: enum 类型必须有非空 options
+  Given frontmatter inputs 含 type="enum" 但无 options
+  When SkillLoader.parse 被调用
+  Then availability == INVALID
+  And unavailableReason 包含 "enum type without options"
+
+AC2: 合法 enum 带 options
+  Given frontmatter inputs 含 type="enum" options=["A","B","C"]
+  When parse 被调用
+  Then availability == AVAILABLE
+  And inputs[0].options 包含 ["A","B","C"]
+```
+
+### US-8: Refresh 异常回滚
+```gherkin
+As a platform operator
+I want skill refresh to preserve the old cache when scanning fails
+So that a transient filesystem error doesn't wipe all loaded skills
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: refresh 扫描异常时保留旧缓存
+  Given registry 已有 3 个 skill 且 scan 抛 RuntimeException
+  When refresh() 被调用
+  Then 返回 RefreshResult 含旧缓存 counts
+  And cache 不被替换 (get("skill-a") 仍非 null)
+
+AC2: 空工具列表 skill 保持 AVAILABLE
+  Given skill.tools 为空列表 (纯 LLM skill)
+  When validateContract 被调用
+  Then availability == AVAILABLE (不因空 tools 标 UNAVAILABLE)
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -185,6 +228,8 @@ AC1: JAR skill 优先于 host skill
 | 组织 | US-4 目录 skill | 支持辅助文件 | 目录扫描正确 | US-1 |
 | 迭代 | US-5 热重载 | 无需重启 | 文件变更后 < 5s 生效 | US-2 |
 | 保护 | US-6 JAR 优先 | 防覆盖 | 0 次误覆盖 | US-2 |
+| 校验 | US-7 InputSpec | 参数安全 | enum 校验 100% | US-1 |
+| 容错 | US-8 Refresh 回滚 | 缓存安全 | 旧缓存保留 100% | US-2 |
 
 ---
 
