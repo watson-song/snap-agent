@@ -9,7 +9,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +19,7 @@ import java.nio.file.Paths;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -285,6 +288,27 @@ class PluginUploaderTest {
         Path savedJar = tempDir.resolve("save-test-plugin").resolve("plugin.jar");
         assertThat(savedJar).exists();
         assertThat(Files.size(savedJar)).isEqualTo(originalSize);
+    }
+
+    // ---- P2: upload JAR IOException error handling ----
+
+    @Test
+    void shouldWrapIOExceptionWhenSavingTempFile() throws Exception {
+        // Mock MultipartFile whose transferTo fails (e.g. disk full)
+        MultipartFile jarFile = mock(MultipartFile.class);
+        org.mockito.Mockito.doThrow(new IOException("disk full"))
+                .when(jarFile).transferTo(any(File.class));
+
+        Throwable thrown = catchThrowable(() -> uploader.upload(jarFile));
+        assertThat(thrown)
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("failed to save uploaded JAR to temp file")
+                .hasCauseInstanceOf(IOException.class);
+        assertThat(thrown.getCause()).hasMessageContaining("disk full");
+
+        // Scanner must never be called when the JAR can't even be saved
+        verify(scanner, never()).scan(any());
+        verify(registry, never()).register(any());
     }
 
     // --- Helper methods ---
