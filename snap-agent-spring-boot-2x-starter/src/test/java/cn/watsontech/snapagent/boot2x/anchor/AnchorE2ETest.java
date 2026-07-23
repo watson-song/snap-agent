@@ -131,7 +131,7 @@ class AnchorE2ETest {
 
     @Test
     void e2e_preprocess_fullFlow_returnsPreprocessId() throws Exception {
-        when(skillRegistry.all()).thenReturn(Collections.singletonList(
+        lenient().when(skillRegistry.all()).thenReturn(Collections.singletonList(
                 new SkillMeta("patrol", "运维巡检", Collections.<String>emptyList(),
                         Collections.emptyList(), "body", SkillAvailability.AVAILABLE, null)
         ));
