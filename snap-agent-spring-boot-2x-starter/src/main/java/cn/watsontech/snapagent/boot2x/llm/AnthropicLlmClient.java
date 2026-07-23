@@ -49,6 +49,7 @@ public class AnthropicLlmClient implements LlmClient {
     private final String baseUrl;
     private final String apiKey;
     private final String authToken;
+    private final String defaultModel;
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -61,9 +62,16 @@ public class AnthropicLlmClient implements LlmClient {
 
     /** Constructor with optional Bearer token auth and HTTP proxy (for proxy gateways like cc-switch). */
     public AnthropicLlmClient(String baseUrl, String apiKey, String authToken, String proxyUrl, int timeoutSeconds) {
+        this(baseUrl, apiKey, authToken, proxyUrl, timeoutSeconds, null);
+    }
+
+    /** Constructor with default model name (used when LlmRequest.model is null). */
+    public AnthropicLlmClient(String baseUrl, String apiKey, String authToken, String proxyUrl,
+                              int timeoutSeconds, String defaultModel) {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.authToken = authToken;
+        this.defaultModel = defaultModel;
         this.objectMapper = new ObjectMapper();
         OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
                 .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
@@ -86,6 +94,7 @@ public class AnthropicLlmClient implements LlmClient {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.authToken = null;
+        this.defaultModel = null;
         this.objectMapper = new ObjectMapper();
         this.httpClient = httpClient;
     }
@@ -117,7 +126,7 @@ public class AnthropicLlmClient implements LlmClient {
                     events.onError("Unexpected content-type: " + contentType);
                     return;
                 }
-                parseSseStream(response, events);
+                parseSseStream(response, events, req);
             }
         } catch (IOException e) {
             log.error("LLM streaming failed: {}", e.getMessage());
@@ -212,7 +221,9 @@ public class AnthropicLlmClient implements LlmClient {
     @SuppressWarnings("unchecked")
     private String buildRequestBody(LlmRequest req) throws IOException {
         Map<String, Object> body = new LinkedHashMap<String, Object>();
-        body.put("model", req.getModel());
+        String model = req.getModel();
+        if (model == null || model.isEmpty()) model = defaultModel;
+        body.put("model", model);
         body.put("max_tokens", req.getMaxTokens());
         body.put("stream", req.isStreaming());
 
@@ -306,7 +317,7 @@ public class AnthropicLlmClient implements LlmClient {
     }
 
     @SuppressWarnings("unchecked")
-    private void parseSseStream(Response response, LlmEventSink events) throws IOException {
+    private void parseSseStream(Response response, LlmEventSink events, LlmRequest req) throws IOException {
         ResponseBody responseBody = response.body();
         if (responseBody == null) {
             events.onError("empty response body");
@@ -321,6 +332,8 @@ public class AnthropicLlmClient implements LlmClient {
 
         // Content block state (held in a mutable holder to pass to helper)
         SseState state = new SseState();
+        // Skip thinking deltas when no tools are requested (e.g. inject mode)
+        state.skipThinking = req.getTools() == null || req.getTools().isEmpty();
 
         String stopReason = null;
 
@@ -395,10 +408,12 @@ public class AnthropicLlmClient implements LlmClient {
                         String text = delta.path("text").asText();
                         events.onThought(text);
                     } else if ("thinking_delta".equals(deltaType)) {
-                        // Extended thinking — capture as thought text
-                        String thinking = delta.path("thinking").asText();
-                        if (thinking != null && !thinking.isEmpty()) {
-                            events.onThought(thinking);
+                        // Extended thinking — skip when no tools requested (inject mode)
+                        if (!state.skipThinking) {
+                            String thinking = delta.path("thinking").asText();
+                            if (thinking != null && !thinking.isEmpty()) {
+                                events.onThought(thinking);
+                            }
                         }
                     } else if ("input_json_delta".equals(deltaType)) {
                         String partial = delta.path("partial_json").asText();
@@ -455,6 +470,7 @@ public class AnthropicLlmClient implements LlmClient {
     /** Mutable state shared between parseSseStream and processSseEvent. */
     private static class SseState {
         boolean inToolUse = false;
+        boolean skipThinking = false;
         String toolUseId = null;
         String toolUseName = null;
         StringBuilder toolUseJson = new StringBuilder();

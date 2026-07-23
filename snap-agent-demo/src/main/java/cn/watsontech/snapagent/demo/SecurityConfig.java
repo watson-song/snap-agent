@@ -28,9 +28,9 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .authorizeRequests()
                 // Public: auth config (tells frontend how to authenticate — no sensitive info)
                 .antMatchers("/snap-agent/auth-config").permitAll()
-                // Public: static resources (SPA shell)
+                // Public: static resources (SPA shell + anchor showcase)
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
-                        "/snap-agent/*.css").permitAll()
+                        "/snap-agent/*.css", "/*.html").permitAll()
                 // Public: SSE stream (EventSource sends cookies automatically;
                 // controller verifies task ownership)
                 .antMatchers("/snap-agent/runs/*/stream").permitAll()
