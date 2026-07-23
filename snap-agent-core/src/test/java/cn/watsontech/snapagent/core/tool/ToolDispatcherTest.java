@@ -3,11 +3,17 @@ package cn.watsontech.snapagent.core.tool;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -358,5 +364,210 @@ class ToolDispatcherTest {
         dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
 
         verify(callback, times(1)).onToolExecuted(eq("mysql_query"), any(), any());
+    }
+
+    // --- G-301: dispatch when provider.execute returns null ---
+
+    @Test
+    void shouldReturnErrorWhenProviderReturnsNullResult() {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        ToolContext ctx = new ToolContext("t1", "u1", null);
+        when(mysqlProvider.execute(any(), any())).thenReturn(null);
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.getError()).isEqualTo("tool returned null result");
+        assertThat(result.getContent()).isNull();
+        assertThat(result.isTruncated()).isFalse();
+    }
+
+    @Test
+    void shouldInvokeAuditWhenProviderReturnsNullResult() {
+        AuditCallback callback = mock(AuditCallback.class);
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        ToolContext ctx = new ToolContext("t1", "u1", callback);
+        when(mysqlProvider.execute(any(), any())).thenReturn(null);
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
+
+        verify(callback, times(1)).onToolExecuted(eq("mysql_query"), any(), eq(result));
+    }
+
+    // --- G-302: dispatch when provider.execute throws RuntimeException ---
+
+    @Test
+    void shouldReturnErrorWhenProviderThrowsRuntimeException() {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        ToolContext ctx = new ToolContext("t1", "u1", null);
+        when(mysqlProvider.execute(any(), any())).thenThrow(new RuntimeException("boom"));
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
+
+        assertThat(result.isError()).isTrue();
+        assertThat(result.getError()).isEqualTo("plugin execution failed: boom");
+        assertThat(result.getContent()).isNull();
+        assertThat(result.isTruncated()).isFalse();
+    }
+
+    @Test
+    void shouldInvokeAuditWhenProviderThrowsRuntimeException() {
+        AuditCallback callback = mock(AuditCallback.class);
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        ToolContext ctx = new ToolContext("t1", "u1", callback);
+        when(mysqlProvider.execute(any(), any())).thenThrow(new RuntimeException("boom"));
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
+
+        assertThat(result.isError()).isTrue();
+        verify(callback, times(1)).onToolExecuted(eq("mysql_query"), any(), eq(result));
+    }
+
+    // --- G-305: activePlugins when override points to disabled plugin (fallback to default) ---
+
+    @Test
+    void shouldFallbackToDefaultWhenOverridePointsToDisabledPlugin() {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "local", "log_read", "Local", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        PluginDescriptor remote = new PluginDescriptor(
+                "remote", "log_read", "Remote", "", "1.0",
+                false, true, false, redisProvider, null, null, null);
+        registry.register(remote);
+        registry.disable("remote");
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+
+        Map<String, String> overrides = new LinkedHashMap<>();
+        overrides.put("log_read", "remote");
+
+        java.util.Collection<PluginDescriptor> active = dispatcher.activePlugins(overrides);
+
+        assertThat(active).hasSize(1);
+        assertThat(active.iterator().next().getPluginId()).isEqualTo("local");
+    }
+
+    // --- G-306: Concurrent register/disable + dispatch (thread safety) ---
+
+    @Test
+    void shouldHandleConcurrentRegisterDisableAndDispatchWithoutExceptions() throws InterruptedException {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        when(mysqlProvider.execute(any(), any())).thenReturn(ToolResult.success("1", 1, 1L));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+
+        int threadCount = 30;
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        List<Throwable> errors = Collections.synchronizedList(new ArrayList<>());
+
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            executor.submit(() -> {
+                try {
+                    startLatch.await();
+                    if (idx % 3 == 0) {
+                        // register a new plugin with a unique id
+                        String id = "plugin-" + idx;
+                        ToolProvider p = mock(ToolProvider.class);
+                        when(p.name()).thenReturn("log_read");
+                        registry.register(new PluginDescriptor(
+                                id, "log_read", "Log", "", "1.0",
+                                false, true, false, p, null, null, null));
+                    } else if (idx % 3 == 1) {
+                        // disable then re-enable the mysql plugin
+                        registry.disable("mysql");
+                        registry.enable("mysql");
+                    } else {
+                        // dispatch a tool call
+                        dispatcher.dispatch("mysql_query", new HashMap<>(),
+                                new ToolContext("t1", "u1", null));
+                    }
+                } catch (Throwable t) {
+                    errors.add(t);
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        startLatch.countDown();
+        assertThat(doneLatch.await(30, TimeUnit.SECONDS)).isTrue();
+        executor.shutdown();
+
+        assertThat(errors).isEmpty();
+    }
+
+    // --- G-309: buildToolDefinitions @Deprecated compatibility ---
+
+    @Test
+    void shouldBuildToolDefinitionsWithSchemaForDeprecatedCompatibility() {
+        ToolDispatcher dispatcher = new ToolDispatcher(
+                java.util.Arrays.asList(mysqlProvider, redisProvider), 50000);
+
+        String defs = dispatcher.buildToolDefinitions();
+
+        assertThat(defs).startsWith("Available tools:");
+        assertThat(defs).contains("mysql_query");
+        assertThat(defs).contains("{\"name\":\"mysql_query\"}");
+        assertThat(defs).contains("redis_get");
+        assertThat(defs).contains("{\"name\":\"redis_get\"}");
+    }
+
+    @Test
+    void shouldBuildEmptyToolDefinitionsWhenNoPluginsRegistered() {
+        ToolDispatcher dispatcher = new ToolDispatcher(
+                Collections.<ToolProvider>emptyList(), 50000);
+
+        String defs = dispatcher.buildToolDefinitions();
+
+        assertThat(defs).startsWith("Available tools:");
+        // no tool entries — just the header
+        assertThat(defs).doesNotContain("- ");
+    }
+
+    // --- G-310: availableToolTypes vs availableToolNames equivalence ---
+
+    @Test
+    void shouldReturnEquivalentResultsForAvailableToolTypesAndNames() {
+        ToolDispatcher dispatcher = new ToolDispatcher(
+                java.util.Arrays.asList(mysqlProvider, redisProvider), 50000);
+
+        Set<String> types = dispatcher.availableToolTypes();
+        Set<String> names = dispatcher.availableToolNames();
+
+        assertThat(types).isEqualTo(names);
+        assertThat(types).containsExactlyInAnyOrder("mysql_query", "redis_get");
+    }
+
+    @Test
+    void shouldReturnEquivalentEmptyResultsForTypesAndNamesWhenNoPlugins() {
+        ToolDispatcher dispatcher = new ToolDispatcher(
+                Collections.<ToolProvider>emptyList(), 50000);
+
+        Set<String> types = dispatcher.availableToolTypes();
+        Set<String> names = dispatcher.availableToolNames();
+
+        assertThat(types).isEqualTo(names);
+        assertThat(types).isEmpty();
     }
 }

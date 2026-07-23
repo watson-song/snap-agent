@@ -154,4 +154,47 @@ class InMemoryPluginRegistryTest {
         assertThat(second.isDefault()).isTrue();
         assertThat(registry.getDefault("log_read")).isSameAs(second);
     }
+
+    // --- G-303: unregister(null) no-op ---
+
+    @Test
+    void shouldNoOpWhenUnregisteringNullIdOnEmptyRegistry() {
+        // registry is empty, unregister(null) should not throw
+        registry.unregister(null);
+        assertThat(registry.list()).isEmpty();
+    }
+
+    @Test
+    void shouldNotRemoveAnyPluginWhenUnregisteringNull() {
+        registry.register(newPlugin("mysql", "mysql_query", true, true));
+        registry.register(newPlugin("redis", "redis_get", true, true));
+
+        registry.unregister(null);
+
+        assertThat(registry.list()).hasSize(2);
+        assertThat(registry.getPlugin("mysql")).isNotNull();
+        assertThat(registry.getPlugin("redis")).isNotNull();
+    }
+
+    // --- G-304: setDefault for unknown pluginId (no-op) ---
+
+    @Test
+    void shouldNoOpWhenSettingDefaultForUnknownPluginId() {
+        registry.register(newPlugin("log1", "log_read", false, true));
+
+        // setDefault with a nonexistent pluginId should be a no-op
+        registry.setDefault("log_read", "nonexistent");
+
+        // original default should still be in place
+        assertThat(registry.getDefault("log_read")).isNotNull();
+        assertThat(registry.getDefault("log_read").getPluginId()).isEqualTo("log1");
+        assertThat(registry.getPlugin("log1").isDefault()).isTrue();
+    }
+
+    @Test
+    void shouldNoOpWhenSettingDefaultForUnknownPluginIdOnEmptyRegistry() {
+        // registry is empty, setDefault should not throw
+        registry.setDefault("log_read", "nonexistent");
+        assertThat(registry.getDefault("log_read")).isNull();
+    }
 }

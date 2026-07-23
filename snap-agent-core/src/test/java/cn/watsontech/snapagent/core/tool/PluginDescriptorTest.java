@@ -6,6 +6,7 @@ import org.mockito.Mockito;
 import java.nio.file.Paths;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PluginDescriptorTest {
 
@@ -75,5 +76,34 @@ class PluginDescriptorTest {
         assertThat(desc.getClassLoader()).isNull();
         assertThat(desc.getJarPath()).isNull();
         assertThat(desc.getPluginContext()).isNull();
+    }
+
+    // --- G-308: PluginDescriptor constructor with null pluginId/toolType ---
+
+    @Test
+    void shouldThrowWhenPluginIdIsNull() {
+        assertThatThrownBy(() -> new PluginDescriptor(
+                null, "t1", "P1", "", "1.0",
+                false, true, true, Mockito.mock(ToolProvider.class), null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pluginId must not be null");
+    }
+
+    @Test
+    void shouldThrowWhenToolTypeIsNull() {
+        assertThatThrownBy(() -> new PluginDescriptor(
+                "p1", null, "P1", "", "1.0",
+                false, true, true, Mockito.mock(ToolProvider.class), null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("toolType must not be null");
+    }
+
+    @Test
+    void shouldThrowWhenBothPluginIdAndToolTypeAreNull() {
+        assertThatThrownBy(() -> new PluginDescriptor(
+                null, null, "P1", "", "1.0",
+                false, true, true, Mockito.mock(ToolProvider.class), null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("pluginId must not be null");
     }
 }
