@@ -50,6 +50,31 @@ class TranscriptEventTest {
     }
 
     @Test
+    void shouldCreateToolResultEventWithContentPreviewAndError() {
+        TranscriptEvent event = TranscriptEvent.toolResult(
+                "toolu_02", 10, true, 50L, "preview-data", "DB error");
+
+        assertThat(event.getType()).isEqualTo(TranscriptEvent.TYPE_TOOL_RESULT);
+        assertThat(event.getData().get("id")).isEqualTo("toolu_02");
+        assertThat(event.getData().get("rowCount")).isEqualTo(10);
+        assertThat(event.getData().get("truncated")).isEqualTo(true);
+        assertThat(event.getData().get("durationMs")).isEqualTo(50L);
+        assertThat(event.getData().get("content")).isEqualTo("preview-data");
+        assertThat(event.getData().get("error")).isEqualTo("DB error");
+    }
+
+    @Test
+    void shouldOmitContentAndErrorWhenNullInToolResult() {
+        TranscriptEvent event = TranscriptEvent.toolResult("id", 1, false, 5L, null, null);
+
+        assertThat(event.getData()).doesNotContainKey("content");
+        assertThat(event.getData()).doesNotContainKey("error");
+        // Base fields still present
+        assertThat(event.getData().get("id")).isEqualTo("id");
+        assertThat(event.getData().get("rowCount")).isEqualTo(1);
+    }
+
+    @Test
     void shouldCreateDoneEvent() {
         TranscriptEvent event = TranscriptEvent.done("SUCCEEDED", "report text");
 

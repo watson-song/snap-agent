@@ -490,4 +490,135 @@ class SkillRegistryTest {
         assertThat(meta).isNotNull();
         assertThat(meta.getRequiredPermission()).isEqualTo("snap-agent:secure");
     }
+
+    // ---- GAP-5: scan failure exception handling ----
+
+    @Test
+    void shouldReturnOldCacheCountsAndNotReplaceCacheWhenRefreshScanThrows() {
+        // A builtin AVAILABLE skill causes validateContract to be called at the scan()
+        // level (outside the walkFileTree visitor), so a throwing dispatcher makes
+        // scan() throw RuntimeException — caught by the constructor and refresh().
+        SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
+
+        ToolDispatcher throwingDispatcher = new ToolDispatcher(
+                Arrays.asList(mysqlProvider), 50000) {
+            @Override
+            public java.util.Set<String> availableToolNames() {
+                throw new RuntimeException("dispatcher exploded");
+            }
+        };
+
+        // Constructor scan throws → caught by constructor's catch → cache stays empty
+        SkillRegistry registry = new SkillRegistry(null,
+                Arrays.asList(builtin), throwingDispatcher);
+        assertThat(registry.all()).isEmpty();
+
+        // refresh() scan throws → caught by refresh's catch → returns old cache counts
+        // and does NOT replace the cache
+        SkillRegistry.RefreshResult result = registry.refresh();
+        assertThat(result.getTotal()).isZero();
+        // cache is NOT replaced — still empty
+        assertThat(registry.all()).isEmpty();
+    }
+
+    @Test
+    void shouldKeepOldCacheAvailableWhenRefreshScanThrowsAfterSuccessfulInit() {
+        // Setup: working dispatcher loads 1 builtin skill
+        SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
+        SkillRegistry registry = new SkillRegistry(null,
+                Arrays.asList(builtin), dispatcher);
+        assertThat(registry.all()).hasSize(1);
+        assertThat(registry.get("builtin-skill").getAvailability())
+                .isEqualTo(SkillAvailability.AVAILABLE);
+
+        // Now swap to a throwing dispatcher via a fresh registry that has the
+        // same builtin but a broken dispatcher. The constructor scan throws,
+        // so cache is empty. We then verify that refresh() on a registry that
+        // HAD a successful init but now fails keeps the old cache.
+        // (Since dispatcher is final, we simulate by constructing a registry
+        // where the first scan works but the second scan fails — done via a
+        // stateful throwing dispatcher that throws only on the second call.)
+        ToolDispatcher throwOnSecondCall = new ToolDispatcher(
+                Arrays.asList(mysqlProvider), 50000) {
+            private int callCount = 0;
+            @Override
+            public java.util.Set<String> availableToolNames() {
+                if (callCount++ > 0) {
+                    throw new RuntimeException("dispatcher exploded on refresh");
+                }
+                return super.availableToolNames();
+            }
+        };
+
+        SkillRegistry registry2 = new SkillRegistry(null,
+                Arrays.asList(builtin), throwOnSecondCall);
+        // First scan (constructor) succeeded — cache has 1 skill
+        assertThat(registry2.all()).hasSize(1);
+        assertThat(registry2.get("builtin-skill").getAvailability())
+                .isEqualTo(SkillAvailability.AVAILABLE);
+
+        // refresh() → scan() throws on second call → caught → old cache kept
+        SkillRegistry.RefreshResult result = registry2.refresh();
+        assertThat(result.getTotal()).isEqualTo(1);
+        // cache is NOT replaced — old skill still there
+        assertThat(registry2.all()).hasSize(1);
+        assertThat(registry2.get("builtin-skill")).isNotNull();
+    }
+
+    // ---- GAP-6: validateContract for empty tools (pure LLM skill) ----
+
+    @Test
+    void shouldKeepAvailableWhenSkillHasEmptyTools() throws IOException {
+        // A skill with no tools is a "pure LLM skill" — no tool contract to validate.
+        // validateContract should leave it AVAILABLE (not mark it UNAVAILABLE).
+        String content = "---\n"
+                + "name: pure-llm-skill\n"
+                + "description: a skill with no tools\n"
+                + "tools: []\n"
+                + "---\n"
+                + "body for pure LLM skill\n";
+        Files.write(tempDir.resolve("pure.md"), content.getBytes(StandardCharsets.UTF_8));
+
+        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+
+        SkillMeta meta = registry.get("pure-llm-skill");
+        assertThat(meta).isNotNull();
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getUnavailableReason()).isNull();
+    }
+
+    @Test
+    void shouldKeepAvailableWhenBuiltinSkillHasNoTools() {
+        // A builtin skill with empty tools should also stay AVAILABLE
+        SkillMeta builtin = new SkillMeta("llm-builtin", "pure LLM builtin",
+                Collections.<String>emptyList(),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(),
+                "body", SkillAvailability.AVAILABLE, null, "builtin", false);
+
+        SkillRegistry registry = new SkillRegistry(null,
+                Arrays.asList(builtin), dispatcher);
+
+        SkillMeta meta = registry.get("llm-builtin");
+        assertThat(meta).isNotNull();
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+    }
+
+    @Test
+    void shouldKeepAvailableWhenSkillOmitsToolsField() throws IOException {
+        // A skill that doesn't declare the tools field at all (tools defaults to empty)
+        String content = "---\n"
+                + "name: no-tools-field\n"
+                + "description: skill without tools field\n"
+                + "---\n"
+                + "body\n";
+        Files.write(tempDir.resolve("notools.md"), content.getBytes(StandardCharsets.UTF_8));
+
+        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+
+        SkillMeta meta = registry.get("no-tools-field");
+        assertThat(meta).isNotNull();
+        assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
+        assertThat(meta.getTools()).isEmpty();
+    }
 }

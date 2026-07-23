@@ -71,3 +71,12 @@ snap-agent-demo/                    # 独立演示模块（不在父 pom 中）
 - SSE 断连：查服务端日志 `Stream error for task ... : Broken pipe`，通常是客户端关闭连接
 - LLM 超时：检查 `snap-agent.llm.timeout-seconds` 和网络到 LLM API 的连通性
 - 任务卡住：检查线程池是否耗尽（`snapAgentExecutor` queue 满会拒绝新任务）
+
+## AI 协作输出约束(backend LLM 限制)
+
+当前 backend LLM API 对**输出大报文 size 有限制、对请求超时有限制**。当需要输出大报文(长设计文档 / 大文件 / 多图 Markdown)时,**选择多次分段输出**,不要一次性塞进单条回复:
+
+- ✅ 大文件用 `Write` 建首段 + 文末留 `<!-- CONTINUE -->` 锚点,后续 `Edit` 替换锚点追加新段(锚点 = 下一段起点,最后一段删锚点)
+- ✅ 单条工具调用(Write/Edit)内容控制在 size 上限内,超长会触发超时/截断
+- ✅ 先出骨架 + 锚点,再逐段填肉,每段独立成稿可验证
+- ⚠️ 不要硬塞——一次性大报文会被 backend 截断/超时,反而返工

@@ -3,8 +3,11 @@ package cn.watsontech.snapagent.core.agent;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -142,5 +145,155 @@ class AgentTaskTest {
 
         assertThat(error.get()).isNull();
         assertThat(task.getTranscript().size()).isLessThanOrEqualTo(500);
+    }
+
+    // ---- GAP-3: streamQueue (pollStreamEvent / drainStreamEvents) ----
+
+    @Test
+    void shouldQueueStreamEventsWhenTranscriptEventAdded() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+
+        task.addTranscriptEvent(TranscriptEvent.thought("first"));
+        task.addTranscriptEvent(TranscriptEvent.thought("second"));
+
+        // drainStreamEvents should return both events in insertion order
+        List<TranscriptEvent> drained = task.drainStreamEvents();
+        assertThat(drained).hasSize(2);
+        assertThat(drained.get(0).getText()).isEqualTo("first");
+        assertThat(drained.get(1).getText()).isEqualTo("second");
+    }
+
+    @Test
+    void shouldDrainStreamQueueToEmptyAfterDrainCalled() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+        task.addTranscriptEvent(TranscriptEvent.thought("one"));
+
+        task.drainStreamEvents();
+        List<TranscriptEvent> secondDrain = task.drainStreamEvents();
+
+        assertThat(secondDrain).isEmpty();
+    }
+
+    @Test
+    void shouldPollStreamEventWithTimeout() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+        task.addTranscriptEvent(TranscriptEvent.thought("poll-me"));
+
+        // poll should return the queued event immediately
+        TranscriptEvent event = task.pollStreamEvent(100);
+        assertThat(event).isNotNull();
+        assertThat(event.getText()).isEqualTo("poll-me");
+    }
+
+    @Test
+    void shouldReturnNullWhenPollingEmptyQueueWithinTimeout() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+
+        // poll with short timeout on empty queue should return null
+        TranscriptEvent event = task.pollStreamEvent(50);
+        assertThat(event).isNull();
+    }
+
+    @Test
+    void shouldQueueAllEventTypesToStreamQueue() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+        Map<String, Object> args = new HashMap<>();
+        args.put("sql", "SELECT 1");
+
+        task.addTranscriptEvent(TranscriptEvent.thought("thinking"));
+        task.addTranscriptEvent(TranscriptEvent.toolCall("toolu_01", "mysql_query", args));
+        task.addTranscriptEvent(TranscriptEvent.toolResult("toolu_01", 1, false, 10L));
+        task.addTranscriptEvent(TranscriptEvent.done("SUCCEEDED", "report"));
+        task.addTranscriptEvent(TranscriptEvent.error("oops"));
+
+        List<TranscriptEvent> drained = task.drainStreamEvents();
+        assertThat(drained).hasSize(5);
+        assertThat(drained).extracting(TranscriptEvent::getType)
+                .containsExactly(
+                        TranscriptEvent.TYPE_THOUGHT,
+                        TranscriptEvent.TYPE_TOOL_CALL,
+                        TranscriptEvent.TYPE_TOOL_RESULT,
+                        TranscriptEvent.TYPE_DONE,
+                        TranscriptEvent.TYPE_ERROR);
+    }
+
+    @Test
+    void shouldBeThreadSafeWhenConcurrentStreamQueueAccess() throws Exception {
+        final AgentTask task = AgentTask.create("u", "s", null, "m");
+        int threadCount = 10;
+        final CountDownLatch start = new CountDownLatch(1);
+        final CountDownLatch done = new CountDownLatch(threadCount);
+        final AtomicReference<Throwable> error = new AtomicReference<Throwable>(null);
+
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            new Thread(() -> {
+                try {
+                    start.await();
+                    for (int j = 0; j < 100; j++) {
+                        task.addTranscriptEvent(TranscriptEvent.thought("t" + idx + "-" + j));
+                        task.drainStreamEvents();
+                    }
+                } catch (Throwable t) {
+                    error.compareAndSet(null, t);
+                } finally {
+                    done.countDown();
+                }
+            }).start();
+        }
+        start.countDown();
+        done.await();
+
+        assertThat(error.get()).isNull();
+    }
+
+    // ---- GAP-10: AgentTask.create ID format uniqueness (concurrent) ----
+
+    @Test
+    void shouldGenerateUniqueIdInSaFormatWhenCreateCalled() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+
+        String id = task.getTaskId();
+        assertThat(id).startsWith("sa_");
+        // Format: sa_{timestamp}_{random12}
+        String[] parts = id.split("_");
+        assertThat(parts).hasSize(3);
+        assertThat(parts[0]).isEqualTo("sa");
+        // timestamp should be a positive number
+        Long.parseLong(parts[1]);
+        // random suffix should be 12 hex chars
+        assertThat(parts[2].length()).isEqualTo(12);
+    }
+
+    @Test
+    void shouldGenerateUniqueIdsWhenConcurrentCreateCalled() throws Exception {
+        int threadCount = 20;
+        int perThread = 500;
+        final CountDownLatch start = new CountDownLatch(1);
+        final CountDownLatch done = new CountDownLatch(threadCount);
+        final AtomicReference<Throwable> error = new AtomicReference<Throwable>(null);
+        final Set<String> allIds = ConcurrentHashMap.newKeySet();
+
+        for (int i = 0; i < threadCount; i++) {
+            new Thread(() -> {
+                try {
+                    start.await();
+                    for (int j = 0; j < perThread; j++) {
+                        AgentTask task = AgentTask.create("u", "s", null, "m");
+                        allIds.add(task.getTaskId());
+                    }
+                } catch (Throwable t) {
+                    error.compareAndSet(null, t);
+                } finally {
+                    done.countDown();
+                }
+            }).start();
+        }
+        start.countDown();
+        done.await();
+
+        assertThat(error.get()).isNull();
+        int expected = threadCount * perThread;
+        assertThat(allIds).hasSize(expected);
     }
 }
