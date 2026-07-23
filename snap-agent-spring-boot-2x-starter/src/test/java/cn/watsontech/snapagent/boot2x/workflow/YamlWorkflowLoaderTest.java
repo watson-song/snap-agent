@@ -121,4 +121,161 @@ class YamlWorkflowLoaderTest {
         WorkflowDefinition wf = loader.load("defaults");
         assertThat(wf.getSteps().get(0).getOnFailure()).isEqualTo("STOP");
     }
+
+    // ---- GAP-8: Bad / empty / malformed YAML tolerance ----
+
+    @Test
+    void shouldSkipMalformedYamlFileAndLoadValidOnes() throws IOException {
+        // Valid file
+        writeFile("good.yml",
+                "name: good-workflow\n" +
+                "description: \"valid\"\n" +
+                "steps:\n" +
+                "  - name: s1\n" +
+                "    skill: skill-a\n");
+        // Malformed YAML — tab used for indentation, which SnakeYAML rejects
+        writeFile("bad.yml",
+                "name: bad-workflow\n" +
+                "\ttab-indent: not-allowed-in-yaml\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        List<WorkflowDefinition> workflows = loader.loadAll();
+
+        // Only the valid file should be loaded
+        assertThat(workflows).hasSize(1);
+        assertThat(workflows.get(0).getName()).isEqualTo("good-workflow");
+    }
+
+    @Test
+    void shouldReturnNullForMalformedYamlInLoad() throws IOException {
+        // Tab at the start of a line — SnakeYAML throws ScannerException
+        writeFile("corrupt.yml",
+                "name: corrupt\n" +
+                "\tbroken: yaml\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("corrupt");
+
+        assertThat(wf).isNull();
+    }
+
+    @Test
+    void shouldHandleEmptyYamlFile() throws IOException {
+        // Completely empty file — SnakeYAML returns null
+        writeFile("blank.yml", "");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("blank");
+
+        assertThat(wf).isNull();
+    }
+
+    @Test
+    void shouldSkipFileMissingNameField() throws IOException {
+        writeFile("noname.yml",
+                "description: \"has no name\"\n" +
+                "steps:\n" +
+                "  - name: s1\n" +
+                "    skill: skill-a\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("noname");
+
+        assertThat(wf).isNull();
+    }
+
+    @Test
+    void shouldSkipFileWithEmptyNameField() throws IOException {
+        writeFile("emptyname.yml",
+                "name: \"\"\n" +
+                "steps:\n" +
+                "  - name: s1\n" +
+                "    skill: skill-a\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("emptyname");
+
+        assertThat(wf).isNull();
+    }
+
+    @Test
+    void shouldReturnNullForNullOrEmptyNameInLoad() {
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+
+        assertThat(loader.load(null)).isNull();
+        assertThat(loader.load("")).isNull();
+    }
+
+    @Test
+    void shouldHandleStepMissingNameOrSkill() throws IOException {
+        // step 1 has no name, step 2 has no skill — both should be skipped
+        writeFile("partial.yml",
+                "name: partial-workflow\n" +
+                "steps:\n" +
+                "  - skill: skill-a\n" +
+                "  - name: s2\n" +
+                "  - name: s3\n" +
+                "    skill: skill-c\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("partial");
+
+        assertThat(wf).isNotNull();
+        // Only step s3 should survive (has both name and skill)
+        assertThat(wf.getSteps()).hasSize(1);
+        assertThat(wf.getSteps().get(0).getName()).isEqualTo("s3");
+        assertThat(wf.getSteps().get(0).getSkill()).isEqualTo("skill-c");
+    }
+
+    @Test
+    void shouldParseStepInputsAsStringValues() throws IOException {
+        writeFile("inputs.yml",
+                "name: inputs-wf\n" +
+                "steps:\n" +
+                "  - name: s1\n" +
+                "    skill: skill-a\n" +
+                "    inputs:\n" +
+                "      service: \"${trigger.svc}\"\n" +
+                "      count: 42\n" +
+                "      flag: true\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("inputs");
+
+        WorkflowStep step = wf.getSteps().get(0);
+        assertThat(step.getInputs()).hasSize(3);
+        assertThat(step.getInputs().get("service")).isEqualTo("${trigger.svc}");
+        // Numeric and boolean values are toString()'d
+        assertThat(step.getInputs().get("count")).isEqualTo("42");
+        assertThat(step.getInputs().get("flag")).isEqualTo("true");
+    }
+
+    @Test
+    void shouldHandleNullInputsInStep() throws IOException {
+        writeFile("noinputs.yml",
+                "name: no-inputs-wf\n" +
+                "steps:\n" +
+                "  - name: s1\n" +
+                "    skill: skill-a\n");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        WorkflowDefinition wf = loader.load("noinputs");
+
+        WorkflowStep step = wf.getSteps().get(0);
+        assertThat(step.getInputs()).isEmpty();
+    }
+
+    @Test
+    void shouldOnlyLoadYmlFilesNotOtherExtensions() throws IOException {
+        writeFile("wf1.yml", "name: wf1\nsteps:\n  - name: s1\n    skill: a\n");
+        writeFile("wf2.yaml", "name: wf2\nsteps:\n  - name: s2\n    skill: b\n");
+        writeFile("readme.txt", "not a workflow");
+
+        YamlWorkflowLoader loader = new YamlWorkflowLoader(tempDir);
+        List<WorkflowDefinition> workflows = loader.loadAll();
+
+        // Only .yml files should be loaded (glob is "*.yml")
+        assertThat(workflows).hasSize(1);
+        assertThat(workflows.get(0).getName()).isEqualTo("wf1");
+    }
 }

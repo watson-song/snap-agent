@@ -150,10 +150,14 @@ public class SimpleWorkflowEngine implements WorkflowEngine {
                 }
                 if (stepResult == null || !TaskStatus.SUCCEEDED.name().equals(stepResult.getStatus())) {
                     if (WorkflowStep.STOP.equals(onFailure)) {
-                        // Record the failed step's result before aborting
-                        if (stepResult != null) {
-                            stepResults.put(step.getName(), stepResult);
-                        }
+                        // Record the failed step's result before aborting.
+                        // When the executor threw an exception, stepResult is
+                        // null; synthesize a FAILED marker so the step is still
+                        // visible in the workflow result (per UC-06).
+                        stepResults.put(step.getName(),
+                                stepResult != null ? stepResult
+                                        : new StepResult(step.getName(), null,
+                                                TaskStatus.FAILED.name(), null));
                         return WorkflowResult.failure(workflow.getName(), step.getName(),
                                 "step execution failed", stepResults,
                                 System.currentTimeMillis() - startTime);
