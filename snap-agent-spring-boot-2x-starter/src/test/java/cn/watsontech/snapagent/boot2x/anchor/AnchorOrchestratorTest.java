@@ -8,10 +8,12 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -286,6 +288,135 @@ class AnchorOrchestratorTest {
         orchestrator.executeWithAnchor(anchor, "question", null, sink);
 
         assertThat(sink.thoughts).contains("response");
+    }
+
+    // ---- G-415: resolveSummary degradation — uses preprocess result when done ----
+
+    @Test
+    @DisplayName("G-415: should use precomputed summary from preprocess when done")
+    void shouldUsePrecomputedSummaryFromPreprocessWhenDone() {
+        when(skillRegistry.all()).thenReturn(Collections.emptyList());
+        String content = new String(new char[200]).replace("\0", "x");
+
+        int[] summaryCallCount = {0};
+        doAnswer(invocation -> {
+            LlmRequest req = invocation.getArgument(0);
+            LlmEventSink sink = invocation.getArgument(1);
+            String prompt = req.getMessages().get(0).getContent();
+            if (prompt.contains("摘要") && !prompt.contains("可用技能")) {
+                summaryCallCount[0]++;
+                sink.onThought("precomputed-summary");
+            } else if (prompt.contains("可用技能") || prompt.contains("skillId")) {
+                sink.onThought("{\"skillId\": null, \"confidence\": 0.1}");
+            } else {
+                sink.onThought("main-response");
+            }
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        AnchorContext anchor = new AnchorContext("test", content, "/p");
+        PreprocessResult prep = orchestrator.preprocess(anchor, "question");
+        orchestrator.awaitPreprocess(prep.getPreprocessId(), 5000);
+        int callsAfterPreprocess = summaryCallCount[0];
+
+        RecordingSink mainSink = new RecordingSink();
+        orchestrator.executeWithAnchor(anchor, "question", prep.getPreprocessId(), mainSink);
+
+        // Summary should not be recomputed during execute (preprocess result was used)
+        assertThat(summaryCallCount[0]).isEqualTo(callsAfterPreprocess);
+        assertThat(mainSink.thoughts.toString()).contains("main-response");
+    }
+
+    @Test
+    @DisplayName("G-415: should fall back to inline when preprocessId is unknown")
+    void shouldFallBackToInlineWhenPreprocessIdIsUnknown() {
+        when(skillRegistry.all()).thenReturn(Collections.emptyList());
+        String content = new String(new char[200]).replace("\0", "x");
+
+        int[] summaryCallCount = {0};
+        doAnswer(invocation -> {
+            LlmRequest req = invocation.getArgument(0);
+            LlmEventSink sink = invocation.getArgument(1);
+            String prompt = req.getMessages().get(0).getContent();
+            if (prompt.contains("摘要") && !prompt.contains("可用技能")) {
+                summaryCallCount[0]++;
+                sink.onThought("inline-summary");
+            } else if (prompt.contains("可用技能") || prompt.contains("skillId")) {
+                sink.onThought("{\"skillId\": null, \"confidence\": 0.1}");
+            } else {
+                sink.onThought("main-response");
+            }
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        AnchorContext anchor = new AnchorContext("test", content, "/p");
+        RecordingSink mainSink = new RecordingSink();
+
+        // Execute with a nonexistent preprocessId — should fall back to inline
+        orchestrator.executeWithAnchor(anchor, "question", "unknown-id-12345", mainSink);
+
+        // Summary should have been computed inline (at least 1 call)
+        assertThat(summaryCallCount[0]).isGreaterThanOrEqualTo(1);
+        assertThat(mainSink.thoughts.toString()).contains("main-response");
+    }
+
+    // ---- G-416: awaitPreprocess graceful handling ----
+
+    @Test
+    @DisplayName("G-416: awaitPreprocess should not throw on unknown preprocessId")
+    void shouldNotThrowOnUnknownPreprocessIdInAwait() {
+        orchestrator.awaitPreprocess("nonexistent-preprocess-id", 1000);
+        // Should return without error
+    }
+
+    @Test
+    @DisplayName("G-416: awaitPreprocess should not throw on null preprocessId")
+    void shouldNotThrowOnNullPreprocessIdInAwait() {
+        orchestrator.awaitPreprocess(null, 1000);
+        // Should return without error
+    }
+
+    // ---- G-416: execute with valid preprocessId uses classify result ----
+
+    @Test
+    @DisplayName("G-416: execute should use precomputed classify result when done")
+    void shouldUsePrecomputedClassifyResultWhenDone() {
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(
+                new SkillMeta("patrol", "运维巡检", Collections.<String>emptyList(),
+                        Collections.emptyList(), "body", SkillAvailability.AVAILABLE, null)
+        ));
+
+        int[] classifyCallCount = {0};
+        doAnswer(invocation -> {
+            LlmRequest req = invocation.getArgument(0);
+            LlmEventSink sink = invocation.getArgument(1);
+            String prompt = req.getMessages().get(0).getContent();
+            if (prompt.contains("可用技能") || prompt.contains("skillId")) {
+                classifyCallCount[0]++;
+                sink.onThought("{\"skillId\": \"patrol\", \"confidence\": 0.9}");
+            } else if (prompt.contains("摘要")) {
+                sink.onThought("summary");
+            } else {
+                sink.onThought("main-response");
+            }
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        String content = new String(new char[200]).replace("\0", "x");
+        AnchorContext anchor = new AnchorContext("test", content, "/p");
+        PreprocessResult prep = orchestrator.preprocess(anchor, "question");
+        orchestrator.awaitPreprocess(prep.getPreprocessId(), 5000);
+        int callsAfterPreprocess = classifyCallCount[0];
+
+        RecordingSink mainSink = new RecordingSink();
+        orchestrator.executeWithAnchor(anchor, "question", prep.getPreprocessId(), mainSink);
+
+        // Classify should not be recomputed during execute (preprocess result was used)
+        assertThat(classifyCallCount[0]).isEqualTo(callsAfterPreprocess);
+        assertThat(mainSink.thoughts.toString()).contains("main-response");
     }
 
     static class RecordingSink implements LlmEventSink {

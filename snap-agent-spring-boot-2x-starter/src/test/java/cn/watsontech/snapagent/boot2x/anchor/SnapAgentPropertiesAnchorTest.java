@@ -2,8 +2,12 @@ package cn.watsontech.snapagent.boot2x.anchor;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -109,5 +113,55 @@ class SnapAgentPropertiesAnchorTest {
         assertThat(anchor.isPathDisabled("/exact/path")).isTrue();
         assertThat(anchor.isPathDisabled("/exact/path/sub")).isTrue();
         assertThat(anchor.isPathDisabled("/other")).isFalse();
+    }
+
+    // ---- GAP-7: resolveEffectiveTtl boundary values ----
+
+    @ParameterizedTest(name = "[{index}] ttl={0} -> {1} ({2})")
+    @MethodSource("resolveEffectiveTtlCases")
+    void shouldResolveEffectiveTtlCorrectly(int requestedTtl, long expected, String description) {
+        SnapAgentProperties.Anchor anchor = new SnapAgentProperties.Anchor();
+
+        long result = anchor.resolveEffectiveTtl(requestedTtl);
+
+        assertThat(result).isEqualTo(expected);
+    }
+
+    static Stream<Arguments> resolveEffectiveTtlCases() {
+        // Defaults: min=60, max=604800, default=3600
+        return Stream.of(
+                // <= 0 → default (3600)
+                Arguments.of(0, 3600L, "zero returns default"),
+                Arguments.of(-1, 3600L, "negative returns default"),
+                // < min → min (60)
+                Arguments.of(30, 60L, "below min returns min"),
+                Arguments.of(59, 60L, "just below min returns min"),
+                // boundary: equals min → not raised
+                Arguments.of(60, 60L, "equals min passes through"),
+                // normal value
+                Arguments.of(3600, 3600L, "normal value passes through"),
+                // boundary: equals max → not capped
+                Arguments.of(604800, 604800L, "equals max passes through"),
+                // > max → max (604800)
+                Arguments.of(999999, 604800L, "above max returns max"),
+                Arguments.of(604801, 604800L, "just above max returns max")
+        );
+    }
+
+    @Test
+    void shouldRespectCustomMinAndMaxTtl() {
+        SnapAgentProperties.Anchor anchor = new SnapAgentProperties.Anchor();
+        anchor.setInjectionCacheMinTtlSeconds(120);
+        anchor.setInjectionCacheMaxTtlSeconds(86400);
+        anchor.setInjectionDefaultCacheTtl(600);
+
+        // 0 → custom default
+        assertThat(anchor.resolveEffectiveTtl(0)).isEqualTo(600L);
+        // below custom min → custom min
+        assertThat(anchor.resolveEffectiveTtl(60)).isEqualTo(120L);
+        // above custom max → custom max
+        assertThat(anchor.resolveEffectiveTtl(100000)).isEqualTo(86400L);
+        // within range
+        assertThat(anchor.resolveEffectiveTtl(3600)).isEqualTo(3600L);
     }
 }

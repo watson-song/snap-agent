@@ -231,4 +231,126 @@ class AnchorInjectionOrchestratorTest {
         assertThat(result.getHtml()).contains("<p>from skill</p>");
         verify(workflowEngine, never()).execute(any(), any());
     }
+
+    // ---- GAP-4: buildInjectionPrompt ----
+
+    @Test
+    void shouldIncludePageUrlAnchorNameAndUserIdInInjectionPrompt() {
+        InjectionRequest req = new InjectionRequest(
+                "公告区域", "/dashboard", "skill1", null, 3600);
+
+        String prompt = orchestrator.buildInjectionPrompt("user001", req);
+
+        assertThat(prompt).contains("/dashboard");
+        assertThat(prompt).contains("公告区域");
+        assertThat(prompt).contains("user001");
+    }
+
+    // ---- GAP-5: extractHtmlFromWorkflowResult (tested through inject) ----
+
+    @Test
+    void shouldReturnFallbackWhenWorkflowResultIsNull() {
+        WorkflowDefinition workflowDef = new WorkflowDefinition(
+                "wf-empty", "Empty WF", Collections.<WorkflowStep>emptyList());
+        when(workflowLoader.load("wf-empty")).thenReturn(workflowDef);
+        when(workflowEngine.execute(any(), any())).thenReturn(null);
+
+        InjectionRequest req = new InjectionRequest(
+                "摘要", "/page", null, "wf-empty", 0);
+
+        InjectionResult result = orchestrator.inject("user001", req);
+
+        assertThat(result.getHtml()).contains("工作流未返回内容");
+    }
+
+    @Test
+    void shouldReturnFallbackWhenStepResultsAreEmpty() {
+        WorkflowDefinition workflowDef = new WorkflowDefinition(
+                "wf-empty-steps", "Empty Steps", Collections.<WorkflowStep>emptyList());
+        when(workflowLoader.load("wf-empty-steps")).thenReturn(workflowDef);
+        WorkflowResult emptyResult = WorkflowResult.success(
+                "wf-empty-steps", new LinkedHashMap<String, StepResult>(), 50);
+        when(workflowEngine.execute(any(), any())).thenReturn(emptyResult);
+
+        InjectionRequest req = new InjectionRequest(
+                "摘要", "/page", null, "wf-empty-steps", 0);
+
+        InjectionResult result = orchestrator.inject("user001", req);
+
+        assertThat(result.getHtml()).contains("工作流未返回内容");
+    }
+
+    @Test
+    void shouldReturnFallbackWhenReportIsEmpty() {
+        WorkflowDefinition workflowDef = new WorkflowDefinition(
+                "wf-empty-report", "Empty Report", Collections.<WorkflowStep>emptyList());
+        when(workflowLoader.load("wf-empty-report")).thenReturn(workflowDef);
+
+        Map<String, StepResult> stepResults = new LinkedHashMap<>();
+        stepResults.put("step1", new StepResult("step1", "task1", "SUCCEEDED", ""));
+        WorkflowResult emptyReportResult = WorkflowResult.success(
+                "wf-empty-report", stepResults, 50);
+        when(workflowEngine.execute(any(), any())).thenReturn(emptyReportResult);
+
+        InjectionRequest req = new InjectionRequest(
+                "摘要", "/page", null, "wf-empty-report", 0);
+
+        InjectionResult result = orchestrator.inject("user001", req);
+
+        assertThat(result.getHtml()).contains("工作流未返回内容");
+    }
+
+    @Test
+    void shouldReturnFallbackWhenReportIsNull() {
+        WorkflowDefinition workflowDef = new WorkflowDefinition(
+                "wf-null-report", "Null Report", Collections.<WorkflowStep>emptyList());
+        when(workflowLoader.load("wf-null-report")).thenReturn(workflowDef);
+
+        Map<String, StepResult> stepResults = new LinkedHashMap<>();
+        stepResults.put("step1", new StepResult("step1", "task1", "SUCCEEDED", null));
+        WorkflowResult nullReportResult = WorkflowResult.success(
+                "wf-null-report", stepResults, 50);
+        when(workflowEngine.execute(any(), any())).thenReturn(nullReportResult);
+
+        InjectionRequest req = new InjectionRequest(
+                "摘要", "/page", null, "wf-null-report", 0);
+
+        InjectionResult result = orchestrator.inject("user001", req);
+
+        assertThat(result.getHtml()).contains("工作流未返回内容");
+    }
+
+    // ---- GAP-6: LLM onError → INJECTION_FAILED ----
+
+    @Test
+    void shouldThrowInjectionFailedWhenLlmReportsError() {
+        SkillMeta skillMeta = new SkillMeta("announcement", "公告",
+                Collections.<String>emptyList(), Collections.emptyList(),
+                "body", SkillAvailability.AVAILABLE, null);
+        when(skillRegistry.get("announcement")).thenReturn(skillMeta);
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onError("LLM timeout");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        InjectionRequest req = new InjectionRequest(
+                "公告", "/page", "announcement", null, 3600);
+
+        assertThatThrownBy(() -> orchestrator.inject("user001", req))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("INJECTION_FAILED")
+                .hasMessageContaining("LLM timeout");
+    }
+
+    @Test
+    void shouldThrowInvalidInputWhenNoSkillOrWorkflowProvided() {
+        InjectionRequest req = new InjectionRequest(
+                "公告", "/page", null, null, 3600);
+
+        assertThatThrownBy(() -> orchestrator.inject("user001", req))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("INVALID_INPUT");
+    }
 }
