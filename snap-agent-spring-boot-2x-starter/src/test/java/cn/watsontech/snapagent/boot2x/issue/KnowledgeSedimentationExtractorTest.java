@@ -162,4 +162,75 @@ class KnowledgeSedimentationExtractorTest {
         assertThat(fragment.getMetadata()).isNotNull();
         assertThat(fragment.getMetadata()).containsEntry("category", "经验沉淀");
     }
+
+    // ---- GAP-6 (P2): no suggestion + no selectedSolution boundary ----
+
+    @Test
+    void shouldEmitEmptySolutionSectionWhenNoSuggestionAndNoSelectedSolution() {
+        // Both solution and selectedSolution are null — the "## 解决方案"
+        // section header must exist but contain no list items or text.
+        IssueClosure issue = new IssueClosure(
+                "issue-008", null, "task-800",
+                null, null, "查询超时", "连接池耗尽",
+                null, null,
+                IssueStatus.DIAGNOSED, null,
+                null, null,
+                1_000L, 2_000L);
+
+        KnowledgeFragment fragment = extractor.extract(issue);
+
+        String content = fragment.getContent();
+        assertThat(content).contains("## 解决方案");
+        // No solution-option list items should appear
+        assertThat(content).doesNotContain("- [");
+        // The 解决方案 section should be empty (followed by end-of-content
+        // or the 验证结果 section, with no solution body in between)
+        int solutionIdx = content.indexOf("## 解决方案");
+        int solutionEnd = content.indexOf("\n\n", solutionIdx);
+        if (solutionEnd < 0) {
+            solutionEnd = content.length();
+        }
+        String solutionSection = content.substring(
+                solutionIdx + "## 解决方案".length(), solutionEnd).trim();
+        assertThat(solutionSection).isEmpty();
+    }
+
+    @Test
+    void shouldEmitEmptySolutionSectionWhenSuggestionHasEmptyOptions() {
+        // SolutionSuggestion present but with empty options list — should
+        // not crash, should not emit any list items.
+        IssueClosure issue = new IssueClosure(
+                "issue-009", null, "task-900",
+                null, null, "查询超时", "连接池耗尽",
+                new SolutionSuggestion(new ArrayList<SolutionOption>(), null, null, null),
+                null,
+                IssueStatus.SOLUTION_PROPOSED, null,
+                null, null,
+                1_000L, 2_000L);
+
+        KnowledgeFragment fragment = extractor.extract(issue);
+
+        String content = fragment.getContent();
+        assertThat(content).contains("## 解决方案");
+        // Empty options list → no list items
+        assertThat(content).doesNotContain("- [");
+    }
+
+    @Test
+    void shouldEmitSolutionSectionWithoutVerificationWhenVerificationIsNull() {
+        // No verification result → the 验证结果 section must be absent
+        IssueClosure issue = new IssueClosure(
+                "issue-010", null, "task-1000",
+                null, null, "查询超时", "连接池耗尽",
+                null, null,
+                IssueStatus.DIAGNOSED, null,
+                null, null,
+                1_000L, 2_000L);
+
+        KnowledgeFragment fragment = extractor.extract(issue);
+
+        assertThat(fragment.getContent()).doesNotContain("## 验证结果");
+        // Content should end after the empty 解决方案 section
+        assertThat(fragment.getContent()).endsWith("## 解决方案\n");
+    }
 }

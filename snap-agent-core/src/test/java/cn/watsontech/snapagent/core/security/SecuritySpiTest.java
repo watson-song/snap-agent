@@ -68,4 +68,74 @@ class SecuritySpiTest {
         assertThat(resolver.resolve(12345)).isNull();
         assertThat(resolver.resolve(null)).isNull();
     }
+
+    // ---- GAP (P1): SecurityGateway.currentUserName default null ----
+
+    @Test
+    void currentUserName_shouldDefaultToNullWhenNotOverridden() {
+        // The interface provides a default implementation returning null.
+        // Implementations that don't override currentUserName() must inherit
+        // this default — the controller then falls back to the user id.
+        SecurityGateway gateway = new SecurityGateway() {
+            @Override
+            public String currentUserId() {
+                return "user-001";
+            }
+
+            @Override
+            public boolean hasPermission(String code) {
+                return true;
+            }
+            // currentUserName() intentionally NOT overridden
+        };
+
+        assertThat(gateway.currentUserName()).isNull();
+    }
+
+    @Test
+    void currentUserName_canBeOverriddenToProvideDisplayName() {
+        SecurityGateway gateway = new SecurityGateway() {
+            @Override
+            public String currentUserId() {
+                return "user-001";
+            }
+
+            @Override
+            public String currentUserName() {
+                return "Alice Wang";
+            }
+
+            @Override
+            public boolean hasPermission(String code) {
+                return true;
+            }
+        };
+
+        assertThat(gateway.currentUserName()).isEqualTo("Alice Wang");
+        // currentUserId is still the canonical id (not affected by display name)
+        assertThat(gateway.currentUserId()).isEqualTo("user-001");
+    }
+
+    @Test
+    void currentUserName_defaultNullAllowsControllerFallback() {
+        // When currentUserName() returns null (default), the controller must
+        // fall back to currentUserId(). This test verifies the SPI contract:
+        // null display name + non-null user id → caller falls back.
+        SecurityGateway gateway = new SecurityGateway() {
+            @Override
+            public String currentUserId() {
+                return "user-001";
+            }
+
+            @Override
+            public boolean hasPermission(String code) {
+                return true;
+            }
+        };
+
+        String displayName = gateway.currentUserName();
+        String fallback = displayName != null ? displayName : gateway.currentUserId();
+
+        assertThat(fallback).isEqualTo("user-001");
+    }
 }
