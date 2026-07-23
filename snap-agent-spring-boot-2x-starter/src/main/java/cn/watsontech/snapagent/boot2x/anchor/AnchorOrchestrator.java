@@ -74,6 +74,7 @@ public class AnchorOrchestrator {
      * Does not throw on timeout — just returns.
      */
     public void awaitPreprocess(String preprocessId, long timeoutMs) {
+        if (preprocessId == null) return;
         PreprocessEntry entry = preprocessStore.get(preprocessId);
         if (entry == null) return;
         try {

@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.anchor;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -169,5 +170,36 @@ class AnchorSummaryCacheTest {
 
         assertThat(result).isEqualTo("large-summary");
         assertThat(calls.get()).isEqualTo(1);
+    }
+
+    // ---- G-413: hashKey static method ----
+
+    @Test
+    @DisplayName("G-413: hashKey should produce deterministic hash for same content")
+    void shouldProduceDeterministicHashForSameContent() {
+        String content = "test content for hashing";
+
+        String hash1 = AnchorSummaryCache.hashKey(content);
+        String hash2 = AnchorSummaryCache.hashKey(new String(content));
+
+        assertThat(hash1).isEqualTo(hash2);
+    }
+
+    @Test
+    @DisplayName("G-413: hashKey should produce different hashes for different content")
+    void shouldProduceDifferentHashesForDifferentContent() {
+        String hash1 = AnchorSummaryCache.hashKey("content A");
+        String hash2 = AnchorSummaryCache.hashKey("content B");
+
+        assertThat(hash1).isNotEqualTo(hash2);
+    }
+
+    @Test
+    @DisplayName("G-413: hashKey should return valid SHA-256 hex string (64 chars)")
+    void shouldReturnValidSha256HexString() {
+        String hash = AnchorSummaryCache.hashKey("any content");
+
+        assertThat(hash).hasSize(64);
+        assertThat(hash).matches("[0-9a-f]{64}");
     }
 }

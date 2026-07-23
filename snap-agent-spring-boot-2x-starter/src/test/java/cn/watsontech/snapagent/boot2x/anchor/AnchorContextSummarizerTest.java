@@ -6,6 +6,7 @@ import cn.watsontech.snapagent.core.llm.LlmEventSink;
 import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -201,5 +202,55 @@ class AnchorContextSummarizerTest {
 
         assertThat(result).isNull();
         verify(llmClient, times(0)).stream(any(), any(), anyString());
+    }
+
+    // ---- G-404: boundary — content length equals threshold should skip LLM ----
+
+    @Test
+    @DisplayName("G-404: should not call LLM when content length equals threshold")
+    void shouldNotCallLlmWhenContentLengthEqualsThreshold() {
+        String content = new String(new char[100]).replace("\0", "x"); // exactly 100 chars
+
+        String result = summarizer.summarize(content);
+
+        assertThat(result).isEqualTo(content);
+        verify(llmClient, times(0)).stream(any(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("G-404: should call LLM when content length exceeds threshold by one")
+    void shouldCallLlmWhenContentLengthExceedsThresholdByOne() {
+        String content = new String(new char[101]).replace("\0", "x"); // 101 chars, threshold=100
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("summary");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        String result = summarizer.summarize(content);
+
+        assertThat(result).isEqualTo("summary");
+        verify(llmClient, times(1)).stream(any(), any(), anyString());
+    }
+
+    // ---- G-405: LLM onError clears accumulated and returns original ----
+
+    @Test
+    @DisplayName("G-405: should return original content when onError fires after partial thoughts")
+    void shouldReturnOriginalContentWhenOnErrorClearsAccumulated() {
+        String longContent = new String(new char[200]).replace("\0", "x");
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("partial summary");
+            sink.onError("boom");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        String result = summarizer.summarize(longContent);
+
+        assertThat(result).isEqualTo(longContent);
     }
 }

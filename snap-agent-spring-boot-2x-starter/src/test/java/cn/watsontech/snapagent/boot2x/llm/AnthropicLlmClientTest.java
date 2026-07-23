@@ -236,6 +236,85 @@ class AnthropicLlmClientTest {
         }
     }
 
+    // ---- skipThinking (GAP-2) ----
+
+    /**
+     * When tools are empty (inject mode), thinking_delta events must NOT
+     * trigger onThought, but text_delta events should still fire.
+     */
+    @Test
+    void shouldSkipThinkingDeltaWhenToolsEmpty() {
+        client.setSseResponse(
+                sse("message_start", "{\"type\":\"message_start\"}")
+                // thinking block — should be skipped
+                + sse("content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":0,"
+                        + "\"content_block\":{\"type\":\"thinking\",\"id\":\"thinking-1\"}}")
+                + sse("content_block_delta",
+                        "{\"type\":\"content_block_delta\",\"index\":0,"
+                        + "\"delta\":{\"type\":\"thinking_delta\","
+                        + "\"thinking\":\"Let me analyze the page context...\"}}")
+                + sse("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}")
+                // text block — should fire onThought
+                + sse("content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":1,"
+                        + "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}")
+                + sse("content_block_delta",
+                        "{\"type\":\"content_block_delta\",\"index\":1,"
+                        + "\"delta\":{\"type\":\"text_delta\",\"text\":\"<p>Hello</p>\"}}")
+                + sse("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}")
+                + sse("message_delta",
+                        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}")
+                + sse("message_stop", "{\"type\":\"message_stop\"}"));
+
+        // simpleRequest() uses empty tools → skipThinking = true
+        client.stream(simpleRequest(), sink, "test-task");
+
+        // thinking_delta content must NOT appear in thoughts
+        assertThat(sink.thoughts).doesNotContain("Let me analyze the page context...");
+        // text_delta content MUST appear
+        assertThat(sink.thoughts).contains("<p>Hello</p>");
+        assertThat(sink.stopReason).isEqualTo("end_turn");
+    }
+
+    /**
+     * When tools are present (agent mode), thinking_delta events SHOULD
+     * trigger onThought.
+     */
+    @Test
+    void shouldNotSkipThinkingDeltaWhenToolsPresent() {
+        cn.watsontech.snapagent.core.llm.ToolDef tool = new cn.watsontech.snapagent.core.llm.ToolDef(
+                "mysql_query", "Execute SQL", "{\"type\":\"object\"}");
+        LlmRequest reqWithTools = new LlmRequest("system prompt",
+                Collections.<Message>singletonList(Message.user("hi")),
+                Collections.singletonList(tool),
+                "claude-sonnet-4-6", 8192, true);
+
+        client.setSseResponse(
+                sse("message_start", "{\"type\":\"message_start\"}")
+                + sse("content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":0,"
+                        + "\"content_block\":{\"type\":\"thinking\",\"id\":\"thinking-1\"}}")
+                + sse("content_block_delta",
+                        "{\"type\":\"content_block_delta\",\"index\":0,"
+                        + "\"delta\":{\"type\":\"thinking_delta\","
+                        + "\"thinking\":\"I should query the database.\"}}")
+                + sse("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}")
+                + sse("content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":1,"
+                        + "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}")
+                + sse("content_block_delta",
+                        "{\"type\":\"content_block_delta\",\"index\":1,"
+                        + "\"delta\":{\"type\":\"text_delta\",\"text\":\"Result\"}}")
+                + sse("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":1}")
+                + sse("message_stop", "{\"type\":\"message_stop\"}"));
+
+        client.stream(reqWithTools, sink, "test-task");
+
+        // With tools present, skipThinking=false → thinking_delta fires
+        assertThat(sink.thoughts).contains("I should query the database.", "Result");
+    }
+
     @Test
     void shouldNotThrowWhenCancellingWithNoActiveCall() {
         client.cancel("nonexistent-task-id");

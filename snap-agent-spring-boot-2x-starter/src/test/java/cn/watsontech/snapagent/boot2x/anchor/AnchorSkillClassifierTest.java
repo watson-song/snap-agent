@@ -8,11 +8,16 @@ import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -259,5 +264,157 @@ class AnchorSkillClassifierTest {
 
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
         return org.assertj.core.data.Offset.offset(tolerance);
+    }
+
+    // ---- G-407: skillId="null" string should be converted to actual null ----
+
+    @Test
+    @DisplayName("G-407: should convert string \"null\" skillId to actual null")
+    void shouldConvertStringNullSkillIdToActualNull() {
+        when(skillRegistry.all()).thenReturn(Collections.emptyList());
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("{\"skillId\":\"null\",\"confidence\":0.1}");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        ClassifyResult result = classifier.classify("q", "c");
+
+        assertThat(result.getSkillId()).isNull();
+        assertThat(result.isMatch()).isFalse();
+    }
+
+    @Test
+    @DisplayName("G-407: should convert empty string skillId to actual null")
+    void shouldConvertEmptyStringSkillIdToActualNull() {
+        when(skillRegistry.all()).thenReturn(Collections.emptyList());
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("{\"skillId\":\"\",\"confidence\":0.9}");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        ClassifyResult result = classifier.classify("q", "c");
+
+        assertThat(result.getSkillId()).isNull();
+        assertThat(result.isMatch()).isFalse();
+    }
+
+    @Test
+    @DisplayName("G-407: should parse reason field when present")
+    void shouldParseReasonFieldWhenPresent() {
+        when(skillRegistry.all()).thenReturn(Collections.singletonList(
+                new SkillMeta("patrol", "运维巡检", Collections.<String>emptyList(),
+                        Collections.emptyList(), "body", SkillAvailability.AVAILABLE, null)
+        ));
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("{\"skillId\":\"patrol\",\"confidence\":0.9,\"reason\":\"ops question\"}");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        ClassifyResult result = classifier.classify("q", "c");
+
+        assertThat(result.getReason()).isEqualTo("ops question");
+    }
+
+    // ---- G-409: extractJson edge cases per Gherkin scenario outline ----
+
+    static Stream<Arguments> extractJsonData() {
+        return Stream.of(
+                // no braces → null
+                Arguments.of("no braces", null),
+                // only start brace, no end → null
+                Arguments.of("{only start", null),
+                // text with JSON in the middle → just the JSON
+                Arguments.of("text {\"a\":1} trailing", "{\"a\":1}"),
+                // two JSON objects concatenated → full span
+                Arguments.of("{\"a\":1}{\"b\":2}", "{\"a\":1}{\"b\":2}"),
+                // empty JSON object
+                Arguments.of("{}", "{}"),
+                // JSON wrapped in markdown code block
+                Arguments.of("```json\n{\"skillId\":\"patrol\"}\n```", "{\"skillId\":\"patrol\"}")
+        );
+    }
+
+    @ParameterizedTest(name = "extractJson(\"{0}\")")
+    @MethodSource("extractJsonData")
+    @DisplayName("G-409: extractJson edge cases per Gherkin UC-07 scenario outline")
+    void shouldExtractJsonFromRawText(String raw, String expected) {
+        assertThat(AnchorSkillClassifier.extractJson(raw)).isEqualTo(expected);
+    }
+
+    // ---- G-409: extractJsonField edge cases ----
+
+    @Test
+    @DisplayName("G-409: extractJsonField should return string value for valid field")
+    void shouldExtractStringFieldValue() {
+        String json = "{\"skillId\":\"patrol\",\"confidence\":0.9}";
+
+        assertThat(AnchorSkillClassifier.extractJsonField(json, "skillId")).isEqualTo("patrol");
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonField should return null for JSON null value")
+    void shouldReturnNullForJsonNullValue() {
+        String json = "{\"skillId\":null,\"confidence\":0.9}";
+
+        assertThat(AnchorSkillClassifier.extractJsonField(json, "skillId")).isNull();
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonField should return null for missing field")
+    void shouldReturnNullForMissingField() {
+        String json = "{\"otherField\":\"value\"}";
+
+        assertThat(AnchorSkillClassifier.extractJsonField(json, "skillId")).isNull();
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonField should handle whitespace around colon")
+    void shouldHandleWhitespaceAroundColon() {
+        String json = "{\"skillId\" :  \"patrol\"}";
+
+        assertThat(AnchorSkillClassifier.extractJsonField(json, "skillId")).isEqualTo("patrol");
+    }
+
+    // ---- G-409: extractJsonDouble edge cases ----
+
+    @Test
+    @DisplayName("G-409: extractJsonDouble should parse decimal confidence")
+    void shouldParseDecimalConfidence() {
+        String json = "{\"confidence\":0.92}";
+
+        assertThat(AnchorSkillClassifier.extractJsonDouble(json, "confidence", 0.0)).isCloseTo(0.92, within(0.001));
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonDouble should parse integer value")
+    void shouldParseIntegerValue() {
+        String json = "{\"confidence\":1}";
+
+        assertThat(AnchorSkillClassifier.extractJsonDouble(json, "confidence", 0.0)).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonDouble should return default for missing field")
+    void shouldReturnDefaultForMissingDoubleField() {
+        String json = "{\"other\":\"value\"}";
+
+        assertThat(AnchorSkillClassifier.extractJsonDouble(json, "confidence", -1.0)).isEqualTo(-1.0);
+    }
+
+    @Test
+    @DisplayName("G-409: extractJsonDouble should parse zero")
+    void shouldParseZeroValue() {
+        String json = "{\"confidence\":0.0}";
+
+        assertThat(AnchorSkillClassifier.extractJsonDouble(json, "confidence", -1.0)).isEqualTo(0.0);
     }
 }
