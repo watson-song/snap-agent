@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -475,5 +476,72 @@ class IssueClosureServiceTest {
         assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
         verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
         verify(issueStore).save(any(IssueClosure.class));
+    }
+
+    // ---- listIssues / loadIssue (GAP-6) ----
+
+    @Test
+    void shouldListIssuesDelegatingToStore() {
+        IssueClosure issue1 = new IssueClosure(
+                "issue-list-1", null, "task-1",
+                null, null, "query1", "root1",
+                suggestionOf("sol1"), null,
+                IssueStatus.SOLUTION_PROPOSED, null,
+                null, null,
+                1_000L, 2_000L);
+        IssueClosure issue2 = new IssueClosure(
+                "issue-list-2", "EXT-2", "task-2",
+                null, null, "query2", "root2",
+                suggestionOf("sol2"), "sol2",
+                IssueStatus.CLOSED, null,
+                verificationOf(true, "ok"), "sedimentation:issue-list-2",
+                3_000L, 4_000L);
+        when(issueStore.list()).thenReturn(Arrays.asList(issue1, issue2));
+
+        List<IssueClosure> result = service.listIssues();
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).getIssueId()).isEqualTo("issue-list-1");
+        assertThat(result.get(1).getIssueId()).isEqualTo("issue-list-2");
+        verify(issueStore).list();
+    }
+
+    @Test
+    void shouldReturnEmptyListWhenNoIssuesExist() {
+        when(issueStore.list()).thenReturn(Collections.<IssueClosure>emptyList());
+
+        List<IssueClosure> result = service.listIssues();
+
+        assertThat(result).isNotNull().isEmpty();
+        verify(issueStore).list();
+    }
+
+    @Test
+    void shouldLoadIssueDelegatingToStore() {
+        IssueClosure existing = new IssueClosure(
+                "issue-load-1", null, "task-load",
+                null, null, "query", "root cause",
+                suggestionOf("sol"), null,
+                IssueStatus.VERIFIED, null,
+                verificationOf(true, "passed"), null,
+                1_000L, 2_000L);
+        when(issueStore.load("issue-load-1")).thenReturn(existing);
+
+        IssueClosure result = service.loadIssue("issue-load-1");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getIssueId()).isEqualTo("issue-load-1");
+        assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
+        verify(issueStore).load("issue-load-1");
+    }
+
+    @Test
+    void shouldReturnNullWhenLoadIssueNotFound() {
+        when(issueStore.load("nonexistent")).thenReturn(null);
+
+        IssueClosure result = service.loadIssue("nonexistent");
+
+        assertThat(result).isNull();
+        verify(issueStore).load("nonexistent");
     }
 }

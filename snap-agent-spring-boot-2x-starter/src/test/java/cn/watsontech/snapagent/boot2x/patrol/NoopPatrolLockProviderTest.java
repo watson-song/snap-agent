@@ -55,4 +55,41 @@ class NoopPatrolLockProviderTest {
         // provider has no internal state, which is the documented contract.
         assertThat(provider.tryAcquire("patrol_same", 60L)).isTrue();
     }
+
+    // ── deeper coverage (GAP-8) ───────────────────────────────────
+
+    @Test
+    @DisplayName("release is idempotent — repeated calls on the same ID do not throw")
+    void releaseShouldBeIdempotent() {
+        NoopPatrolLockProvider provider = new NoopPatrolLockProvider();
+        provider.release("patrol_1");
+        provider.release("patrol_1");
+        provider.release("patrol_1");
+    }
+
+    @Test
+    @DisplayName("release of an unheld lock is a no-op")
+    void releaseShouldNoOpForUnheldLock() {
+        NoopPatrolLockProvider provider = new NoopPatrolLockProvider();
+        // Releasing a lock that was never acquired must not throw.
+        provider.release("never-acquired");
+    }
+
+    @Test
+    @DisplayName("acquire-release-acquire cycle succeeds (lock re-acquirable after release)")
+    void shouldSupportAcquireReleaseAcquireCycle() {
+        NoopPatrolLockProvider provider = new NoopPatrolLockProvider();
+        assertThat(provider.tryAcquire("patrol-cycle", 60L)).isTrue();
+        provider.release("patrol-cycle");
+        assertThat(provider.tryAcquire("patrol-cycle", 60L)).isTrue();
+        provider.release("patrol-cycle");
+    }
+
+    @Test
+    @DisplayName("tryAcquire returns true for extreme TTL values")
+    void tryAcquireShouldHandleExtremeTtlValues() {
+        NoopPatrolLockProvider provider = new NoopPatrolLockProvider();
+        assertThat(provider.tryAcquire("patrol-extreme", Long.MAX_VALUE)).isTrue();
+        assertThat(provider.tryAcquire("patrol-extreme", Long.MIN_VALUE)).isTrue();
+    }
 }

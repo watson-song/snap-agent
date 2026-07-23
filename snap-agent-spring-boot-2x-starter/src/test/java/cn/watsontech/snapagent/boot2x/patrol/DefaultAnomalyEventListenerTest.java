@@ -293,6 +293,76 @@ class DefaultAnomalyEventListenerTest {
         verify(pushChannel).push(any(), any());
     }
 
+    // ── multi-channel concurrent scenario (GAP-7) ──────────────────
+
+    @Test
+    void shouldCallAllChannelsEvenWhenMiddleOnesFail() {
+        // Three channels: first ok, second throws, third ok.
+        // Verifies exception isolation — a failure in one channel does not
+        // prevent subsequent channels from receiving the alert.
+        AlertPushChannel ch1 = mock(AlertPushChannel.class);
+        AlertPushChannel ch2 = mock(AlertPushChannel.class);
+        AlertPushChannel ch3 = mock(AlertPushChannel.class);
+        when(ch1.type()).thenReturn("ch1");
+        when(ch2.type()).thenReturn("ch2");
+        when(ch3.type()).thenReturn("ch3");
+        doThrow(new RuntimeException("ch2 down"))
+                .when(ch2).push(any(), any());
+
+        when(alertConverger.record(any())).thenReturn(
+                new AlertConvergence("a-multi", "fp", "T", "S", "M", "t"));
+        when(skillRegistry.get("error-spike-investigation")).thenReturn(mockSkill());
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.FAILED);
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        DefaultAnomalyEventListener listener = new DefaultAnomalyEventListener(
+                agentExecutor, skillRegistry, alertConverger, reportStore,
+                Arrays.asList(ch1, ch2, ch3));
+
+        listener.onEvent(event("ERR", "svc", "boom", null, null));
+
+        // All three channels must have been invoked despite ch2 throwing.
+        verify(ch1).push(any(), any());
+        verify(ch2).push(any(), any());
+        verify(ch3).push(any(), any());
+    }
+
+    @Test
+    void shouldCallAllChannelsWhenAllFail() {
+        // Edge case: every channel throws — the listener must still not
+        // propagate the exception to the caller.
+        AlertPushChannel ch1 = mock(AlertPushChannel.class);
+        AlertPushChannel ch2 = mock(AlertPushChannel.class);
+        when(ch1.type()).thenReturn("ch1");
+        when(ch2.type()).thenReturn("ch2");
+        doThrow(new RuntimeException("ch1 down")).when(ch1).push(any(), any());
+        doThrow(new RuntimeException("ch2 down")).when(ch2).push(any(), any());
+
+        when(alertConverger.record(any())).thenReturn(
+                new AlertConvergence("a-all-fail", "fp", "T", "S", "M", "t"));
+        when(skillRegistry.get("error-spike-investigation")).thenReturn(mockSkill());
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.SUCCEEDED);
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        DefaultAnomalyEventListener listener = new DefaultAnomalyEventListener(
+                agentExecutor, skillRegistry, alertConverger, reportStore,
+                Arrays.asList(ch1, ch2));
+
+        // Must not throw — all failures should be swallowed.
+        listener.onEvent(event("ERR", "svc", "boom", null, null));
+
+        verify(ch1).push(any(), any());
+        verify(ch2).push(any(), any());
+        // Report should still be saved.
+        verify(reportStore).save(any(PatrolReport.class));
+    }
+
     // ── null pushChannels in constructor ────────────────────────────
 
     @Test

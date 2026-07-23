@@ -15,6 +15,7 @@ import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 
@@ -400,6 +401,104 @@ class ScheduledPatrolSchedulerTest {
 
         // Verify the agentExecutor was called (meaning execution proceeded)
         verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+    }
+
+    // ── _user_message injection content verification (GAP-4) ────────
+
+    @Test
+    void executePatrolShouldAppendPatrolSuffixToExistingUserMessage() {
+        enableImmediateExecution();
+        SkillMeta skill = new SkillMeta("health-patrol", "desc",
+                null, null, "body", null, null);
+        when(skillRegistry.get("health-patrol")).thenReturn(skill);
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.SUCCEEDED);
+            task.setReport("OK");
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        Map<String, String> inputs = new HashMap<>();
+        inputs.put("_user_message", "Check CPU");
+        PatrolTask task = new PatrolTask("p-msg-1", "health-patrol",
+                "0 */5 * * * ?", "user-1", inputs);
+        scheduler.schedule(task);
+
+        ArgumentCaptor<AgentTask> captor = ArgumentCaptor.forClass(AgentTask.class);
+        verify(agentExecutor).execute(captor.capture(), any(SkillMeta.class));
+
+        Map<String, String> executedInputs = captor.getValue().getInputs();
+        String userMessage = executedInputs.get("_user_message");
+        assertThat(userMessage).isNotNull();
+        // The original message must come first, followed by the patrol suffix.
+        assertThat(userMessage).startsWith("Check CPU");
+        assertThat(userMessage).contains("[巡检模式]");
+        assertThat(userMessage).contains("ALERT_SUMMARY");
+        // The suffix is appended after the original — separator newlines present.
+        assertThat(userMessage).contains("Check CPU\n\n[巡检模式]");
+    }
+
+    @Test
+    void executePatrolShouldSetPatrolSuffixAsUserMessageWhenAbsent() {
+        enableImmediateExecution();
+        SkillMeta skill = new SkillMeta("health-patrol", "desc",
+                null, null, "body", null, null);
+        when(skillRegistry.get("health-patrol")).thenReturn(skill);
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.SUCCEEDED);
+            task.setReport("OK");
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        // No _user_message in inputs — the suffix itself becomes the message.
+        PatrolTask task = new PatrolTask("p-msg-2", "health-patrol",
+                "0 */5 * * * ?", "user-1", null);
+        scheduler.schedule(task);
+
+        ArgumentCaptor<AgentTask> captor = ArgumentCaptor.forClass(AgentTask.class);
+        verify(agentExecutor).execute(captor.capture(), any(SkillMeta.class));
+
+        Map<String, String> executedInputs = captor.getValue().getInputs();
+        String userMessage = executedInputs.get("_user_message");
+        assertThat(userMessage).isNotNull();
+        // When no existing message, the trimmed suffix is used directly.
+        assertThat(userMessage).startsWith("[巡检模式]");
+        assertThat(userMessage).contains("ALERT_SUMMARY");
+        // Should not start with newlines (trimmed).
+        assertThat(userMessage).doesNotStartWith("\n");
+    }
+
+    @Test
+    void executePatrolShouldPreserveOtherInputsAlongsideUserMessage() {
+        enableImmediateExecution();
+        SkillMeta skill = new SkillMeta("health-patrol", "desc",
+                null, null, "body", null, null);
+        when(skillRegistry.get("health-patrol")).thenReturn(skill);
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.SUCCEEDED);
+            task.setReport("OK");
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        Map<String, String> inputs = new HashMap<>();
+        inputs.put("_user_message", "Check CPU");
+        inputs.put("service", "order-svc");
+        inputs.put("env", "prod");
+        PatrolTask task = new PatrolTask("p-msg-3", "health-patrol",
+                "0 */5 * * * ?", "user-1", inputs);
+        scheduler.schedule(task);
+
+        ArgumentCaptor<AgentTask> captor = ArgumentCaptor.forClass(AgentTask.class);
+        verify(agentExecutor).execute(captor.capture(), any(SkillMeta.class));
+
+        Map<String, String> executedInputs = captor.getValue().getInputs();
+        // Original non-_user_message inputs must survive.
+        assertThat(executedInputs.get("service")).isEqualTo("order-svc");
+        assertThat(executedInputs.get("env")).isEqualTo("prod");
+        // _user_message must be augmented with the suffix.
+        assertThat(executedInputs.get("_user_message")).startsWith("Check CPU");
     }
 
     // ── recordAlert with null alertConverger ───────────────────────
