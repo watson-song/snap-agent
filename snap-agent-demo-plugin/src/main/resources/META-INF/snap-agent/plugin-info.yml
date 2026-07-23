@@ -1,0 +1,7 @@
+id: demo-status-plugin
+toolType: system_status
+displayName: "Demo Status Plugin"
+description: "Returns system status information — a demo plugin for testing upload/enable lifecycle"
+version: 1.0.0
+isDefault: false
+providerClass: cn.watsontech.snapagent.plugin.demo.DemoStatusPlugin

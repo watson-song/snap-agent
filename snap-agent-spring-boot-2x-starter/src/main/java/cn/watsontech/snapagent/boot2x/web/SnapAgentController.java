@@ -853,8 +853,8 @@ public class SnapAgentController {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required");
         }
 
-        // Anchor Q&A routing: skillId="auto" with anchor context bypasses skill lookup
-        if ("auto".equals(skillId) && body.containsKey("anchor")) {
+        // Anchor Q&A routing: skillId="auto" or "off" with anchor context bypasses skill lookup
+        if (("auto".equals(skillId) || "off".equals(skillId)) && body.containsKey("anchor")) {
             if (!properties.getAnchor().isEnabled() || anchorOrchestrator == null) {
                 return errorResponse(HttpStatus.CONFLICT, "ANCHOR_DISABLED",
                         "anchor Q&A feature is not enabled");
@@ -1029,63 +1029,125 @@ public class SnapAgentController {
                     .body(errorBody("RATE_LIMITED", "rate limit exceeded"));
         }
 
-        AgentTask task = AgentTask.create(userId, "auto", inputs, model, null);
-        taskStore.save(task);
-
-        final AgentTask finalTask = task;
+        String anchorSkillId = (String) body.get("skillId");
+        if (anchorSkillId == null || anchorSkillId.isEmpty()) anchorSkillId = "auto";
         final String finalUserId = userId;
-        final AnchorContext anchorContext = new AnchorContext(anchorName, anchorContent, pageUrl);
-        final String preprocessId = (String) body.get("preprocessId");
-        final String finalQuestion = question;
-        try {
-            taskExecutor.execute(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        finalTask.setStatus(TaskStatus.RUNNING);
-                        taskStore.update(finalTask);
 
-                        LlmEventSink sink = new LlmEventSink() {
-                            @Override
-                            public void onThought(String text) {
-                                if (text != null && !text.isEmpty()) {
-                                    finalTask.addTranscriptEvent(TranscriptEvent.thought(text));
-                                }
-                            }
-                            @Override
-                            public void onToolUse(String id, String name, Map<String, Object> input) { }
-                            @Override
-                            public void onToolResult(String toolUseId, String result) { }
-                            @Override
-                            public void onStop(String stopReason) { }
-                            @Override
-                            public void onError(String message) {
-                                finalTask.addTranscriptEvent(TranscriptEvent.error(message));
-                            }
-                        };
+        // "auto" mode: route through AgentExecutor with full tool access (jdbc_query, etc.)
+        // "off" mode: direct LLM call via AnchorOrchestrator (no tools, pure context Q&A)
+        AgentTask task;
+        if ("auto".equals(anchorSkillId)) {
+            // Build virtual skill with anchor context embedded in the body
+            String skillBody = "你正在帮助用户理解页面内容。\n"
+                    + "用户正在浏览页面 \"" + pageUrl + "\" 的 \"" + anchorName + "\" 区块。\n\n"
+                    + "区块内容：\n" + anchorContent + "\n\n"
+                    + "用户提问请参考 {message}。\n"
+                    + "如果区块内容中已有答案，直接回答。\n"
+                    + "如果区块内容不足以回答问题，可以使用可用的工具（如 jdbc_query、redis_get 等）"
+                    + "从数据库或缓存中查询数据来补充回答。\n"
+                    + "回答要简洁明了，使用中文。";
+            SkillMeta virtualSkill = new SkillMeta(
+                    "anchor-auto", "Anchor Q&A with tools",
+                    Collections.<String>emptyList(),
+                    Collections.<InputSpec>emptyList(),
+                    skillBody,
+                    SkillAvailability.AVAILABLE, null
+            );
+            Map<String, String> autoInputs = new HashMap<String, String>();
+            autoInputs.put("message", question);
+            String appProfiles = properties.getAppProfiles();
+            if (appProfiles != null && !appProfiles.isEmpty()) {
+                autoInputs.put("_app_profile", appProfiles);
+            }
+            task = AgentTask.create(userId, anchorSkillId, autoInputs, model, null);
+            taskStore.save(task);
 
-                        anchorOrchestrator.executeWithAnchor(anchorContext, finalQuestion,
-                                preprocessId, sink);
-                        finalTask.setStatus(TaskStatus.SUCCEEDED);
-                        taskStore.update(finalTask);
-                    } catch (RuntimeException e) {
-                        log.error("Anchor execution failed for task {}: {}",
-                                finalTask.getTaskId(), e.getMessage());
-                        finalTask.addTranscriptEvent(TranscriptEvent.error(e.getMessage()));
-                        finalTask.setStatus(TaskStatus.FAILED);
-                        taskStore.update(finalTask);
-                    } finally {
-                        rateLimiter.release(finalUserId);
+            final AgentTask finalAutoTask = task;
+            final SkillMeta finalSkill = virtualSkill;
+            try {
+                taskExecutor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            agentExecutor.execute(finalAutoTask, finalSkill);
+                        } catch (RuntimeException e) {
+                            log.error("Anchor auto execution failed for task {}: {}",
+                                    finalAutoTask.getTaskId(), e.getMessage());
+                            finalAutoTask.addTranscriptEvent(TranscriptEvent.error(e.getMessage()));
+                            finalAutoTask.setStatus(TaskStatus.FAILED);
+                            taskStore.update(finalAutoTask);
+                        } finally {
+                            rateLimiter.release(finalUserId);
+                        }
                     }
-                }
-            });
-        } catch (RejectedExecutionException e) {
-            rateLimiter.releaseRejected(userId);
-            task.setStatus(TaskStatus.FAILED);
-            taskStore.update(task);
-            log.error("Task executor rejected anchor task {}: {}", task.getTaskId(), e.getMessage());
-            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "EXECUTOR_REJECTED",
-                    "server busy, please retry later");
+                });
+            } catch (RejectedExecutionException e) {
+                rateLimiter.releaseRejected(userId);
+                task.setStatus(TaskStatus.FAILED);
+                taskStore.update(task);
+                log.error("Task executor rejected anchor task {}: {}", task.getTaskId(), e.getMessage());
+                return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "EXECUTOR_REJECTED",
+                        "server busy, please retry later");
+            }
+        } else {
+            // "off" mode: direct LLM via AnchorOrchestrator (no tools)
+            task = AgentTask.create(userId, anchorSkillId, inputs, model, null);
+            taskStore.save(task);
+
+            final AgentTask finalTask = task;
+            final AnchorContext anchorContext = new AnchorContext(anchorName, anchorContent, pageUrl);
+            final String preprocessId = (String) body.get("preprocessId");
+            final String finalQuestion = question;
+            try {
+                taskExecutor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            finalTask.setStatus(TaskStatus.RUNNING);
+                            taskStore.update(finalTask);
+
+                            LlmEventSink sink = new LlmEventSink() {
+                                @Override
+                                public void onThought(String text) {
+                                    if (text != null && !text.isEmpty()) {
+                                        finalTask.addTranscriptEvent(TranscriptEvent.thought(text));
+                                    }
+                                }
+                                @Override
+                                public void onToolUse(String id, String name, Map<String, Object> input) { }
+                                @Override
+                                public void onToolResult(String toolUseId, String result) { }
+                                @Override
+                                public void onStop(String stopReason) { }
+                                @Override
+                                public void onError(String message) {
+                                    finalTask.addTranscriptEvent(TranscriptEvent.error(message));
+                                }
+                            };
+
+                            anchorOrchestrator.executeWithAnchor(anchorContext, finalQuestion,
+                                    preprocessId, sink);
+                            finalTask.setStatus(TaskStatus.SUCCEEDED);
+                            taskStore.update(finalTask);
+                        } catch (RuntimeException e) {
+                            log.error("Anchor execution failed for task {}: {}",
+                                    finalTask.getTaskId(), e.getMessage());
+                            finalTask.addTranscriptEvent(TranscriptEvent.error(e.getMessage()));
+                            finalTask.setStatus(TaskStatus.FAILED);
+                            taskStore.update(finalTask);
+                        } finally {
+                            rateLimiter.release(finalUserId);
+                        }
+                    }
+                });
+            } catch (RejectedExecutionException e) {
+                rateLimiter.releaseRejected(userId);
+                task.setStatus(TaskStatus.FAILED);
+                taskStore.update(task);
+                log.error("Task executor rejected anchor task {}: {}", task.getTaskId(), e.getMessage());
+                return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "EXECUTOR_REJECTED",
+                        "server busy, please retry later");
+            }
         }
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
@@ -1094,7 +1156,7 @@ public class SnapAgentController {
         result.put("streamUrl", properties.getBasePath() + "/runs/" + task.getTaskId() + "/stream");
 
         Map<String, Object> auditDetails = new LinkedHashMap<String, Object>();
-        auditDetails.put("skillId", "auto");
+        auditDetails.put("skillId", anchorSkillId);
         auditDetails.put("anchor", anchorName);
         auditDetails.put("taskId", task.getTaskId());
         audit(userId, "POST", "/runs", "RUN_ANCHOR_QA", auditDetails);
@@ -2676,7 +2738,9 @@ public class SnapAgentController {
     private ResponseEntity<Object> requirePluginReadPermission() {
         ResponseEntity<Object> authError = requireAuth();
         if (authError != null) return authError;
-        if (!securityGateway.hasPermission(properties.getSecurity().getPluginReadPermission())) {
+        String perm = properties.getSecurity().getPluginReadPermission();
+        if (perm != null && !perm.isEmpty()
+                && !securityGateway.hasPermission(perm)) {
             return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin read permission denied");
         }
         return null;
@@ -2685,7 +2749,9 @@ public class SnapAgentController {
     private ResponseEntity<Object> requirePluginManagePermission() {
         ResponseEntity<Object> authError = requireAuth();
         if (authError != null) return authError;
-        if (!securityGateway.hasPermission(properties.getSecurity().getPluginManagePermission())) {
+        String perm = properties.getSecurity().getPluginManagePermission();
+        if (perm != null && !perm.isEmpty()
+                && !securityGateway.hasPermission(perm)) {
             return errorResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", "plugin manage permission denied");
         }
         return null;

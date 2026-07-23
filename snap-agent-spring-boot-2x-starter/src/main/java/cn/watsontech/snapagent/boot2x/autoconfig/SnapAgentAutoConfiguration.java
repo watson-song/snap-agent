@@ -216,7 +216,8 @@ public class SnapAgentAutoConfiguration {
                 props.getLlm().getApiKey(),
                 props.getLlm().getAuthToken(),
                 props.getLlm().getProxyUrl(),
-                props.getLlm().getTimeoutSeconds());
+                props.getLlm().getTimeoutSeconds(),
+                props.getLlm().getModel());
     }
 
     // ---- DataSourceRegistry (multi-env, v0.6) ----

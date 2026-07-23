@@ -89,7 +89,10 @@
         if (isPathDisabled(window.location.pathname)) return;
 
         var main = document.querySelector('main') || document.body;
-        var anchors = main.querySelectorAll('[data-snap-anchor]:not([data-snap-anchor-injected])');
+        // Q&A anchors: skip inject-mode elements (they have their own init path)
+        var anchors = main.querySelectorAll(
+            '[data-snap-anchor]:not([data-snap-anchor-injected]):not([data-snap-mode="inject"])'
+        );
         anchors.forEach(function (el) {
             injectAnchorIcon(el);
             el.setAttribute('data-snap-anchor-injected', 'true');
@@ -99,7 +102,7 @@
         if (anchors.length === 0) {
             var sections = main.querySelectorAll('section, h2[id], h3[id]');
             sections.forEach(function (el) {
-                if (!el.hasAttribute('data-snap-anchor-injected') && !el.hasAttribute('data-snap-anchor')) {
+                if (!el.hasAttribute('data-snap-anchor-injected') && !el.hasAttribute('data-snap-anchor') && !el.hasAttribute('data-snap-mode')) {
                     var name = el.getAttribute('data-snap-anchor') || el.id || el.textContent.trim().slice(0, 50);
                     el.setAttribute('data-snap-anchor', name);
                     injectAnchorIcon(el);
@@ -108,12 +111,12 @@
             });
         }
 
-        // Inject anchors
+        // Inject anchors (use separate marker so Q&A pass doesn't block them)
         var injectAnchors = main.querySelectorAll(
-            '[data-snap-mode="inject"]:not([data-snap-anchor-injected])'
+            '[data-snap-mode="inject"]:not([data-snap-inject-init])'
         );
         injectAnchors.forEach(function (el) {
-            el.setAttribute('data-snap-anchor-injected', 'true');
+            el.setAttribute('data-snap-inject-init', 'true');
             initInjectAnchor(el);
         });
     }
@@ -201,7 +204,7 @@
         if (drawerHost) return;
         drawerHost = document.createElement('div');
         drawerHost.id = 'snap-anchor-drawer-host';
-        drawerHost.style.cssText = 'position:fixed;top:0;right:0;width:0;height:100vh;z-index:99999;transition:width 0.3s ease;';
+        drawerHost.style.cssText = 'position:fixed;top:0;right:0;width:400px;height:100vh;z-index:99999;transform:translateX(100%);transition:transform 0.35s cubic-bezier(0.22,1,0.36,1);';
         document.body.appendChild(drawerHost);
         var shadow = drawerHost.attachShadow({ mode: 'open' });
         shadow.innerHTML = getDrawerTemplate();
@@ -209,11 +212,13 @@
 
         // Close button
         shadow.getElementById('snap-close').addEventListener('click', closeDrawer);
+        // Handle click also closes
+        shadow.getElementById('snap-handle').addEventListener('click', closeDrawer);
         // Send button
         shadow.getElementById('snap-send').addEventListener('click', sendMessage);
-        // Enter key in input
+        // Enter key in input (skip IME composition Enter)
         shadow.getElementById('snap-input').addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
                 e.preventDefault();
                 sendMessage();
             }
@@ -223,8 +228,10 @@
     function getDrawerTemplate() {
         return '<style>' +
             ':host{all:initial}' +
-            '.drawer{width:100%;height:100%;background:#fff;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1a1a1a;box-shadow:-4px 0 24px rgba(0,0,0,0.12);border-radius:0 16px 16px 0;overflow:hidden}' +
-            '.header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#6366f1;color:#fff}' +
+            '.drawer{position:relative;width:100%;height:100%;background:#fff;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:#1a1a1a;box-shadow:-4px 0 24px rgba(0,0,0,0.12);border-radius:16px 0 0 16px;overflow:hidden}' +
+            '.drawer-handle{position:absolute;left:-8px;top:50%;transform:translateY(-50%);width:6px;height:56px;background:linear-gradient(180deg,#6366f1,#4f46e5);border-radius:3px 0 0 3px;cursor:pointer;box-shadow:-2px 0 6px rgba(99,102,241,0.3);display:flex;align-items:center;justify-content:center}' +
+            '.drawer-handle::after{content:"";width:2px;height:24px;background:rgba(255,255,255,0.5);border-radius:1px}' +
+            '.header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#6366f1;color:#fff;border-radius:16px 0 0 0}' +
             '.header-left{display:flex;flex-direction:column;min-width:0;flex:1}' +
             '.header h3{margin:0;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
             '.header .subtitle{font-size:11px;opacity:0.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
@@ -248,6 +255,7 @@
             '.input-area button:disabled{background:#c7d2fe;cursor:not-allowed}' +
             '</style>' +
             '<div class="drawer">' +
+            '<div class="drawer-handle" id="snap-handle"></div>' +
             '<div class="header">' +
             '  <div class="header-left">' +
             '    <h3 id="snap-title">Anchor Q&A</h3>' +
@@ -269,7 +277,7 @@
 
     function openDrawer(el, name, skill) {
         createDrawer();
-        drawerHost.style.width = '400px';
+        drawerHost.style.transform = 'translateX(0)';
         drawer.getElementById('snap-title').textContent = name;
         var content = drawer.getElementById('snap-content');
         content.innerHTML = '';
@@ -343,11 +351,11 @@
         // Insert loading placeholder
         var loadingEl = document.createElement('div');
         loadingEl.className = 'snap-inject-loading';
-        loadingEl.style.cssText = 'display:flex;align-items:center;justify-content:center;min-height:60px;';
-        loadingEl.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" style="animation:snap-blink 1.2s ease-in-out infinite;">'
-            + '<circle cx="12" cy="12" r="10"/>'
-            + '<path d="M8 12h8M12 8v8"/>'
+        loadingEl.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:8px;min-height:60px;';
+        loadingEl.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="#6366f1" style="animation:snap-blink 1.2s ease-in-out infinite;">'
+            + '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>'
             + '</svg>'
+            + '<span style="color:#6366f1;font-size:13px;font-family:system-ui,sans-serif;animation:snap-blink 1.2s ease-in-out infinite;">SnapAgent 生成中...</span>'
             + '<style>@keyframes snap-blink{0%,100%{opacity:0.3}50%{opacity:1}}</style>';
         el.innerHTML = '';
         el.appendChild(loadingEl);
@@ -388,7 +396,7 @@
 
     function closeDrawer() {
         if (drawerHost) {
-            drawerHost.style.width = '0';
+            drawerHost.style.transform = 'translateX(100%)';
             // Abort any ongoing SSE
             if (drawer._eventSource) {
                 drawer._eventSource.close();

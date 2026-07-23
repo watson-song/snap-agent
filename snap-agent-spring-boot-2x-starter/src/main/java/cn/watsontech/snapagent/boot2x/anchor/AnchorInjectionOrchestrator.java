@@ -114,10 +114,10 @@ public class AnchorInjectionOrchestrator {
                 + "当前时间：" + LocalDateTime.now() + "\n\n"
                 + "要求：\n"
                 + "1. 返回纯 HTML 片段，不要包含 <html>、<body>、<head> 等外层标签\n"
-                + "2. 内容应为可直接嵌入页面的完整 HTML（可含内联 <style> 和 <script>）\n"
-                + "3. 你可以自由设计内容风格、布局和配色，让内容新颖且吸引人\n"
-                + "4. 内容应与当前用户身份和页面上下文相关\n"
-                + "5. 不要使用外联 CSS/JS，所有样式和脚本必须内联\n";
+                + "2. 内容应为可直接嵌入页面的完整 HTML（可含内联 <style>）\n"
+                + "3. 内容简洁精炼，不要冗余文字，快速输出\n"
+                + "4. 不要使用外联 CSS/JS，所有样式必须内联\n"
+                + "5. 不要输出思考过程，直接输出 HTML\n";
     }
 
     /** Executes a skill to generate HTML content. */
@@ -127,12 +127,21 @@ public class AnchorInjectionOrchestrator {
             throw new IllegalArgumentException("SKILL_NOT_FOUND: " + skillId);
         }
 
+        // Use skill body as system prompt; fall back to generic prompt if empty
+        String skillBody = skill.getBody();
+        String systemPrompt;
+        if (skillBody != null && !skillBody.trim().isEmpty()) {
+            systemPrompt = skillBody;
+        } else {
+            systemPrompt = "你是 SnapAgent 内容生成助手，负责为页面锚点生成简洁的 HTML 内容。要求快速生成，内容精简。";
+        }
+
         LlmRequest request = new LlmRequest(
-                "你是 SnapAgent 内容生成助手，负责为页面锚点生成 HTML 内容。",
+                systemPrompt,
                 Collections.singletonList(Message.user(prompt)),
                 Collections.emptyList(),
                 null,
-                props.getInjectionMaxTokens(),
+                Math.min(props.getInjectionMaxTokens(), 1024),
                 true    // streaming — collect output via onThought
         );
 
@@ -161,7 +170,30 @@ public class AnchorInjectionOrchestrator {
             }
         }, "inject-" + UUID.randomUUID().toString());
 
-        return html.toString();
+        return stripThinking(html.toString());
+    }
+
+    /**
+     * Strips LLM thinking/reasoning text that appears before the actual HTML.
+     * Models like GLM often output "Let me think..." before the real content.
+     * Finds the first HTML tag and returns from there.
+     */
+    static String stripThinking(String raw) {
+        if (raw == null || raw.isEmpty()) return raw;
+        // Find first '<' that looks like an HTML tag (followed by a letter or '/')
+        for (int i = 0; i < raw.length(); i++) {
+            if (raw.charAt(i) == '<') {
+                // Check if this looks like a real HTML tag
+                if (i + 1 < raw.length()) {
+                    char next = raw.charAt(i + 1);
+                    if (Character.isLetter(next) || next == '/' || next == '!' || next == 's') {
+                        return raw.substring(i).trim();
+                    }
+                }
+            }
+        }
+        // No HTML tag found, return as-is
+        return raw.trim();
     }
 
     /** Executes a workflow to generate HTML content. */
