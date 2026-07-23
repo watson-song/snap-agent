@@ -2,6 +2,8 @@ package cn.watsontech.snapagent.core.agent;
 
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class RateLimiterTest {
@@ -136,5 +138,97 @@ class RateLimiterTest {
         limiter.release("u1"); // normal release — hourly stays
         assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
         assertThat(limiter.getConcurrentCount("u1")).isZero();
+    }
+
+    // ---- GAP-7: rolloverHourIfNeeded (hour window rollover) ----
+
+    @Test
+    void shouldResetHourlyCountWhenHourWindowRollsOver() throws Exception {
+        RateLimiter limiter = new RateLimiter(5, 10);
+
+        // Acquire twice — hourlyCount = 2
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(2);
+
+        // Simulate time moving to a new hour by setting currentHourStart to 2 hours ago
+        long currentHour = currentHourMillis();
+        setField(limiter, "currentHourStart", currentHour - (2 * 60L * 60L * 1000L));
+
+        // Calling getHourlyCount triggers rolloverHourIfNeeded, which clears hourlyCounts
+        assertThat(limiter.getHourlyCount("u1")).isZero();
+
+        // The next acquire should start fresh (hourly = 1, not 3)
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
+    }
+
+    @Test
+    void shouldClearAllUsersHourlyCountsOnRollover() throws Exception {
+        RateLimiter limiter = new RateLimiter(5, 10);
+
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        assertThat(limiter.tryAcquire("u2")).isTrue();
+        limiter.release("u2");
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
+        assertThat(limiter.getHourlyCount("u2")).isEqualTo(1);
+
+        // Simulate hour rollover
+        long currentHour = currentHourMillis();
+        setField(limiter, "currentHourStart", currentHour - (60L * 60L * 1000L));
+
+        assertThat(limiter.getHourlyCount("u1")).isZero();
+        assertThat(limiter.getHourlyCount("u2")).isZero();
+    }
+
+    @Test
+    void shouldNotResetHourlyCountWithinSameHour() throws Exception {
+        RateLimiter limiter = new RateLimiter(5, 10);
+
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
+
+        // Set currentHourStart to the actual current hour (no rollover)
+        setField(limiter, "currentHourStart", currentHourMillis());
+
+        // Within the same hour — count should persist
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
+    }
+
+    @Test
+    void shouldRespectHourlyLimitAfterRolloverResetsCount() throws Exception {
+        // maxRunsPerHour = 2
+        RateLimiter limiter = new RateLimiter(5, 2);
+
+        // Exhaust hourly quota
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        limiter.release("u1");
+        // Third acquire should fail (quota exhausted)
+        assertThat(limiter.tryAcquire("u1")).isFalse();
+
+        // Simulate hour rollover — quota resets
+        long currentHour = currentHourMillis();
+        setField(limiter, "currentHourStart", currentHour - (60L * 60L * 1000L));
+
+        // After rollover, acquire should succeed again
+        assertThat(limiter.tryAcquire("u1")).isTrue();
+        assertThat(limiter.getHourlyCount("u1")).isEqualTo(1);
+    }
+
+    private static long currentHourMillis() {
+        long now = System.currentTimeMillis();
+        return now - (now % (60L * 60L * 1000L));
+    }
+
+    private static void setField(Object target, String fieldName, long value) throws Exception {
+        Field field = RateLimiter.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.setLong(target, value);
     }
 }

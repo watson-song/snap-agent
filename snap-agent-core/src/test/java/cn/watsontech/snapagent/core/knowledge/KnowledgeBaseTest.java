@@ -4,11 +4,13 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Unit tests for {@link KnowledgeBase}.
@@ -190,5 +192,165 @@ class KnowledgeBaseTest {
                 fixedScoreSearcher(1.0));
 
         assertThat(kb.size()).isEqualTo(3);
+    }
+
+    // ---- GAP-1 (P1): searchWithScores multi-fragment descending ----
+
+    @Test
+    void searchWithScores_shouldReturnFragmentsSortedByScoreDescending() {
+        // 3 fragments scored 0.3 / 0.9 / 0.6 — must come back as 0.9, 0.6, 0.3
+        KnowledgeFragment fLow = fragment("低分", "alpha");
+        KnowledgeFragment fMid = fragment("中分", "beta");
+        KnowledgeFragment fHigh = fragment("高分", "gamma");
+        KnowledgeSearcher tieredSearcher = new KnowledgeSearcher() {
+            @Override
+            public double score(String query, KnowledgeFragment fragment) {
+                if (fragment == fLow) {
+                    return 0.3;
+                }
+                if (fragment == fMid) {
+                    return 0.6;
+                }
+                if (fragment == fHigh) {
+                    return 0.9;
+                }
+                return 0.0;
+            }
+        };
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.singletonList(sourceWith(Arrays.asList(fLow, fMid, fHigh))),
+                tieredSearcher);
+
+        List<SearchResult> results = kb.searchWithScores("query", 5, 0.0);
+
+        assertThat(results).hasSize(3);
+        // Descending order: high → mid → low
+        assertThat(results.get(0).getFragment()).isEqualTo(fHigh);
+        assertThat(results.get(0).getScore()).isCloseTo(0.9, within(0.001));
+        assertThat(results.get(1).getFragment()).isEqualTo(fMid);
+        assertThat(results.get(1).getScore()).isCloseTo(0.6, within(0.001));
+        assertThat(results.get(2).getFragment()).isEqualTo(fLow);
+        assertThat(results.get(2).getScore()).isCloseTo(0.3, within(0.001));
+    }
+
+    @Test
+    void searchWithScores_shouldRespectMinScoreFilter() {
+        KnowledgeFragment f1 = fragment("片段1", "匹配");
+        KnowledgeFragment f2 = fragment("片段2", "匹配");
+        KnowledgeFragment f3 = fragment("片段3", "匹配");
+        KnowledgeSearcher searcher = new KnowledgeSearcher() {
+            @Override
+            public double score(String query, KnowledgeFragment fragment) {
+                if (fragment == f1) {
+                    return 0.9;
+                }
+                if (fragment == f2) {
+                    return 0.4;
+                }
+                if (fragment == f3) {
+                    return 0.1;
+                }
+                return 0.0;
+            }
+        };
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.singletonList(sourceWith(Arrays.asList(f1, f2, f3))),
+                searcher);
+
+        // minScore 0.5 filters out f2 (0.4) and f3 (0.1)
+        List<SearchResult> results = kb.searchWithScores("query", 5, 0.5);
+
+        assertThat(results).hasSize(1);
+        assertThat(results.get(0).getFragment()).isEqualTo(f1);
+    }
+
+    @Test
+    void searchWithScores_shouldLimitToTopK() {
+        KnowledgeFragment f1 = fragment("片段1", "匹配");
+        KnowledgeFragment f2 = fragment("片段2", "匹配");
+        KnowledgeFragment f3 = fragment("片段3", "匹配");
+        KnowledgeSearcher searcher = new KnowledgeSearcher() {
+            @Override
+            public double score(String query, KnowledgeFragment fragment) {
+                if (fragment == f1) {
+                    return 0.9;
+                }
+                if (fragment == f2) {
+                    return 0.8;
+                }
+                if (fragment == f3) {
+                    return 0.7;
+                }
+                return 0.0;
+            }
+        };
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.singletonList(sourceWith(Arrays.asList(f1, f2, f3))),
+                searcher);
+
+        // topK=2 limits to 2 highest scoring fragments
+        List<SearchResult> results = kb.searchWithScores("query", 2, 0.0);
+
+        assertThat(results).hasSize(2);
+        assertThat(results.get(0).getFragment()).isEqualTo(f1);
+        assertThat(results.get(1).getFragment()).isEqualTo(f2);
+    }
+
+    @Test
+    void searchWithScores_shouldReturnEmptyForNullOrEmptyQuery() {
+        KnowledgeFragment f1 = fragment("片段1", "内容1");
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.singletonList(sourceWith(Collections.singletonList(f1))),
+                fixedScoreSearcher(1.0));
+
+        assertThat(kb.searchWithScores(null, 5, 0.0)).isEmpty();
+        assertThat(kb.searchWithScores("", 5, 0.0)).isEmpty();
+    }
+
+    // ---- GAP-2 (P1): listAll immutability ----
+
+    @Test
+    void listAll_shouldReturnUnmodifiableList() {
+        KnowledgeFragment f1 = fragment("片段1", "内容1");
+        KnowledgeFragment f2 = fragment("片段2", "内容2");
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.singletonList(sourceWith(Arrays.asList(f1, f2))),
+                fixedScoreSearcher(1.0));
+
+        List<KnowledgeFragment> all = kb.listAll();
+
+        assertThat(all).hasSize(2);
+        assertThat(all).contains(f1, f2);
+        // Modifying the returned list must fail — defensive copy / unmodifiable
+        assertThatThrownBy(() -> all.add(fragment("片段3", "内容3")))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> all.remove(0))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> all.clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+        // Iterator.remove must also fail
+        Iterator<KnowledgeFragment> it = all.iterator();
+        assertThatThrownBy(it::remove)
+                .isInstanceOf(UnsupportedOperationException.class);
+        // Internal cache must be unchanged after attempted mutation
+        assertThat(kb.size()).isEqualTo(2);
+        assertThat(kb.listAll()).hasSize(2);
+    }
+
+    @Test
+    void listAll_shouldReturnEmptyUnmodifiableListWhenNoFragments() {
+        KnowledgeBase kb = new KnowledgeBase(
+                Collections.<KnowledgeSource>emptyList(),
+                fixedScoreSearcher(1.0));
+
+        List<KnowledgeFragment> all = kb.listAll();
+
+        assertThat(all).isEmpty();
+        assertThatThrownBy(() -> all.add(fragment("新片段", "内容")))
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    private static org.assertj.core.data.Offset<Double> within(double tolerance) {
+        return org.assertj.core.data.Offset.offset(tolerance);
     }
 }

@@ -160,4 +160,53 @@ class SimpleKeywordSearcherTest {
         assertThat(searcher.tokenize("")).isEmpty();
         assertThat(searcher.tokenize(null)).isEmpty();
     }
+
+    // ---- GAP-3 (P2): mixed Chinese-English tokenization ----
+
+    @Test
+    void tokenize_mixedChineseEnglish_emitsLatinAndCjkBigrams() {
+        // "database 连接池" → English "database" + CJK bigrams "连接","接池"
+        List<String> tokens = searcher.tokenize("database 连接池");
+
+        assertThat(tokens).contains("database");
+        assertThat(tokens).contains("连接");
+        assertThat(tokens).contains("接池");
+    }
+
+    @Test
+    void tokenize_mixedChineseEnglishPunctuation_splitsCorrectly() {
+        // Punctuation separates Latin words; CJK bigrams advance across spaces
+        List<String> tokens = searcher.tokenize("Hello, 数据库 world");
+
+        assertThat(tokens).contains("hello");
+        assertThat(tokens).contains("world");
+        // "数据库" → bigrams ["数据", "据库"]
+        assertThat(tokens).contains("数据", "据库");
+    }
+
+    @Test
+    void score_mixedChineseEnglishQuery_matchesFragmentWithBothParts() {
+        // Fragment title/content mixes English and Chinese keywords
+        KnowledgeFragment fragment = new KnowledgeFragment(
+                "database 连接池配置", "database connection pool 连接池", "src", null);
+
+        double score = searcher.score("database 连接池", fragment);
+
+        // "database" + "连接" + "接池" all match title and content → high score
+        assertThat(score).isGreaterThan(0.5);
+    }
+
+    @Test
+    void score_mixedChineseEnglishQuery_partialMatchScoresLower() {
+        // Fragment has only the English half; Chinese part misses
+        KnowledgeFragment fragment = new KnowledgeFragment(
+                "database config", "database configuration only", "src", null);
+
+        double score = searcher.score("database 连接池", fragment);
+
+        // "database" hits title and content, but CJK bigrams don't match.
+        // queryTokenCount = 4 (database, 连接, 接池, 池-standalone)
+        // score = (1*2 + 1) / (4*2) = 3/8 = 0.375
+        assertThat(score).isLessThanOrEqualTo(0.5);
+    }
 }

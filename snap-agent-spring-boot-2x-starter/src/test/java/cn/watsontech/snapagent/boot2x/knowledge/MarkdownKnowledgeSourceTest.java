@@ -147,4 +147,67 @@ class MarkdownKnowledgeSourceTest {
         source.reload(); // should be a no-op
         assertThat(source.load()).isEmpty();
     }
+
+    // ---- GAP-4 (P2): nested directory recursion ----
+
+    @Test
+    void load_recursivelyDiscoversMdFilesInNestedDirectories() throws IOException {
+        // Root .md
+        Files.write(tempDir.resolve("root.md"),
+                "# Root\n## R1\nroot body\n".getBytes());
+        // Nested subdirectory .md
+        Path subDir = tempDir.resolve("subdir");
+        Files.createDirectories(subDir);
+        Files.write(subDir.resolve("nested.md"),
+                "# Nested\n## N1\nnested body\n".getBytes());
+        // Deeper nested subdirectory .md
+        Path deepDir = subDir.resolve("deep");
+        Files.createDirectories(deepDir);
+        Files.write(deepDir.resolve("deep.md"),
+                "# Deep\n## D1\ndeep body\n".getBytes());
+        // Non-md file in nested dir should be skipped
+        Files.write(subDir.resolve("ignore.txt"), "skip me".getBytes());
+
+        MarkdownKnowledgeSource source = new MarkdownKnowledgeSource(tempDir.toString());
+        List<KnowledgeFragment> fragments = source.load();
+
+        // root.md: overview + R1 = 2
+        // nested.md: overview + N1 = 2
+        // deep.md: overview + D1 = 2
+        // ignore.txt skipped
+        assertThat(fragments).hasSize(6);
+        assertThat(fragments).extracting(KnowledgeFragment::getTitle)
+                .contains("R1", "N1", "D1");
+        // Every fragment carries its file's H1 category metadata
+        assertThat(fragments).extracting(f -> f.getMetadata().get("category"))
+                .contains("Root", "Nested", "Deep");
+    }
+
+    @Test
+    void load_recursionSkipsNonMdFilesInSubdirectories() throws IOException {
+        Path subDir = tempDir.resolve("only-txt");
+        Files.createDirectories(subDir);
+        Files.write(subDir.resolve("notes.txt"), "not markdown".getBytes());
+        Files.write(subDir.resolve("readme.md"), "# Real\n## S1\nbody\n".getBytes());
+
+        MarkdownKnowledgeSource source = new MarkdownKnowledgeSource(tempDir.toString());
+        List<KnowledgeFragment> fragments = source.load();
+
+        // Only readme.md is loaded — notes.txt skipped
+        assertThat(fragments).hasSize(2); // overview + S1
+        assertThat(fragments).extracting(KnowledgeFragment::getTitle)
+                .contains("S1");
+    }
+
+    @Test
+    void load_nestedDirectoryWithoutMdFiles_returnsEmpty() throws IOException {
+        Path subDir = tempDir.resolve("empty-sub");
+        Files.createDirectories(subDir);
+        Files.write(subDir.resolve("data.json"), "{}".getBytes());
+
+        MarkdownKnowledgeSource source = new MarkdownKnowledgeSource(tempDir.toString());
+        List<KnowledgeFragment> fragments = source.load();
+
+        assertThat(fragments).isEmpty();
+    }
 }

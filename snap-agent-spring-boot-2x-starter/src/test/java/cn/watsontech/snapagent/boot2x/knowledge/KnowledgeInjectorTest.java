@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.knowledge;
 
 import cn.watsontech.snapagent.core.agent.AgentTask;
+import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
 import cn.watsontech.snapagent.core.knowledge.KnowledgeSearcher;
@@ -179,5 +180,81 @@ class KnowledgeInjectorTest {
 
         assertThat(result).isNotEmpty();
         assertThat(result).contains("补货策略");
+    }
+
+    // ---- GAP-5 (P1): KnowledgeInjector + multiple SystemPromptExtender ----
+
+    @Test
+    void extend_knowledgeInjectorCoexistsWithProjectContextExtender() {
+        // Simulate what AgentExecutor.buildSystemPrompt does: iterate a list
+        // of SystemPromptExtender and concatenate non-empty outputs. Verify
+        // that a real KnowledgeInjector works alongside another extender.
+        KnowledgeBase kb = makeKnowledgeBase(Arrays.asList(
+                makeFragment("Database Diagnostics",
+                        "database connection pool and slow query analysis")));
+        KnowledgeInjector knowledgeExtender = new KnowledgeInjector(kb, 3, 0.1);
+        SystemPromptExtender projectExtender = (skill, task) ->
+                "## 项目结构\n模块: snap-agent-core\n包: cn.watsontech.snapagent";
+
+        List<SystemPromptExtender> extenders = Arrays.asList(
+                projectExtender, knowledgeExtender);
+        AgentTask task = makeTask("database connection pool");
+        SkillMeta skill = makeSkill();
+
+        // Mimic AgentExecutor's prompt assembly loop
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 系统提示\nuserId: ").append(task.getUserId()).append("\n");
+        for (SystemPromptExtender extender : extenders) {
+            String context = extender.extend(skill, task);
+            if (context != null && !context.isEmpty()) {
+                sb.append("\n").append(context);
+            }
+        }
+        String prompt = sb.toString();
+
+        // Both extender outputs must appear in the assembled prompt
+        assertThat(prompt).contains("项目结构");
+        assertThat(prompt).contains("snap-agent-core");
+        assertThat(prompt).contains("业务知识参考");
+        assertThat(prompt).contains("Database Diagnostics");
+        assertThat(prompt).contains("来源:");
+
+        // Project context must come before knowledge (insertion order)
+        assertThat(prompt.indexOf("snap-agent-core"))
+                .isLessThan(prompt.indexOf("业务知识参考"));
+        // Both must come after the userId line
+        assertThat(prompt.indexOf("user1"))
+                .isLessThan(prompt.indexOf("snap-agent-core"))
+                .isLessThan(prompt.indexOf("业务知识参考"));
+    }
+
+    @Test
+    void extend_knowledgeInjectorReturnsEmptyDoesNotInterfereWithOtherExtender() {
+        // When the query doesn't match any fragment, the knowledge injector
+        // returns "" — this must not corrupt the other extender's output.
+        KnowledgeBase kb = makeKnowledgeBase(Arrays.asList(
+                makeFragment("Redis Cache", "redis cache management")));
+        KnowledgeInjector knowledgeExtender = new KnowledgeInjector(kb, 3, 0.1);
+        SystemPromptExtender projectExtender = (skill, task) ->
+                "## 项目结构\n模块: snap-agent-core";
+
+        List<SystemPromptExtender> extenders = Arrays.asList(
+                projectExtender, knowledgeExtender);
+        AgentTask task = makeTask("docker kubernetes"); // no match
+        SkillMeta skill = makeSkill();
+
+        StringBuilder sb = new StringBuilder();
+        for (SystemPromptExtender extender : extenders) {
+            String context = extender.extend(skill, task);
+            if (context != null && !context.isEmpty()) {
+                sb.append("\n").append(context);
+            }
+        }
+        String prompt = sb.toString();
+
+        // Project context is present
+        assertThat(prompt).contains("项目结构");
+        // Knowledge section is absent (no match → empty string)
+        assertThat(prompt).doesNotContain("业务知识参考");
     }
 }
