@@ -23,7 +23,7 @@ Three minimum steps turn a Spring Boot 2.x app into an LLM diagnostic agent:
    <dependency>
        <groupId>cn.watsontech.snapagent</groupId>
        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-       <version>1.0-SNAPSHOT</version>
+       <version>0.5.0</version>
    </dependency>
    <!-- OkHttp is declared optional by the starter; the host MUST bring it explicitly -->
    <dependency>

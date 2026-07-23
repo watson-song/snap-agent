@@ -71,10 +71,10 @@ gpg --keyserver keyserver.ubuntu.com --send-keys $KEY_ID
 
 ```bash
 # 一键完成：改版本号 → 跑测试 → commit → tag → 准备下一个 SNAPSHOT
-./scripts/release.sh 0.3.0 --next 0.4.0
+./scripts/release.sh 0.5.0 --next 0.6.0
 
 # 推送后，GitHub Actions 自动并行执行两个 workflow：
-git push origin dev && git push origin v0.3.0
+git push origin dev && git push origin v0.5.0
 ```
 
 | Workflow | 触发 | 作用 |
@@ -92,7 +92,7 @@ git push origin dev && git push origin v0.3.0
 需要本机配好 GPG 和 settings.xml（见上方"一次性配置 4"）：
 
 ```bash
-./scripts/release.sh 0.3.0 --deploy-local
+./scripts/release.sh 0.5.0 --deploy-local
 ```
 
 `--deploy-local` 会在本地执行 `mvn clean deploy -Prelease`，GPG 密码通过 gpg-agent 弹窗输入（或用 `-Dgpg.pinentry-mode=loopback -Dgpg.passphrase=xxx`）。
@@ -101,7 +101,7 @@ git push origin dev && git push origin v0.3.0
 
 | 参数 | 说明 |
 |---|---|
-| `<version>` | 必填，x.y.z 格式（如 `0.3.0`），不带 `-SNAPSHOT` |
+| `<version>` | 必填，x.y.z 格式（如 `0.5.0`），不带 `-SNAPSHOT` |
 | `--next <x.y.z>` | 发版后自动切到下一个开发版本（自动加 `-SNAPSHOT`）并单独 commit |
 | `--deploy-local` | 本地直接部署到 Central Portal（跳过 CI） |
 | `--skip-tests` | 跳过测试（不推荐） |
@@ -186,10 +186,10 @@ Repo **Settings → Secrets and variables → Actions**, add 4 secrets:
 
 ```bash
 # One command: bump version → run tests → commit → tag → prepare next SNAPSHOT
-./scripts/release.sh 0.3.0 --next 0.4.0
+./scripts/release.sh 0.5.0 --next 0.6.0
 
 # Push; two GitHub Actions workflows run in parallel:
-git push origin dev && git push origin v0.3.0
+git push origin dev && git push origin v0.5.0
 ```
 
 | Workflow | Trigger | Purpose |
@@ -207,7 +207,7 @@ Artifacts become globally available in ~15–30 minutes. Verify at:
 Requires local GPG and settings.xml (see "One-time Setup 4"):
 
 ```bash
-./scripts/release.sh 0.3.0 --deploy-local
+./scripts/release.sh 0.5.0 --deploy-local
 ```
 
 `--deploy-local` runs `mvn clean deploy -Prelease` locally; the GPG passphrase is prompted via gpg-agent (or use `-Dgpg.pinentry-mode=loopback -Dgpg.passphrase=xxx`).
@@ -216,7 +216,7 @@ Requires local GPG and settings.xml (see "One-time Setup 4"):
 
 | Option | Description |
 |---|---|
-| `<version>` | Required, x.y.z format (e.g. `0.3.0`), no `-SNAPSHOT` suffix |
+| `<version>` | Required, x.y.z format (e.g. `0.5.0`), no `-SNAPSHOT` suffix |
 | `--next <x.y.z>` | After release, switch to the next dev version (`-SNAPSHOT` appended) in a separate commit |
 | `--deploy-local` | Deploy to Central Portal from your machine (skip CI) |
 | `--skip-tests` | Skip tests (not recommended) |

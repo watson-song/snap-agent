@@ -23,7 +23,7 @@
    <dependency>
        <groupId>cn.watsontech.snapagent</groupId>
        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-       <version>1.0-SNAPSHOT</version>
+       <version>0.5.0</version>
    </dependency>
    <!-- OkHttp（Starter 标记为 optional，宿主必须显式引入） -->
    <dependency>

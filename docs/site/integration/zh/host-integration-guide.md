@@ -57,7 +57,7 @@ SnapAgent 是一个嵌入式 LLM 诊断 Agent 库，让 Spring Boot 2.x 应用�
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.5.0</version>
 </dependency>
 ```
 
@@ -95,7 +95,7 @@ Starter 中的内置工具按 `@ConditionalOnClass` / `@ConditionalOnBean` 条�
     <dependency>
         <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>0.5.0</version>
     </dependency>
     <!-- OkHttp（Starter 中为 optional，宿主必须显式引入） -->
     <dependency>
@@ -121,7 +121,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.5.0</version>
     <exclusions>
         <exclusion>
             <groupId>cn.watsontech.snapagent</groupId>

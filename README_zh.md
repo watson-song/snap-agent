@@ -4,7 +4,7 @@
 
 [![Java 8](https://img.shields.io/badge/Java-8-orange.svg)](https://adoptium.net/)
 [![Spring Boot 2.5.15](https://img.shields.io/badge/Spring%20Boot-2.5.15-green.svg)](https://spring.io/projects/spring-boot)
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)]()
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)]()
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 [English](README.md) | [中文](README_zh.md)
@@ -47,7 +47,7 @@ SnapAgent 是一个**嵌入式 AI 技能框架**。它让你在任何现有或�
 **方式 A — 一键安装（从 GitHub Release 下载预构建 JAR）：**
 
 ```bash
-bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/v0.4.0/install.sh)
+bash <(curl -sL https://github.com/watson-song/snap-agent/releases/download/v0.5.0/install.sh)
 ```
 
 **方式 B — 从源码构建：**
@@ -62,7 +62,7 @@ git clone https://github.com/watson-song/snap-agent.git && cd snap-agent && mvn 
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>0.4.0</version>
+    <version>0.5.0</version>
 </dependency>
 ```
 
