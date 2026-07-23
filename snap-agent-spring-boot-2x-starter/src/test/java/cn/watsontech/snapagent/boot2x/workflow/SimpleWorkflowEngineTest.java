@@ -24,6 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -482,5 +484,319 @@ class SimpleWorkflowEngineTest {
         assertThat(engine.evaluateCondition("${missing.status == 'SUCCEEDED'}", empty)).isFalse();
         assertThat(engine.evaluateCondition("${missing.status}", empty)).isFalse();
         assertThat(engine.evaluateCondition("${missing.taskId}", empty)).isFalse();
+    }
+
+    // ---- GAP-6: Skill not found (STOP vs SKIP) ----
+
+    @Test
+    void shouldFailWithSkillNotFoundWhenOnFailureIsStop() {
+        when(skillRegistry.get("nonexistent-skill")).thenReturn(null);
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "nonexistent-skill", null, null, WorkflowStep.STOP),
+                step("s2", "skill-b", null, null, null));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(result.getFailedStep()).isEqualTo("s1");
+        assertThat(result.getErrorMessage()).contains("skill not found");
+        assertThat(result.getErrorMessage()).contains("nonexistent-skill");
+        // s2 should never have been reached
+        assertThat(result.getStepResults()).doesNotContainKey("s2");
+        // AgentExecutor must not have been called
+        verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
+    }
+
+    @Test
+    void shouldSkipStepWhenSkillNotFoundAndOnFailureIsSkip() {
+        // Only "nonexistent-skill" returns null; skill-b uses the default mock
+        when(skillRegistry.get("nonexistent-skill")).thenReturn(null);
+        mockExecuteSuccess("ok");
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "nonexistent-skill", null, null, WorkflowStep.SKIP),
+                step("s2", "skill-b", null, null, null));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        // s1 should be recorded with all-null fields (skipped)
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1).isNotNull();
+        assertThat(s1.getTaskId()).isNull();
+        assertThat(s1.getStatus()).isNull();
+        assertThat(s1.getReport()).isNull();
+
+        // s2 should have executed normally
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s2.getReport()).isEqualTo("ok");
+    }
+
+    // ---- GAP-7: RETRY that still fails after retry ----
+
+    @Test
+    void shouldContinueAfterRetryStillFails() {
+        // skill-a always fails, skill-b succeeds
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            if ("skill-b".equals(task.getSkillId())) {
+                task.setStatus(TaskStatus.SUCCEEDED);
+                task.setReport("s2-done");
+            } else {
+                task.setStatus(TaskStatus.FAILED);
+            }
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "skill-a", null, null, WorkflowStep.RETRY),
+                step("s2", "skill-b", null, null, null));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        // Workflow continues (not aborted) because RETRY falls through to SKIP
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        // s1 should be recorded with FAILED status
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1).isNotNull();
+        assertThat(s1.getStatus()).isEqualTo("FAILED");
+
+        // s2 should have executed normally
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s2.getReport()).isEqualTo("s2-done");
+    }
+
+    @Test
+    void shouldContinueAfterRetryStillThrowsException() {
+        // skill-a always throws, skill-b succeeds
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            if ("skill-a".equals(task.getSkillId())) {
+                throw new RuntimeException("boom");
+            }
+            task.setStatus(TaskStatus.SUCCEEDED);
+            task.setReport("s2-done");
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "skill-a", null, null, WorkflowStep.RETRY),
+                step("s2", "skill-b", null, null, null));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        // RETRY exhausted → falls through to SKIP-like behavior → workflow continues
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+
+        // s1 should be recorded with FAILED status (null stepResult → FAILED marker)
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1).isNotNull();
+        assertThat(s1.getStatus()).isEqualTo("FAILED");
+        assertThat(s1.getTaskId()).isNull();
+        assertThat(s1.getReport()).isNull();
+
+        // s2 should have executed normally
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s2.getReport()).isEqualTo("s2-done");
+    }
+
+    // ---- Bug: STOP + executor exception should still record the failed step ----
+
+    @Test
+    void shouldRecordFailedStepWhenExecutorThrowsAndOnFailureIsStop() {
+        // s1 succeeds, s2 throws, s3 should never be reached
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            if ("skill-a".equals(task.getSkillId())) {
+                task.setStatus(TaskStatus.SUCCEEDED);
+                task.setReport("s1-ok");
+            } else if ("skill-b".equals(task.getSkillId())) {
+                throw new RuntimeException("unexpected error");
+            }
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "skill-a", null, null, null),
+                step("s2", "skill-b", null, null, WorkflowStep.STOP),
+                step("s3", "skill-c", null, null, null));
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.FAILED);
+        assertThat(result.getFailedStep()).isEqualTo("s2");
+
+        // Per spec UC-06: stepResults should contain s1 and s2, but NOT s3
+        assertThat(result.getStepResults()).containsOnlyKeys("s1", "s2");
+        assertThat(result.getStepResults()).doesNotContainKey("s3");
+
+        // s1 should be SUCCEEDED
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1.getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(s1.getReport()).isEqualTo("s1-ok");
+
+        // s2 should be recorded as FAILED even though the executor threw
+        StepResult s2 = result.getStepResults().get("s2");
+        assertThat(s2).isNotNull();
+        assertThat(s2.getStatus()).isEqualTo("FAILED");
+    }
+
+    // ---- Empty workflow ----
+
+    @Test
+    void shouldReturnSuccessForEmptyWorkflow() {
+        WorkflowDefinition wf = new WorkflowDefinition("empty", "no steps",
+                java.util.Collections.<WorkflowStep>emptyList());
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        WorkflowResult result = engine.execute(wf, triggerInputs);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(WorkflowStatus.COMPLETED);
+        assertThat(result.getStepResults()).isEmpty();
+        assertThat(result.getDurationMs()).isGreaterThanOrEqualTo(0);
+        verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
+    }
+
+    // ---- Unrecognized condition defaults to true ----
+
+    @Test
+    void shouldDefaultToTrueForUnrecognizedCondition() {
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+
+        // Garbage that doesn't match the condition pattern
+        assertThat(engine.evaluateCondition("this is not a valid condition", stepResults)).isTrue();
+        assertThat(engine.evaluateCondition("${unknown.thing}", stepResults)).isTrue();
+        assertThat(engine.evaluateCondition("plain text", stepResults)).isTrue();
+    }
+
+    @Test
+    void shouldHandleNullTriggerInputsGracefully() {
+        mockExecuteSuccess("ok");
+
+        WorkflowDefinition wf = buildWorkflow(
+                step("s1", "skill-a", null, null, null));
+
+        // null triggerInputs should not cause NPE
+        WorkflowResult result = engine.execute(wf, null);
+
+        assertThat(result.isSuccess()).isTrue();
+        StepResult s1 = result.getStepResults().get("s1");
+        assertThat(s1.getStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    // ---- GAP-5: Placeholder edge cases ----
+
+    @Test
+    void shouldResolvePlaceholderInMiddleOfString() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("msg", "Checking ${trigger.env} env");
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        triggerInputs.put("env", "prod");
+
+        Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs,
+                new LinkedHashMap<String, StepResult>());
+
+        assertThat(resolved.get("msg")).isEqualTo("Checking prod env");
+    }
+
+    @Test
+    void shouldResolveMissingTriggerKeyToEmptyString() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("x", "${trigger.missing}");
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+
+        Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs,
+                new LinkedHashMap<String, StepResult>());
+
+        assertThat(resolved.get("x")).isEmpty();
+    }
+
+    @Test
+    void shouldResolveMissingStepReferenceToEmptyString() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("ref", "prev=${missing-step.result}");
+
+        Map<String, String> resolved = engine.resolveInputs(inputs,
+                new HashMap<String, String>(),
+                new LinkedHashMap<String, StepResult>());
+
+        assertThat(resolved.get("ref")).isEqualTo("prev=");
+    }
+
+    // ---- GAP-9: Multiple mixed placeholders in one value ----
+
+    @Test
+    void shouldResolveMultipleMixedPlaceholdersInOneValue() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("combined",
+                "${trigger.service}/${s1.status}/${s1.taskId}/${s1.result}");
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        triggerInputs.put("service", "order-svc");
+
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "task-42", "SUCCEEDED", "oom-found"));
+
+        Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs, stepResults);
+
+        assertThat(resolved.get("combined")).isEqualTo("order-svc/SUCCEEDED/task-42/oom-found");
+    }
+
+    @Test
+    void shouldResolvePlaceholdersWithSurroundingLiteralText() {
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("msg", "Service ${trigger.svc} in ${trigger.env} reported: ${s1.result}");
+
+        Map<String, String> triggerInputs = new HashMap<String, String>();
+        triggerInputs.put("svc", "api");
+        triggerInputs.put("env", "staging");
+
+        Map<String, StepResult> stepResults = new LinkedHashMap<String, StepResult>();
+        stepResults.put("s1", new StepResult("s1", "t1", "SUCCEEDED", "all-good"));
+
+        Map<String, String> resolved = engine.resolveInputs(inputs, triggerInputs, stepResults);
+
+        assertThat(resolved.get("msg"))
+                .isEqualTo("Service api in staging reported: all-good");
+    }
+
+    @Test
+    void shouldNotResolvePlainDollarBraceWithoutMatchingPattern() {
+        // A placeholder referencing an unknown prefix (not trigger. and no dot)
+        Map<String, String> inputs = new LinkedHashMap<String, String>();
+        inputs.put("literal", "cost is ${5.00} dollars");
+
+        Map<String, String> resolved = engine.resolveInputs(inputs,
+                new HashMap<String, String>(),
+                new LinkedHashMap<String, StepResult>());
+
+        // ${5.00} — lastIndexOf('.') finds the dot, stepName="5", field="00"
+        // stepResults has no "5" → replacement is null → empty string
+        // So the result is "cost is  dollars"
+        assertThat(resolved.get("literal")).isEqualTo("cost is  dollars");
+    }
+
+    @Test
+    void shouldReturnTypeSimpleForEngine() {
+        assertThat(engine.type()).isEqualTo("simple");
     }
 }
