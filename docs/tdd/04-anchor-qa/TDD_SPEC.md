@@ -79,6 +79,38 @@
 ```
 **AC:** AC1: Given threshold=0.5 / When classify 返回 confidence=0.3 / Then isMatch()==false 且走通用 LLM；AC2: Given LLM 返回 "not a json" / When classify / Then 返回 ClassifyResult.noMatch()。
 
+### US-6: GET /anchor/config 端点
+```gherkin
+作为 宿主页面前端
+我希望 GET /anchor/config 返回 enabled 和 disabledPaths
+以便 客户端知道哪些页面可显示锚点图标
+```
+**AC:** AC1: Given anchor.enabled=true / When GET /anchor/config / Then 返回 200 + {enabled:true, disabledPaths:[...]}；AC2: Given anchor.enabled=false / When GET /anchor/config / Then 返回 200 + {enabled:false}；AC3: Given 无认证 / When GET /anchor/config (公开端点) / Then 返回 200 (无需认证)。
+
+### US-7: SSE 流式回传
+```gherkin
+作为 宿主页面浏览者
+我希望 提问后通过 SSE 实时看到 LLM 输出 token
+以便 不需等待完整回答即可开始阅读
+```
+**AC:** AC1: Given POST /runs 返回 streamUrl / When 客户端连接 SSE / Then 接收 thought 事件流式推送；AC2: Given LLM 输出 "Hello World" / When SSE 传输 / Then onThought 按序推送 "Hello" "World" 两个 token。
+
+### US-8: 限流 429 防护
+```gherkin
+作为 系统运维
+我希望 POST /runs 对单用户有并发和小时配额限制
+以便 防止单用户耗尽 LLM 配额
+```
+**AC:** AC1: Given maxConcurrentPerUser=1 且用户 u1 已有一个运行中任务 / When POST /runs (同用户) / Then 返回 429 RATE_LIMITED；AC2: Given maxRunsPerHour=20 且 u1 已用 20 次 / When POST /runs / Then 返回 429。
+
+### US-9: AnchorContext 数据模型
+```gherkin
+作为 系统开发者
+我希望 AnchorContext 正确拼接 pageUrl/name/content/question 且处理截断
+以便 LLM 收到结构化的区块上下文
+```
+**AC:** AC1: Given anchor = AnchorContext("订单状态", "已发货\nSF123", "/order/1") / When augmentMessage("什么时候到？") / Then 返回文本含 pageUrl、name、content、question 四部分；AC2: Given anchor.truncated=true, originalLength=52180 / When augmentMessage("q") / Then 返回文本含 "内容已截断，原始长度 52180 字符"；AC3: Given AnchorContext.fromMap({name:"n", content:"c"}) / When 构造 / Then 非null 且 truncated=false；AC4: Given AnchorContext.fromMap({name:"", content:""}) / When 构造 / Then 返回 null。
+
 ---
 
 ## 3. 功能规格 (Functional Specs)

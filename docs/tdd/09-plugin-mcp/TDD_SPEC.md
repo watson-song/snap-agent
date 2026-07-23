@@ -75,9 +75,45 @@ AC4: override 校验失败
   Then 400 + error="INVALID_PLUGIN_OVERRIDE"
 ```
 
-### US-3: plugin-info.yml 兜底扫描 — 作为 plugin 作者，我希望无 @ToolPlugin 时从 META-INF/snap-agent/plugin-info.yml 读元数据，以便用最少侵入方式打包 plugin。
+### US-3: plugin-info.yml 兜底扫描
+```gherkin
+作为 plugin 作者
+我希望 无 @ToolPlugin 注解时从 META-INF/snap-agent/plugin-info.yml 读元数据
+以便 用最少侵入方式打包 plugin
+```
+**AC:**
+```gherkin
+AC1: Given JAR 含 @ToolPlugin 注解 (id="annotated", version="3.0.0")
+  When scanner.scan(classLoader)
+  Then 返回注解元数据 (pluginId="annotated", version="3.0.0")
+AC2: Given JAR 仅含 META-INF/snap-agent/plugin-info.yml (id="yaml-plugin", version="0.9.1")
+  When scanner.scan(classLoader)
+  Then 返回 YAML 元数据 (pluginId="yaml-plugin")
+AC3: Given JAR 无注解无 yml
+  When scanner.scan(classLoader)
+  Then 抛 IllegalStateException 含 "no plugin metadata found"
+```
 
-### US-4: MCP SSE 远端工具适配 — 作为运维，我希望配置 snap-agent.mcp.servers 后自动拉取远端工具，以便不修改代码即可接入外部 MCP server。
+### US-4: MCP SSE 远端工具适配
+```gherkin
+作为 运维
+我希望 配置 snap-agent.mcp.servers 后自动拉取远端工具
+  以便 不修改代码即可接入外部 MCP server
+```
+**AC:**
+```gherkin
+AC1: Given baseUrl="https://mcp-server/sse" authHeader="X-Token"
+  When client.connect()
+  Then 发送 initialize (protocolVersion="2024-11-05", clientInfo.name="snap-agent")
+  And 接收 endpoint event + tools/list 返回工具列表 size > 0
+AC2: Given serverName="data-map" toolName="search_table"
+  When new McpToolProvider(serverName, toolInfo, client).name()
+  Then 返回 "mcp__data-map__search_table"
+AC3: Given provider.execute(args, ctx)
+  When callTool 被调用
+  Then client.callTool(toolName, args, 30s) 被调用
+  And 从 response.content[] 提取 type="text" 拼接为 ToolResult
+```
 
 ### US-5: 反注册 + 资源清理
 ```gherkin
@@ -98,11 +134,62 @@ AC6: 非 system plugin 清理
   Then JAR 和父目录被删除，URLClassLoader.close() 被调用
 ```
 
+### US-6: PluginConfigExtractor 配置注入
+```gherkin
+作为 plugin 开发者
+我希望 snap-agent.tools.{pluginId}.* 配置自动注入 plugin
+  以便 plugin 无需硬编码连接参数
+```
+**AC:**
+```gherkin
+AC1: Given env 含 snap-agent.tools.remote-log.base-url 和 max-lines
+  When extractor.extract(env, "remote-log")
+  Then 返回 Map 含 base-url 和 max-lines
+AC2: Given env 无相关配置
+  When extractor.extract(env, "nonexistent")
+  Then 返回 emptyMap
+AC3: Given pluginId 为 null
+  When extractor.extract(env, null)
+  Then 返回 emptyMap 且不抛异常
+```
+
+### US-7: MCP SSE auth header 安全传递
+```gherkin
+作为 安全管理员
+我希望 MCP SSE 连接的 auth header 从环境变量读取
+  以便 不在配置文件中硬编码 token
+```
+**AC:**
+```gherkin
+AC1: Given 配置 authHeader="X-Bdp-Token" 且环境变量 BDP_TOKEN="secret123"
+  When client.connect()
+  Then HTTP 请求 Header 含 "X-Bdp-Token: secret123"
+AC2: Given 环境变量 BDP_TOKEN 未设置 (${BDP_TOKEN:})
+  When client.connect()
+  Then HTTP 请求 Header 值为空串，不抛异常
+```
+
+### US-8: Maven archetype 脚手架
+```gherkin
+作为 plugin 开发者
+我希望 用 Maven archetype 快速生成 plugin 项目骨架
+  以便 5 分钟内创建可打包的 plugin 项目
+```
+**AC:**
+```gherkin
+AC1: Given 执行 mvn archetype:generate -DarchetypeArtifactId=snap-agent-plugin
+  When 项目生成
+  Then 含 pom.xml、@ToolPlugin 注解类、plugin-info.yml 模板
+AC2: Given 生成的项目
+  When mvn package
+  Then 产出可上传的 JAR 且 PluginMetadataScanner 能识别
+```
+
 ---
 
 ## 2.5 用户故事地图
 
-开发(US-3)→部署(US-1)→调用(US-2 overrides)→集成(US-4 MCP)→运维(US-5 反注册)，每阶段依赖前一阶段。
+开发(US-3)→部署(US-1)→调用(US-2 overrides)→配置(US-6)→集成(US-4 MCP)→安全(US-7)→运维(US-5 反注册)→脚手架(US-8)，每阶段依赖前一阶段。
 
 ---
 

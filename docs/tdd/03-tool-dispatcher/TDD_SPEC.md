@@ -60,6 +60,7 @@
 我希望 调用 registry.enable/disable/setDefault 来运行时切换 plugin 状态
 以便 不重启宿主即可降级或切换，运维变更窗口从 30 分钟降至 < 1s
 ```
+**AC:** AC1: Given "log1"(default) 和 "log2"(同 toolType) 已注册 / When registry.disable("log1") / Then "log1".enabled==false 且 getDefault("log_read")=="log2"(自动提升); AC2: Given disabled "log1" / When registry.enable("log1") / Then "log1".enabled==true; AC3: Given registry 为空 / When registry.setDefault("log_read", "nonexistent") / Then 不抛异常.
 
 ### US-4: system plugin 保护
 ```gherkin
@@ -67,6 +68,7 @@
 我希望 system=true 的 plugin 不可被 unregister
 以免 内置工具被误删导致 skill 全量失败
 ```
+**AC:** AC1: Given "mysql"(system=true) 已注册 / When registry.unregister("mysql") / Then 抛 UnsupportedOperationException 含 "cannot unregister system plugin"; AC2: Given "log1"(default, system=false) 和 "log2"(非 default, 同 toolType) 已注册 / When registry.unregister("log1") / Then getDefault("log_read")=="log2" 且 "log2".isDefault()==true.
 
 ### US-5: @ToolPluginAnnotation 元数据声明
 ```gherkin
@@ -75,6 +77,38 @@
 以便 扫描时自动读取元数据，减少 80% YAML 清单维护成本
 ```
 **AC:** AC1: Given 类标注 @ToolPluginAnnotation(id="remote-log", toolType="log_read", version="2.0.0", isDefault=true) / When 读取注解 / Then 各字段匹配且 displayName/description 为空串；AC2: Given 最小注解 @ToolPluginAnnotation(id="m", toolType="metrics_query") / Then version="1.0.0", isDefault=false。
+
+### US-6: ToolResult 截断保护
+```gherkin
+作为 系统运维
+我希望 dispatch 超长 tool result 自动截断
+以防 LLM context 窗口被工具输出撑爆
+```
+**AC:** AC1: Given maxToolResultChars=50 且 provider.execute 返回 content 长度 80 / When dispatch / Then result.isTruncated()==true 且 content 长度 <= 50; AC2: Given provider.execute 返回 error result / When dispatch / Then error result 不被截断.
+
+### US-7: 审计回调隔离
+```gherkin
+作为 安全审计员
+我希望 dispatch 每次调用都触发 audit callback 且 callback 异常不破坏主流程
+以便 审计日志完整且审计故障不影响诊断
+```
+**AC:** AC1: Given ctx.auditCallback != null / When dispatch 成功 / Then callback.onToolExecuted 被调用 once，toolName 为 toolType（非 pluginId）; AC2: Given callback.onToolExecuted 抛 RuntimeException / When dispatch / Then 不向上抛出，正常返回 ToolResult.
+
+### US-8: activePlugins 去重计算
+```gherkin
+作为 Agent 执行循环
+我希望 activePlugins() 每个 toolType 只暴露一个 plugin（default 或 override）
+以便 LLM 看到的工具定义无重复
+```
+**AC:** AC1: Given "local-log"(default, enabled) 和 "remote-log"(enabled) 同 toolType / When activePlugins() / Then 返回 size==1 且 pluginId=="local-log"; AC2: Given overrides={"log_read":"remote-log"} / When activePlugins(overrides) / Then 返回 size==1 且 pluginId=="remote-log"; AC3: Given "mysql"(default, enabled=false) / When activePlugins() / Then 返回空集合.
+
+### US-9: 旧构造器向后兼容
+```gherkin
+作为 宿主开发者
+我希望 现有 @Component ToolProvider bean 零修改仍可工作
+以便 升级 SnapAgent 版本时无需改宿主代码
+```
+**AC:** AC1: Given 旧 @Component ToolProvider bean 已注册 / When ToolDispatcher 构造 / Then bean 被自动包装为 PluginDescriptor(system=true, isDefault=true) 且 dispatch 正常路由; AC2: Given 旧 bean 和新 @ToolPlugin 注解 plugin 同 toolType / When dispatch 无 override / Then 旧 bean (default) 被调用.
 
 ---
 

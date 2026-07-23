@@ -120,6 +120,24 @@ AC12: Git commit_hash 正则 — "^[0-9a-f]{7,40}$" 不匹配则拒绝
 AC13: Config 敏感字段脱敏 — password/secret/token/credential/key 字段值显示 "****"
 ```
 
+### US-6: PrincipalResolver SPI 用户解析
+```gherkin
+作为 安全管理员
+我希望 SecurityGateway 通过 PrincipalResolver 解析当前用户身份
+  以便 审计日志和限流计数基于真实用户而非匿名
+```
+**AC:**
+```gherkin
+AC14: Given PrincipalResolver 实现 currentUserName() 返回 "user-001"
+  When SecurityGateway.onApiAccess 执行
+  Then audit 记录 userId="user-001"
+  And RateLimiter.tryAcquire("user-001") 被调用
+AC15: Given PrincipalResolver 实现 currentUserName() 返回 null
+  When SecurityGateway.onApiAccess 执行
+  Then audit 记录 userId="(anonymous)"
+  And RateLimiter.tryAcquire 返回 false (拒绝匿名)
+```
+
 ---
 
 ## 3. 功能规格

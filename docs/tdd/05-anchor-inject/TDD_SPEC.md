@@ -107,6 +107,50 @@ AC7: Given 无 fallback
   Then 移除占位符，不抛异常
 ```
 
+### US-6: TTL=0 禁用缓存
+```gherkin
+作为 系统管理员
+我希望 cacheTtl=0 时不缓存注入结果
+以便 每次页面加载都获取最新 AI 内容
+```
+**AC:**
+```gherkin
+AC8: Given InjectionRequest(cacheTtl=0)
+  When 连续调用两次 inject
+  Then 两次 cached=false，LLM 调两次
+  And 缓存不写入任何条目
+```
+
+### US-7: skill 优先于 workflow
+```gherkin
+作为 技能开发者
+我希望 InjectionRequest 同时含 skillId 和 workflowId 时优先走 skill
+  以便 注入内容由 LLM 直接生成，保证一致性
+```
+**AC:**
+```gherkin
+AC9: Given InjectionRequest(skillId="s1", workflowId="w1")
+  When inject 执行
+  Then LLM 被调用，workflowEngine 不被调用
+  And 返回 InjectionResult 含 LLM 生成的 HTML
+```
+
+### US-8: 无效输入与 skill 不存在异常处理
+```gherkin
+作为 系统开发者
+我希望 inject 在无 skill 无 workflow 或 skill 不存在时抛明确异常
+  以便 调用方可正确处理错误而非收到空 HTML
+```
+**AC:**
+```gherkin
+AC10: Given InjectionRequest(skillId=null, workflowId=null)
+  When inject
+  Then 抛 IllegalArgumentException 含 "INVALID_INPUT"
+AC11: Given skillRegistry.get("x") 返回 null
+  When inject with skillId="x"
+  Then 抛 IllegalArgumentException 含 "SKILL_NOT_FOUND"
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -118,6 +162,9 @@ AC7: Given 无 fallback
 | 质量 | US-3 | 干净HTML | 100% | US-1 |
 | 定制 | US-4 | 精确控制 | 100% | US-1 |
 | 容错 | US-5 | 不崩坏 | 100% | US-1 |
+| 不缓存 | US-6 | 实时内容 | TTL=0→不缓存 100% | US-1 |
+| 优先级 | US-7 | 一致性 | skill 优先 100% | US-1 |
+| 异常 | US-8 | 明确错误 | 异常抛出 100% | US-1 |
 
 ---
 

@@ -175,6 +175,71 @@ AC2: 被拒回滚
   Then concurrentCount 归零且 hourlyCount 归零
 ```
 
+### US-7: SSE 实时流式推送
+```gherkin
+As a diagnostic user
+I want thought/tool_call/tool_result events to be pushed via streamQueue in real-time
+So that I can see diagnostic progress without waiting for the full task to complete
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: pollStreamEvent 实时消费
+  Given TurnCollector 收到 onThought("正在分析")
+  When streamQueue.pollStreamEvent() 被调用
+  Then 返回 TranscriptEvent(type=thought, text="正在分析")
+  And 事件 timestamp 单调递增
+
+AC2: drainStreamEvents 批量消费
+  Given streamQueue 有 3 个事件 (thought, tool_call, tool_result)
+  When drainStreamEvents() 被调用
+  Then 返回 3 个事件，顺序与入队一致
+  And streamQueue 变空
+```
+
+### US-8: TranscriptEvent 事件模型
+```gherkin
+As a system developer
+I want TranscriptEvent factory methods to produce correctly-typed immutable events
+So that transcript data is structured and safe for concurrent access
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: thought 工厂方法
+  Given TranscriptEvent.thought("分析中...")
+  When 获取 type 和 text
+  Then type == "thought" 且 text == "分析中..."
+  And data 为空 Map
+
+AC2: toolResult 工厂方法含 content preview 和 error
+  Given TranscriptEvent.toolResult("query", 1, "result content", null)
+  When 获取 data
+  Then data 含 toolName="query" 且 data 含 content 预览
+  And error key 不存在 (error 为 null 时省略)
+```
+
+### US-9: 多轮对话历史注入
+```gherkin
+As a diagnostic user
+I want the agent to include conversation history in follow-up turns
+So that multi-turn dialogue maintains context across user inputs
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: 历史 messages 在 user_inputs 之前
+  Given task.getHistory() 返回 [user("之前问题"), assistant("之前回答")]
+  When buildMessages 被调用
+  Then messages 包含 history entries 在 <user_inputs> message 之前
+  And history entries 顺序与 getHistory() 一致
+
+AC2: 空历史不影响正常流程
+  Given task.getHistory() 返回空列表
+  When buildMessages 被调用
+  Then messages 仅包含 system + user_inputs，无额外 history
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -186,6 +251,9 @@ AC2: 被拒回滚
 | 容错 | US-2/US-3 停止与续传 | 资源安全 | 无 OOM | US-1 |
 | 控制 | US-4 取消 | 用户可控 | 取消响应 < 1s | US-1 |
 | 安全 | US-5 Prompt 顺序 | 注入防护 | 0 次 prompt injection | US-1 |
+| 流式 | US-7 SSE 推送 | 实时感知 | token 延迟 < 500ms | US-1 |
+| 数据 | US-8 事件模型 | 结构化数据 | factory 100% | US-1 |
+| 上下文 | US-9 历史注入 | 多轮连贯 | 历史 100% 注入 | US-1 |
 
 ---
 
