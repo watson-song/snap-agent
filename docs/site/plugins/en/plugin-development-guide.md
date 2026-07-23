@@ -47,7 +47,7 @@ Backward compatibility: existing `@Component ToolProvider` beans require no modi
 mvn archetype:generate \
   -DarchetypeGroupId=cn.watsontech.snapagent \
   -DarchetypeArtifactId=snap-agent-plugin-archetype \
-  -DarchetypeVersion=0.4.0-SNAPSHOT \
+  -DarchetypeVersion=0.5.0 \
   -DgroupId=com.example \
   -DartifactId=my-remote-log-plugin \
   -Dversion=1.0.0-SNAPSHOT \

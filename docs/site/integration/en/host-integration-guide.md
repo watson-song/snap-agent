@@ -58,7 +58,7 @@ The Maven coordinates for both modules (groupId is `cn.watsontech.snapagent`, ma
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.5.0</version>
 </dependency>
 ```
 
@@ -96,7 +96,7 @@ A typical host `pom.xml` dependency snippet (mirrors the `snap-agent-demo` modul
     <dependency>
         <groupId>cn.watsontech.snapagent</groupId>
         <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-        <version>1.0-SNAPSHOT</version>
+        <version>0.5.0</version>
     </dependency>
     <!-- OkHttp (optional in Starter; host must declare explicitly) -->
     <dependency>
@@ -122,7 +122,7 @@ If the host wants to **completely remove** SnapAgent's built-in skills (e.g., to
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.5.0</version>
     <exclusions>
         <exclusion>
             <groupId>cn.watsontech.snapagent</groupId>
