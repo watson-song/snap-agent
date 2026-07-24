@@ -413,7 +413,18 @@ AC2: Given 生成的项目
 | `PluginAutoWrappingTest` | 单元 | 内置 ToolProvider 自动包装+路由 |
 | `PluginInfoYmlParserTest` | 单元 | YAML 解析 |
 
-### 8.2 测试缺口
+### 8.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点/组件 | 状态 |
+|--------|----------|-----------|------|
+| E2E-1 | MCP SSE 客户端全流程: McpSseClient.connect() → SSE endpoint → initialize JSON-RPC → tools/list → McpToolProvider.schema() | McpSseClient (静态方法) | ⚠未实现 (P1 GAP) |
+| E2E-2 | MCP callTool: McpSseClient.callTool(toolName, args) → JSON-RPC → content[].text 提取 | McpSseClient (静态方法) | ⚠未实现 (P1 GAP) |
+| E2E-3 | Plugin 上传→启用→执行: POST /tools/plugins/upload (JAR) → POST /tools/plugins/{id}/enable → POST /runs (使用 plugin) | POST /tools/plugins/upload, POST /tools/plugins/{id}/enable, POST /runs | ⚠未实现 |
+| E2E-4 | Plugin 删除 system 403: DELETE /tools/plugins/{system-id} → 403 | DELETE /tools/plugins/{id} | ⚠未实现 |
+| E2E-5 | MCP auth header: McpSseClient.connect() 携带 ${BDP_TOKEN} → MCP server 验证 | McpSseClient | ⚠未实现 (P2 GAP) |
+| E2E-6 | 认证/权限: POST /tools/plugins/upload 无认证 → 401 / 无 plugin:manage 权限 → 403 | POST /tools/plugins/upload | ⚠未实现 |
+
+### 8.3 测试缺口
 - P1: `McpSseClient.connect()` 全流程 mock（MockWebServer 验证 SSE endpoint + initialize + tools/list）
 - P1: `McpSseClient.callTool` JSON-RPC 透传（MockWebServer 验证 content[].text 提取）
 - P2: `McpToolProvider.schema()` JSON 合法性（解析断言 name/description/input_schema）
@@ -421,7 +432,7 @@ AC2: Given 生成的项目
 - P2: 上传 JAR 写盘 IOException、MCP SSE auth header 缺失分支
 - P3: `cleanupPlugin(null classLoader+jarPath)` 组合边界
 
-### 8.3 Mock 策略
+### 8.4 Mock 策略
 ```yaml
 单元: PluginRegistry/Scanner=Mockito, Environment=MockEnvironment, MultipartFile=MockMultipartFile, 真实 JAR=JarOutputStream
 集成: MockMvc + InMemoryPluginRegistry 真实实例

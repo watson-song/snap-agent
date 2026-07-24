@@ -240,6 +240,30 @@ AC2: 空历史不影响正常流程
   Then messages 仅包含 system + user_inputs，无额外 history
 ```
 
+### US-10: 知识注入 Agent 引擎 (KnowledgeInjector × SystemPromptExtender)
+```gherkin
+As an agent developer
+I want KnowledgeInjector to be invoked as part of the SystemPromptExtender chain during buildSystemPrompt
+So that business knowledge fragments are automatically injected into the agent's system prompt
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: 知识匹配时注入 system prompt
+  Given KnowledgeInjector 注册为 SystemPromptExtender
+  And 知识库含"数据库诊断"片段内容含"连接池"
+  And task inputs 提及"连接池"
+  When buildSystemPrompt 被调用
+  Then prompt 包含"业务知识参考"标记和片段内容
+  And 知识 section 位于只读前缀之后、skill body 之前或之后
+
+AC2: 无匹配知识时不污染 prompt
+  Given KnowledgeInjector.extend 返回空串 (无匹配片段)
+  When buildSystemPrompt 被调用
+  Then prompt 不包含"业务知识参考"
+  And prompt 结构与无 extender 时一致
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -254,6 +278,7 @@ AC2: 空历史不影响正常流程
 | 流式 | US-7 SSE 推送 | 实时感知 | token 延迟 < 500ms | US-1 |
 | 数据 | US-8 事件模型 | 结构化数据 | factory 100% | US-1 |
 | 上下文 | US-9 历史注入 | 多轮连贯 | 历史 100% 注入 | US-1 |
+| 知识 | US-10 知识注入引擎 | 回答精准 | 知识注入 100% | US-5 |
 
 ---
 
@@ -278,6 +303,34 @@ AC2: 空历史不影响正常流程
 | UC-13 | 输入值在 user message | P0 | US-5 AC2 | 单元 |
 | UC-14 | 并发与小时限流 | P0 | US-6 | 单元 |
 | UC-15 | 多 extender 追加 | P1 | US-5 | 单元 |
+| UC-16 | KnowledgeInjector 注入 system prompt | P0 | US-10 AC1 | 单元 |
+| UC-17 | 无匹配知识不污染 prompt | P1 | US-10 AC2 | 单元 |
+| UC-R1 | POST /runs 创建异步任务返回202 | P0 | US-1 | 集成 |
+| UC-R2 | POST /runs skill不存在返回404 | P0 | US-2 | 集成 |
+| UC-R3 | POST /runs skill不可用返回409 | P0 | US-2 | 集成 |
+| UC-R4 | POST /runs 缺少必填input返回400 | P0 | US-5 | 集成 |
+| UC-R5 | POST /runs model不允许返回400 | P0 | US-5 | 集成 |
+| UC-R6 | POST /runs 超限返回429 | P0 | US-6 | 集成 |
+| UC-R7 | POST /runs 权限不足返回403 | P0 | US-7 | 集成 |
+| UC-R8 | GET /runs 分页查询+状态过滤 | P1 | - | 集成 |
+| UC-R9 | GET /runs/{id} 返回任务状态 | P0 | US-1 | 集成 |
+| UC-R10 | GET /runs/{id} 不存在返回404 | P0 | US-2 | 集成 |
+| UC-R11 | GET /runs/{id}/transcript 返回事件列表 | P1 | - | 集成 |
+| UC-R12 | GET /runs/{id}/report 返回Markdown报告 | P1 | - | 集成 |
+| UC-R13 | GET /runs/{id}/stream SSE推送 | P0 | US-1 | 集成 |
+| UC-R14 | POST /runs/{id}/cancel 取消任务 | P0 | US-4 | 集成 |
+| UC-R15 | POST /runs/{id}/cancel 不存在返回404 | P0 | US-4 | 集成 |
+| UC-R16 | POST /runs/{id}/cancel 跨用户返回403 | P0 | US-7 | 集成 |
+| UC-R17 | GET /audit 当前用户审计记录 | P1 | - | 集成 |
+| UC-R18 | GET /auth-config 认证配置 | P1 | - | 集成 |
+| UC-R19 | GET /user-info 用户信息 | P1 | - | 集成 |
+| UC-R20 | GET /models 可用模型列表 | P1 | - | 集成 |
+
+| 测试文件 | 覆盖的UC |
+|----------|---------|
+| `SnapAgentControllerTest` | UC-R1~R8, R9~R14, R17, R19, R20 |
+| `SnapAgentControllerSecurityTest` | UC-R7(401/403), R17(审计), R19(user-info) |
+| `InternalTaskControllerTest` | probe/stream 内部接口 |
 
 ### 3.2 详细用例 (Gherkin格式)
 
@@ -431,6 +484,46 @@ Feature: Rate limiter concurrency and hourly limits
   Scenario: null userId returns false
     When tryAcquire(null)
     Then return false
+```
+
+#### UC-16: KnowledgeInjector 注入 system prompt
+```gherkin
+@priority:high @type:unit
+Feature: KnowledgeInjector as SystemPromptExtender integrates with buildSystemPrompt
+
+  Scenario: 知识匹配时注入 system prompt
+    Given KnowledgeInjector 注册为 SystemPromptExtender
+    And 知识库含片段(title="数据库诊断", content="连接池配置 max=20")
+    And AgentTask inputs 提及"连接池"
+    When AgentExecutor.buildSystemPrompt(skill, task)
+    Then system prompt 包含"业务知识参考"
+    And prompt 包含"连接池配置 max=20"
+    And 知识 section 位于只读前缀 "你是只读诊断 agent" 之后
+
+  Scenario: 多 SystemPromptExtender 拼接时 KnowledgeInjector 仍注入
+    Given extender1 返回 "## 项目结构"
+    And KnowledgeInjector 返回 "## 业务知识参考\n连接池配置"
+    When buildSystemPrompt 被调用
+    Then prompt 包含 "项目结构" 和 "业务知识参考"
+    And 两者均出现在只读前缀之后
+```
+
+#### UC-17: 无匹配知识不污染 prompt
+```gherkin
+@priority:medium @type:unit
+Feature: Empty knowledge extension does not pollute system prompt
+
+  Scenario: 无匹配知识时 extend 返回空串
+    Given KnowledgeInjector.extend 返回 "" (无匹配片段)
+    When buildSystemPrompt 被调用
+    Then prompt 不包含"业务知识参考"
+    And prompt 结构与无 KnowledgeInjector 时一致
+
+  Scenario: knowledge.enabled=false 时 KnowledgeInjector 不注册
+    Given knowledge.enabled=false
+    When Spring 容器初始化
+    Then SystemPromptExtender 列表不含 KnowledgeInjector
+    And buildSystemPrompt 无知识 section
 ```
 
 ---
@@ -624,24 +717,41 @@ Scenario: Tool exception during dispatch
 
 | 测试类 | 文件路径 | 覆盖内容 |
 |--------|----------|----------|
-| AgentExecutorTest | `snap-agent-core/src/test/java/.../agent/AgentExecutorTest.java` | 单轮/多轮成功、max-turns、max_tokens 续传、LLM 异常/报错 FAILED、工具异常不中断、取消 (前/轮间/异常后)、system prompt 顺序、placeholder 保留、input message、tool defs、audit、extender (单/多/空/null)、model 传递 |
-| AgentTaskTest | `snap-agent-core/src/test/java/.../agent/AgentTaskTest.java` | PENDING 初始、状态转换、transcript 顺序/限制、audit 限制、report 设置、inputs 持有、defensive copy、线程安全 (10 线程 x 100 次) |
+| AgentExecutorTest | `snap-agent-core/src/test/java/.../agent/AgentExecutorTest.java` | 单轮/多轮成功、max-turns、max_tokens 续传、LLM 异常/报错 FAILED、工具异常不中断、取消 (前/轮间/异常后)、system prompt 顺序、placeholder 保留、input message、tool defs、audit、extender (单/多/空/null)、model 传递、sanitizeInput、serializeResult、history注入、pluginOverrides |
+| AgentTaskTest | `snap-agent-core/src/test/java/.../agent/AgentTaskTest.java` | PENDING 初始、状态转换、transcript 顺序/限制、audit 限制、report 设置、inputs 持有、defensive copy、线程安全 (10 线程 x 100 次)、streamQueue (queue/drain/poll/timeout/allEventTypes/concurrent)、ID唯一性 (sa_format/20线程x500) |
 | RateLimiterTest | `snap-agent-core/src/test/java/.../agent/RateLimiterTest.java` | 并发限制、小时限制、release/releaseRejected、null userId、unknown user、不超零、多用户并发、配置读取、不泄漏 hourly quota |
+| TaskStoreTest | `snap-agent-core/src/test/java/.../agent/TaskStoreTest.java` | save/get/null/missing、update、remove、allTasks、countByUserAndStatus、clearAll、query分页、filterBySkillId、filterByStatus、sortedByCreatedAtDesc、totalCount、countWithFilters |
+| TranscriptEventTest | `snap-agent-core/src/test/java/.../agent/TranscriptEventTest.java` | thought/toolCall/toolResult/done/error factory方法、timestamp持有、contentPreview/error null处理、toString |
+| ReportGeneratorTest | `snap-agent-core/src/test/java/.../agent/ReportGeneratorTest.java` | 报告生成 |
 
-### 8.5 测试缺口 (Bug 候选)
+### 8.5 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | 完整诊断流程: POST /runs (skillId+inputs) → 202 taskId → GET /runs/{id}/stream (SSE) → thought/tool_call/tool_result/done → GET /runs/{id}/transcript → GET /runs/{id}/report | POST /runs, GET /runs/{id}/stream, GET /runs/{id}/transcript, GET /runs/{id}/report | ⚠未实现 |
+| E2E-2 | 任务取消流程: POST /runs → 202 → POST /runs/{id}/cancel → GET /runs/{id}/stream 确认 CANCELED 事件 | POST /runs/{id}/cancel | ⚠未实现 |
+| E2E-3 | 限流错误路径: POST /runs 超过并发上限 → 429 / 超过小时配额 → 429 | POST /runs | ⚠未实现 (GAP-11) |
+| E2E-4 | 认证/权限错误: POST /runs 无认证 → 401 / 无权限 → 403 | POST /runs | ⚠未实现 (GAP-12) |
+| E2E-5 | 不存在的任务: GET /runs/{nonexistent}/stream → 404, GET /runs/{nonexistent}/transcript → 404 | GET /runs/{id}/stream, GET /runs/{id}/transcript | ⚠未实现 (GAP-13) |
+| E2E-6 | max_tokens 续传: POST /runs → SSE partial → max_tokens → POST /runs (续传) → SSE done | POST /runs | ⚠未实现 |
+
+### 8.6 测试缺口 (Bug 候选)
 
 | 缺口ID | 描述 | 风险 | 优先级 |
 |--------|------|------|--------|
-| GAP-1 | TaskStore 无独立测试类，query/count/countByUserAndStatus/countByUser 仅被间接覆盖 | 分页/过滤逻辑可能有 bug | P1 |
-| GAP-2 | TranscriptEvent 无独立测试，factory 方法 (thought/toolCall/toolResult/done/error) 未直接验证 data map 内容 | 事件 data 结构可能错 | P1 |
-| GAP-3 | AgentTask.streamQueue (pollStreamEvent/drainStreamEvents) 完全未测试 | SSE 实时推送可能丢事件 | P0 |
-| GAP-4 | AgentExecutor.sanitizeInput 未直接测试，超长输入 (>1000 chars) 和控制字符剥离无断言 | prompt injection 防护可能失效 | P0 |
-| GAP-5 | AgentExecutor.serializeResult/escape 未直接测试，JSON 序列化正确性无断言 | tool_result 回填 LLM 可能 JSON 格式错 | P1 |
-| GAP-6 | 多轮对话历史 (task.getHistory()) 注入 messages 的行为未测试 | follow-up 问答可能丢失上下文 | P1 |
-| GAP-7 | RateLimiter 小时窗口翻转 (rolloverHourIfNeeded) 无时间模拟测试，CAS 竞态无并发测试 | 跨小时时计数可能不准 | P1 |
-| GAP-8 | task-timeout-minutes (总时长限制) 设计文档提及但 AgentExecutor 未实现 | 长时间任务无法中断 | P2 |
-| GAP-9 | AgentExecutor.buildToolDefs 的 pluginOverrides 选择逻辑未测试 | 插件覆盖可能选错 | P1 |
-| GAP-10 | AgentTask.create 的 ID 格式 (sa_{timestamp}_{random12}) 唯一性无并发测试 | 高并发下可能 ID 碰撞 | P2 |
+| GAP-1 | ✅已关闭: TaskStore 已由 `TaskStoreTest` 覆盖 (15个测试: save/get/null/missing/update/remove/allTasks/countByUserAndStatus/clearAll/query分页/filterBySkillId/filterByStatus/sorted/totalCount/countWithFilters) | — | P1 |
+| GAP-2 | ✅已关闭: TranscriptEvent 已由 `TranscriptEventTest` 覆盖 (9个测试: thought/toolCall/toolResult/done/error factory+timestamp+null处理+toString) | — | P1 |
+| GAP-3 | ✅已关闭: AgentTask.streamQueue (pollStreamEvent/drainStreamEvents) 已由 `AgentTaskTest` 覆盖 (6个测试: queue/drain/poll/timeout/empty/allEventTypes/threadSafe) | — | P0 |
+| GAP-4 | ✅已关闭: AgentExecutor.sanitizeInput 已由 `AgentExecutorTest` 覆盖 (5个测试: truncate>1000/stripControl/normalUnicode/null/emptyMap) | — | P0 |
+| GAP-5 | ✅已关闭: AgentExecutor.serializeResult 已由 `AgentExecutorTest` 覆盖 (2个测试: toolResultJson/errorResultJson) | — | P1 |
+| GAP-6 | ✅已关闭: 多轮对话历史注入已由 `AgentExecutorTest` 覆盖 (3个测试: injectHistory/nullHistory/emptyHistory) | — | P1 |
+| GAP-7 | ✅已关闭: RateLimiter 小时窗口翻转已由 `RateLimiterTest` 覆盖 (4个测试: shouldResetHourlyCountWhenHourWindowRollsOver/shouldClearAllUsersHourlyCountsOnRollover/shouldNotResetHourlyCountWithinSameHour/shouldRespectHourlyLimitAfterRolloverResetsCount) | — | P1 |
+| GAP-8 | ⚠功能缺失: task-timeout-minutes 设计文档提及但 AgentExecutor 未实现，需先实现再测试 | P2 | 功能未实现 |
+| GAP-9 | ✅已关闭: AgentExecutor.buildToolDefs 的 pluginOverrides 选择逻辑已由 `AgentExecutorTest` 覆盖 (shouldSelectOverridePluginWhenPluginOverridesSet) | — | P1 |
+| GAP-10 | ✅已关闭: AgentTask.create ID 唯一性已由 `AgentTaskTest` 覆盖 (2个测试: sa_format/20线程x500并发唯一) | — | P2 |
+| GAP-11 | ⚠E2E缺失: POST /runs 429 限流路径无 E2E 覆盖 (并发上限+小时配额) — 见 E2E-3 | P1 | 需 E2E 集成测试 |
+| GAP-12 | ⚠E2E缺失: POST /runs 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-4 | P1 | 需 E2E 集成测试 |
+| GAP-13 | ⚠E2E缺失: GET /runs/{nonexistent}/stream 404 路径无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 
 ---
 

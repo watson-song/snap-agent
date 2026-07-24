@@ -257,6 +257,16 @@ AC2: 空工具列表 skill 保持 AVAILABLE
 | UC-16 | refresh 返回计数 | P0 | US-2 | 单元 |
 | UC-17 | 并发安全读写 | P0 | US-2 | 单元 |
 | UC-18 | 重复 custom name last-wins | P1 | US-2 | 单元 |
+| UC-R1 | GET /skills 列出技能 | P0 | US-2 | 集成 |
+| UC-R2 | GET /skills 包含source字段 | P1 | US-2 | 集成 |
+| UC-R3 | GET /skills 包含shortcuts | P1 | US-1 | 集成 |
+| UC-R4 | POST /skills/refresh 刷新技能 | P0 | US-2 | 集成 |
+| UC-R5 | DELETE /skills/{name} 删除自定义技能 | P0 | US-2 AC3 | 集成 |
+| UC-R6 | DELETE /skills/{name} builtin返回403 | P0 | US-2 | 集成 |
+| UC-R7 | DELETE /skills/{name} 不存在返回404 | P0 | US-2 | 集成 |
+| UC-R8 | POST /skills/upload 上传技能文件 | P1 | US-2 | 集成 |
+| UC-R9 | POST /skills/upload-folder 上传技能目录 | P1 | US-2 | 集成 |
+| UC-R10 | GET /skills 暴露requiredPermission | P1 | US-3 | 集成 |
 
 ### 3.2 详细用例 (Gherkin格式)
 
@@ -646,20 +656,36 @@ Scenario: Refresh fails
 | SkillRegistryTest | `snap-agent-core/src/test/java/.../skill/SkillRegistryTest.java` | 三文件加载、AVAILABLE/UNAVAILABLE、INVALID 跳过、不存在目录、无 .md 文件、refresh 新增/删除/修改 body、null skill 查找、refresh 计数、null 目录、null dispatcher、并发安全 (4 reader + 1 refresher)、builtin-only、builtin+custom 合并、custom 覆盖 builtin、删除恢复 builtin、isBuiltin、custom path、目录 skill (SKILL.md)、辅助文件跳过、组织性目录递归、嵌套目录、重复 name last-wins、source=custom、required-permission 保留+降级+解析 |
 | SkillMetaTest | `snap-agent-core/src/test/java/.../skill/SkillMetaTest.java` | 全字段持有、null tools/inputs -> 空列表、toString、所有 availability 值、requiredPermission 默认空+持有+with* 保留+null 处理 |
 
-### 8.5 测试缺口 (Bug 候选)
+### 8.5 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | Skill 上传流程: POST /skills/upload (.md) → 200 → GET /skills 验证新 skill → POST /skills/refresh → GET /skills 验证刷新 | POST /skills/upload, GET /skills, POST /skills/refresh | ⚠未实现 (GAP-11) |
+| E2E-2 | Skill 上传 ZIP: POST /skills/upload-folder (.zip) → 200 → GET /skills 验证目录 skill | POST /skills/upload-folder | ⚠未实现 (GAP-12) |
+| E2E-3 | Skill 删除流程: DELETE /skills/{custom-name} → 200 → GET /skills 验证 builtin 恢复 | DELETE /skills/{name} | ⚠未实现 (GAP-13) |
+| E2E-4 | Skill 删除 builtin: DELETE /skills/{builtin-name} → 403 | DELETE /skills/{name} | ⚠未实现 (GAP-14) |
+| E2E-5 | Skill 刷新流程: POST /skills/refresh → 200 → GET /skills 验证计数 | POST /skills/refresh, GET /skills | ⚠未实现 (GAP-15) |
+| E2E-6 | 认证错误: GET /skills 无认证 → 401 / 无权限 → 403 | GET /skills | ⚠未实现 (GAP-16) |
+
+### 8.6 测试缺口 (Bug 候选)
 
 | 缺口ID | 描述 | 风险 | 优先级 |
 |--------|------|------|--------|
-| GAP-1 | ClasspathSkillScanner 无独立测试类 (starter 模块)，两遍扫描逻辑、classpath: -> classpath*: 规范化、isFromSnapAgentJar 判断、parseGroupedResources 目录分组 均未测试 | host skill 可能误覆盖 JAR 内置 skill | P0 |
-| GAP-2 | SkillHotReloader 无独立测试类，start/stop/watchLoop、.md 过滤、目录不存在 no-op、daemon 线程 均未测试 | 热重载可能不触发或泄漏线程 | P0 |
-| GAP-3 | SkillLoader.ensureYamlValueQuoted (auto-quoting) 未直接测试，含冒号的值可能解析失败 | 含 "URI: http://..." 的 description 可能解析错误 | P1 |
-| GAP-4 | InputSpec 无独立测试类，type=options 校验 (enum 必须有 options) 未测试 | enum 类型无 options 时 UI 渲染可能出错 | P1 |
-| GAP-5 | SkillRegistry.scan 失败异常处理 (RuntimeException catch) 仅在构造函数有 log.warn，refresh 失败返回旧 cache counts 但 cache 不替换，该路径无测试 | refresh 异常时可能返回错误计数 | P1 |
-| GAP-6 | SkillRegistry validateContract 对空 tools 列表 (skill 无 tools 声明) 的行为未测试 | 纯 LLM skill 可能被误标 UNAVAILABLE | P1 |
-| GAP-7 | SkillHotReloader 在 macOS 上的 SensitivityWatchEventModifier.HIGH 行为无集成测试验证 | 热重载延迟可能 > 2s | P2 |
-| GAP-8 | ClasspathSkillScanner.parseResource 读取大文件 (readAll) 无内存限制测试 | 大 skill 文件可能 OOM | P2 |
-| GAP-9 | SkillLoader.parse 对 frontmatter 中多余未知字段的处理 (忽略 vs 报错) 未测试 | 未知字段可能导致解析异常 | P2 |
-| GAP-10 | SkillRegistry 对 uploadDir 可读但不可写的情况未测试 | refresh 时写入失败但缓存未更新 | P2 |
+| GAP-1 | ✅已关闭: ClasspathSkillScanner 已由 `ClasspathSkillScannerTest` 覆盖 (8个测试: standalone/directory/auxMdSkip/nullDir/builtinSkills) | — | P0 |
+| GAP-2 | ✅已关闭: SkillHotReloader 已由 `SkillHotReloaderTest` 覆盖 (2个测试: fileCreated→refresh/nonExistentDir→graceful) | — | P0 |
+| GAP-3 | ✅已关闭: SkillLoader.ensureYamlValueQuoted 已由 `SkillLoaderTest` 覆盖 (4个测试: shouldAutoQuoteValueContainingColonSpace/shouldAutoQuoteValueEndingWithColon/shouldNotReQuoteAlreadyQuotedValue/shouldNotQuoteListItemLines) | — | P1 |
+| GAP-4 | ✅已关闭: InputSpec enum options 校验已由 `SkillLoaderTest` 覆盖 (shouldMarkInvalidWhenEnumInputHasNoOptions/shouldParseEnumInputWithOptionsSuccessfully) | — | P1 |
+| GAP-5 | ✅已关闭: SkillRegistry.scan 失败异常处理已由 `SkillRegistryTest` 覆盖 (shouldReturnOldCacheCountsAndNotReplaceCacheWhenRefreshScanThrows/shouldKeepOldCacheAvailableWhenRefreshScanThrowsAfterSuccessfulInit) | — | P1 |
+| GAP-6 | ✅已关闭: SkillRegistry 空 tools 列表处理已由 `SkillRegistryTest` 覆盖 (shouldKeepAvailableWhenSkillHasEmptyTools/shouldKeepAvailableWhenBuiltinSkillHasNoTools/shouldKeepAvailableWhenSkillOmitsToolsField) | — | P1 |
+| GAP-7 | ⚠环境约束: SkillHotReloader macOS WatchService 行为需真实文件系统集成测试，单元测试无法模拟 OS 级事件 | P2 | 需 macOS 集成环境 |
+| GAP-8 | ⚠边缘场景: ClasspathSkillScanner 大文件 OOM 场景需超大 fixture 文件，测试成本高 | P2 | 边缘场景 |
+| GAP-9 | ✅已关闭: SkillLoader 未知字段处理已由 `SkillLoaderTest` 覆盖 (shouldIgnoreUnknownFrontmatterFields/shouldIgnoreUnknownNestedMappingFields) | — | P2 |
+| GAP-10 | ⚠边缘场景: SkillRegistry uploadDir 只读场景需文件系统权限模拟，Java 测试难以精确控制 | P2 | 需文件系统 mock |
+| GAP-11 | ⚠E2E缺失: POST /skills/upload REST 端点无 E2E 覆盖 (仅单元测试 SkillLoader) — 见 E2E-1 | P1 | 需 E2E 集成测试 |
+| GAP-12 | ⚠E2E缺失: POST /skills/upload-folder (ZIP) REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| GAP-13 | ⚠E2E缺失: DELETE /skills/{name} REST 端点无 E2E 覆盖 (custom 删除+builtin 403) — 见 E2E-3/4 | P1 | 需 E2E 集成测试 |
+| GAP-14 | ⚠E2E缺失: POST /skills/refresh REST 端点无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
+| GAP-15 | ⚠E2E缺失: GET /skills 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-6 | P2 | 需 E2E 集成测试 |
 
 ---
 

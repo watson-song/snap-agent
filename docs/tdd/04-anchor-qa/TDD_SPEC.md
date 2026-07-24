@@ -115,6 +115,33 @@
 
 ## 3. 功能规格 (Functional Specs)
 
+### 3.1 用例清单
+
+| 用例ID | 名称 | 优先级 | AC | 类型 |
+|--------|------|--------|----|------|
+| UC-01 | preprocess 正常流程 | P0 | US-1 | 集成 |
+| UC-02 | preprocess 入参校验 | P0 | US-1 | 集成 |
+| UC-03 | POST /runs auto+anchor 创建task | P0 | US-2 | 集成 |
+| UC-04 | off 模式直连 AnchorOrchestrator | P1 | US-2 | 集成 |
+| UC-05 | AnchorContext.augmentMessage | P0 | US-6 | 单元 |
+| UC-06 | Summarizer 短内容跳过+降级 | P1 | US-3 | 单元 |
+| UC-07 | Classifier 正常+降级 | P1 | US-4 | 单元 |
+| UC-08 | SummaryCache 缓存 | P1 | US-3 | 单元 |
+| UC-09 | preprocess 缓存命中复用 | P1 | US-3 | 集成 |
+| UC-R1 | GET /anchor/config 锚点配置 | P0 | - | 集成 |
+| UC-R2 | GET /anchor/config disabled时返回false | P0 | - | 集成 |
+| UC-R3 | GET /anchor/config 不需要认证 | P1 | - | 集成 |
+| UC-R4 | POST /anchor/preprocess 200返回 | P0 | US-1 | 集成 |
+| UC-R5 | POST /anchor/preprocess 400缺anchor | P0 | US-1 | 集成 |
+| UC-R6 | POST /anchor/preprocess 400缺anchorName | P0 | US-1 | 集成 |
+| UC-R7 | POST /anchor/preprocess 401未登录 | P0 | US-7 | 集成 |
+| UC-R8 | POST /runs anchor模式禁用返回403 | P1 | US-2 | 集成 |
+
+| 测试文件 | 覆盖的UC |
+|----------|---------|
+| `SnapAgentControllerAnchorTest` | UC-R1~R8, UC-01~02,04 |
+| `SnapAgentControllerTest` | UC-03 (runs with anchor context) |
+
 ### 3.2 详细用例 (Gherkin)
 
 #### UC-01: POST /anchor/preprocess 正常流程
@@ -399,7 +426,18 @@ GET /snap-agent/anchor/config (新增, 公开): Response: 200 {enabled:boolean, 
 
 **结论**: E2E 层 controller 端点 + 预摘要缓存复用已覆盖。单元测试层（AnchorContext/Summarizer/Classifier/SummaryCache/Orchestrator）几乎空白，降级路径与边界值主要靠 E2E 间接覆盖，粒度不足。
 
-### 12.2 测试缺口
+### 12.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | 完整 Anchor QA 流程: GET /anchor/config → POST /anchor/preprocess (返回 preprocessId) → POST /runs (auto+anchor, preprocessId 复用) → SSE stream → done | GET /anchor/config, POST /anchor/preprocess, POST /runs, GET /runs/{id}/stream | ✅已覆盖 (AnchorE2ETest IT-401~410) |
+| E2E-2 | "off" 模式: POST /runs (skillId="off", 无工具) → SSE stream → 纯上下文问答 | POST /runs | ⚠未实现 (G-417) |
+| E2E-3 | 400 错误路径: POST /runs (auto, 缺 inputs.message) → 400 | POST /runs | ⚠未实现 (G-418) |
+| E2E-4 | 429 限流: POST /runs 超并发/配额 → 429 | POST /runs | ⚠未实现 (G-419) |
+| E2E-5 | SSE 断言: POST /runs → SSE stream → 验证 thought/tool_call/done 事件序列和内容 | GET /runs/{id}/stream | ⚠未实现 (G-420) |
+| E2E-6 | preprocess 缓存命中: POST /anchor/preprocess (相同 content) → 二次调用返回 cached preprocessId | POST /anchor/preprocess | ✅已覆盖 (IT-410) |
+
+### 12.3 测试缺口
 
 | 缺口ID | 描述 | 优先级 | 建议测试 |
 |--------|------|--------|----------|
@@ -416,10 +454,10 @@ GET /snap-agent/anchor/config (新增, 公开): Response: 200 {enabled:boolean, 
 | G-419 | `POST /runs` rate limit 429 无覆盖 | P2 | IT-413 |
 | G-420 | SSE stream for anchor 无端到端断言 | P1 | IT-414 |
 
-### 12.3 参考文档
+### 12.4 参考文档
 - `docs/superpowers/specs/2026-07-20-host-page-anchor-qa-design.md` | `docs/tdd/TEMPLATE.md`
 
-### 12.4 术语表
+### 12.5 术语表
 
 | 术语 | 定义 |
 |------|------|

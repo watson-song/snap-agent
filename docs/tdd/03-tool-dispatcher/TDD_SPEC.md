@@ -114,6 +114,27 @@
 
 ## 3. 功能规格 (Functional Specs)
 
+### 3.1 用例清单
+
+| 用例ID | 名称 | 优先级 | AC | 类型 |
+|--------|------|--------|----|------|
+| UC-01 | dispatch 默认路由与 ctx=null | P0 | US-1 | 单元 |
+| UC-02 | dispatch pluginOverrides 覆盖 | P0 | US-2 | 单元 |
+| UC-03 | registry register 边界 | P0 | US-3 | 单元 |
+| UC-04 | registry unregister system保护与自动提升 | P0 | US-4 | 单元 |
+| UC-05 | registry setDefault 清旧 | P0 | US-5 | 单元 |
+| UC-06 | activePlugins 去重与override | P0 | US-8 | 单元 |
+| UC-07 | truncate 超长结果 | P1 | US-7 | 单元 |
+| UC-08 | audit callback 触发 | P1 | US-6 | 单元 |
+| UC-R1 | GET /tools 工具列表 | P1 | - | 集成 |
+| UC-R2 | GET /tools/plugins 插件列表 | P1 | US-8 | 集成 |
+| UC-R3 | GET /tools/plugins/{id} 插件详情 | P1 | - | 集成 |
+| UC-R4 | POST /tools/plugins/upload 上传插件 | P0 | US-3 | 集成 |
+| UC-R5 | DELETE /tools/plugins/{id} 删除插件 | P0 | US-4 | 集成 |
+| UC-R6 | POST /tools/plugins/{id}/enable 启用 | P1 | - | 集成 |
+| UC-R7 | POST /tools/plugins/{id}/disable 禁用 | P1 | - | 集成 |
+| UC-R8 | PUT /tools/plugins/{id}/default 设默认 | P1 | US-5 | 集成 |
+
 ### 3.2 详细用例 (Gherkin)
 
 #### UC-01: dispatch 默认路由与 ctx=null
@@ -362,7 +383,17 @@ void register(PluginDescriptor); void unregister(String); void setDefault(String
 
 **结论**: 核心路由逻辑、registry 生命周期、注解读取已较完整覆盖（38 个测试）。
 
-### 12.2 测试缺口
+### 12.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | Tool 列表查询: GET /tools → 200 列表; GET /tools/plugins → 200 plugin 列表 | GET /tools, GET /tools/plugins | ⚠未实现 (G-311) |
+| E2E-2 | Plugin 上传流程: POST /tools/plugins/upload (JAR) → 200 → GET /tools/plugins 验证新 plugin | POST /tools/plugins/upload | ⚠未实现 (G-312) |
+| E2E-3 | Plugin 删除流程: DELETE /tools/plugins/{custom-id} → 200; DELETE /tools/plugins/{system-id} → 403 | DELETE /tools/plugins/{id} | ⚠未实现 (G-313) |
+| E2E-4 | Plugin 启停流程: POST /tools/plugins/{id}/enable → 200; POST /tools/plugins/{id}/disable → 200; POST /tools/plugins/{id}/default → 200 | POST /tools/plugins/{id}/{action} | ⚠未实现 (G-314) |
+| E2E-5 | 认证/权限: GET /tools 无认证 → 401 / 无权限 → 403 | GET /tools | ⚠未实现 (G-315) |
+
+### 12.3 测试缺口
 
 | 缺口ID | 描述 | 优先级 | 建议测试 |
 |--------|------|--------|----------|
@@ -376,11 +407,16 @@ void register(PluginDescriptor); void unregister(String); void setDefault(String
 | G-308 | `PluginDescriptor` 构造 null pluginId/toolType 抛异常未覆盖 | P2 | UT-312a |
 | G-309 | `buildToolDefinitions` @Deprecated 兼容性未覆盖 | P3 | UT-319a |
 | G-310 | `availableToolTypes` 与 `availableToolNames` 等价性未覆盖 | P3 | UT-319b |
+| G-311 | ⚠E2E缺失: GET /tools, GET /tools/plugins REST 端点无 E2E 覆盖 — 见 E2E-1 | P1 | 需 E2E 集成测试 |
+| G-312 | ⚠E2E缺失: POST /tools/plugins/upload (JAR) REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| G-313 | ⚠E2E缺失: DELETE /tools/plugins/{id} REST 端点无 E2E 覆盖 (custom vs system 403) — 见 E2E-3 | P1 | 需 E2E 集成测试 |
+| G-314 | ⚠E2E缺失: POST /tools/plugins/{id}/enable\|disable\|default REST 端点无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
+| G-315 | ⚠E2E缺失: GET /tools 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 
-### 12.3 参考文档
+### 12.4 参考文档
 - `docs/embeed-skills-agent/04-tools-and-mcp.md` | `docs/superpowers/specs/2026-07-21-plugin-architecture-refactor-design.md` | `docs/tdd/TEMPLATE.md`
 
-### 12.4 术语表
+### 12.5 术语表
 
 | 术语 | 定义 |
 |------|------|

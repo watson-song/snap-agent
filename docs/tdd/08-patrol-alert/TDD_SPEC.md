@@ -135,6 +135,25 @@ AC3: Given issue.status 为 RESOLVED
   Then 不创建工单 (仅 OPEN 状态可创建)
 ```
 
+### US-9: 问题沉淀知识注入 Agent 引擎
+```gherkin
+作为 运维工程师
+我希望 问题关闭后沉淀的知识通过 KnowledgeInjector 自动注入 Agent 引擎的 system prompt
+  以便 下次同类问题诊断时 Agent 可参考历史经验
+```
+**AC:**
+```gherkin
+AC1: Given issue 关闭时 KnowledgeSedimentationExtractor 提取 KnowledgeFragment
+  When KnowledgeBase.reload()
+  Then 下次 Agent 执行时 KnowledgeInjector.extend 返回含经验沉淀的片段
+  And system prompt 含"业务知识参考"和"经验沉淀"标记
+
+AC2: Given KnowledgeBase 为 null
+  When issue.close()
+  Then 不报错，status=CLOSED
+  And KnowledgeInjector 无新片段可注入
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -149,6 +168,7 @@ AC3: Given issue.status 为 RESOLVED
 | 诊断 | US-6 事件触发 | 事件驱动 | 延迟<30s | US-2 |
 | 治理 | US-7 闭环 | 经验沉淀 | 闭环>80% | US-6 |
 | 闭环 | US-8 | 工单跟踪 | 创建率 100% | US-7 |
+| 沉淀 | US-9 | 经验注入引擎 | 沉淀注入 100% | US-7 |
 
 ---
 
@@ -164,6 +184,24 @@ AC3: Given issue.status 为 RESOLVED
 | UC-09/10/11 | 推送通道(Webhook+Email) | P0 | US-4/5 | 单元 |
 | UC-12 | 事件触发默认Skill | P0 | US-6 AC1 | 单元 |
 | UC-13/14/15 | 问题闭环(方案/验证/关闭) | P0 | US-7 | 单元 |
+| UC-16 | 问题沉淀→知识注入引擎 | P1 | US-9 | 单元 |
+| UC-R1 | POST /patrol/tasks 创建巡检任务 | P0 | US-1 AC1 | 集成 |
+| UC-R2 | GET /patrol/tasks 列出巡检任务 | P1 | - | 集成 |
+| UC-R3 | DELETE /patrol/tasks/{id} 删除巡检任务 | P1 | - | 集成 |
+| UC-R4 | PATCH /patrol/tasks/{id}/toggle 启停巡检 | P1 | - | 集成 |
+| UC-R5 | POST /patrol/infer 手动触发巡检推断 | P0 | US-2 | 集成 |
+| UC-R6 | GET /patrol/reports 巡检报告列表 | P1 | - | 集成 |
+| UC-R7 | GET /patrol/reports/{id} 报告详情 | P1 | - | 集成 |
+| UC-R8 | GET /alerts 告警列表 | P0 | US-3 | 集成 |
+| UC-R9 | POST /alerts/{id}/resolve 解决告警 | P0 | US-3 | 集成 |
+| UC-R10 | POST /runs/{id}/bugfix-suggestion 修复建议 | P0 | US-7 | 集成 |
+| UC-R11 | POST /runs/{taskId}/solution 提交方案 | P0 | US-7 | 集成 |
+| UC-R12 | POST /runs/{taskId}/issue 创建问题 | P0 | US-7 | 集成 |
+| UC-R13 | GET /issues/recent-runs 最近问题运行 | P1 | - | 集成 |
+| UC-R14 | GET /issues 问题列表 | P1 | - | 集成 |
+| UC-R15 | GET /issues/{issueId} 问题详情 | P1 | - | 集成 |
+| UC-R16 | POST /issues/{issueId}/verify 验证问题 | P0 | US-7 | 集成 |
+| UC-R17 | POST /issues/{issueId}/close 关闭问题 | P0 | US-7 | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -276,6 +314,29 @@ AC3: Given issue.status 为 RESOLVED
     Then status=CLOSED，reload未调用
 ```
 
+#### UC-16: 问题沉淀→知识注入引擎
+```gherkin
+@priority:medium @type:unit
+功能: 问题沉淀知识通过 KnowledgeInjector 注入 Agent 引擎
+  场景: 关闭后沉淀知识可被后续诊断检索
+    Given IssueClosure(issueId="issue-005", userQuery="为什么订单服务超时?", rootCause="连接池打满")
+    And KnowledgeSedimentationExtractor.extract 提取 KnowledgeFragment
+    When close("issue-005")
+    Then knowledgeBase.reload 被调用
+    And 下次 KnowledgeInjector.extend(task提及"订单服务超时") 返回非空
+    And 返回内容含"经验沉淀"和"连接池打满"
+    When AgentExecutor.buildSystemPrompt 调用
+    Then system prompt 含"业务知识参考"section
+    And 含沉淀的"##问题"和"##根因"章节
+
+  场景: knowledgeBase=null 时关闭不报错且不注入
+    Given knowledgeBase=null
+    When close("issue-005")
+    Then status=CLOSED，不抛异常
+    And KnowledgeInjector.extend 无法检索沉淀片段 (返回空串)
+    And system prompt 不含"业务知识参考"
+```
+
 ---
 
 ## 4. 接口规格 (API Specs)
@@ -355,20 +416,36 @@ IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
 | IssueClosureServiceTest | starter | propose(3)/createIssue(3)/verify(3)/close(3)/SPI路径(3) | 15 |
 | PatrolModelTest | core | AnomalyEvent(7)/AlertConvergence(5)/PatrolTask(7)/PatrolReport(3)/BugfixSuggestion(7) | 29 |
 
-### 8.2 测试缺口
+### 8.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | Patrol 任务全生命周期: POST /patrol/tasks (创建) → GET /patrol/tasks (列表) → POST /patrol/tasks/{id}/toggle (启停) → GET /patrol/reports (报告) | POST /patrol/tasks, GET /patrol/tasks, POST /patrol/tasks/{id}/toggle, GET /patrol/reports | ⚠部分覆盖 (GAP-5) |
+| E2E-2 | Patrol LLM 推断: POST /patrol/infer (content) → 200 (anomaly 检测结果) | POST /patrol/infer | ⚠未实现 (GAP-9) |
+| E2E-3 | Alert 全生命周期: GET /alerts (列表) → POST /alerts/{id}/resolve (解决) → GET /alerts (验证已解决) | GET /alerts, POST /alerts/{id}/resolve | ⚠未实现 (GAP-10) |
+| E2E-4 | Issue 闭环流程: POST /anchor/inject (proposeSolution) → POST /issues (createIssue) → POST /issues/{id}/verify → POST /issues/{id}/close | POST /anchor/inject, POST /issues, POST /issues/{id}/verify, POST /issues/{id}/close | ⚠未实现 (GAP-11) |
+| E2E-5 | Patrol → Alert 联动: POST /patrol/infer → anomaly → Alert 自动汇聚 → GET /alerts 验证告警 | POST /patrol/infer, GET /alerts | ⚠未实现 (GAP-12) |
+| E2E-6 | 认证/权限: GET /alerts 无认证 → 401 / 无权限 → 403 | GET /alerts | ⚠未实现 (GAP-13) |
+
+### 8.3 测试缺口
 
 | 缺口 | 描述 | 优先级 | 涉及类 |
 |------|------|--------|--------|
-| GAP-1 | autoResolveStale独立测试缺失 — 未直接验证过期告警自动转RESOLVED | P1 | InMemoryAlertConverger |
-| GAP-2 | query按type过滤分支未覆盖 | P1 | InMemoryAlertConverger |
-| GAP-3 | count按type过滤分支未覆盖 | P2 | InMemoryAlertConverger |
-| GAP-4 | _user_message注入内容验证较弱 — 仅验证executor调用 | P1 | ScheduledPatrolScheduler |
-| GAP-5 | PatrolEndpoint集成测试覆盖面有限 | P2 | PatrolEndpointIntegrationTest |
-| GAP-6 | listIssues/loadIssue方法测试缺失 | P2 | IssueClosureService |
-| GAP-7 | 多推送通道并发场景缺失 | P2 | Scheduler/Listener |
+| GAP-1 | ✅已关闭: autoResolveStale 已由 `InMemoryAlertConvergerTest` 覆盖 (shouldAutoResolveStaleAlertsOnQuery/shouldNotReprocessResolvedAlerts) | — | P1 |
+| GAP-2 | ✅已关闭: query/count按type过滤已由 `InMemoryAlertConvergerTest` 覆盖 (shouldQueryFilterByType/shouldQueryReturnAllWhenTypeIsNullOrEmpty/shouldQueryReturnEmptyForUnknownType/shouldCountFilterByType/shouldCountReturnTotalWhenTypeIsNullOrEmpty) | — | P1 |
+| GAP-3 | ✅已关闭: count按type过滤已由 `InMemoryAlertConvergerTest` 覆盖 (shouldCountFilterByType/shouldCountReturnTotalWhenTypeIsNullOrEmpty) | — | P2 |
+| GAP-4 | ✅已关闭: _user_message注入内容验证已由 `ScheduledPatrolSchedulerTest` 覆盖 (executePatrolShouldAppendPatrolSuffixToExistingUserMessage/executePatrolShouldSetPatrolSuffixAsUserMessageWhenAbsent/executePatrolShouldPreserveOtherInputsAlongsideUserMessage) | — | P1 |
+| GAP-5 | ⚠部分覆盖: PatrolEndpoint 基本集成测试已有，但覆盖面有限 (缺少异常场景/权限边界) | P2 | 需扩展集成测试 |
+| GAP-6 | ✅已关闭: listIssues/loadIssue 已由 `IssueClosureServiceTest` 覆盖 (shouldListIssuesDelegatingToStore/shouldReturnEmptyListWhenNoIssuesExist/shouldLoadIssueDelegatingToStore/shouldReturnNullWhenLoadIssueNotFound) | — | P2 |
+| GAP-7 | ⚠并发测试: 多推送通道并发场景需并发测试框架 (CountDownLatch/ExecutorService)，ScheduledPatrolSchedulerTest 已验证异常隔离但未验证并发安全 | P2 | 需并发测试 |
 | GAP-8 | NoopLockProvider/NoopIssueTracker覆盖较浅 | P3 | Noop* |
+| GAP-9 | ⚠E2E缺失: POST /patrol/infer REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| GAP-10 | ⚠E2E缺失: GET /alerts + POST /alerts/{id}/resolve REST 端点无 E2E 覆盖 — 见 E2E-3 | P1 | 需 E2E 集成测试 |
+| GAP-11 | ⚠E2E缺失: Issue 闭环流程 (propose→create→verify→close) 无端到端 E2E 覆盖 — 见 E2E-4 | P1 | 需 E2E 集成测试 |
+| GAP-12 | ⚠E2E缺失: Patrol→Alert 联动 (infer→anomaly→converge→alert) 无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
+| GAP-13 | ⚠E2E缺失: GET /alerts 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-6 | P2 | 需 E2E 集成测试 |
 
-### 8.3 Mock策略
+### 8.4 Mock策略
 TaskScheduler(mock可立即执行) / AgentExecutor(mock设status/report) / SkillRegistry(mock) / JavaMailSender(mock+ArgumentCaptor) / AlertConverger/IssueStore/IssueTracker/KnowledgeBase(mock) / PatrolLockProvider(mock默认true) / HTTP测试(继承覆写httpPost捕获参数)
 
 ---

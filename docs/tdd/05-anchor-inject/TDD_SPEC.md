@@ -379,7 +379,17 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 
 **总结**: Orchestrator.inject 主流程+异常全覆盖；Cache 全方法覆盖；stripThinking/skipThinking 已由 StripThinkingTest 和 AnthropicLlmClientTest 覆盖。
 
-### 8.3 测试缺口
+### 8.3 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | 正常注入流程: POST /anchor/inject (anchorName+source) → 200 (HTML content) | POST /anchor/inject | ✅已覆盖 (SnapAgentControllerInjectTest) |
+| E2E-2 | 缓存命中: POST /anchor/inject (相同参数) → 200 (cached 标记) | POST /anchor/inject | ✅已覆盖 |
+| E2E-3 | 400 错误: POST /anchor/inject (缺 anchorName / 缺 source) → 400 | POST /anchor/inject | ✅已覆盖 |
+| E2E-4 | 503 未配置: POST /anchor/inject (anchor.enabled=false) → 503 | POST /anchor/inject | ✅已覆盖 |
+| E2E-5 | 500 skill 不存在: POST /anchor/inject (skill 未找到) → 500 | POST /anchor/inject | ✅已覆盖 |
+
+### 8.4 测试缺口
 
 | ID | 描述 | 优先级 | 建议 |
 |----|------|--------|------|
@@ -392,7 +402,7 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 | GAP-7 | ✅已关闭: resolveEffectiveTtl 边界值已由 `SnapAgentPropertiesAnchorTest` 覆盖 (8个参数化测试: 0/negative/below min/equals min/normal/equals max/above max + shouldRespectCustomMinAndMaxTtl) | — | P1 |
 | GAP-8 | ✅已关闭: anchor.js 前端测试已由 Vitest + Playwright 覆盖 (`anchor.test.js` 24个单元测试: DOM扫描/路径匹配/drawer创建/注入模式/auth/MutationObserver; `app.test.js` 30+个单元测试: formatTime/escapeHtml/getSkillState/getTaskIssueState/profileLabel/toast/handleAuthError/toggleSection/authHeaders/loadSkills/loadModels; `ui.spec.js` 20+个E2E测试: 技能列表/模型选择/聊天SSE/文件上传/认证状态/功能导航) | — | P2 |
 
-### 8.4 Mock策略
+### 8.5 Mock策略
 ```yaml
 Mock: LlmClient(doAnswer模拟stream), SkillRegistry, WorkflowEngine, SecurityGateway
 ```
