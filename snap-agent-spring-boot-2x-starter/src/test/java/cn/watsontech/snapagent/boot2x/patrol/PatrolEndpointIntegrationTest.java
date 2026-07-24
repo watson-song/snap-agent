@@ -6,6 +6,8 @@ import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.agent.TranscriptEvent;
+import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.llm.LlmEventSink;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
 import cn.watsontech.snapagent.core.patrol.PatrolReport;
@@ -15,9 +17,14 @@ import cn.watsontech.snapagent.core.security.SecurityGateway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -34,29 +41,31 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Uses standalone MockMvc with mocked PatrolScheduler and AlertConverger,
  * and a real TemplateBugfixSuggester to exercise the template-based suggestion logic.</p>
+ *
+ * <p>TDD spec: 08-patrol-alert GAP-9..GAP-13.</p>
  */
+@ExtendWith(MockitoExtension.class)
 class PatrolEndpointIntegrationTest {
 
+    @Mock private PatrolScheduler patrolScheduler;
+    @Mock private AlertConverger alertConverger;
+    @Mock private TaskStore taskStore;
+    @Mock private SecurityGateway securityGateway;
+    @Mock private RateLimiter rateLimiter;
+    @Mock private LlmClient llmClient;
+
     private MockMvc mockMvc;
-    private PatrolScheduler patrolScheduler;
-    private AlertConverger alertConverger;
     private TemplateBugfixSuggester bugfixSuggester;
-    private TaskStore taskStore;
-    private SecurityGateway securityGateway;
+    private SnapAgentProperties props;
 
     @BeforeEach
     void setUp() {
-        patrolScheduler = mock(PatrolScheduler.class);
-        alertConverger = mock(AlertConverger.class);
         bugfixSuggester = new TemplateBugfixSuggester();
-        taskStore = mock(TaskStore.class);
-        securityGateway = mock(SecurityGateway.class);
-
-        when(securityGateway.currentUserId()).thenReturn("test-user");
-        when(securityGateway.hasPermission(anyString())).thenReturn(true);
-
-        SnapAgentProperties props = new SnapAgentProperties();
+        props = new SnapAgentProperties();
         props.setEnabled(true);
+
+        lenient().when(securityGateway.currentUserId()).thenReturn("test-user");
+        lenient().when(securityGateway.hasPermission(anyString())).thenReturn(true);
 
         // Use the 15-arg constructor that accepts patrol/alert/bugfix beans directly
         SnapAgentController controller = new SnapAgentController(
@@ -66,10 +75,10 @@ class PatrolEndpointIntegrationTest {
                 null, // toolDispatcher
                 props,
                 securityGateway,
-                mock(RateLimiter.class),
+                rateLimiter,
                 null, // taskExecutor
                 null, // peerSseRelay
-                null, // llmClient
+                llmClient,
                 null, // auditLogger
                 null, // conversationStore
                 patrolScheduler,
@@ -179,8 +188,10 @@ class PatrolEndpointIntegrationTest {
                 .andExpect(status().isNotFound());
     }
 
+    // ── GAP-11: GET /alerts with type filter (already covered, verify) ──
+
     @Test
-    @DisplayName("GET /alerts?type=ERROR_SPIKE filters alerts by type")
+    @DisplayName("GAP-11: GET /alerts?type=ERROR_SPIKE filters alerts by type")
     void shouldListAlertsWithTypeFilter() throws Exception {
         AlertConvergence alert = new AlertConvergence(
                 "a1", "fp", "ERROR_SPIKE", "svc", "NPE", "task-1");
@@ -257,5 +268,72 @@ class PatrolEndpointIntegrationTest {
 
         mockMvc.perform(post("/snap-agent/runs/unknown/bugfix-suggestion"))
                 .andExpect(status().isNotFound());
+    }
+
+    // ── GAP-9: POST /patrol/infer (content analysis) → 200 ───────
+
+    @Test
+    @DisplayName("GAP-9: POST /patrol/infer returns inferred name and keywords")
+    void shouldInferPatrolMeta() throws Exception {
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("{\"name\":\"健康巡检\",\"keywords\":\"异常,超时\"}");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        mockMvc.perform(post("/snap-agent/patrol/infer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"instruction\":\"每天检查服务健康状态\",\"skillName\":\"health-patrol\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("健康巡检"))
+                .andExpect(jsonPath("$.keywords").value("异常,超时"));
+    }
+
+    // ── GAP-10: POST /patrol/infer with missing content → 400 ────
+
+    @Test
+    @DisplayName("GAP-10: POST /patrol/infer returns 400 when instruction is missing")
+    void shouldReturn400WhenInstructionMissing() throws Exception {
+        mockMvc.perform(post("/snap-agent/patrol/infer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("instruction is required"));
+    }
+
+    // ── GAP-12: POST /alerts/{id}/resolve for non-existent alert → 404 ──
+
+    @Test
+    @DisplayName("GAP-12: POST /alerts/{id}/resolve returns 404 for non-existent alert")
+    void shouldReturn404WhenResolvingNonExistentAlert() throws Exception {
+        doThrow(new ResponseStatusException(HttpStatus.NOT_FOUND, "alert not found"))
+                .when(alertConverger).resolve("nonexistent");
+
+        mockMvc.perform(post("/snap-agent/alerts/nonexistent/resolve"))
+                .andExpect(status().isNotFound());
+    }
+
+    // ── GAP-13: GET /alerts without authentication → 401 ──────────
+
+    @Test
+    @DisplayName("GAP-13a: GET /alerts returns 401 when not authenticated")
+    void shouldReturn401WhenAlertsNoAuth() throws Exception {
+        when(securityGateway.currentUserId()).thenReturn(null);
+
+        mockMvc.perform(get("/snap-agent/alerts"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
+    }
+
+    // ── GAP-13: GET /alerts without permission → 403 ──────────────
+
+    @Test
+    @DisplayName("GAP-13b: GET /alerts returns 403 without permission")
+    void shouldReturn403WhenAlertsNoPermission() throws Exception {
+        when(securityGateway.hasPermission(anyString())).thenReturn(false);
+
+        mockMvc.perform(get("/snap-agent/alerts"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
     }
 }

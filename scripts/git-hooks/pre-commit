@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# SnapAgent pre-commit hook
+#
+# Enforces TDD rules:
+#   1. Bugfix commits MUST include test changes
+#   2. Feature/new-code commits MUST include test changes
+#   3. No --no-verify bypass (the hook itself is the guard)
+#   4. Staged Java source files must have corresponding test files (heuristic)
+#
+set -eo pipefail
+
+# Disable -u for array iteration safety (empty arrays become unbound under set -u)
+set +u
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+STAGED_JAVA_SRC=()
+STAGED_JAVA_TEST=()
+STAGED_OTHER=()
+HAS_BUGFIX=false
+HAS_FEATURE=false
+HAS_TEST_CHANGE=false
+HAS_SRC_CHANGE=false
+
+# --- Collect staged files ---
+while IFS= read -r file; do
+  [ -z "$file" ] && continue
+
+  case "$file" in
+    *.java)
+      # A test file must be in a test directory (src/test/) AND named *Test.java/*Spec.java
+      if [[ "$file" == */src/test/* ]] && [[ "$file" == *Test.java || "$file" == *Spec.java ]]; then
+        STAGED_JAVA_TEST+=("$file")
+        HAS_TEST_CHANGE=true
+      else
+        STAGED_JAVA_SRC+=("$file")
+        HAS_SRC_CHANGE=true
+      fi
+      ;;
+    *.js)
+      if [[ "$file" == */test/* || "$file" == */tests/* ]] && [[ "$file" == *.test.js || "$file" == *.spec.js ]]; then
+        STAGED_JAVA_TEST+=("$file")
+        HAS_TEST_CHANGE=true
+      else
+        STAGED_OTHER+=("$file")
+        HAS_SRC_CHANGE=true
+      fi
+      ;;
+    docs/*|*.md|*.yml|*.yaml|*.xml|*.properties|*.conf|.gitignore|*.sh|*.json)
+      # Config/docs — no test requirement, but track for context
+      ;;
+    *)
+      STAGED_OTHER+=("$file")
+      HAS_SRC_CHANGE=true
+      ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# --- Analyze commit message (if available via args or prepare-commit-msg) ---
+COMMIT_MSG_FILE="${1:-}"
+COMMIT_MSG=""
+if [ -n "$COMMIT_MSG_FILE" ] && [ -f "$COMMIT_MSG_FILE" ]; then
+  COMMIT_MSG="$(cat "$COMMIT_MSG_FILE" 2>/dev/null || true)"
+else
+  # Try to get from MERGE_MSG or SQUASH_MSG
+  GIT_DIR_VAL="${GIT_DIR:-$(git rev-parse --git-dir 2>/dev/null || echo "")}"
+  for f in "$GIT_DIR_VAL/MERGE_MSG" "$GIT_DIR_VAL/SQUASH_MSG" "$GIT_DIR_VAL/COMMIT_EDITMSG"; do
+    if [ -f "$f" ]; then
+      COMMIT_MSG="$(cat "$f" 2>/dev/null || true)"
+      break
+    fi
+  done
+fi
+
+# Detect bugfix or feature from commit message
+MSG_LOWER="$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')"
+# Detect bugfix or feature from commit message (match conventional commit prefix)
+if echo "$MSG_LOWER" | grep -qE '^(fix|修复)(\(.+\))?:|fixup!'; then
+  HAS_BUGFIX=true
+fi
+if echo "$MSG_LOWER" | grep -qE '^(feat|feature|新增)(\(.+\))?:'; then
+  HAS_FEATURE=true
+fi
+
+# --- Rule 1: Bugfix must have tests ---
+if [ "$HAS_BUGFIX" = true ] && [ "$HAS_SRC_CHANGE" = true ] && [ "$HAS_TEST_CHANGE" = false ]; then
+  echo ""
+  echo "❌ PRE-COMMIT BLOCKED: Bugfix commit without test changes"
+  echo ""
+  echo "   Bugfix commits MUST include a test that reproduces the bug"
+  echo "   and verifies the fix. This is TDD — no exceptions."
+  echo ""
+  echo "   Staged source files (no tests):"
+  for f in "${STAGED_JAVA_SRC[@]}" "${STAGED_OTHER[@]}"; do
+    echo "     - $f"
+  done
+  echo ""
+  echo "   Fix: Add a test file that covers the bug scenario, then stage it."
+  echo "        If this is not a bugfix, adjust your commit message prefix."
+  echo ""
+  exit 1
+fi
+
+# --- Rule 2: Feature/new code must have tests ---
+if [ "$HAS_FEATURE" = true ] && [ "$HAS_SRC_CHANGE" = true ] && [ "$HAS_TEST_CHANGE" = false ]; then
+  echo ""
+  echo "❌ PRE-COMMIT BLOCKED: Feature commit without test changes"
+  echo ""
+  echo "   New features and new code MUST include corresponding tests."
+  echo "   Write the test FIRST (red), then implement (green), then refactor."
+  echo ""
+  echo "   Staged source files (no tests):"
+  for f in "${STAGED_JAVA_SRC[@]}" "${STAGED_OTHER[@]}"; do
+    echo "     - $f"
+  done
+  echo ""
+  echo "   Fix: Add test(s) covering the new feature, then stage them."
+  echo "        If this is not a new feature, adjust your commit message prefix."
+  echo ""
+  exit 1
+fi
+
+# --- Rule 3: Heuristic — staged Java src files should have test counterparts ---
+# Only warn, don't block — the commit message rule above is the hard gate.
+if [ ${#STAGED_JAVA_SRC[@]} -gt 0 ] && [ "$HAS_TEST_CHANGE" = false ]; then
+  echo ""
+  echo "⚠️  WARNING: Source files staged without any test changes"
+  echo ""
+  echo "   Staged source:"
+  for f in "${STAGED_JAVA_SRC[@]}"; do
+    echo "     - $f"
+
+    # Try to find a test file counterpart
+    base_name="$(basename "$f" .java)"
+    test_name="${base_name}Test.java"
+    # Search common test locations
+    found=false
+    for search_dir in \
+      "$REPO_ROOT/snap-agent-spring-boot-2x-starter/src/test/java" \
+      "$REPO_ROOT/snap-agent-core/src/test/java"; do
+      if find "$search_dir" -name "$test_name" -print -quit 2>/dev/null | grep -q .; then
+        found=true
+        break
+      fi
+    done
+    if [ "$found" = false ]; then
+      echo "       → No test file found: $test_name"
+    fi
+  done
+  echo ""
+  echo "   This is allowed for refactoring/docs, but if you're adding logic,"
+  echo "   add tests. See docs/TEST_GUIDELINES.md for the test spec."
+  echo ""
+fi
+
+# --- Rule 4: Block commits to main with WIP/untested state ---
+BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+if [ "$BRANCH" = "main" ] && echo "$MSG_LOWER" | grep -qE '\bwip\b|\btodo\b|\btmp\b'; then
+  echo ""
+  echo "❌ PRE-COMMIT BLOCKED: WIP/tmp commit on main branch"
+  echo ""
+  echo "   Use a feature branch for work-in-progress commits."
+  echo ""
+  exit 1
+fi
+
+exit 0

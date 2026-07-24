@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
 import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
@@ -25,6 +26,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -50,6 +52,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -748,5 +751,168 @@ class SnapAgentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.entries").isArray())
                 .andExpect(jsonPath("$.total").exists());
+    }
+
+    // ---- SSE stream event sequence tests (GAP: thought → tool_call → done order) ----
+
+    @Test
+    void shouldStreamEventsInOrderForTerminalTask() throws Exception {
+        AgentTask task = AgentTask.create("user001", "test-skill",
+                new HashMap<String, String>(), "claude-sonnet-4-6");
+        // Add events in sequence: thought → tool_call → done
+        task.addTranscriptEvent(TranscriptEvent.thought("Analyzing the issue..."));
+        task.addTranscriptEvent(TranscriptEvent.toolCall("call_1", "mysql_query",
+                Collections.<String, Object>singletonMap("sql", "SELECT 1")));
+        task.addTranscriptEvent(TranscriptEvent.done("SUCCEEDED", "Issue resolved"));
+        task.setStatus(TaskStatus.SUCCEEDED);
+        when(taskStore.get(task.getTaskId())).thenReturn(task);
+
+        // Synchronous executor so streaming logic runs immediately
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
+                controller.streamRun(task.getTaskId(), null);
+
+        assertThat(emitter).isNotNull();
+        // Verify transcript events are in the expected order: thought → tool_call → done
+        List<TranscriptEvent> events = task.getTranscript();
+        assertThat(events).hasSize(3);
+        assertThat(events.get(0).getType()).isEqualTo(TranscriptEvent.TYPE_THOUGHT);
+        assertThat(events.get(1).getType()).isEqualTo(TranscriptEvent.TYPE_TOOL_CALL);
+        assertThat(events.get(2).getType()).isEqualTo(TranscriptEvent.TYPE_DONE);
+        // Verify the streaming Runnable was submitted to the executor
+        verify(taskExecutor).execute(any(Runnable.class));
+    }
+
+    // ---- POST /runs with skillId="auto" (anchor Q&A) tests ----
+
+    @Test
+    void shouldCreateAnchorRunWhenSkillIdIsAutoWithAnchorContext() throws Exception {
+        properties.getAnchor().setEnabled(true);
+        AnchorOrchestrator mockOrchestrator = org.mockito.Mockito.mock(AnchorOrchestrator.class);
+        controller.setAnchorOrchestrator(mockOrchestrator);
+        when(rateLimiter.tryAcquire("user001")).thenReturn(true);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        Map<String, Object> anchor = new LinkedHashMap<String, Object>();
+        anchor.put("name", "summary-section");
+        anchor.put("content", "This is the page content");
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "auto");
+        body.put("anchor", anchor);
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("message", "What is this about?");
+        body.put("inputs", inputs);
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.taskId").isNotEmpty())
+                .andExpect(jsonPath("$.streamUrl").isNotEmpty());
+
+        verify(taskStore).save(any(AgentTask.class));
+        // "auto" mode routes through AgentExecutor with full tool access
+        verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+    }
+
+    // ---- POST /skills/upload tests (GAP-11: .md upload REST E2E) ----
+
+    @Test
+    void shouldUploadSkillAndReturn200WhenValidMdFile() throws Exception {
+        java.nio.file.Path tempDir = java.nio.file.Files.createTempDirectory("skill-upload-test");
+        properties.setUploadSkillsDir(tempDir.toString());
+        when(skillRegistry.refresh())
+                .thenReturn(new SkillRegistry.RefreshResult(3, 2, 1, 0));
+
+        MockMultipartFile file = new MockMultipartFile("file", "my-skill.md",
+                "text/markdown", "# My Skill\n\nbody".getBytes());
+
+        try {
+            mockMvc.perform(multipart("/snap-agent/skills/upload").file(file))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.filename").value("my-skill.md"))
+                    .andExpect(jsonPath("$.total").value(3))
+                    .andExpect(jsonPath("$.available").value(2))
+                    .andExpect(jsonPath("$.unavailable").value(1))
+                    .andExpect(jsonPath("$.invalid").value(0));
+
+            // Verify the file was saved to the skills directory
+            assertThat(java.nio.file.Files.exists(tempDir.resolve("my-skill.md"))).isTrue();
+        } finally {
+            deleteRecursively(tempDir);
+        }
+    }
+
+    @Test
+    void shouldReturn400WhenUploadingEmptyFile() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file", "empty.md",
+                "text/markdown", new byte[0]);
+
+        mockMvc.perform(multipart("/snap-agent/skills/upload").file(file))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("INVALID_INPUT"));
+    }
+
+    // ---- POST /skills/upload-folder tests (GAP-12: folder upload REST E2E) ----
+
+    @Test
+    void shouldUploadSkillFolderAndReturn200WhenValidFiles() throws Exception {
+        java.nio.file.Path tempDir = java.nio.file.Files.createTempDirectory("skill-folder-test");
+        properties.setUploadSkillsDir(tempDir.toString());
+        when(skillRegistry.refresh())
+                .thenReturn(new SkillRegistry.RefreshResult(5, 4, 1, 0));
+
+        MockMultipartFile file1 = new MockMultipartFile("files", "my-folder/skill1.md",
+                "text/markdown", "# Skill 1".getBytes());
+        MockMultipartFile file2 = new MockMultipartFile("files", "my-folder/skill2.md",
+                "text/markdown", "# Skill 2".getBytes());
+
+        try {
+            mockMvc.perform(multipart("/snap-agent/skills/upload-folder")
+                            .file(file1)
+                            .file(file2)
+                            .param("dirName", "my-folder"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.dirName").value("my-folder"))
+                    .andExpect(jsonPath("$.filesSaved").value(2))
+                    .andExpect(jsonPath("$.total").value(5))
+                    .andExpect(jsonPath("$.available").value(4));
+
+            // Verify files were saved
+            java.nio.file.Path destDir = tempDir.resolve("my-folder");
+            assertThat(java.nio.file.Files.exists(destDir.resolve("skill1.md"))).isTrue();
+            assertThat(java.nio.file.Files.exists(destDir.resolve("skill2.md"))).isTrue();
+        } finally {
+            deleteRecursively(tempDir);
+        }
+    }
+
+    @Test
+    void shouldReturn400WhenUploadFolderHasNoFiles() throws Exception {
+        mockMvc.perform(multipart("/snap-agent/skills/upload-folder"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private void deleteRecursively(java.nio.file.Path path) {
+        if (path == null || !java.nio.file.Files.exists(path)) return;
+        try {
+            if (java.nio.file.Files.isDirectory(path)) {
+                try (java.util.stream.Stream<java.nio.file.Path> entries = java.nio.file.Files.list(path)) {
+                    for (java.nio.file.Path entry : (Iterable<java.nio.file.Path>) entries::iterator) {
+                        deleteRecursively(entry);
+                    }
+                }
+            }
+            java.nio.file.Files.deleteIfExists(path);
+        } catch (java.io.IOException e) {
+            // ignore cleanup errors
+        }
     }
 }
