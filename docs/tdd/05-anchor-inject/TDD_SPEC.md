@@ -184,6 +184,12 @@ AC11: Given skillRegistry.get("x") 返回 null
 | UC-08 | skill不存在抛异常 | P0 | - | 单元 |
 | UC-09 | workflow执行注入 | P1 | - | 单元 |
 | UC-10 | 客户端fallback | P1 | AC6,7 | 单元 |
+| UC-R1 | POST /anchor/inject 200返回HTML | P0 | AC1 | 集成 |
+| UC-R2 | POST /anchor/inject 缓存命中cached=true | P0 | AC2 | 集成 |
+| UC-R3 | POST /anchor/inject 400缺anchorName | P0 | - | 集成 |
+| UC-R4 | POST /anchor/inject 400无source | P0 | - | 集成 |
+| UC-R5 | POST /anchor/inject 503未配置 | P0 | - | 集成 |
+| UC-R6 | POST /anchor/inject 500 skill不存在 | P0 | - | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -371,20 +377,20 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 | `AnchorInjectionCacheTest` | 8 | put/get、missing、过期、per-entry TTL、max TTL、invalidateAll、size、custom maxSize |
 | `SnapAgentControllerInjectTest` | 6 | 200、cached、400缺anchorName、400无source、503未配置、500 skill不存在 |
 
-**总结**: Orchestrator.inject 主流程+异常全覆盖；Cache 全方法覆盖；stripThinking/skipThinking 无直接测试。
+**总结**: Orchestrator.inject 主流程+异常全覆盖；Cache 全方法覆盖；stripThinking/skipThinking 已由 StripThinkingTest 和 AnthropicLlmClientTest 覆盖。
 
 ### 8.3 测试缺口
 
 | ID | 描述 | 优先级 | 建议 |
 |----|------|--------|------|
-| GAP-1 | `stripThinking` 无独立参数化测试 | P0 | 英文/中文前缀、null、空串、DOCTYPE |
-| GAP-2 | `AnthropicLlmClient.skipThinking` 无测试 | P0 | tools空跳过thinking_delta、非空传递 |
-| GAP-3 | `InjectionRequest.fromMap`/`hasSource`/`getSourceId` 无测试 | P1 | Map解析、cacheTtl默认、source优先级 |
-| GAP-4 | `buildInjectionPrompt` 无测试 | P1 | prompt含pageUrl/anchorName/userId |
-| GAP-5 | `extractHtmlFromWorkflowResult` 空结果路径 | P1 | null/空stepResults、空report |
-| GAP-6 | LLM onError→INJECTION_FAILED 路径 | P1 | Mock onError验证异常 |
-| GAP-7 | `resolveEffectiveTtl` 边界值 | P1 | TTL=0/<min/>max/正常 |
-| GAP-8 | `anchor.js` inject 无JS测试 | P2 | 需JS测试框架或E2E |
+| GAP-1 | ✅已关闭: `stripThinking` 已由 `StripThinkingTest` 覆盖 (6个参数化用例: 英文前缀/中文前缀/无前缀/DOCTYPE/null/空串) | — | P0 |
+| GAP-2 | ✅已关闭: `AnthropicLlmClient.skipThinking` 已由 `AnthropicLlmClientTest` 覆盖 (tools空→skip thinking_delta / tools非空→传递) | — | P0 |
+| GAP-3 | ✅已关闭: InjectionRequest.fromMap/hasSource/getSourceId 已由 `InjectionRequestTest` 覆盖 (7个fromMap测试 + 5个hasSource测试 + 5个getSourceId测试) | — | P1 |
+| GAP-4 | ✅已关闭: buildInjectionPrompt 已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldIncludePageUrlAnchorNameAndUserIdInInjectionPrompt) | — | P1 |
+| GAP-5 | ✅已关闭: extractHtmlFromWorkflowResult 空结果路径已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldReturnFallbackWhenWorkflowResultIsNull/shouldReturnFallbackWhenStepResultsAreEmpty/shouldReturnFallbackWhenReportIsEmpty/shouldReturnFallbackWhenReportIsNull) | — | P1 |
+| GAP-6 | ✅已关闭: LLM onError→INJECTION_FAILED 路径已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldThrowInjectionFailedWhenLlmReportsError) | — | P1 |
+| GAP-7 | ✅已关闭: resolveEffectiveTtl 边界值已由 `SnapAgentPropertiesAnchorTest` 覆盖 (8个参数化测试: 0/negative/below min/equals min/normal/equals max/above max + shouldRespectCustomMinAndMaxTtl) | — | P1 |
+| GAP-8 | ✅已关闭: anchor.js 前端测试已由 Vitest + Playwright 覆盖 (`anchor.test.js` 24个单元测试: DOM扫描/路径匹配/drawer创建/注入模式/auth/MutationObserver; `app.test.js` 30+个单元测试: formatTime/escapeHtml/getSkillState/getTaskIssueState/profileLabel/toast/handleAuthError/toggleSection/authHeaders/loadSkills/loadModels; `ui.spec.js` 20+个E2E测试: 技能列表/模型选择/聊天SSE/文件上传/认证状态/功能导航) | — | P2 |
 
 ### 8.4 Mock策略
 ```yaml
