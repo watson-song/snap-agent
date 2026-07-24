@@ -505,6 +505,25 @@ jobs:
 
 ---
 
+## TDD规格模块索引
+
+| # | 模块 | TDD Spec | 说明 |
+|---|------|----------|------|
+| 01 | `01-agent-engine` | [TDD_SPEC.md](01-agent-engine/TDD_SPEC.md) | Agent 引擎 |
+| 02 | `02-skill-system` | [TDD_SPEC.md](02-skill-system/TDD_SPEC.md) | Skill 系统 |
+| 03 | `03-tool-dispatcher` | [TDD_SPEC.md](03-tool-dispatcher/TDD_SPEC.md) | ToolDispatcher 路由与插件体系 |
+| 04 | `04-anchor-qa` | [TDD_SPEC.md](04-anchor-qa/TDD_SPEC.md) | Anchor Q&A 锚点问答模式 |
+| 05 | `05-anchor-inject` | [TDD_SPEC.md](05-anchor-inject/TDD_SPEC.md) | 锚点注入模式 (Anchor Injection) |
+| 06 | `06-knowledge` | [TDD_SPEC.md](06-knowledge/TDD_SPEC.md) | 业务知识库 (Knowledge Base) |
+| 07 | `07-workflow` | [TDD_SPEC.md](07-workflow/TDD_SPEC.md) | 工作流引擎 (Workflow Engine) |
+| 08 | `08-patrol-alert` | [TDD_SPEC.md](08-patrol-alert/TDD_SPEC.md) | 巡检告警与问题闭环 (Patrol, Alert & Issue Closure) |
+| 09 | `09-plugin-mcp` | [TDD_SPEC.md](09-plugin-mcp/TDD_SPEC.md) | Plugin & MCP 集成 |
+| 10 | `10-cost-security` | [TDD_SPEC.md](10-cost-security/TDD_SPEC.md) | 成本与安全 |
+| 11 | `11-host-integration` | [TDD_SPEC.md](11-host-integration/TDD_SPEC.md) | 宿主项目集成 (Host Integration) |
+| 12 | `12-codegraph` | [TDD_SPEC.md](12-codegraph/TDD_SPEC.md) | 代码图谱 (Code Graph) |
+
+---
+
 ## 示例项目
 
 参考完整示例：
@@ -517,6 +536,8 @@ jobs:
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | 1.0 | 2024-04-08 | 初始版本 |
+| 1.1 | 2026-07-24 | 添加 12-codegraph 模块到 TDD 规格模块索引 |
+| 1.2 | 2026-07-24 | 添加前端测试基础设施 (Vitest + Playwright)，关闭 05-anchor-inject GAP-8 |
 
 ---
 

@@ -1,0 +1,16 @@
+{
+  "name": "snap-agent-frontend-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "vitest run && playwright test"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8",
+    "@playwright/test": "^1.49.1",
+    "jsdom": "^25.0.1"
+  }
+}
