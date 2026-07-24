@@ -160,6 +160,23 @@ AC13: Given 查询为空串 ""
   Then 返回空列表
 ```
 
+### US-9: KnowledgeInjector 集成 AgentExecutor (SystemPromptExtender 链)
+```gherkin
+作为 Agent 开发者
+我希望 KnowledgeInjector 实现 SystemPromptExtender SPI 被 AgentExecutor.buildSystemPrompt 调用
+以便 业务知识自动注入 Agent 的 system prompt，无需用户手动操作
+```
+**AC:**
+```gherkin
+AC14: Given KnowledgeInjector 注册为 SystemPromptExtender 且知识库含匹配片段
+  When AgentExecutor.buildSystemPrompt 调用
+  Then system prompt 含"业务知识参考"标记和片段内容
+  And 知识 section 位于只读前缀之后
+AC15: Given KnowledgeInjector.extend 返回空串 (无匹配)
+  When buildSystemPrompt 调用
+  Then prompt 不含"业务知识参考"，不影响原 prompt 结构
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -174,6 +191,7 @@ AC13: Given 查询为空串 ""
 | 限量 | US-6 | 数量可控 | topK 限制 100% | US-3 |
 | 质量 | US-7 | 高相关度 | minScore 过滤 100% | US-3 |
 | 防御 | US-8 | 不崩坏 | null 安全 100% | US-3 |
+| 集成 | US-9 | 自动注入引擎 | 知识注入 100% | US-1 |
 
 ---
 
@@ -195,6 +213,13 @@ AC13: Given 查询为空串 ""
 | UC-10 | 经验沉淀提取 | P0 | AC7 | 单元 |
 | UC-11 | reload热重载 | P1 | AC8 | 单元 |
 | UC-12 | 单源失败隔离 | P1 | AC9 | 单元 |
+| UC-13 | KnowledgeInjector 集成 AgentExecutor | P0 | AC14 | 单元 |
+| UC-14 | 空知识不污染 prompt | P1 | AC15 | 单元 |
+| UC-R1 | GET /knowledge/status 知识库状态 | P1 | - | 集成 |
+| UC-R2 | GET /knowledge/search 检索知识片段 | P0 | AC1 | 集成 |
+| UC-R3 | GET /knowledge/fragments 列出片段 | P1 | - | 集成 |
+| UC-R4 | POST /knowledge/reload 热重载 | P1 | AC8 | 集成 |
+| UC-R5 | POST /knowledge/upload 上传知识文件 | P1 | - | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -294,6 +319,35 @@ AC13: Given 查询为空串 ""
     And fragment.metadata不受影响且getMetadata().put()抛UnsupportedOperationException
 ```
 
+```gherkin
+@priority:high @type:unit
+功能: KnowledgeInjector 集成 AgentExecutor SystemPromptExtender 链
+
+  场景: 知识匹配时extend返回非空注入system prompt
+    Given KnowledgeInjector 实现自 SystemPromptExtender
+    And 知识库含片段(title="数据库诊断", content="连接池配置 max=20")
+    And AgentTask inputs 提及"连接池"
+    When extend(skill, task) 被调用
+    Then 返回非空字符串含"业务知识参考"和"来源:"
+    And 含片段内容"连接池配置 max=20"
+    When AgentExecutor.buildSystemPrompt 调用该 extend 返回值
+    Then system prompt 含"业务知识参考"section
+    And 位于只读前缀"你是只读诊断 agent"之后
+
+  场景: 无匹配时extend返回空串不污染prompt
+    Given 知识库含片段但无匹配"Redis缓存"
+    When extend(skill, task("Redis缓存")) 被调用
+    Then 返回空字符串 ""
+    When buildSystemPrompt 调用该空返回值
+    Then prompt 不含"业务知识参考"
+    And prompt 结构与无 KnowledgeInjector 时一致
+
+  场景: null task时extend安全返回空串
+    Given task 为 null
+    When extend(skill, null)
+    Then 返回空字符串 ""，不抛异常
+```
+
 ---
 
 ## 4. 接口规格
@@ -361,19 +415,35 @@ SearchResult: {fragment, score:double[0,1]}
 
 **总结**: 六个核心类全部有单元测试，public方法覆盖率 > 80%。
 
-### 8.3 测试缺口
+### 8.3 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | 知识状态查询: GET /knowledge/status → 200 (sourceCount/fragmentCount) | GET /knowledge/status | ⚠未实现 (GAP-8) |
+| E2E-2 | 知识上传: POST /knowledge/upload (.md) → 200 → GET /knowledge/status 验证计数增加 | POST /knowledge/upload | ⚠未实现 (GAP-9) |
+| E2E-3 | 知识搜索: GET /knowledge/search?q=keyword → 200 (SearchResult 列表) | GET /knowledge/search | ⚠未实现 (GAP-10) |
+| E2E-4 | 知识重载: POST /knowledge/reload → 200 → GET /knowledge/status 验证刷新 | POST /knowledge/reload | ⚠未实现 (GAP-11) |
+| E2E-5 | 知识片段列表: GET /knowledge/fragments → 200 (片段列表) | GET /knowledge/fragments | ⚠未实现 (GAP-12) |
+| E2E-6 | KnowledgeInjector 集成: POST /runs (含知识注入) → SystemPrompt 含知识 section | POST /runs | ⚠未实现 (GAP-5 P0) |
+
+### 8.4 测试缺口
 
 | ID | 描述 | 优先级 | 建议 |
 |----|------|--------|------|
-| GAP-1 | `searchWithScores`多片段降序验证不足 | P1 | 3+片段按score降序 |
-| GAP-2 | `listAll`不可变性验证缺失 | P1 | 修改返回列表抛异常 |
-| GAP-3 | 混合中英文分词场景 | P2 | "database 连接池"分词 |
-| GAP-4 | `MarkdownKnowledgeSource`嵌套目录递归 | P2 | 子目录.md文件加载 |
-| GAP-5 | `KnowledgeInjector`+AgentExecutor集成 | P1 | 多SystemPromptExtender拼接 |
-| GAP-6 | 无suggestion且无selectedSolution边界 | P2 | extract content格式 |
+| GAP-1 | ✅已关闭: searchWithScores 多片段降序已由 `KnowledgeBaseTest` 覆盖 (searchWithScores_shouldReturnFragmentsSortedByScoreDescending: 3片段score=0.3/0.9/0.6验证降序) | — | P1 |
+| GAP-2 | ✅已关闭: listAll 不可变性已由 `KnowledgeBaseTest` 覆盖 (listAll_shouldReturnUnmodifiableList: 验证add/remove/clear/iterator.remove均抛UnsupportedOperationException) | — | P1 |
+| GAP-3 | ⚠边缘场景: 混合中英文分词需依赖搜索算法实现 (TF-IDF/分词器)，当前 SimpleSearcher 基于关键词匹配 | P2 | 算法依赖 |
+| GAP-4 | ✅已关闭: MarkdownKnowledgeSource 嵌套目录递归已由 `MarkdownKnowledgeSourceTest` 覆盖 (load_recursivelyDiscoversMdFilesInNestedDirectories/load_recursionSkipsNonMdFilesInSubdirectories/load_nestedDirectoryWithoutMdFiles_returnsEmpty) | — | P2 |
+| GAP-5 | `KnowledgeInjector`+AgentExecutor集成 | P0 | 多SystemPromptExtender拼接，验证知识section位置和格式 → UC-13/UC-14 已补充 |
+| GAP-6 | ⚠边缘场景: 无 suggestion 且无 selectedSolution 边界需 LLM 响应 mock，属于 LLM 集成层面 | P2 | LLM mock 依赖 |
 | GAP-7 | `SearchResult`值对象无测试 | P3 | getter验证 |
+| GAP-8 | ⚠E2E缺失: GET /knowledge/status REST 端点无 E2E 覆盖 — 见 E2E-1 | P1 | 需 E2E 集成测试 |
+| GAP-9 | ⚠E2E缺失: POST /knowledge/upload REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| GAP-10 | ⚠E2E缺失: GET /knowledge/search REST 端点无 E2E 覆盖 — 见 E2E-3 | P1 | 需 E2E 集成测试 |
+| GAP-11 | ⚠E2E缺失: POST /knowledge/reload REST 端点无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
+| GAP-12 | ⚠E2E缺失: GET /knowledge/fragments REST 端点无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 
-### 8.4 Mock策略
+### 8.5 Mock策略
 ```yaml
 Mock: KnowledgeSource(匿名实现), KnowledgeSearcher(lambda), AgentTask/SkillMeta(真实对象)
 文件: @TempDir创建临时.md文件

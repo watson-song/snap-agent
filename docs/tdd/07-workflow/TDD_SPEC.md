@@ -180,6 +180,9 @@ AC3: Given stepResults 所有 step 均无 HTML 内容
 | UC-10 | stepName.result占位符 | P0 | US-4 AC2 | 单元 |
 | UC-11 | Skill未找到+STOP | P1 | US-5 AC2 | 单元 |
 | UC-12 | 空工作流成功 | P1 | US-6 AC2 | 单元 |
+| UC-R1 | GET /workflows 列出全部工作流 | P1 | - | 集成 |
+| UC-R2 | GET /workflows/{name} 查看工作流详情 | P1 | - | 集成 |
+| UC-R3 | POST /workflows/{name}/run 执行工作流 | P0 | US-3 | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -382,21 +385,36 @@ WorkflowStatus: 枚举 RUNNING/COMPLETED/ABORTED/FAILED
 | WorkflowResultTest | core | success/failure工厂/防御拷贝/不可变/null空/isSuccess兼容/toString | 7 |
 | WorkflowStatusTest | core | 枚举完整/valueOf/唯一性 | 3 |
 
-### 8.2 测试缺口
+### 8.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | Workflow 列表查询: GET /workflows → 200 (workflow 列表) | GET /workflows | ⚠未实现 (GAP-10) |
+| E2E-2 | Workflow 详情: GET /workflows/{name} → 200 (step 定义) / 404 (不存在) | GET /workflows/{name} | ⚠未实现 (GAP-11) |
+| E2E-3 | Workflow 执行: POST /workflows/{name}/run (inputs) → 200 (result) | POST /workflows/{name}/run | ⚠未实现 (GAP-12) |
+| E2E-4 | Workflow 执行 404: POST /workflows/{nonexistent}/run → 404 | POST /workflows/{name}/run | ⚠未实现 (GAP-13) |
+| E2E-5 | Workflow 执行 400: POST /workflows/{name}/run (缺 inputs) → 400 | POST /workflows/{name}/run | ⚠未实现 (GAP-14) |
+
+### 8.3 测试缺口
 
 | 缺口 | 描述 | 优先级 | 涉及类 |
 |------|------|--------|--------|
-| GAP-1 | **SimpleWorkflowEngine无单元测试** — execute/evaluateCondition/resolveInputs全未测 | P0 | SimpleWorkflowEngine |
-| GAP-2 | **YamlWorkflowLoader无单元测试** — loadAll/load/parseFile全未测 | P0 | YamlWorkflowLoader |
-| GAP-3 | 条件DSL 5种模式无独立测试 | P0 | evaluateCondition |
-| GAP-4 | STOP/SKIP/RETRY端到端测试缺失 | P0 | execute |
-| GAP-5 | 占位符解析(trigger+stepName)测试缺失 | P0 | resolveInputs/resolveValue |
-| GAP-6 | Skill未找到场景测试缺失 | P1 | execute |
-| GAP-7 | RETRY重试后仍失败行为缺失 | P1 | execute |
-| GAP-8 | YAML坏文件/空文件容错缺失 | P1 | parseFile |
-| GAP-9 | 多占位符混合解析缺失 | P2 | resolveValue |
+| GAP-1 | ✅已关闭: SimpleWorkflowEngine 已由 `SimpleWorkflowEngineTest` 覆盖 (25+测试: execute/sequential/skip/condition/failurePolicy/resolveInputs/references) | — | P0 |
+| GAP-2 | ✅已关闭: YamlWorkflowLoader 已由 `YamlWorkflowLoaderTest` 覆盖 (15+测试: loadSingle/loadAll/skipMalformed/emptyFile/missingName/ymlOnly) | — | P0 |
+| GAP-3 | ✅已关闭: 条件DSL 5种模式已由 `SimpleWorkflowEngineTest` 覆盖 (notNull/contains/size/statusEquals/bareTruthy) | — | P0 |
+| GAP-4 | ✅已关闭: STOP/SKIP/RETRY 已由 `SimpleWorkflowEngineTest` 覆盖 (stopOnFailure/skipOnFailure/retryOnFailure) | — | P0 |
+| GAP-5 | ✅已关闭: 占位符解析已由 `SimpleWorkflowEngineTest` 覆盖 (resolveTriggerInputs/resolveStepResultReferences) | — | P0 |
+| GAP-6 | ✅已关闭: Skill未找到场景已由 `SimpleWorkflowEngineTest` 覆盖 (shouldFailWithSkillNotFoundWhenOnFailureIsStop/shouldSkipStepWhenSkillNotFoundAndOnFailureIsSkip) | — | P1 |
+| GAP-7 | ✅已关闭: RETRY重试后仍失败行为已由 `SimpleWorkflowEngineTest` 覆盖 (shouldContinueAfterRetryStillFails/shouldContinueAfterRetryStillThrowsException) | — | P1 |
+| GAP-8 | ✅已关闭: YAML坏文件/空文件容错已由 `YamlWorkflowLoaderTest` 覆盖 (skipMalformed/emptyFile/missingName) | — | P1 |
+| GAP-9 | ✅已关闭: 多占位符混合解析已由 `SimpleWorkflowEngineTest` 覆盖 (resolveMultipleMixedPlaceholdersInOneValue) | — | P2 |
+| GAP-10 | ⚠E2E缺失: GET /workflows REST 端点无 E2E 覆盖 — 见 E2E-1 | P1 | 需 E2E 集成测试 |
+| GAP-11 | ⚠E2E缺失: GET /workflows/{name} REST 端点无 E2E 覆盖 (200/404) — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| GAP-12 | ⚠E2E缺失: POST /workflows/{name}/run REST 端点无 E2E 覆盖 — 见 E2E-3 | P1 | 需 E2E 集成测试 |
+| GAP-13 | ⚠E2E缺失: POST /workflows/{nonexistent}/run 404 路径无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
+| GAP-14 | ⚠E2E缺失: POST /workflows/{name}/run 缺 inputs 400 路径无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 
-### 8.3 Mock策略
+### 8.4 Mock策略
 ```yaml
 AgentExecutor: Mockito mock，设置task status/report
 SkillRegistry: Mockito mock，返回SkillMeta或null

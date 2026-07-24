@@ -160,6 +160,51 @@ class SimpleCodeGraphBuilderTest {
         assertThat(builder.type()).isEqualTo("regex");
     }
 
+    // ---- GAP-4: DEPENDS_ON edge type from field and method param ----
+
+    @Test
+    void build_parsesDependsOnFromFieldType() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        Files.createDirectories(srcDir);
+        Files.write(srcDir.resolve("Container.java"), (
+                "package com.test;\n\n"
+                + "public class Container {\n"
+                + "    private Helper helper;\n"
+                + "}\n").getBytes());
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        // DEPENDS_ON edge from Container to Helper
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.Container")
+                && e.getToId().equals("com.test.Helper"));
+    }
+
+    @Test
+    void build_parsesDependsOnFromMethodParam() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        Files.createDirectories(srcDir);
+        Files.write(srcDir.resolve("Processor.java"), (
+                "package com.test;\n\n"
+                + "public class Processor {\n"
+                + "    public void process(Helper helper) {\n"
+                + "    }\n"
+                + "}\n").getBytes());
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        // DEPENDS_ON edge from Processor to Helper (from method param)
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.Processor")
+                && e.getToId().equals("com.test.Helper"));
+    }
+
     @Test
     void build_parsesInterfaceAndEnum() throws IOException {
         Path srcDir = tempDir.resolve("src/com/test");

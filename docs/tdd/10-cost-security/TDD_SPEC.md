@@ -153,6 +153,10 @@ AC15: Given PrincipalResolver 实现 currentUserName() 返回 null
 | UC-05 | SnapAgentController 401/403/审计 + SecurityGateway SPI | P0 | AC8,AC9,AC10 | 集成 |
 | UC-06 | 只读工具守卫 (Redis/Git/Config) | P0 | AC11,AC12,AC13 | 单元 |
 | UC-07 | CostTrackingLlmClient 成本记录 | P1 | US-1 | 单元 |
+| UC-R1 | GET /cost/summary 全局成本摘要 | P1 | - | 集成 |
+| UC-R2 | GET /cost/users/{userId}/summary 用户成本 | P1 | - | 集成 |
+| UC-R3 | GET /cost/skills/{skillName}/summary 技能成本 | P1 | - | 集成 |
+| UC-R4 | GET /cost/records 成本记录分页 | P1 | - | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -366,7 +370,19 @@ AC15: Given PrincipalResolver 实现 currentUserName() 返回 null
 | `SecuritySpiTest` | 单元 | UC-05 SecurityGateway/PrincipalResolver SPI 可实现性 |
 | `SnapAgentControllerSecurityTest` | 集成 | UC-05 401/403/审计+/user-info fallback/displayName/null gateway + LoggingSecurityAuditLogger |
 
-### 8.2 测试缺口
+### 8.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点 | 状态 |
+|--------|----------|------|------|
+| E2E-1 | 费用摘要: GET /cost/summary → 200 (总费用/用户/技能维度) | GET /cost/summary | ⚠未实现 |
+| E2E-2 | 费用记录: GET /cost/records → 200 (费用明细列表) | GET /cost/records | ⚠未实现 |
+| E2E-3 | 用户费用: GET /cost/users/{id}/summary → 200 (单用户费用) | GET /cost/users/{id}/summary | ⚠未实现 |
+| E2E-4 | 技能费用: GET /cost/skills/{name}/summary → 200 (单技能费用) | GET /cost/skills/{name}/summary | ⚠未实现 |
+| E2E-5 | 安全流 401: GET /cost/summary 无认证 → 401 | GET /cost/summary | ⚠未实现 |
+| E2E-6 | 安全流 403: GET /cost/summary 无 cost:query 权限 → 403 | GET /cost/summary | ⚠未实现 |
+| E2E-7 | 安全流 429: POST /runs 超限 → 429 (RateLimiter) | POST /runs | ⚠未实现 |
+
+### 8.3 测试缺口
 
 - **P0** `BudgetEnforcer` 三维度边界 + null 预算 — mock CostStore 返回边界值
 - **P0** `SqlGuard` 9 类拒绝 + LIMIT 改写 — 参数化拒绝用例 + 正常 SELECT
@@ -377,8 +393,12 @@ AC15: Given PrincipalResolver 实现 currentUserName() 返回 null
 - **P1** `CostTrackingLlmClient` 装饰器 — mock LlmClient 发 onUsage+onStop 验证 record
 - **P1** `SecurityGateway.currentUserName` 默认 null — 验证 default 方法 + controller fallback
 - **P2** `BudgetEnforcer.startOfTodayMillis` 时区 + `RateLimiter` 小时窗口切换
+- **P1** E2E缺失: GET /cost/summary, GET /cost/records REST 端点无 E2E 覆盖 — 见 E2E-1/2
+- **P1** E2E缺失: GET /cost/users/{id}/summary, GET /cost/skills/{name}/summary REST 端点无 E2E 覆盖 — 见 E2E-3/4
+- **P1** E2E缺失: GET /cost/* 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-5/6
+- **P2** E2E缺失: POST /runs 429 RateLimiter 路径无 E2E 覆盖 — 见 E2E-7
 
-### 8.3 Mock 策略
+### 8.4 Mock 策略
 单元: CostStore/RedisTemplate/LlmClient=Mockito, Environment=MockEnvironment；集成: MockMvc + mock SecurityGateway/RateLimiter；SqlGuard/CodePathGuard 纯逻辑无 Mock。
 
 ---
