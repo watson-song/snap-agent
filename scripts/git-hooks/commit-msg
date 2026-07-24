@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+#
+# SnapAgent commit-msg hook
+#
+# Enforces TDD commit message conventions:
+#   1. Commit message must have a type prefix (feat/fix/test/docs/refactor/chore/build)
+#   2. fix/feat commits are flagged for test verification (pre-commit handles the actual block)
+#   3. Messages should reference the TDD spec module if applicable
+#
+set -euo pipefail
+
+COMMIT_MSG_FILE="${1:-}"
+if [ -z "$COMMIT_MSG_FILE" ] || [ ! -f "$COMMIT_MSG_FILE" ]; then
+  exit 0
+fi
+
+COMMIT_MSG="$(cat "$COMMIT_MSG_FILE" 2>/dev/null || true)"
+
+# Skip merge commits
+if echo "$COMMIT_MSG" | grep -qE '^Merge '; then
+  exit 0
+fi
+
+# Get first line (subject)
+FIRST_LINE="$(echo "$COMMIT_MSG" | head -1)"
+
+# --- Rule 1: Must have a type prefix ---
+# Accepted: feat:, fix:, test:, docs:, refactor:, chore:, build:, ci:, style:, perf:
+if ! echo "$FIRST_LINE" | grep -qE '^(feat|fix|test|docs|refactor|chore|build|ci|style|perf)(\(.+\))?: .+'; then
+  # Check if it's a conventional Chinese-style message (some commits use Chinese)
+  if ! echo "$FIRST_LINE" | grep -qE '^(新增|修复|测试|文档|重构|构建|优化)(\(.+\))?: .+'; then
+    echo ""
+    echo "❌ COMMIT-MSG BLOCKED: Missing conventional commit prefix"
+    echo ""
+    echo "   First line: $FIRST_LINE"
+    echo ""
+    echo "   Required format: <type>(<scope>): <description>"
+    echo "   Accepted types: feat, fix, test, docs, refactor, chore, build, ci, style, perf"
+    echo "   Chinese types:  新增, 修复, 测试, 文档, 重构, 构建, 优化"
+    echo ""
+    echo "   Examples:"
+    echo "     feat(agent): add max-turns enforcement in AgentExecutor"
+    echo "     fix(skill): reject empty tool definitions in SkillLoader"
+    echo "     test(cost): add E2E tests for /cost/summary 401/403 paths"
+    echo "     docs(tdd): update E2E key path sections in 12 spec files"
+    echo ""
+    exit 1
+  fi
+fi
+
+# --- Rule 2: Warn on fix/feat without test mention ---
+MSG_LOWER="$(echo "$COMMIT_MSG" | tr '[:upper:]' '[:lower:]')"
+if echo "$MSG_LOWER" | grep -qE '^(fix|修复)' && ! echo "$MSG_LOWER" | grep -qE 'test|测试|spec'; then
+  echo ""
+  echo "⚠️  WARNING: Bugfix commit — no test reference in message"
+  echo "   Bugfix commits should mention the test that verifies the fix."
+  echo "   Example: fix(sqlguard): reject UNION in subquery (SqlGuardTest)"
+  echo ""
+fi
+
+if echo "$MSG_LOWER" | grep -qE '^(feat|新增)' && ! echo "$MSG_LOWER" | grep -qE 'test|测试|spec'; then
+  echo ""
+  echo "⚠️  WARNING: Feature commit — no test reference in message"
+  echo "   Feature commits should mention the tests covering the new functionality."
+  echo "   Example: feat(knowledge): add knowledge upload endpoint (KnowledgeControllerTest)"
+  echo ""
+fi
+
+# --- Rule 3: Subject line length ---
+SUBJECT_LEN="$(echo -n "$FIRST_LINE" | wc -c | tr -d ' ')"
+if [ "$SUBJECT_LEN" -gt 100 ]; then
+  echo ""
+  echo "❌ COMMIT-MSG BLOCKED: Subject line too long ($SUBJECT_LEN chars, max 100)"
+  echo ""
+  echo "   $FIRST_LINE"
+  echo ""
+  exit 1
+fi
+
+exit 0

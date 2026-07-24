@@ -34,15 +34,79 @@ snap-agent-demo/                    # 独立演示模块（不在父 pom 中）
 
 1. **构建顺序**：先 `mvn clean install` 父项目（core + starter），再 `cd snap-agent-demo && mvn clean package`
 2. **Java 8**：源码必须兼容 Java 8（无 `var`、无 `Stream.toList()`、无 `Text Blocks`）
-3. **测试基线**：1010 tests（core 254 + starter 756），jacoco 行覆盖率门槛为 **ratchet 模式**（core ≥ 0.72 / starter ≥ 0.73，即当前实测值向下取整，只许升不许降）。目标：随新测试补齐逐步升回 0.85——重灾区 core `codegraph`/`conversation`/`security` 0% / `patrol` 25% / `cost` 56%，starter `tool.mcp` 43% / `web` 44% / `patrol` 60% / `llm` 65% / `autoconfig` 69%。注意门槛在 `verify` 阶段才检查（且 JaCoCo 比较时向下取整到 2 位小数），日常 `mvn test` 不会触发，发版前必须跑 `mvn clean verify`
+3. **测试基线**：1253+ tests（core 254 + starter 1253），jacoco 行覆盖率门槛为 **ratchet 模式**（core ≥ 0.72 / starter ≥ 0.73，即当前实测值向下取整，只许升不许降）。目标：随新测试补齐逐步升回 0.85。注意门槛在 `verify` 阶段才检查，日常 `mvn test` 不会触发，发版前必须跑 `mvn clean verify`
 4. **Stale JAR 问题**：Spring Boot fat JAR 嵌套 starter JAR，改了 starter 代码后必须 `mvn clean install` starter 再重新 `mvn clean package` demo
 
 ## 代码约定
 
 - **Java**: `javax.servlet`（非 `jakarta`），`@ConditionalOnProperty` 控制 Bean 装配
 - **前端**: 纯 vanilla JS，无构建工具，无 npm 依赖。`app.js` 改动后需递增 `index.html` 中的 `?v=N` 缓存破坏参数
-- **测试**: JUnit 5 + AssertJ + Mockito，测试类与源码同包结构
-- **Git**: 提交信息用英文或中英混合，不要 `--no-verify`
+- **测试**: JUnit 5 + AssertJ + Mockito，测试类与源码同包结构。详见 `docs/TEST_GUIDELINES.md` — **TDD 驱动开发，贯彻到底**
+- **Git**: 提交信息用英文或中英混合，Conventional Commits 格式，不要 `--no-verify`
+
+## TDD 驱动开发规范
+
+> **核心原则：每一行产品代码都有对应的测试代码。测试是设计工具，不是覆盖率工具。**
+> 完整规范见 `docs/TEST_GUIDELINES.md`
+
+### 红绿循环 (必须遵守)
+
+```
+Red:   先写测试 → 运行 → 失败（功能未实现）
+Green: 写最小实现 → 运行 → 通过
+Refactor: 重构 → 运行 → 仍通过
+```
+
+### Bugfix 规则
+
+修复 Bug 时**必须**：
+1. 先写复现测试 — 在修复前，写一个测试能稳定复现该 Bug（红灯）
+2. 再修复代码 — 最小改动让测试通过（绿灯）
+3. 提交信息引用测试类名
+
+### Feature 规则
+
+新增功能时**必须**：
+1. 先写失败测试 — 断言期望行为（红灯）
+2. 再实现功能 — 让测试通过（绿灯）
+3. 补充边界测试 — null/空/超长/并发/异常路径
+
+### 测试分层
+
+| 层级 | 特征 | 适用 |
+|------|------|------|
+| Unit | @ExtendWith(MockitoExtension.class)，standalone MockMvc，无 Spring 上下文 | 核心逻辑：Service/Executor/Loader/Registry/Guard |
+| Integration | standalone MockMvc + 真实组件链，或 @SpringBootTest | Controller 端点、多组件协作、条件装配 |
+| E2E | standalone MockMvc 模拟完整请求链 | 端到端关键路径 |
+| Frontend Unit | Vitest + jsdom，eval 加载非模块化 JS | DOM 操作、工具函数 |
+| Frontend E2E | Playwright + page.route() mock API | UI 交互、SSE 渲染 |
+
+### 禁止项
+
+- 禁止先写实现再补测试
+- 禁止 @SpringBootTest 用于纯逻辑测试（用 standalone MockMvc）
+- 禁止测试间共享状态（每个测试 @BeforeEach 重置）
+- 禁止 mock 被测对象本身（mock 依赖，不 mock 被测类）
+- 禁止 --no-verify 旁路（仅限生产事故紧急修复）
+
+### 覆盖率
+
+- JaCoCo ratchet 模式：core ≥ 0.72 / starter ≥ 0.73，只升不降
+- 每个 public 方法至少 1 正常路径 + 1 边界/错误路径
+- Controller 端点必须有：正常 200 + 错误（400/404/403/429）+ 认证（401/403）
+- 发版前必须 `mvn clean verify`
+
+### Git Hooks
+
+安装：`./scripts/install-hooks.sh`
+
+- **pre-commit**: bugfix/feature 提交必须有测试文件变更，否则阻止提交
+- **commit-msg**: 强制 Conventional Commits 格式（feat/fix/test/docs/refactor/chore/build）
+- **main 分支禁止 WIP 提交**
+
+### TDD 规格文件
+
+测试规格在 `docs/tdd/01-agent-engine/` 至 `docs/tdd/12-codegraph/`，每个模块包含已有测试覆盖、E2E 关键路径、测试缺口（GAP）。新增功能前先更新对应 TDD 规格文件。
 
 ## 安全红线
 
