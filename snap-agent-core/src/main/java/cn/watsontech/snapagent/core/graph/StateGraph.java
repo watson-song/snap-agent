@@ -63,7 +63,7 @@ public class StateGraph {
                 if (!nodes.containsKey(entry.getValue())) {
                     throw new IllegalStateException("conditional routing target not found: " + entry.getValue());
                 }
-                adjacency.get(ce.getFrom()).add(new EdgeTarget(entry.getValue(), entry.getKey()));
+                adjacency.get(ce.getFrom()).add(new EdgeTarget(entry.getValue(), entry.getKey(), ce.getCondition()));
             }
         }
 
