@@ -10,6 +10,8 @@ import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
@@ -173,5 +175,45 @@ class AgentNodeTest {
         String userMsg = capturedReq[0].getMessages().get(0).getContent();
         assertThat(userMsg).doesNotContain("<knowledge>");
         assertThat(userMsg).isEqualTo("分析问题");
+    }
+
+    @Test
+    @DisplayName("tool defs 从 registry.getAll() 构建")
+    void toolDefsFromRegistry() throws InterruptException {
+        LlmClient llmClient = mock(LlmClient.class);
+        LlmRequest[] capturedReq = new LlmRequest[1];
+        doAnswer(inv -> {
+            capturedReq[0] = inv.getArgument(0);
+            LlmEventSink sink = inv.getArgument(1);
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), any());
+
+        // Create a mocked ToolCallback with description + jsonSchema
+        ToolCallback callback = mock(ToolCallback.class);
+        when(callback.getName()).thenReturn("mysql_query");
+        when(callback.getDescription()).thenReturn("执行SQL查询");
+        when(callback.getJsonSchema()).thenReturn("{\"type\":\"object\",\"properties\":{\"sql\":{\"type\":\"string\"}}}");
+
+        ToolCallbackRegistry registry = mock(ToolCallbackRegistry.class);
+        when(registry.getAll()).thenReturn(Collections.singletonList(callback));
+
+        ExecutionContext ctx = mock(ExecutionContext.class);
+        when(ctx.getLlmClient()).thenReturn(llmClient);
+        when(ctx.getTools()).thenReturn(registry);
+        when(ctx.getTaskId()).thenReturn("t-1");
+        when(ctx.isCancelled()).thenReturn(false);
+
+        AgentNode node = new AgentNode(testSkill(), testTask());
+        GraphState state = GraphState.empty("t1")
+                .with("system.prompt", "你是诊断 agent")
+                .with("user.message", "分析问题");
+
+        node.execute(state, ctx);
+
+        // Verify tool defs were passed to LlmRequest
+        assertThat(capturedReq[0].getTools()).hasSize(1);
+        assertThat(capturedReq[0].getTools().get(0).getName()).isEqualTo("mysql_query");
+        assertThat(capturedReq[0].getTools().get(0).getDescription()).isEqualTo("执行SQL查询");
     }
 }

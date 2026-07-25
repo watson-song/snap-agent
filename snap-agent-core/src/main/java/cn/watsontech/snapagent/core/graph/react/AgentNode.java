@@ -13,11 +13,11 @@ import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -25,8 +25,7 @@ import java.util.Map;
  * AgentNode: LLM streaming call with tool definitions + RAG context.
  * Parses structured output. Sets stop_reason in state.
  *
- * <p>Phase 1: tool defs are empty (ToolCallback stub has no description/schema).
- * Phase 2 will add full tool definition building from ToolCallbackRegistry.</p>
+ * <p>Phase 2: tool defs built from ToolCallbackRegistry.getAll().</p>
  */
 public class AgentNode implements Node {
     private static final Logger log = LoggerFactory.getLogger(AgentNode.class);
@@ -60,8 +59,17 @@ public class AgentNode implements Node {
         List<Message> messages = new ArrayList<>();
         messages.add(Message.user(userMessage));
 
-        // Build tool defs (Phase 1: empty, full tool defs in Phase 2)
-        List<ToolDef> toolDefs = Collections.emptyList();
+        // Build tool defs from registry
+        List<ToolDef> toolDefs = new ArrayList<>();
+        if (toolRegistry != null) {
+            for (ToolCallback callback : toolRegistry.getAll()) {
+                toolDefs.add(new ToolDef(
+                    callback.getName(),
+                    callback.getDescription(),
+                    callback.getJsonSchema()
+                ));
+            }
+        }
 
         // Build LlmRequest (immutable constructor)
         LlmRequest request = new LlmRequest(
