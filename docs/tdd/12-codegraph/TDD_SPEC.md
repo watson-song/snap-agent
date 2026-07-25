@@ -1,6 +1,7 @@
 # TDD需求规格说明书 — 代码图谱 (Code Graph)
 
-> 版本: 1.0 | 模块: 12-codegraph | 基于 TEMPLATE.md
+> 版本: 1.1 (SnapAgent 2.x 架构适配) | 模块: 12-codegraph | 基于 TEMPLATE.md
+> 变更: CodeGraphToolProvider → @Tool 注解方法 (由 ToolCallbacks.from() 反射发现); CodeGraph 模型 (nodes/edges/BFS) 与正则解析保持不变
 
 ---
 
@@ -10,19 +11,19 @@
 需求ID: REQ-12-CODEGRAPH
 需求名称: 代码图谱构建与检索 (Code Graph)
 优先级: P1
-迭代: v0.8+
+迭代: v0.8+ (2.x 适配)
 负责人: SnapAgent Team
 状态: 开发中
 ```
 
 ### 1.1 背景与目标
-- **业务背景**: SnapAgent 需要理解宿主项目代码结构，为 LLM 提供调用链、影响范围等代码级上下文。
-- **用户价值**: AI 问答时能回答"谁调用了这个方法"、"改这个类影响哪些代码"等问题，无需人工翻代码。
-- **成功指标**: 正则解析覆盖率 > 80% 常见 Java 模式；BFS 查询 < 10ms；循环检测 100%。
+- **业务背景**: SnapAgent 需要理解宿主项目代码结构，为 LLM 提供调用链、影响范围等代码级上下文。SnapAgent 2.x 中，CodeGraph 模型与正则解析保持不变，仅将 `CodeGraphToolProvider` 的工具暴露方式从自定义 ToolProvider 改为 `@Tool` 注解方法，由 `ToolCallbacks.from()` 反射发现并注册到 `ToolCallbackRegistry`，与内置工具统一。
+- **用户价值**: AI 问答时能回答"谁调用了这个方法"、"改这个类影响哪些代码"等问题，无需人工翻代码；2.x 后 CodeGraph 工具与其他 @Tool 工具一致地参与图执行。
+- **成功指标**: 正则解析覆盖率 > 80% 常见 Java 模式；BFS 查询 < 10ms；循环检测 100%；@Tool 方法反射注册成功率 100%。
 
 ### 1.2 范围边界
-- **包含**: `CodeGraph`、`CodeGraphNode`、`CodeGraphEdge`、`CodeGraphBuilder` (SPI)、`CodeGraphIndex` (SPI)、`SimpleCodeGraphBuilder`、`InMemoryCodeGraphIndex`、`CodeGraphToolProvider`。
-- **不包含**: AST 级精确解析 (JavaParser/Spoon)、持久化索引 (SQLite/H2)、跨仓库分析。
+- **包含**: `CodeGraph`、`CodeGraphNode`、`CodeGraphEdge`、`CodeGraphBuilder` (SPI)、`CodeGraphIndex` (SPI)、`SimpleCodeGraphBuilder`、`InMemoryCodeGraphIndex`、`CodeGraphTools` (含 `@Tool` 注解方法)。
+- **不包含**: AST 级精确解析 (JavaParser/Spoon)、持久化索引 (SQLite/H2)、跨仓库分析、`CodeGraphToolProvider` 旧实现 (已删除)。
 
 ### 1.3 风险与假设
 
@@ -31,6 +32,7 @@
 | R1 | 正则解析对复杂 Java 语法误解析 | 中 | 中 | 标注为 regex 模式，后续可替换为 AST |
 | R2 | 大项目 OOM | 低 | 高 | 文件大小限制 + 路径白名单 |
 | R3 | BFS 遇到环死循环 | 中 | 高 | visited 集合去重 |
+| R4 | @Tool 方法签名与 ToolCallbacks.from() 反射解析不兼容 | 低 | 中 | 扫描期校验 + 启动日志警告 |
 
 ---
 
@@ -174,32 +176,46 @@ AC16: Given B#b() 被 A#a() 和 D#d() 调用
   Then 返回含 A#a() 和 D#d()
 ```
 
-### US-10: CodeGraphToolProvider 工具暴露
+### US-10: CodeGraphTools 通过 @Tool 暴露 (2.x 重构)
 ```gherkin
 作为 LLM
-我希望 通过工具调用访问代码图谱
-以便 在对话中回答代码问题
+我希望 通过 @Tool 注解方法访问代码图谱，由 ToolCallbacks.from() 反射注册到 ToolCallbackRegistry
+以便 在对话中回答代码问题，与内置工具无差异
 ```
 **AC:**
 ```gherkin
-AC17: Given 工具参数 tool="call_chain" query="A#a()"
-  When provider.execute(args, ctx)
+AC17: Given CodeGraphTools 类含 @Tool(name="call_chain") 方法
+  When ToolCallbacks.from(codeGraphToolsInstance)
+  Then 返回 ToolCallback[size=4] (call_chain/reverse_chain/impact_analysis/find)
+  And 每个 ToolCallback.getJsonSchema() 含参数 schema
+
+AC18: Given 工具参数 tool="call_chain" query="A#a()"
+  When ToolCallback.execute(args, ctx)
   Then 返回非错误结果，content 含 "正向调用链"
-AC18: Given tool="unknown"
+
+AC19: Given tool="unknown"
   When execute
   Then 返回错误 "unknown tool"
-AC19: Given 缺少 tool 参数
+
+AC20: Given 缺少 tool 参数
   When execute
   Then 返回错误 "missing required parameter: tool"
-AC20: Given tool="find" query="b"
+
+AC21: Given tool="find" query="b"
   When execute
   Then content 含 "匹配节点" 和节点信息
-AC21: Given provider.name()
+
+AC22: Given ToolCallback.getName() 对应 @Tool(name=...)
   When 调用
-  Then 返回 "code_graph_tools"
-AC22: Given provider.schema()
-  When 调用
-  Then JSON 含 call_chain/reverse_chain/impact_analysis/find
+  Then 返回 "call_chain"/"reverse_chain"/"impact_analysis"/"find"
+
+AC23: Given ToolCallbackRegistry 已注册 CodeGraph 的 4 个 ToolCallback
+  When toToolDefinitionsJson()
+  Then JSON 含 call_chain/reverse_chain/impact_analysis/find，与其他 @Tool 工具格式一致
+
+AC24: Given CodeGraphTools 实例被销毁
+  When ToolCallbackRegistry.unregister("call_chain") 等
+  Then 4 个工具均不再可见，其他工具不受影响
 ```
 
 ---
@@ -215,7 +231,7 @@ AC22: Given provider.schema()
 | 检索 | US-6 | 模糊搜索 | 命中率 100% | US-1 |
 | 调用链 | US-7/8 | 依赖分析 | 深度限制+循环 100% | US-1 |
 | 影响 | US-9 | 变更评估 | 受影响节点 100% | US-1 |
-| 工具 | US-10 | LLM 可用 | 4种工具全覆盖 | US-7/8/9 |
+| 工具 | US-10 | LLM 可用 | 4种 @Tool 方法全覆盖 | US-7/8/9 |
 
 ---
 
@@ -248,17 +264,18 @@ AC22: Given provider.schema()
 | UC-21 | nodeCount | P0 | - | 单元 |
 | UC-22 | getOutgoingEdges | P0 | - | 单元 |
 | UC-23 | getIncomingEdges | P0 | - | 单元 |
-| UC-24 | Tool: call_chain | P0 | AC17 | 单元 |
-| UC-25 | Tool: reverse_chain | P0 | - | 单元 |
-| UC-26 | Tool: impact_analysis | P0 | - | 单元 |
-| UC-27 | Tool: find | P0 | AC20 | 单元 |
-| UC-28 | Tool: unknown error | P0 | AC18 | 单元 |
-| UC-29 | Tool: missing param error | P0 | AC19 | 单元 |
-| UC-30 | Tool: maxDepth 参数 | P1 | - | 单元 |
-| UC-31 | Tool: name() | P0 | AC21 | 单元 |
-| UC-32 | Tool: schema() | P0 | AC22 | 单元 |
-| UC-33 | Tool: 模糊匹配方法名 | P1 | - | 单元 |
-| UC-34 | Tool: 无匹配返回提示 | P1 | - | 单元 |
+| UC-24 | @Tool: call_chain | P0 | AC18 | 单元 |
+| UC-25 | @Tool: reverse_chain | P0 | - | 单元 |
+| UC-26 | @Tool: impact_analysis | P0 | - | 单元 |
+| UC-27 | @Tool: find | P0 | AC21 | 单元 |
+| UC-28 | @Tool: unknown error | P0 | AC19 | 单元 |
+| UC-29 | @Tool: missing param error | P0 | AC20 | 单元 |
+| UC-30 | @Tool: maxDepth 参数 | P1 | - | 单元 |
+| UC-31 | ToolCallbacks.from 反射发现 | P0 | AC17 | 单元 |
+| UC-32 | toToolDefinitionsJson 一致 | P0 | AC23 | 单元 |
+| UC-33 | unregister 不影响其他 | P1 | AC24 | 单元 |
+| UC-34 | @Tool: 模糊匹配方法名 | P1 | - | 单元 |
+| UC-35 | @Tool: 无匹配返回提示 | P1 | - | 单元 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -348,11 +365,18 @@ AC22: Given provider.schema()
 
 ```gherkin
 @priority:high @type:unit
-功能: CodeGraphToolProvider 工具
+功能: CodeGraphTools @Tool 注解方法 (经 ToolCallbacks.from() 反射)
+
+  场景: ToolCallbacks.from 反射发现 4 个 @Tool
+    Given CodeGraphTools 类含 @Tool(name="call_chain")/@Tool(name="reverse_chain")/@Tool(name="impact_analysis")/@Tool(name="find")
+    When ToolCallbacks.from(codeGraphToolsInstance)
+    Then 返回 ToolCallback[size=4]
+    And 每个 callback.getName() 与 @Tool(name=...) 一致
+    And 每个 callback.getJsonSchema() 含参数 schema (query 必填, max_depth 可选)
 
   场景: call_chain 工具
     Given args={tool:"call_chain", query:"com.test.A#a()"}
-    When execute
+    When callback.execute(args, ctx)
     Then content 含 "正向调用链" 和 "B#b()" 和 "C#c()"
 
   场景: reverse_chain 工具
@@ -393,11 +417,18 @@ AC22: Given provider.schema()
     When execute
     Then content 含 "未找到"
 
-  场景: name/schema
-    When name()
-    Then 返回 "code_graph_tools"
-    When schema()
+  场景: ToolCallbackRegistry 注册与 JSON 一致
+    Given 4 个 ToolCallback 已注册到 ToolCallbackRegistry
+    When toToolDefinitionsJson()
     Then JSON 含 call_chain/reverse_chain/impact_analysis/find
+    And 与内置 @Tool 工具格式一致 (无 source 字段差异)
+
+  场景: unregister 不影响其他工具
+    Given CodeGraph 4 个 ToolCallback 已注册
+    And 内置 @Tool 方法 "mysql_query" 也注册为 ToolCallback
+    When ToolCallbackRegistry.unregister("call_chain") 等 4 个
+    Then CodeGraph 工具不再可见
+    And 内置 "mysql_query" 仍存在
 ```
 
 ---
@@ -405,11 +436,11 @@ AC22: Given provider.schema()
 ## 4. 接口规格
 
 ```java
-// SPI: 构建器
+// SPI: 构建器 (不变)
 CodeGraph build();                    // 解析源码构建图谱
 String type();                        // 构建器类型标识 ("regex")
 
-// SPI: 索引
+// SPI: 索引 (不变)
 List<CodeGraphNode> findByName(String namePattern);
 List<CodeGraphEdge> getOutgoingEdges(String nodeId);
 List<CodeGraphEdge> getIncomingEdges(String nodeId);
@@ -418,15 +449,39 @@ List<CodeGraphNode> findReverseCallChain(String methodId, int maxDepth);
 List<CodeGraphNode> findImpactScope(String nodeId, int maxDepth);
 CodeGraphNode getNode(String id);
 int nodeCount();
+
+// 2.x: CodeGraphTools 用 @Tool 注解方法暴露工具
+public class CodeGraphTools {
+    private final CodeGraphIndex index;
+
+    @Tool(name = "call_chain", description = "查找方法的正向调用链")
+    public ToolResult callChain(
+        @ToolParam(description = "方法 ID，如 com.example.Foo#bar()") String query,
+        @ToolParam(description = "最大深度", required = false) Integer maxDepth) { ... }
+
+    @Tool(name = "reverse_chain", description = "查找反向调用链")
+    public ToolResult reverseChain(...) { ... }
+
+    @Tool(name = "impact_analysis", description = "分析变更影响范围")
+    public ToolResult impactAnalysis(...) { ... }
+
+    @Tool(name = "find", description = "按名称模糊匹配代码节点")
+    public ToolResult find(...) { ... }
+}
+
+// 注册 (2.x): 由 ToolCallbacks.from() 反射发现 @Tool 方法
+// ToolCallback[] callbacks = ToolCallbacks.from(codeGraphToolsInstance);
+// Arrays.stream(callbacks).forEach(toolCallbackRegistry::register);
 ```
 
 ```yaml
-# ToolProvider 暴露给 LLM 的工具
-tool: code_graph_tools
-params:
-  tool: enum [call_chain, reverse_chain, impact_analysis, find]
-  query: string (方法ID或名称模式)
-  max_depth: int (可选，默认5)
+# 2.x: CodeGraphTools 通过 @Tool 暴露给 LLM 的工具
+# 由 ToolCallbacks.from() 反射发现，注册到 ToolCallbackRegistry
+tools (经 @Tool 注解):
+  - call_chain: { query: string (必填), max_depth: int (可选，默认5) }
+  - reverse_chain: { query: string (必填), max_depth: int (可选，默认5) }
+  - impact_analysis: { query: string (必填), max_depth: int (可选，默认3) }
+  - find: { query: string (必填) }
 返回: ToolResult content 含文本格式化结果
 ```
 
@@ -454,6 +509,11 @@ CodeGraphEdge:
 CodeGraph:
   nodes: List<CodeGraphNode> (不可变)
   edges: List<CodeGraphEdge> (不可变)
+
+CodeGraphTools (2.x):
+  index: CodeGraphIndex (注入)
+  @Tool 方法: call_chain / reverse_chain / impact_analysis / find
+  反射: ToolCallbacks.from(instance) → ToolCallback[4]
 ```
 
 ---
@@ -462,17 +522,18 @@ CodeGraph:
 
 | 错误码 | 级别 | 描述 |
 |--------|------|------|
-| unknown tool | ERROR | 未知工具名 |
-| missing required parameter: tool | ERROR | 缺少 tool 参数 |
-| missing required parameter: query | ERROR | 缺少 query 参数 |
+| unknown tool | ERROR | 未知工具名 (经 @Tool 反射后不应出现，仅手工调用时) |
+| missing required parameter: tool | ERROR | 缺少 tool 参数 (经 @Tool 反射后由 ToolCallback 校验) |
+| missing required parameter: query | ERROR | 缺少 query 参数 (@ToolParam required=true) |
 | 未找到 | INFO | 查询无匹配结果 |
+| TOOL_REFLECTION_ERR | ERROR | @Tool 方法签名无法被 ToolCallbacks.from() 解析 |
 
 ---
 
 ## 7. 非功能需求
 
 ```yaml
-性能: 构建P95<5s (千文件项目) | 查询P95<10ms | BFS循环检测100%
+性能: 构建P95<5s (千文件项目) | 查询P95<10ms | BFS循环检测100% | ToolCallbacks.from()<100ms
 安全: CodePathGuard路径白名单 | 文件大小限制 | 扫描包名限制
 ```
 
@@ -486,9 +547,9 @@ CodeGraph:
 |----------|------|------|------|
 | `SimpleCodeGraphBuilderTest` | starter | class/method/field解析、extends/implements、CALLS、包名过滤、空项目、null root、type()、interface/enum | 8 |
 | `InMemoryCodeGraphIndexTest` | starter | findByName(匹配/大小写/空null)、findCallChain(正向/depth/不存在/循环)、findReverseCallChain、findImpactScope、getOutgoingEdges、getIncomingEdges、getNode(命中/null)、nodeCount | 14 |
-| `CodeGraphToolProviderTest` | starter | call_chain、reverse_chain、impact_analysis、find、模糊匹配、unknown error、missing param、无匹配、name、schema、maxDepth | 13 |
+| `CodeGraphToolsTest` | starter | ToolCallbacks.from 反射发现 4 个 @Tool、call_chain、reverse_chain、impact_analysis、find、模糊匹配、unknown error、missing param、无匹配、maxDepth、toToolDefinitionsJson 一致、unregister 不影响其他 | 15 |
 
-**总结**: 3个测试文件，35个测试用例，覆盖全部 SPI 方法和工具提供者。
+**总结**: 3个测试文件，37个测试用例，覆盖全部 SPI 方法、@Tool 反射注册和 4 种工具调用。CodeGraph 模型与正则解析部分与 1.0 版本完全一致；仅工具暴露方式改为 @Tool 注解方法。
 
 ### 8.3 E2E 关键路径
 
@@ -497,9 +558,10 @@ CodeGraph:
 | E2E-1 | 代码图谱构建: SimpleCodeGraphBuilder.build(projectRoot) → CodeGraph (class/method/field 节点 + CALLS/DEPENDS_ON 边) | SimpleCodeGraphBuilder | ✅已覆盖 (SimpleCodeGraphBuilderTest 8测试) |
 | E2E-2 | 调用链查询: InMemoryCodeGraphIndex.findCallChain(src, dst, maxDepth) → 正向调用链 | InMemoryCodeGraphIndex | ✅已覆盖 (InMemoryCodeGraphIndexTest 14测试) |
 | E2E-3 | 影响范围: InMemoryCodeGraphIndex.findImpactScope(className) → 反向调用链 | InMemoryCodeGraphIndex | ✅已覆盖 |
-| E2E-4 | 工具执行: POST /runs (skillId=auto, tool=call_chain) → LLM tool_use → CodeGraphToolProvider.execute() → JSON 结果 | POST /runs, CodeGraphToolProvider | ⚠未实现 (GAP-6) |
+| E2E-4 | 工具执行: POST /runs (skillId=auto, tool=call_chain) → LLM tool_use → ToolsNode 调 CodeGraph ToolCallback → JSON 结果 | POST /runs, ToolsNode + CodeGraphTools | ⚠未实现 (GAP-6) |
 | E2E-5 | SPI 可替换性: CodeGraphBuilder SPI 替换 → 新 builder 生效 → 构建结果不同 | CodeGraphBuilder SPI | ⚠未实现 (GAP-3 P2) |
 | E2E-6 | 循环检测: findCallChain(A→B→A) → visited 集合去重 → 不死循环 | InMemoryCodeGraphIndex | ✅已覆盖 |
+| E2E-7 | @Tool 反射注册: ToolCallbacks.from(codeGraphToolsInstance) → ToolCallback[4] → ToolCallbackRegistry 注册 → toToolDefinitionsJson 含 4 工具 | ToolCallbacks + ToolCallbackRegistry | ✅已覆盖 (CodeGraphToolsTest) |
 
 ### 8.4 测试缺口
 
@@ -511,11 +573,14 @@ CodeGraph:
 | GAP-4 | ✅已关闭: DEPENDS_ON 边类型已由 `SimpleCodeGraphBuilderTest` 覆盖 (build_parsesDependsOnFromFieldType/build_parsesDependsOnMethodParam)。OVERRIDES/REFERENCES 不由 SimpleCodeGraphBuilder 产生，CodeGraphTest 验证所有 EdgeType 可存储。 | — | P2 |
 | GAP-5 | ⚠功能缺失: SimpleCodeGraphBuilder.build() 未实现大文件跳过逻辑（CodePathGuard.validate 有 maxFileBytes 但 builder 直接用 Files.readAllBytes）。需先实现再测试。 | P2 | 功能未实现 |
 | GAP-6 | ⚠E2E缺失: POST /runs (tool=call_chain/reverse_chain/impact_analysis) 端到端流程无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
+| GAP-7 | ✅已关闭: @Tool 反射注册 (ToolCallbacks.from + ToolCallbackRegistry) 已由 `CodeGraphToolsTest` 覆盖 (shouldReflectFourToolMethods/shouldGenerateConsistentJsonSchema/shouldUnregisterWithoutAffectingOthers) | — | P0 |
 
 ### 8.5 Mock策略
 ```yaml
 无外部依赖需Mock。SimpleCodeGraphBuilder 使用真实文件系统 (@TempDir)。
-CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
+CodeGraphTools 使用真实 InMemoryCodeGraphIndex。
+ToolCallbacks.from() 使用真实反射 (无 mock)。
+ToolCallbackRegistry 使用 Mockito mock (验证 register/unregister 调用)。
 ```
 
 ---
@@ -525,7 +590,8 @@ CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
 | 依赖 | 状态 | 降级 |
 |------|------|------|
 | CodePathGuard | 已完成 | 路径校验 |
-| ToolProvider SPI | 已完成 | - |
+| ToolCallbackRegistry SPI (2.x) | 已完成 | - |
+| ToolCallbacks.from() 反射工具 (2.x) | 已完成 | - |
 | SimpleCodeGraphBuilder | 已完成 | 正则解析 |
 | InMemoryCodeGraphIndex | 已完成 | 内存索引 |
 
@@ -535,6 +601,8 @@ CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
 
 ```yaml
 日志: INFO "CodeGraph built: nodes={}, edges={}, duration={}ms" | WARN "File skipped: too large {}"
+      INFO "CodeGraphTools registered: 4 ToolCallbacks via ToolCallbacks.from()"
+指标: codegraph_build_duration_seconds | codegraph_query_duration_seconds{tool} | codegraph_tool_call_total{tool}
 ```
 
 ---
@@ -545,6 +613,7 @@ CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
 | 版本 | 日期 | 作者 | 内容 |
 |------|------|------|------|
 | 1.0 | 2026-07-24 | Team | 初始TDD规格 |
+| 1.1 | 2026-07-25 | Team | 适配 2.x: CodeGraphToolProvider 改为 CodeGraphTools (@Tool 注解方法); 由 ToolCallbacks.from() 反射发现并注册到 ToolCallbackRegistry; CodeGraph 模型与正则解析保持不变; 新增 UC-31/32/33 反射注册/JSON 一致/unregister 隔离 |
 
 ### 12.2 参考文档
 - `snap-agent-core/src/main/java/.../codegraph/CodeGraph.java`
@@ -554,7 +623,8 @@ CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
 - `snap-agent-core/src/main/java/.../codegraph/CodeGraphIndex.java`
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../codegraph/SimpleCodeGraphBuilder.java`
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../codegraph/InMemoryCodeGraphIndex.java`
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../codegraph/CodeGraphToolProvider.java`
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../codegraph/CodeGraphTools.java` (2.x 重命名自 CodeGraphToolProvider)
+- `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md`
 
 ### 12.3 术语表
 | 术语 | 定义 |
@@ -564,4 +634,6 @@ CodeGraphToolProvider 使用真实 InMemoryCodeGraphIndex。
 | CodeGraphEdge | 有向边 (CALLS/IMPLEMENTS/EXTENDS等) |
 | CodeGraphBuilder | 构建器 SPI，默认实现为 regex |
 | CodeGraphIndex | 索引 SPI，默认实现为内存 BFS |
-| CodeGraphToolProvider | 将图谱能力暴露为 LLM 工具 |
+| CodeGraphTools | 2.x 工具类，含 @Tool 注解方法，由 ToolCallbacks.from() 反射注册为 ToolCallback[] |
+| ToolCallbacks.from() | 2.x 反射工具，自动发现 @Tool 方法并包装为 ToolCallback |
+| ToolCallbackRegistry | 2.x 工具注册表 SPI，CodeGraph 工具与内置 @Tool 工具统一注册 |

@@ -1,6 +1,7 @@
 # TDD需求规格说明书 — 巡检告警与问题闭环 (Patrol, Alert & Issue Closure)
 
-> 版本: 2.0 | 模块: `snap-agent-core/patrol` + `snap-agent-spring-boot-2x-starter/patrol` + `issue`
+> 版本: 2.1 (SnapAgent 2.x 架构重构) | 模块: `snap-agent-core/patrol` + `snap-agent-spring-boot-2x-starter/patrol` + `issue`
+> 变更: PatrolScheduler 内部从 AgentExecutor 切换到 ReActGraphFactory + GraphExecutor; 告警收敛和 issue 闭环作为图执行后处理; 知识沉淀注入改由 RetrievalAugmentationAdvisor 承担
 
 ---
 
@@ -12,7 +13,7 @@
 优先级: P0 | 迭代: v0.5+v0.9 | 状态: 开发中
 ```
 
-**背景**: v0.5实现从"用户问→诊断"到"Agent主动巡检发现异常并推送"。v0.9补齐"问题→诊断→方案→修复→验证→沉淀"完整闭环。**目标**: 异常发现到告警<5分钟；去重率>70%；闭环率>80%。**范围**: ScheduledPatrolScheduler、InMemoryAlertConverger、AlertPushChannel SPI、Webhook/Email通道、DefaultAnomalyEventListener、IssueClosureService。**不含**: Jira/GitHub IssueTracker（v0.9.1）。
+**背景**: v0.5实现从"用户问→诊断"到"Agent主动巡检发现异常并推送"。v0.9补齐"问题→诊断→方案→修复→验证→沉淀"完整闭环。SnapAgent 2.x 中，PatrolScheduler 内部用 ReActGraphFactory.build(skill, task, advisors) 编译 ReAct 图并由 GraphExecutor 执行；告警收敛、推送和 issue 闭环作为图执行后的后处理步骤；问题沉淀知识通过 RetrievalAugmentationAdvisor 注入后续诊断图。**目标**: 异常发现到告警<5分钟；去重率>70%；闭环率>80%。**范围**: ScheduledPatrolScheduler、InMemoryAlertConverger、AlertPushChannel SPI、Webhook/Email通道、DefaultAnomalyEventListener、IssueClosureService、IssueClosureNode (可选终态节点)。**不含**: Jira/GitHub IssueTracker（v0.9.1）。
 
 | 风险 | 描述 | 缓解 |
 |------|------|------|
@@ -20,6 +21,7 @@
 | R2 | 多Pod巡检重复 | PatrolLockProvider SPI，Noop默认单Pod |
 | R3 | 推送通道异常丢告警 | 异常捕获不影响其他通道 |
 | R4 | ALERT_SUMMARY依赖LLM格式 | 正则大小写不敏感+去尾部markdown |
+| R5 | 图执行 checkpoint 失败致状态不一致 | GraphExecutor 失败不阻塞主流程，降级 RUNNING→FAILED |
 
 ---
 
@@ -34,7 +36,7 @@
 **AC:**
 ```gherkin
 AC1: Given cron="0 */5 * * * ?" enabled=true / When schedule(task) / Then TaskScheduler.schedule调用，ID为null时自动生成"patrol_N"
-AC2: Given lockProvider.tryAcquire=false / When 巡检触发 / Then 跳过执行，不调AgentExecutor，记录INFO
+AC2: Given lockProvider.tryAcquire=false / When 巡检触发 / Then 跳过执行，不调 GraphExecutor，记录INFO
 ```
 
 ### US-2: 巡检执行与异常检测
@@ -46,7 +48,7 @@ AC2: Given lockProvider.tryAcquire=false / When 巡检触发 / Then 跳过执行
 **AC:**
 ```gherkin
 AC1: Given report含"ALERT_SUMMARY: CPU high" / When 巡检完成 / Then anomalyDetected=true，AlertConverger.record调用，推送通道收到告警
-AC2: Given Skill返回FAILED / When 巡检完成 / Then anomalyDetected=true
+AC2: Given Skill返回FAILED (GraphExecutor 抛异常或 TaskStatus.FAILED) / When 巡检完成 / Then anomalyDetected=true
 AC3: Given report无ALERT_SUMMARY且状态SUCCEEDED / Then anomalyDetected=false，不触发推送
 ```
 
@@ -98,8 +100,8 @@ AC2: Given 收件人空 / When push / Then 不发送，记录WARN
 ```
 **AC:**
 ```gherkin
-AC1: Given AnomalyEvent skillName=null / When onEvent / Then 默认skill="error-spike-investigation"，AgentExecutor调用，报告保存+推送
-AC2: Given skillName="custom-diag" / When onEvent / Then SkillRegistry.get("custom-diag")调用
+AC1: Given AnomalyEvent skillName=null / When onEvent / Then 默认skill="error-spike-investigation"，ReActGraphFactory.build + GraphExecutor.execute 调用，报告保存+推送
+AC2: Given skillName="custom-diag" / When onEvent / Then SkillRegistry.get("custom-diag") 调用并以此 skill 编译图
 ```
 
 ### US-7: 问题闭环状态机
@@ -111,7 +113,7 @@ AC2: Given skillName="custom-diag" / When onEvent / Then SkillRegistry.get("cust
 **AC:**
 ```gherkin
 AC1: Given 诊断任务完成 / When proposeSolution / Then status=SOLUTION_PROPOSED，含方案选项
-AC2: Given status=FIX_IN_PROGRESS / When verify / Then 运行verify-fix Skill，status=VERIFIED
+AC2: Given status=FIX_IN_PROGRESS / When verify / Then 运行verify-fix Skill (经 ReActGraphFactory 编译)，status=VERIFIED
 AC3: Given status=VERIFIED / When close / Then 提取KnowledgeFragment+reload，status=CLOSED
 ```
 
@@ -135,23 +137,42 @@ AC3: Given issue.status 为 RESOLVED
   Then 不创建工单 (仅 OPEN 状态可创建)
 ```
 
-### US-9: 问题沉淀知识注入 Agent 引擎
+### US-9: 问题沉淀知识注入图运行时 (2.x 重构)
 ```gherkin
 作为 运维工程师
-我希望 问题关闭后沉淀的知识通过 KnowledgeInjector 自动注入 Agent 引擎的 system prompt
+我希望 问题关闭后沉淀的知识通过 RetrievalAugmentationAdvisor 自动注入后续诊断图的 agent 节点
   以便 下次同类问题诊断时 Agent 可参考历史经验
 ```
 **AC:**
 ```gherkin
 AC1: Given issue 关闭时 KnowledgeSedimentationExtractor 提取 KnowledgeFragment
-  When KnowledgeBase.reload()
-  Then 下次 Agent 执行时 KnowledgeInjector.extend 返回含经验沉淀的片段
-  And system prompt 含"业务知识参考"和"经验沉淀"标记
+  When KnowledgeBase.reload() / VectorStore.add(docs)
+  Then 下次 ReActGraphFactory.build(skill, task, advisors) 时 RetrievalAugmentationAdvisor.beforeNode("agent") 返回含经验沉淀的片段
+  And state["rag.context"] 含"业务知识参考"和"经验沉淀"标记
 
-AC2: Given KnowledgeBase 为 null
+AC2: Given KnowledgeBase 与 VectorStore 均为 null
   When issue.close()
   Then 不报错，status=CLOSED
-  And KnowledgeInjector 无新片段可注入
+  And RetrievalAugmentationAdvisor 无新片段可注入 (state["rag.context"] 为空)
+```
+
+### US-10: IssueClosureNode 作为可选终态节点 (2.x 新增)
+```gherkin
+作为 平台开发者
+我希望 agent end_turn 后可路由到 IssueClosureNode 完成闭环
+  以便 闭环逻辑嵌入图而非散落在 PatrolScheduler
+```
+**AC:**
+```gherkin
+AC1: Given 配置 snap-agent.patrol.issue-closure-node=true
+  When ReActGraphFactory.build(skill, task, advisors) 编译
+  Then CompiledGraph 含 IssueClosureNode 作为可选终态
+  And ShouldContinue 路由 end_turn → IssueClosureNode → END
+
+AC2: Given snap-agent.patrol.issue-closure-node=false (默认)
+  When 图编译
+  Then 不含 IssueClosureNode，end_turn → END (legacy 路径)
+  And 闭环由 PatrolScheduler 后处理调用 IssueClosureService
 ```
 
 ---
@@ -168,7 +189,8 @@ AC2: Given KnowledgeBase 为 null
 | 诊断 | US-6 事件触发 | 事件驱动 | 延迟<30s | US-2 |
 | 治理 | US-7 闭环 | 经验沉淀 | 闭环>80% | US-6 |
 | 闭环 | US-8 | 工单跟踪 | 创建率 100% | US-7 |
-| 沉淀 | US-9 | 经验注入引擎 | 沉淀注入 100% | US-7 |
+| 沉淀 | US-9 | 经验注入图 | 沉淀注入 100% | US-7 |
+| 图集成 | US-10 | 终态节点 | 路由正确 100% | US-7 |
 
 ---
 
@@ -184,7 +206,8 @@ AC2: Given KnowledgeBase 为 null
 | UC-09/10/11 | 推送通道(Webhook+Email) | P0 | US-4/5 | 单元 |
 | UC-12 | 事件触发默认Skill | P0 | US-6 AC1 | 单元 |
 | UC-13/14/15 | 问题闭环(方案/验证/关闭) | P0 | US-7 | 单元 |
-| UC-16 | 问题沉淀→知识注入引擎 | P1 | US-9 | 单元 |
+| UC-16 | 问题沉淀→RetrievalAugmentationAdvisor | P1 | US-9 | 单元 |
+| UC-17 | IssueClosureNode 路由 | P1 | US-10 | 单元 |
 | UC-R1 | POST /patrol/tasks 创建巡检任务 | P0 | US-1 AC1 | 集成 |
 | UC-R2 | GET /patrol/tasks 列出巡检任务 | P1 | - | 集成 |
 | UC-R3 | DELETE /patrol/tasks/{id} 删除巡检任务 | P1 | - | 集成 |
@@ -208,10 +231,10 @@ AC2: Given KnowledgeBase 为 null
 #### UC-03/04/05: 异常检测 (ALERT_SUMMARY / FAILED / 正常)
 ```gherkin
 @priority:high @type:unit
-功能: 巡检后异常判定与推送
+功能: 巡检后异常判定与推送 (基于 GraphExecutor 输出)
   场景: LLM输出ALERT_SUMMARY
     Given report="CPU at 95%\nALERT_SUMMARY: CPU critically high"
-    When 巡检完成
+    When 巡检完成 (GraphExecutor.execute 返回 SUCCEEDED)
     Then extractAlertSummary返回"CPU critically high"，anomalyDetected=true
     And AlertConverger.record调用，pushChannel.push调用
   场景: 大小写不敏感+去尾部markdown
@@ -221,7 +244,7 @@ AC2: Given KnowledgeBase 为 null
     Given report="All systems normal" status=SUCCEEDED
     Then 返回null，anomalyDetected=false，不触发推送
   场景: FAILED状态自动判定异常
-    Given AgentExecutor返回TaskStatus.FAILED
+    Given GraphExecutor.execute 返回 TaskStatus.FAILED
     Then anomalyDetected=true，AlertConverger.record调用
 ```
 
@@ -276,15 +299,20 @@ AC2: Given KnowledgeBase 为 null
 #### UC-12: 异常事件触发诊断
 ```gherkin
 @priority:high @type:unit
-功能: DefaultAnomalyEventListener触发诊断Skill
+功能: DefaultAnomalyEventListener触发诊断Skill (经 ReActGraphFactory + GraphExecutor)
   场景: 默认skill触发
     Given event skillName=null
     When onEvent
-    Then SkillRegistry.get("error-spike-investigation")调用，AgentExecutor.execute调用
+    Then SkillRegistry.get("error-spike-investigation")调用
+    And ReActGraphFactory.build(skill, task, advisors) + GraphExecutor.execute 调用
     And 报告保存anomalyDetected=true，pushChannel.push调用
   场景: skill未找到存储失败报告
     Given skillName="nonexistent" SkillRegistry返回null
-    Then 报告status=FAILED summary含"Skill not found"，AgentExecutor未调用
+    Then 报告status=FAILED summary含"Skill not found"，GraphExecutor未调用
+  场景: skill 不可用 (UNAVAILABLE)
+    Given skill.available == UNAVAILABLE
+    Then 报告status=FAILED summary含 unavailableReason
+    And ReActGraphFactory.build 抛 SkillUnavailableException 被捕获
 ```
 
 #### UC-13/14/15: 问题闭环 (方案/验证/关闭)
@@ -297,44 +325,60 @@ AC2: Given KnowledgeBase 为 null
     Then status=SOLUTION_PROPOSED，options含2项，recommended="opt-1"，save调用
   场景: 方案—任务不存在返回null / SPI路径用SolutionSuggester
     Given taskStore.get返回null 或 SolutionSuggester已配置
-    Then 返回null(save未调用) 或 suggester调用(Executor未调用)
+    Then 返回null(save未调用) 或 suggester调用(GraphExecutor未执行)
   场景: 验证修复
     Given status=FIX_IN_PROGRESS verify-fix report含"通过"
     When verify("issue-001")
-    Then passed=true status=VERIFIED
+    Then passed=true status=VERIFIED (verify-fix Skill 经 ReActGraphFactory 编译)
   场景: 验证—Runner返回null fallback Skill / Issue不存在返回null
     Given VerificationRunner返回null 或 issueStore.load返回null
-    Then AgentExecutor.execute调用(Skill路径) 或 返回null
+    Then GraphExecutor.execute调用(Skill路径) 或 返回null
   场景: 关闭+沉淀
     Given status=VERIFIED
     When close("issue-005")
-    Then KnowledgeFragment提取，reload调用，status=CLOSED，knowledgeEntryId="sedimentation:issue-005"
+    Then KnowledgeFragment提取，VectorStore.add 调用，status=CLOSED，knowledgeEntryId="sedimentation:issue-005"
   场景: 关闭—knowledgeBase=null不报错
-    Given knowledgeBase=null
-    Then status=CLOSED，reload未调用
+    Given knowledgeBase=null 且 VectorStore=null
+    Then status=CLOSED，VectorStore.add 未调用
 ```
 
-#### UC-16: 问题沉淀→知识注入引擎
+#### UC-16: 问题沉淀→RetrievalAugmentationAdvisor
 ```gherkin
 @priority:medium @type:unit
-功能: 问题沉淀知识通过 KnowledgeInjector 注入 Agent 引擎
+功能: 问题沉淀知识通过 RetrievalAugmentationAdvisor 注入 agent 节点
   场景: 关闭后沉淀知识可被后续诊断检索
     Given IssueClosure(issueId="issue-005", userQuery="为什么订单服务超时?", rootCause="连接池打满")
     And KnowledgeSedimentationExtractor.extract 提取 KnowledgeFragment
     When close("issue-005")
-    Then knowledgeBase.reload 被调用
-    And 下次 KnowledgeInjector.extend(task提及"订单服务超时") 返回非空
-    And 返回内容含"经验沉淀"和"连接池打满"
-    When AgentExecutor.buildSystemPrompt 调用
-    Then system prompt 含"业务知识参考"section
-    And 含沉淀的"##问题"和"##根因"章节
+    Then KnowledgeBase.reload + VectorStore.add 被调用
+    And 下次 ReActGraphFactory.build(skill, task, advisors) 时
+    And RetrievalAugmentationAdvisor.beforeNode("agent", state, ctx) 调用 DocumentRetriever.retrieve
+    And state["rag.context"] 返回非空含"经验沉淀"和"连接池打满"
 
-  场景: knowledgeBase=null 时关闭不报错且不注入
-    Given knowledgeBase=null
+  场景: knowledgeBase=null + VectorStore=null 时关闭不报错且不注入
+    Given knowledgeBase=null 且 VectorStore=null
     When close("issue-005")
     Then status=CLOSED，不抛异常
-    And KnowledgeInjector.extend 无法检索沉淀片段 (返回空串)
-    And system prompt 不含"业务知识参考"
+    And RetrievalAugmentationAdvisor 检索结果为空 (state["rag.context"] 为空串)
+```
+
+#### UC-17: IssueClosureNode 路由
+```gherkin
+@priority:medium @type:unit
+功能: IssueClosureNode 作为可选终态节点
+  场景: 启用 issue-closure-node
+    Given snap-agent.patrol.issue-closure-node=true
+    When ReActGraphFactory.build(skill, task, advisors) 编译
+    Then CompiledGraph.getNodes() 含 "issue_closure" 节点
+    And ShouldContinue 路由 end_turn → "issue_closure" → END
+    And IssueClosureNode.execute 调用 IssueClosureService.close(taskId)
+
+  场景: 默认禁用 (legacy 路径)
+    Given snap-agent.patrol.issue-closure-node=false (默认)
+    When 图编译
+    Then CompiledGraph.getNodes() 不含 "issue_closure"
+    And ShouldContinue 路由 end_turn → END
+    And 闭环由 PatrolScheduler 后处理调用 IssueClosureService
 ```
 
 ---
@@ -348,6 +392,7 @@ void cancel(String patrolId); // 移除+cancel future
 Boolean toggleEnabled(String patrolId); // 切换enabled
 List<PatrolReport> getReports(String userId, int limit, int offset);
 long countReports(String userId);
+// 内部: build via ReActGraphFactory + execute via GraphExecutor
 ```
 
 ### 4.2 AlertConverger SPI
@@ -368,8 +413,21 @@ String type(); // "webhook"/"email"
 ```java
 IssueClosure proposeSolution(String taskId); // DIAGNOSED→SOLUTION_PROPOSED
 IssueClosure createExternalIssue(String taskId, String selectedSolution); // →FIX_IN_PROGRESS
-IssueClosure verify(String issueId); // →VERIFIED
-IssueClosure close(String issueId); // →CLOSED+沉淀
+IssueClosure verify(String issueId); // →VERIFIED (verify-fix 经 ReActGraphFactory 编译)
+IssueClosure close(String issueId); // →CLOSED+沉淀 (VectorStore.add)
+```
+
+### 4.5 IssueClosureNode (2.x 新增)
+```java
+/**
+ * 可选终态节点，agent end_turn 后路由到此。
+ * 调用 IssueClosureService.close(taskId) 完成闭环。
+ * 仅当 snap-agent.patrol.issue-closure-node=true 时由 ReActGraphFactory 加入图。
+ */
+public class IssueClosureNode implements Node {
+    public String getName() { return "issue_closure"; }
+    public GraphState execute(GraphState state, ExecutionContext ctx);
+}
 ```
 
 ---
@@ -381,6 +439,7 @@ PatrolReport: id/patrolId/taskId/userId/skillName/triggeredAt/status/summary/ano
 AnomalyEvent: type/source/message/timestamp/metadata/skillName/inputs
 AlertConvergence: 线程安全(count=AtomicInteger,lastSeen/status=volatile)，STATUS_ACTIVE/RESOLVED
 IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
+CheckpointStore: 2.x 新增 — 巡检任务失败可 resume (threadId="patrol:{patrolId}:{runId}")
 ```
 
 ---
@@ -388,17 +447,20 @@ IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
 ## 6. 错误处理规格
 | 场景 | 行为 | 日志 |
 |------|------|------|
-| Skill未找到/AgentExecutor异常 | 存储FAILED报告 | ERROR |
+| Skill未找到/ReActGraphFactory 抛 SkillUnavailableException | 存储FAILED报告 | ERROR |
+| GraphExecutor.execute 异常 (LLM/tool) | catch → checkpoint → FAILED 报告 | ERROR |
 | 推送通道/httpPost/MailException | 捕获不传播，不影响其他通道 | ERROR |
 | AlertConverger=null | 仅推送不收敛 | - |
 | reportStore=null | 不存储仍执行诊断 | - |
 | Issue不存在 | 返回null | WARN |
 | verify-fix Skill未找到 | 返回null(legacy) | ERROR |
+| IssueClosureNode 异常 | catch → END 不阻塞图成功 | WARN |
 
 ---
 
 ## 7. 非功能需求 (NFR)
 - [x] AlertConvergence线程安全(AtomicInteger+volatile) — 推送通道异常隔离 — 多Pod锁竞争 — 环形缓冲区有界内存 — 自动解决过期告警(懒检查)
+- [x] 2.x: GraphExecutor 失败 → checkpoint → 后续可 resume，巡检任务可断点续传
 
 ---
 
@@ -408,12 +470,12 @@ IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
 
 | 测试类 | 模块 | 覆盖内容 | 数量 |
 |--------|------|----------|------|
-| ScheduledPatrolSchedulerTest | starter | extractAlertSummary(7)/schedule(3)/cancel(2)/toggle(2)/list+reports(3)/executePatrol(8)/构造器(4) | 29 |
+| ScheduledPatrolSchedulerTest | starter | extractAlertSummary(7)/schedule(3)/cancel(2)/toggle(2)/list+reports(3)/executePatrol(8, 含 ReActGraphFactory+GraphExecutor 调用断言)/构造器(4) | 29 |
 | InMemoryAlertConvergerTest | starter | record新建/去重递增/不同source/query排序/resolve/count/环形淘汰 | 7 |
 | WebhookAlertPushChannelTest | starter | 非异常跳过/null跳过/JSON payload/event块/无auth/IOException吞/type/超时默认 | 8 |
 | EmailAlertPushChannelTest | starter | 非异常跳过/null跳过/空收件人/邮件字段/默认prefix/默认from/默认event/MailException吞/type | 9 |
-| DefaultAnomalyEventListenerTest | starter | 触发skill/指定skill/默认skill/skill未找到/异常存储/null converger/null store/合并inputs/通道异常/null通道/四参构造 | 12 |
-| IssueClosureServiceTest | starter | propose(3)/createIssue(3)/verify(3)/close(3)/SPI路径(3) | 15 |
+| DefaultAnomalyEventListenerTest | starter | 触发skill/指定skill/默认skill/skill未找到/异常存储/null converger/null store/合并inputs/通道异常/null通道/四参构造/SkillUnavailableException | 13 |
+| IssueClosureServiceTest | starter | propose(3)/createIssue(3)/verify(3, 含 ReActGraphFactory 编译 verify-fix)/close(3, 含 VectorStore.add)/SPI路径(3)/IssueClosureNode 路由(2) | 17 |
 | PatrolModelTest | core | AnomalyEvent(7)/AlertConvergence(5)/PatrolTask(7)/PatrolReport(3)/BugfixSuggestion(7) | 29 |
 
 ### 8.2 E2E 关键路径
@@ -426,6 +488,7 @@ IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
 | E2E-4 | Issue 闭环流程: POST /anchor/inject (proposeSolution) → POST /issues (createIssue) → POST /issues/{id}/verify → POST /issues/{id}/close | POST /anchor/inject, POST /issues, POST /issues/{id}/verify, POST /issues/{id}/close | ⚠未实现 (GAP-11) |
 | E2E-5 | Patrol → Alert 联动: POST /patrol/infer → anomaly → Alert 自动汇聚 → GET /alerts 验证告警 | POST /patrol/infer, GET /alerts | ⚠未实现 (GAP-12) |
 | E2E-6 | 认证/权限: GET /alerts 无认证 → 401 / 无权限 → 403 | GET /alerts | ⚠未实现 (GAP-13) |
+| E2E-7 | Checkpoint resume: 巡检失败 → checkpoint → POST /runs/{id}/resume → 继续执行 | POST /runs/{id}/resume | ⚠未实现 (GAP-14) |
 
 ### 8.3 测试缺口
 
@@ -444,26 +507,30 @@ IssueStatus: DIAGNOSED→SOLUTION_PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED
 | GAP-11 | ⚠E2E缺失: Issue 闭环流程 (propose→create→verify→close) 无端到端 E2E 覆盖 — 见 E2E-4 | P1 | 需 E2E 集成测试 |
 | GAP-12 | ⚠E2E缺失: Patrol→Alert 联动 (infer→anomaly→converge→alert) 无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 | GAP-13 | ⚠E2E缺失: GET /alerts 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-6 | P2 | 需 E2E 集成测试 |
+| GAP-14 | ⚠E2E缺失: 巡检任务 checkpoint resume (POST /runs/{id}/resume) 无 E2E 覆盖 — 见 E2E-7 | P2 | 需 E2E 集成测试 |
+| GAP-15 | ✅已关闭: IssueClosureNode 路由已由 `IssueClosureServiceTest` 覆盖 (shouldRouteToEndViaIssueClosureNodeWhenEnabled/shouldSkipIssueClosureNodeWhenDisabled) | — | P1 |
 
 ### 8.4 Mock策略
-TaskScheduler(mock可立即执行) / AgentExecutor(mock设status/report) / SkillRegistry(mock) / JavaMailSender(mock+ArgumentCaptor) / AlertConverger/IssueStore/IssueTracker/KnowledgeBase(mock) / PatrolLockProvider(mock默认true) / HTTP测试(继承覆写httpPost捕获参数)
+TaskScheduler(mock可立即执行) / ReActGraphFactory(mock 返回预设 CompiledGraph) / GraphExecutor(mock设status/report) / SkillRegistry(mock) / JavaMailSender(mock+ArgumentCaptor) / AlertConverger/IssueStore/IssueTracker/VectorStore/KnowledgeBase(mock) / PatrolLockProvider(mock默认true) / HTTP测试(继承覆写httpPost捕获参数)
 
 ---
 
 ## 9. 依赖与前置条件
 | 依赖 | 状态 | 降级 |
 |------|------|------|
-| AgentExecutor/SkillRegistry | 已完成(v0.1) | 同步/未找到存FAILED |
+| ReActGraphFactory + GraphExecutor | 已完成 (2.x) | 同步/未找到存FAILED |
+| SkillRegistry | 已完成(v0.1) | SkillUnavailableException |
 | TaskScheduler | Spring自带 | NoopLockProvider单Pod |
 | JavaMailSender | 可选(starter-mail) | @ConditionalOnClass保护 |
-| KnowledgeBase | 已完成(v0.7) | null时跳过reload |
+| VectorStore + EmbeddingModel | 可选 (2.x) | null 时跳过 reload |
 | IssueStore/Tracker | 已完成(v0.9) | Noop默认空实现 |
 
 ---
 
 ## 10. 可观测性设计
 ```yaml
-日志: 调度/锁跳过/执行/异常检测=INFO, 推送=INFO, 推送失败=ERROR, Issue状态转换=INFO
+日志: 调度/锁跳过/执行/异常检测=INFO, 推送=INFO, 推送失败=ERROR, Issue状态转换=INFO, Checkpoint save=DEBUG
+指标: patrol_graph_execution_duration_seconds, alert_converge_count, issue_state_transition_total
 ```
 
 ---
@@ -478,8 +545,11 @@ TaskScheduler(mock可立即执行) / AgentExecutor(mock设status/report) / Skill
 | 版本 | 日期 | 变更 |
 |------|------|------|
 | 2.0 | 2026-07-23 | 基于v0.5+v0.9设计文档创建 |
+| 2.1 | 2026-07-25 | 适配 2.x: PatrolScheduler 内部从 AgentExecutor 切换到 ReActGraphFactory + GraphExecutor; 告警收敛和 issue 闭环改为图执行后处理; 知识注入由 KnowledgeInjector 改为 RetrievalAugmentationAdvisor; 新增 IssueClosureNode 可选终态节点 (US-10 / UC-17); 沉淀目标改为 VectorStore |
+
 ### 参考文档
-`docs/superpowers/specs/2026-07-16-v0.5-active-monitoring-design.md` / `2026-07-16-v0.9-issue-closure-design.md` / `docs/tdd/TEMPLATE.md`
+`docs/superpowers/specs/2026-07-16-v0.5-active-monitoring-design.md` / `2026-07-16-v0.9-issue-closure-design.md` / `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md` / `docs/tdd/TEMPLATE.md`
+
 ### 术语表
 | 术语 | 定义 |
 |------|------|
@@ -487,6 +557,8 @@ TaskScheduler(mock可立即执行) / AgentExecutor(mock设status/report) / Skill
 | ALERT_SUMMARY | LLM巡检模式输出的异常标记行 |
 | AlertConvergence | 收敛告警(指纹/计数/状态)，指纹=SHA-256(type\|source)前16字符 |
 | AlertPushChannel | 推送通道SPI(webhook/email) |
-| AnomalyEventListener | 异常事件监听SPI，触发诊断Skill |
+| AnomalyEventListener | 异常事件监听SPI，触发诊断Skill (经 ReActGraphFactory 编译) |
 | IssueClosure | 问题闭环记录(状态机全生命周期) |
 | IssueStatus | DIAGNOSED→PROPOSED→FIX_IN_PROGRESS→VERIFIED→CLOSED |
+| IssueClosureNode | 2.x 可选终态图节点，agent end_turn 后路由到此完成闭环 |
+| RetrievalAugmentationAdvisor | 2.x 知识注入 Advisor，替代 KnowledgeInjector (经 VectorStore 检索) |

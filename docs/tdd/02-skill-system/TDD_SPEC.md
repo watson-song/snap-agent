@@ -1,7 +1,8 @@
 # TDD需求规格说明书 — Skill 系统
 
-> 版本: 2.0
+> 版本: 2.1 (SnapAgent 2.x 架构重构)
 > 适用: AI辅助开发 + TDD流程
+> 变更: 适配图架构 (EntryNode + ReActGraphFactory) 与 ToolCallbackRegistry SPI
 
 ---
 
@@ -17,13 +18,13 @@
 ```
 
 ### 1.1 背景与目标
-- **业务背景**: 诊断 skill 以 Markdown frontmatter 格式定义，需要解析、校验工具契约、缓存并支持内置 + 上传两层模型。用户可在运行时上传/删除自定义 skill。
-- **用户价值**: skill 加载从启动到可用 < 5 秒；两层模型让内置 skill 零配置可用，自定义 skill 持久化且可覆盖内置。
+- **业务背景**: 诊断 skill 以 Markdown frontmatter 格式定义，需要解析、校验工具契约、缓存并支持内置 + 上传两层模型。用户可在运行时上传/删除自定义 skill。SnapAgent 2.x 中，skill body 由 EntryNode 用于构建 system prompt，SkillMeta 传递给 ReActGraphFactory.build(skill, task, advisors) 以编译运行图。
+- **用户价值**: skill 加载从启动到可用 < 5 秒；两层模型让内置 skill 零配置可用，自定义 skill 持久化且可覆盖内置；skill 与图运行时解耦，便于扩展为多种图形态。
 - **成功指标**: skill 解析成功率 > 95%；刷新不阻塞读操作；custom 覆盖 builtin 后删除自动恢复 builtin。
 
 ### 1.2 范围边界
-- **包含**: SkillLoader frontmatter 解析、SkillRegistry 两层合并与目录扫描、SkillMeta 元数据、ClasspathSkillScanner classpath 扫描、SkillHotReloader 文件监听热重载、InputSpec 参数规格。
-- **不包含**: skill 上传/删除 controller 层 (SnapAgentController)、工具分发器实现。
+- **包含**: SkillLoader frontmatter 解析、SkillRegistry 两层合并与目录扫描、SkillMeta 元数据、ClasspathSkillScanner classpath 扫描、SkillHotReloader 文件监听热重载、InputSpec 参数规格、skill.tools 字段对 ToolCallbackRegistry 的契约校验。
+- **不包含**: skill 上传/删除 controller 层 (SnapAgentController)、EntryNode/ReActGraphFactory 内部实现 (01-agent-engine 模块)。
 
 ### 1.3 风险与假设
 
@@ -33,10 +34,12 @@
 | R2 | 宿主 classpath skill 覆盖内置 skill | 中 | 中 | ClasspathSkillScanner 两遍扫描，JAR 优先 | team |
 | R3 | 热重载 WatchService 在 macOS 轮询延迟 10s | 中 | 低 | 使用 HIGH sensitivity (2s) | team |
 | R4 | 并发刷新时读者看到半构建缓存 | 低 | 高 | volatile holder 原子替换 | team |
+| R5 | skill.tools 声明与 ToolCallbackRegistry 不同步致运行时缺失 | 中 | 中 | 加载期即校验，标 UNAVAILABLE 阻止图编译 | team |
 
 **关键假设**:
 - 假设1: classpath 在运行时不变，ClasspathSkillScanner 只在启动时扫描一次。
 - 假设2: 上传目录可读写，重启后持久化。
+- 假设3: ToolCallbackRegistry 在图编译前已就绪，ReActGraphFactory.build() 调用时工具集稳定。
 
 ---
 
@@ -96,19 +99,19 @@ AC3: 删除 custom 恢复 builtin
 ### US-3: 工具契约校验
 ```gherkin
 As a skill author
-I want the system to check if my declared tools are registered
-So that unavailable skills are clearly marked
+I want the system to check if my declared tools are registered in ToolCallbackRegistry
+So that unavailable skills are clearly marked before ReActGraphFactory compiles the graph
 ```
 
 **验收标准 (AC):**
 ```gherkin
 AC1: 所有工具已注册 -> AVAILABLE
-  Given skill.tools=[mysql_query] 且 dispatcher 已注册 mysql_query
+  Given skill.tools=[mysql_query] 且 ToolCallbackRegistry 已注册 mysql_query
   When validateContract 后
   Then availability=AVAILABLE
 
 AC2: 缺少工具 -> UNAVAILABLE
-  Given skill.tools=[mysql_query, redis_get] 且 dispatcher 仅注册 mysql_query
+  Given skill.tools=[mysql_query, redis_get] 且 ToolCallbackRegistry 仅注册 mysql_query
   When validateContract 后
   Then availability=UNAVAILABLE
   And unavailableReason 包含 "redis_get"
@@ -218,6 +221,35 @@ AC2: 空工具列表 skill 保持 AVAILABLE
   Then availability == AVAILABLE (不因空 tools 标 UNAVAILABLE)
 ```
 
+### US-9: Skill 喂入图运行时 (2.x 新增)
+```gherkin
+As a platform developer
+I want SkillMeta to be consumable by ReActGraphFactory so that
+  skill body flows into EntryNode for system prompt construction
+  and skill.tools drive the ToolCallbackRegistry subset for the compiled graph
+```
+
+**验收标准 (AC):**
+```gherkin
+AC1: skill body 进入 EntryNode 构建 system prompt
+  Given skill.body 非空 且 skill.available == AVAILABLE
+  When ReActGraphFactory.build(skill, task, advisors) 编译图
+  Then EntryNode.execute 将 skill.body 注入 system prompt
+  And CompiledGraph.getEntryPoint() == "entry"
+
+AC2: skill.tools 子集注入 ToolCallbackRegistry
+  Given skill.tools=["mysql_query","redis_get"] 且两者均 AVAILABLE
+  When 图编译
+  Then ToolsNode 仅看到 skill.tools 声明的 ToolCallback 子集
+  And 未声明的工具不出现在 toToolDefinitionsJson()
+
+AC3: UNAVAILABLE skill 阻止图编译
+  Given skill.available == UNAVAILABLE
+  When ReActGraphFactory.build(skill, task, advisors)
+  Then 抛 SkillUnavailableException 含 unavailableReason
+  And 不构造 CompiledGraph
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -232,6 +264,7 @@ AC2: 空工具列表 skill 保持 AVAILABLE
 | 保护 | US-6 JAR 优先 | 防覆盖 | 0 次误覆盖 | US-2 |
 | 校验 | US-7 InputSpec | 参数安全 | enum 校验 100% | US-1 |
 | 容错 | US-8 Refresh 回滚 | 缓存安全 | 旧缓存保留 100% | US-2 |
+| 集成 | US-9 喂入图运行时 | skill→graph | body/tools 入图 100% | US-3 |
 
 ---
 
@@ -259,6 +292,9 @@ AC2: 空工具列表 skill 保持 AVAILABLE
 | UC-16 | refresh 返回计数 | P0 | US-2 | 单元 |
 | UC-17 | 并发安全读写 | P0 | US-2 | 单元 |
 | UC-18 | 重复 custom name last-wins | P1 | US-2 | 单元 |
+| UC-19 | skill.body 进入 EntryNode | P0 | US-9 AC1 | 单元 |
+| UC-20 | skill.tools 子集注入图 | P0 | US-9 AC2 | 单元 |
+| UC-21 | UNAVAILABLE 阻止图编译 | P0 | US-9 AC3 | 单元 |
 | UC-R1 | GET /skills 列出技能 | P0 | US-2 | 集成 |
 | UC-R2 | GET /skills 包含source字段 | P1 | US-2 | 集成 |
 | UC-R3 | GET /skills 包含shortcuts | P1 | US-1 | 集成 |
@@ -360,11 +396,11 @@ Feature: Delete custom restores builtin
 #### UC-11: 工具缺失标记 UNAVAILABLE
 ```gherkin
 @priority:high @type:unit
-Feature: Tool contract validation
+Feature: Tool contract validation against ToolCallbackRegistry
 
-  Scenario: Skill declares tool not registered
+  Scenario: Skill declares tool not registered in ToolCallbackRegistry
     Given skill.tools=[mysql_query, redis_get]
-    And dispatcher only has mysql_query registered
+    And ToolCallbackRegistry only has mysql_query registered
     When SkillRegistry validates the contract
     Then availability == UNAVAILABLE
     And unavailableReason contains "redis_get"
@@ -420,6 +456,45 @@ Feature: Concurrent read/write safety
     And get("skill-a") is not null after completion
 ```
 
+#### UC-19: skill.body 进入 EntryNode
+```gherkin
+@priority:high @type:unit
+Feature: Skill body feeds EntryNode system prompt
+
+  Scenario: AVAILABLE skill body becomes system prompt
+    Given skill.body="你是诊断助手" 且 skill.available == AVAILABLE
+    When ReActGraphFactory.build(skill, task, advisors)
+    Then EntryNode.execute 将 skill.body 作为 system prompt 前缀
+    And CompiledGraph.getEntryPoint() == "entry"
+    And CompiledGraph.getNodes() 含 "entry" / "agent" / "tools" 节点
+```
+
+#### UC-20: skill.tools 子集注入图
+```gherkin
+@priority:high @type:unit
+Feature: skill.tools restricts ToolCallback subset for graph
+
+  Scenario: Only declared tools visible to ToolsNode
+    Given skill.tools=["mysql_query","redis_get"]
+    And ToolCallbackRegistry 注册了 mysql_query / redis_get / code_graph_tools
+    When ReActGraphFactory.build(skill, task, advisors)
+    Then ToolsNode 看到的 ToolCallback 仅含 mysql_query 和 redis_get
+    And toToolDefinitionsJson() 不含 code_graph_tools
+```
+
+#### UC-21: UNAVAILABLE 阻止图编译
+```gherkin
+@priority:high @type:unit
+Feature: UNAVAILABLE skill blocks graph compilation
+
+  Scenario: Build with unavailable skill throws
+    Given skill.available == UNAVAILABLE 且 unavailableReason contains "redis_get"
+    When ReActGraphFactory.build(skill, task, advisors)
+    Then 抛 SkillUnavailableException
+    And 异常 message 含 unavailableReason
+    And CompiledGraph 未被创建
+```
+
 ---
 
 ## 4. 接口规格 (API Specs)
@@ -453,12 +528,15 @@ SkillMeta parse(String content);
  * Two-tier skill registry: builtin (classpath) + custom (filesystem).
  * Custom overrides builtin by name; delete custom restores builtin.
  * Cache stored in volatile holder; refresh atomically replaces.
+ *
+ * 2.x: validateContract 改为对 ToolCallbackRegistry 校验。
  */
 List<SkillMeta> all();                    // merged list
 SkillMeta get(String name);               // custom if exists, else builtin
 boolean isBuiltin(String name);           // true if builtin exists
 Path getCustomSkillPath(String name);     // file/dir path for delete
 RefreshResult refresh();                  // re-scan + atomically replace cache
+void validateContract(SkillMeta meta, ToolCallbackRegistry registry);
 ```
 
 #### ClasspathSkillScanner.scan
@@ -482,6 +560,23 @@ void start();
 void stop();
 ```
 
+#### ReActGraphFactory.build (2.x 引入)
+```java
+/**
+ * Build a CompiledGraph from skill + task + advisors.
+ * entry → agent ↔ tools → END 形态。
+ * - EntryNode 消费 skill.body 构造 system prompt
+ * - ToolsNode 仅看到 skill.tools 对应的 ToolCallback 子集
+ * - skill.available != AVAILABLE 时抛 SkillUnavailableException
+ *
+ * @param skill    SkillMeta，需 availability == AVAILABLE
+ * @param task     AgentTask (inputs, userId, skillId)
+ * @param advisors Advisor 链 (Memory / RAG / SafeGuard / Cost / Observation)
+ * @return CompiledGraph
+ */
+CompiledGraph build(SkillMeta skill, AgentTask task, List<Advisor> advisors);
+```
+
 ---
 
 ## 5. 数据规格 (Data Specs)
@@ -493,10 +588,10 @@ void stop();
 字段:
   - name: String (必填, 唯一标识)
   - description: String (必填)
-  - tools: List<String> (可选, 空列表=纯 LLM skill)
+  - tools: List<String> (可选, 空列表=纯 LLM skill; 校验目标为 ToolCallbackRegistry)
   - inputs: List<InputSpec> (可选)
   - shortcuts: List<Shortcut> (可选)
-  - body: String (正文, 含 {key} 占位符)
+  - body: String (正文, 含 {key} 占位符; 由 EntryNode 消费)
   - availability: enum [AVAILABLE, UNAVAILABLE, INVALID]
   - unavailableReason: String
   - source: String ["builtin" | "custom" | "host"]
@@ -551,10 +646,11 @@ void stop();
 |--------|------|------|------|
 | INVALID_FRONTMATTER | WARN | frontmatter 不合规 | skill 标 INVALID, 跳过 |
 | YAML_PARSE_ERR | WARN | YAML 解析异常 | skill 标 INVALID, reason 含错误信息 |
-| TOOL_MISSING | WARN | 声明工具未注册 | skill 标 UNAVAILABLE, reason 列出缺失工具 |
+| TOOL_MISSING | WARN | 声明工具未在 ToolCallbackRegistry 注册 | skill 标 UNAVAILABLE, reason 列出缺失工具 |
 | DIR_NOT_FOUND | WARN | upload 目录不存在 | 仅加载 builtin, 日志 WARN |
 | DUPLICATE_NAME | WARN | 重复 custom skill name | last-scanned wins, 前一个被覆盖 |
 | HOST_SHADOWED | WARN | host skill 与 JAR 同名 | host 版本跳过, 使用 JAR 版本 |
+| SKILL_UNAVAILABLE | ERROR | skill.available != AVAILABLE 时被 ReActGraphFactory 调用 | 抛 SkillUnavailableException, 不构造图 |
 
 ### 6.2 错误场景
 ```gherkin
@@ -575,6 +671,11 @@ Scenario: Refresh fails
   When refresh() scan throws RuntimeException
   Then return RefreshResult with existing cache counts
   And cache is NOT replaced
+
+Scenario: Build graph with UNAVAILABLE skill
+  When ReActGraphFactory.build(unavailableSkill, task, advisors)
+  Then 抛 SkillUnavailableException
+  And 日志记录 unavailableReason
 ```
 
 ---
@@ -588,6 +689,7 @@ Scenario: Refresh fails
   - 启动扫描: 100 个 skill < 2s
   - refresh: 原子替换, 读不加锁
   - 热重载检测延迟: macOS < 2s (HIGH sensitivity)
+  - ReActGraphFactory.build: < 50ms (不含 LLM 调用)
 ```
 
 ### 7.4 可测试性要求
@@ -595,6 +697,7 @@ Scenario: Refresh fails
 - [x] SkillRegistry 两层合并全覆盖
 - [x] 目录扫描规则全覆盖
 - [x] 并发安全有测试
+- [x] skill→图编译契约 (body 入 EntryNode / tools 子集 / UNAVAILABLE 阻止) 有测试
 
 ---
 
@@ -605,8 +708,8 @@ Scenario: Refresh fails
    /\
   /  \  E2E (完整 skill 加载 — 未来)
  /____\
-/        \  集成 (SkillRegistry + TempDir + mock ToolDispatcher)
-/          \  单元 (SkillLoader, SkillMeta, InputSpec, ClasspathSkillScanner, SkillHotReloader)
+/        \  集成 (SkillRegistry + TempDir + mock ToolCallbackRegistry)
+/          \  单元 (SkillLoader, SkillMeta, InputSpec, ClasspathSkillScanner, SkillHotReloader, ReActGraphFactory 契约)
 ```
 
 ### 8.2 测试清单
@@ -627,8 +730,8 @@ Scenario: Refresh fails
 | UT-012 | 单元 | builtin+custom 合并 | 是 | P0 |
 | UT-013 | 单元 | custom 覆盖 builtin | 是 | P0 |
 | UT-014 | 单元 | 删除 custom 恢复 builtin | 是 | P0 |
-| UT-015 | 单元 | 工具缺失 UNAVAILABLE | 是 | P0 |
-| UT-016 | 单元 | null dispatcher UNAVAILABLE | 是 | P0 |
+| UT-015 | 单元 | 工具缺失 UNAVAILABLE (vs ToolCallbackRegistry) | 是 | P0 |
+| UT-016 | 单元 | null ToolCallbackRegistry UNAVAILABLE | 是 | P0 |
 | UT-017 | 单元 | 目录 skill SKILL.md | 是 | P0 |
 | UT-018 | 单元 | 辅助 .md 跳过 | 是 | P0 |
 | UT-019 | 单元 | 组织性目录递归 | 是 | P0 |
@@ -640,13 +743,17 @@ Scenario: Refresh fails
 | UT-025 | 单元 | custom skill path 获取 | 是 | P1 |
 | UT-026 | 单元 | required-permission 保留 | 是 | P1 |
 | UT-027 | 单元 | SkillMeta with* 方法 | 是 | P1 |
+| UT-028 | 单元 | skill.body 进入 EntryNode system prompt | 是 | P0 |
+| UT-029 | 单元 | skill.tools 子集注入 ToolsNode | 是 | P0 |
+| UT-030 | 单元 | UNAVAILABLE 阻止 ReActGraphFactory.build | 是 | P0 |
 
 ### 8.3 Mock策略
 ```yaml
 需要Mock的外部依赖:
-  - ToolDispatcher: Mockito mock, when().availableToolNames() 返回 Set
-  - ToolProvider: Mockito mock, when().name()/schema()
+  - ToolCallbackRegistry: Mockito mock, when().getAll() 返回 List<ToolCallback>
+  - ToolCallback: Mockito mock, when().getName()/getDescription()/getJsonSchema()
   - ResourcePatternResolver: Mockito mock (for ClasspathSkillScanner)
+  - LlmClient: Mockito mock (for ReActGraphFactory 契约测试)
   - 文件系统: @TempDir (JUnit5)
 ```
 
@@ -655,8 +762,9 @@ Scenario: Refresh fails
 | 测试类 | 文件路径 | 覆盖内容 |
 |--------|----------|----------|
 | SkillLoaderTest | `snap-agent-core/src/test/java/.../skill/SkillLoaderTest.java` | 全字段解析、缺 name/description INVALID、缺 closing delimiter、null/empty content、tools 非列表 INVALID、enum+options、input default、shortcuts 解析+缺 label INVALID、required-permission 解析+默认空、body 提取、多工具、inputs block list 格式 |
-| SkillRegistryTest | `snap-agent-core/src/test/java/.../skill/SkillRegistryTest.java` | 三文件加载、AVAILABLE/UNAVAILABLE、INVALID 跳过、不存在目录、无 .md 文件、refresh 新增/删除/修改 body、null skill 查找、refresh 计数、null 目录、null dispatcher、并发安全 (4 reader + 1 refresher)、builtin-only、builtin+custom 合并、custom 覆盖 builtin、删除恢复 builtin、isBuiltin、custom path、目录 skill (SKILL.md)、辅助文件跳过、组织性目录递归、嵌套目录、重复 name last-wins、source=custom、required-permission 保留+降级+解析 |
+| SkillRegistryTest | `snap-agent-core/src/test/java/.../skill/SkillRegistryTest.java` | 三文件加载、AVAILABLE/UNAVAILABLE、INVALID 跳过、不存在目录、无 .md 文件、refresh 新增/删除/修改 body、null skill 查找、refresh 计数、null 目录、null ToolCallbackRegistry、并发安全 (4 reader + 1 refresher)、builtin-only、builtin+custom 合并、custom 覆盖 builtin、删除恢复 builtin、isBuiltin、custom path、目录 skill (SKILL.md)、辅助文件跳过、组织性目录递归、嵌套目录、重复 name last-wins、source=custom、required-permission 保留+降级+解析 |
 | SkillMetaTest | `snap-agent-core/src/test/java/.../skill/SkillMetaTest.java` | 全字段持有、null tools/inputs -> 空列表、toString、所有 availability 值、requiredPermission 默认空+持有+with* 保留+null 处理 |
+| ReActGraphFactoryContractTest | `snap-agent-core/src/test/java/.../skill/ReActGraphFactoryContractTest.java` | skill.body 进入 EntryNode、skill.tools 子集、UNAVAILABLE 抛 SkillUnavailableException、advisors 顺序包裹 |
 
 ### 8.5 E2E 关键路径
 
@@ -668,6 +776,7 @@ Scenario: Refresh fails
 | E2E-4 | Skill 删除 builtin: DELETE /skills/{builtin-name} → 403 | DELETE /skills/{name} | ⚠未实现 (GAP-14) |
 | E2E-5 | Skill 刷新流程: POST /skills/refresh → 200 → GET /skills 验证计数 | POST /skills/refresh, GET /skills | ⚠未实现 (GAP-15) |
 | E2E-6 | 认证错误: GET /skills 无认证 → 401 / 无权限 → 403 | GET /skills | ⚠未实现 (GAP-16) |
+| E2E-7 | Skill→Graph 端到端: POST /runs (skillId=available) → 202 → GraphExecutor 用 EntryNode+skill.body 构建 prompt → SSE 流推送 | POST /runs, GET /runs/{id}/stream | ⚠未实现 (GAP-17) |
 
 ### 8.6 测试缺口 (Bug 候选)
 
@@ -688,6 +797,8 @@ Scenario: Refresh fails
 | GAP-13 | ⚠E2E缺失: DELETE /skills/{name} REST 端点无 E2E 覆盖 (custom 删除+builtin 403) — 见 E2E-3/4 | P1 | 需 E2E 集成测试 |
 | GAP-14 | ⚠E2E缺失: POST /skills/refresh REST 端点无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
 | GAP-15 | ⚠E2E缺失: GET /skills 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-6 | P2 | 需 E2E 集成测试 |
+| GAP-16 | ✅已关闭: skill→图编译契约 (US-9 AC1-3) 已由 `ReActGraphFactoryContractTest` 覆盖 (body 入 EntryNode / tools 子集 / UNAVAILABLE 抛异常) | — | P0 |
+| GAP-17 | ⚠E2E缺失: Skill 可用→图编译→SSE 推送端到端流程 — 见 E2E-7 | P1 | 需 E2E 集成测试 |
 
 ---
 
@@ -703,7 +814,9 @@ Scenario: Refresh fails
 ### 9.2 内部依赖
 - [x] SkillLoader (已完成)
 - [x] SkillMeta (已完成)
-- [x] ToolDispatcher (已完成)
+- [x] ToolCallbackRegistry (已完成, 2.x 替代 ToolDispatcher)
+- [x] EntryNode + ReActGraphFactory (已完成, 01-agent-engine 模块)
+- [x] Advisor SPI (已完成, 2.x 替代 SystemPromptExtender)
 
 ---
 
@@ -713,10 +826,12 @@ Scenario: Refresh fails
 | 版本 | 日期 | 作者 | 变更内容 |
 |------|------|------|----------|
 | 2.0 | 2026-07-23 | snap-agent team | 初始 TDD 规格 |
+| 2.1 | 2026-07-25 | snap-agent team | 适配 2.x 图架构: skill→EntryNode/ReActGraphFactory, 工具契约改对 ToolCallbackRegistry 校验, 替换 SystemPromptExtender→Advisor, 新增 US-9 与 UC-19/20/21 |
 
 ### 12.2 参考文档
 - `docs/embeed-skills-agent/02-skill-loading.md` — Skill 加载设计
 - `docs/superpowers/specs/2026-07-03-two-tier-skill-system-design.md` — 两层 skill 系统设计
+- `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md` — 2.x 架构重构设计
 
 ### 12.3 术语表
 | 术语 | 定义 |
@@ -727,3 +842,7 @@ Scenario: Refresh fails
 | directory skill | 目录含 SKILL.md, 整个目录为一个 skill |
 | organizational dir | 无 SKILL.md 的目录, 递归扫描子内容 |
 | frontmatter | .md 文件首部 YAML 元数据块, 以 `---` 分隔 |
+| EntryNode | 图入口节点, 消费 skill.body 构造 system prompt (2.x) |
+| ReActGraphFactory | 图工厂, build(skill, task, advisors) 编译 entry→agent↔tools→END (2.x) |
+| ToolCallbackRegistry | 工具注册表 SPI, skill.tools 的校验目标 (2.x 替代 ToolDispatcher) |
+| Advisor | 图节点前后置钩子 SPI, 替代 SystemPromptExtender (2.x) |

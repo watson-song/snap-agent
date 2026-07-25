@@ -1,6 +1,7 @@
 # TDD需求规格说明书 — 锚点注入模式 (Anchor Injection)
 
-> 版本: 2.0 | 模块: 05-anchor-inject | 基于 TEMPLATE.md
+> 版本: 2.1 (SnapAgent 2.x 架构重构) | 模块: 05-anchor-inject | 基于 TEMPLATE.md
+> 变更: AnchorInjectionOrchestrator → AnchorGraphFactory.buildInjectMode() 线性图; HTML 处理由 HtmlOutputConverter 统一承担 (含 stripThinking/sanitize)
 
 ---
 
@@ -16,21 +17,22 @@
 ```
 
 ### 1.1 背景与目标
-- **业务背景**: 宿主页面某些区域需在加载时由 SnapAgent 自动生成 HTML 注入，而非用户点击问答。
-- **用户价值**: 页面加载即呈现 AI 内容，零交互成本；缓存命中 < 5ms 返回。
-- **成功指标**: 缓存命中率 > 70%；首屏注入 < 3s；stripThinking 正确率 100%。
+- **业务背景**: 宿主页面某些区域需在加载时由 SnapAgent 自动生成 HTML 注入，而非用户点击问答。SnapAgent 2.x 中，inject 模式由 AnchorGraphFactory.buildInjectMode() 产出一个线性图 (preprocess → generate → cache)，HTML 后处理由 HtmlOutputConverter 统一承担。
+- **用户价值**: 页面加载即呈现 AI 内容，零交互成本；缓存命中 < 5ms 返回；stripThinking/sanitize 由 HtmlOutputConverter 统一处理。
+- **成功指标**: 缓存命中率 > 70%；首屏注入 < 3s；HtmlOutputConverter 正确率 100%。
 
 ### 1.2 范围边界
-- **包含**: `AnchorInjectionOrchestrator`、`AnchorInjectionCache`、`stripThinking`、`AnthropicLlmClient` skipThinking、客户端 `anchor.js` inject。
-- **不包含**: 锚点 Q&A 模式、preprocess 预摘要、skill classifier。
+- **包含**: `AnchorGraphFactory.buildInjectMode()` (线性图: preprocess → generate → cache)、`HtmlOutputConverter` (containerClass, template, stripThinking, sanitize)、`AnchorInjectionCache`、客户端 `anchor.js` inject。
+- **不包含**: 锚点 Q&A 模式 (04-anchor-qa)、preprocess 预摘要细节、skill classifier、AnchorGraphFactory.buildAutoMode / buildOffMode (其他模式由 04-anchor-qa 维护)。
 
 ### 1.3 风险与假设
 
 | 风险ID | 描述 | 概率 | 影响 | 缓解 |
 |--------|------|------|------|------|
-| R1 | LLM 输出 thinking 前缀致 HTML 解析异常 | 中 | 高 | stripThinking + skipThinking 双防护 |
+| R1 | LLM 输出 thinking 前缀致 HTML 解析异常 | 中 | 高 | HtmlOutputConverter.stripThinking + LlmClient skipThinking 双防护 |
 | R2 | 缓存 TTL 配置不当 | 低 | 中 | min/max TTL 强制约束 + 7天上限 |
-| R3 | 工作流引擎未配置时注入失败 | 低 | 中 | 抛 WORKFLOW_NOT_FOUND |
+| R3 | skill 未配置或不可用时注入失败 | 低 | 中 | 抛 SKILL_NOT_FOUND / SKILL_UNAVAILABLE |
+| R4 | HtmlOutputConverter sanitize 误杀合法 HTML | 低 | 中 | containerClass 白名单 + 模板覆盖 |
 
 ---
 
@@ -65,30 +67,33 @@ AC3: Given 用户 A 和 B 请求同一锚点
   Then LLM 调两次，各自独立结果
 ```
 
-### US-3: LLM 思考过程过滤
+### US-3: LLM 思考过程过滤 (HtmlOutputConverter)
 ```gherkin
 作为 系统开发者
-我希望 自动剥离 LLM 输出的 thinking 前缀
-以便 注入的 HTML 干净
+我希望 HtmlOutputConverter 自动剥离 LLM 输出的 thinking 前缀并执行 sanitize
+以便 注入的 HTML 干净且安全
 ```
 **AC:**
 ```gherkin
-AC4: Given LLM 输出 "Let me think...<div>x</div>"
-  When stripThinking 执行
-  Then 返回 "<div>x</div>"
+AC4: Given LLM 原始输出 "Let me think...<div>x</div>"
+  When HtmlOutputConverter.convert(raw) (stripThinking=true, sanitize=true)
+  Then 返回 "<div class=\"snap-inject\">x</div>"
+  And thinking 前缀被剥离
+  And 根 div 含 containerClass="snap-inject"
 ```
 
-### US-4: 技能 body 作为 system prompt
+### US-4: 技能 body 作为 system prompt (经 EntryNode)
 ```gherkin
 作为 技能开发者
-我希望 注入时用 skill body 作为 system prompt
+我希望 注入图的 generate 节点用 skill body 作为 system prompt
 以便 精确控制生成风格
 ```
 **AC:**
 ```gherkin
 AC5: Given skill body 非空
-  When executeSkill 执行
-  Then LlmRequest.systemPrompt = skill body
+  When AnchorGraphFactory.buildInjectMode(skill, task, advisors) 编译
+  Then generate 节点 (AgentNode) 的 system prompt == skill body
+  And HtmlOutputConverter.getFormat() 注入到 LLM 指令中
 ```
 
 ### US-5: 注入失败降级显示
@@ -119,9 +124,10 @@ AC8: Given InjectionRequest(cacheTtl=0)
   When 连续调用两次 inject
   Then 两次 cached=false，LLM 调两次
   And 缓存不写入任何条目
+  And 线性图仍走完 preprocess → generate → cache 三节点 (cache 节点 no-op)
 ```
 
-### US-7: skill 优先于 workflow
+### US-7: skill 优先于 workflow (legacy)
 ```gherkin
 作为 技能开发者
 我希望 InjectionRequest 同时含 skillId 和 workflowId 时优先走 skill
@@ -131,7 +137,7 @@ AC8: Given InjectionRequest(cacheTtl=0)
 ```gherkin
 AC9: Given InjectionRequest(skillId="s1", workflowId="w1")
   When inject 执行
-  Then LLM 被调用，workflowEngine 不被调用
+  Then AnchorGraphFactory.buildInjectMode() 用 skill 编译图
   And 返回 InjectionResult 含 LLM 生成的 HTML
 ```
 
@@ -149,6 +155,29 @@ AC10: Given InjectionRequest(skillId=null, workflowId=null)
 AC11: Given skillRegistry.get("x") 返回 null
   When inject with skillId="x"
   Then 抛 IllegalArgumentException 含 "SKILL_NOT_FOUND"
+AC12: Given skill.available == UNAVAILABLE
+  When inject with skillId="y"
+  Then 抛 SkillUnavailableException (由 ReActGraphFactory 复用)
+```
+
+### US-9: 线性图三节点形态 (2.x 新增)
+```gherkin
+作为 平台开发者
+我希望 AnchorGraphFactory.buildInjectMode() 产出 preprocess → generate → cache 线性图
+  以便 inject 流程清晰、易调试、易插 advisor
+```
+**AC:**
+```gherkin
+AC13: Given skill.available == AVAILABLE
+  When AnchorGraphFactory.buildInjectMode(skill, task, advisors)
+  Then CompiledGraph.getNodes() 含 "preprocess" / "generate" / "cache" 三节点
+  And 边为 preprocess→generate→cache→END (无条件边)
+  And getEntryPoint() == "preprocess"
+
+AC14: Given advisors 含 MessageChatMemoryAdvisor(order=100)
+  When 图编译
+  Then AdvisorNode 包裹 generate 节点
+  And before chain 在 LLM 调用前执行 memory.load
 ```
 
 ---
@@ -165,6 +194,7 @@ AC11: Given skillRegistry.get("x") 返回 null
 | 不缓存 | US-6 | 实时内容 | TTL=0→不缓存 100% | US-1 |
 | 优先级 | US-7 | 一致性 | skill 优先 100% | US-1 |
 | 异常 | US-8 | 明确错误 | 异常抛出 100% | US-1 |
+| 图形态 | US-9 | 线性三节点 | 节点顺序 100% | US-1 |
 
 ---
 
@@ -177,13 +207,15 @@ AC11: Given skillRegistry.get("x") 返回 null
 | UC-01 | 缓存未命中执行skill | P0 | AC1 | 单元 |
 | UC-02 | 缓存命中直接返回 | P0 | AC2 | 单元 |
 | UC-03 | 不同用户缓存隔离 | P0 | AC3 | 单元 |
-| UC-04 | stripThinking剥离 | P0 | AC4 | 单元 |
+| UC-04 | HtmlOutputConverter.stripThinking | P0 | AC4 | 单元 |
 | UC-05 | skill body做prompt | P0 | AC5 | 单元 |
-| UC-06 | TTL=0不缓存 | P1 | - | 单元 |
-| UC-07 | skill优先workflow | P1 | - | 单元 |
-| UC-08 | skill不存在抛异常 | P0 | - | 单元 |
-| UC-09 | workflow执行注入 | P1 | - | 单元 |
-| UC-10 | 客户端fallback | P1 | AC6,7 | 单元 |
+| UC-06 | TTL=0不缓存 | P1 | AC8 | 单元 |
+| UC-07 | skill优先workflow | P1 | AC9 | 单元 |
+| UC-08 | skill不存在抛异常 | P0 | AC11 | 单元 |
+| UC-09 | UNAVAILABLE skill 抛异常 | P0 | AC12 | 单元 |
+| UC-10 | 线性图三节点结构 | P0 | AC13 | 单元 |
+| UC-11 | Advisor 包裹 generate | P1 | AC14 | 单元 |
+| UC-12 | 客户端fallback | P1 | AC6,7 | 单元 |
 | UC-R1 | POST /anchor/inject 200返回HTML | P0 | AC1 | 集成 |
 | UC-R2 | POST /anchor/inject 缓存命中cached=true | P0 | AC2 | 集成 |
 | UC-R3 | POST /anchor/inject 400缺anchorName | P0 | - | 集成 |
@@ -195,25 +227,27 @@ AC11: Given skillRegistry.get("x") 返回 null
 
 ```gherkin
 @priority:high @type:unit
-功能: AnchorInjectionOrchestrator 注入编排
+功能: AnchorGraphFactory.buildInjectMode 线性图
 
   场景: 缓存未命中时执行skill并缓存
-    Given skillRegistry 存在 skill "announcement" 且 body 非空
+    Given skillRegistry 存在 skill "announcement" 且 body 非空 且 availability=AVAILABLE
     And llmClient.stream onThought 输出 "<div class=\"notice\">Hello!</div>"
     And InjectionRequest(anchorName="公告", pageUrl="/dashboard", skillId="announcement", cacheTtl=3600)
-    When orchestrator.inject("user001", req)
+    When anchorGraphFactory.buildInjectMode(skill, task, advisors) + GraphExecutor.execute
     Then html contains "<div class=\"notice\">Hello!</div>" 且 cached == false
     And 再次调用 cached=true 且 LLM 不再调用
 
   场景: 缓存命中直接返回不调LLM
     Given 缓存已有 key "user001:announcement:公告:/page"
-    When orchestrator.inject("user001", req)
+    When anchorGraphFactory.buildInjectMode + execute
     Then cached == true 且 llmClient.stream 调用次数为 0
+    And preprocess 节点命中缓存即 END (不进 generate)
 
   场景: TTL=0时不缓存
     Given InjectionRequest(cacheTtl=0)
     When 连续调用两次
     Then 两次 cached=false，LLM 调两次
+    And cache 节点 no-op 不写入
 
   场景: 不同用户缓存key不同
     Given 用户A和B请求同一锚点
@@ -222,48 +256,61 @@ AC11: Given skillRegistry.get("x") 返回 null
 
   场景: skill body非空时作为systemPrompt
     Given skill "announcement" body="你是公告助手"
-    When executeSkill 执行
+    When buildInjectMode + generate 节点执行
     Then LlmRequest.systemPrompt == "你是公告助手"
     And maxTokens == min(injectionMaxTokens, 1024)
+    And HtmlOutputConverter.getFormat() 注入到 LLM 指令
 
   场景: skill body为空时用默认prompt
     Given skill body 为空串
-    When executeSkill 执行
+    When generate 节点执行
     Then systemPrompt 为 "你是 SnapAgent 内容生成助手..."
 
-  场景大纲: stripThinking剥离推理前缀
-    Given LLM 原始输出 <raw>
-    When stripThinking(raw)
+  场景大纲: HtmlOutputConverter.stripThinking剥离推理前缀
+    Given LLM 原始输出 <raw>，containerClass="snap-inject"
+    When converter.convert(raw)
     Then 返回 <expected>
     例子:
       | raw | expected | 说明 |
-      | "Let me think...<div>x</div>" | "<div>x</div>" | 英文前缀 |
-      | "让我想想<p>hi</p>" | "<p>hi</p>" | 中文前缀 |
-      | "<div>direct</div>" | "<div>direct</div>" | 无前缀 |
-      | "<!DOCTYPE html>" | "<!DOCTYPE html>" | DOCTYPE |
+      | "Let me think...<div>x</div>" | "<div class=\"snap-inject\">x</div>" | 英文前缀+包裹 |
+      | "让我想想<p>hi</p>" | "<p class=\"snap-inject\">hi</p>" | 中文前缀+包裹 |
+      | "<div>direct</div>" | "<div class=\"snap-inject\">direct</div>" | 无前缀+包裹 |
+      | "<!DOCTYPE html>" | "<!DOCTYPE html>" | DOCTYPE 不二次包裹 |
       | null | null | null |
       | "" | "" | 空串 |
 
   场景: inject模式下skipThinking跳过thinking_delta
     Given LlmRequest.tools 为空
-    When AnthropicLlmClient 解析SSE
+    When LlmClient 解析SSE
     Then skipThinking=true，thinking_delta 不触发 onThought
     And text_delta 正常触发
 
   场景: skill优先于workflow
     Given InjectionRequest(skillId="s1", workflowId="w1")
     When inject 执行
-    Then LLM 被调用，workflowEngine 不被调用
+    Then AnchorGraphFactory.buildInjectMode 用 skill 编译，不调用 workflow
 
   场景: skill不存在抛异常
     Given skillRegistry.get("x") 返回 null
     When inject with skillId="x"
     Then 抛 IllegalArgumentException 含 "SKILL_NOT_FOUND"
 
+  场景: UNAVAILABLE skill 抛异常
+    Given skill.available == UNAVAILABLE 且 unavailableReason 含 "redis_get"
+    When buildInjectMode
+    Then 抛 SkillUnavailableException
+
   场景: 无skill无workflow抛异常
     Given InjectionRequest(skillId=null, workflowId=null)
     When inject
     Then 抛异常含 "INVALID_INPUT"
+
+  场景: 线性图三节点结构
+    Given skill.available == AVAILABLE
+    When buildInjectMode(skill, task, advisors)
+    Then CompiledGraph.getNodes() 含 "preprocess" / "generate" / "cache"
+    And 边为 preprocess→generate→cache→END
+    And getEntryPoint() == "preprocess"
 ```
 
 ```gherkin
@@ -318,10 +365,16 @@ AC11: Given skillRegistry.get("x") 返回 null
 ## 4. 接口规格
 
 ```java
-// inject — 缓存查询→执行→缓存→返回
-InjectionResult inject(String userId, InjectionRequest req);
-// stripThinking — 剥离HTML前的thinking文本 (static)
-// skipThinking: tools为空时跳过thinking_delta (AnthropicLlmClient)
+// AnchorGraphFactory.buildInjectMode — 编译 inject 线性图
+// preprocess: 准备 prompt + 检查缓存 (命中即 END)
+// generate: AgentNode 调 LLM (skill.body 为 system prompt, HtmlOutputConverter 为 format)
+// cache: 写入 AnchorInjectionCache (TTL=0 时 no-op)
+CompiledGraph buildInjectMode(SkillMeta skill, AgentTask task, List<Advisor> advisors);
+
+// HtmlOutputConverter — 2.x 统一 HTML 后处理
+// containerClass="snap-inject", template 可选, stripThinking=true, sanitize=true
+// getFormat() → HTML 结构指令; convert() → stripThinking + sanitize + 确保根 div 包裹
+InjectionResult inject(String userId, InjectionRequest req);  // REST 入口仍为 AnchorController
 ```
 ```yaml
 POST /snap-agent/anchor/inject:
@@ -338,6 +391,11 @@ InjectionCacheEntry: {html:String, generatedAt:Instant, expiresAt:Instant}
 InjectionRequest: {anchorName, pageUrl, skillId, workflowId, cacheTtl:int=3600}
 缓存Key: "userId:sourceId:anchorName:pageUrl"
 TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>max→max
+HtmlOutputConverter:
+  containerClass: "snap-inject"
+  template: 可选 HTML 骨架
+  stripThinking: true (剥离 thinking 前缀)
+  sanitize: true (XSS 防护)
 ```
 
 ---
@@ -347,14 +405,15 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 | 错误码 | 级别 | HTTP | 描述 |
 |--------|------|------|------|
 | SKILL_NOT_FOUND | ERROR | 404 | skillId不存在 |
-| WORKFLOW_NOT_FOUND | ERROR | 404 | workflow不存在/引擎未配置 |
+| SKILL_UNAVAILABLE | ERROR | 404 | skill 存在但 availability != AVAILABLE |
 | INVALID_INPUT | WARN | 400 | 无skillId/workflowId |
-| INJECTION_FAILED | ERROR | 500 | LLM调用失败 |
+| INJECTION_FAILED | ERROR | 500 | LLM调用失败或 HtmlOutputConverter 异常 |
 
 ```gherkin
 场景: LLM onError触发RuntimeException
   When stream 回调 onError("timeout")
-  Then executeSkill 抛 RuntimeException 含 "INJECTION_FAILED"
+  Then generate 节点抛 RuntimeException 含 "INJECTION_FAILED"
+  And GraphExecutor catch → checkpoint → TaskStatus.FAILED
 ```
 
 ---
@@ -362,7 +421,7 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 ## 7. 非功能需求
 
 ```yaml
-性能: 缓存命中P95<5ms | 冷启动P95<3s | 命中率>70% | stripThinking<1ms
+性能: 缓存命中P95<5ms | 冷启动P95<3s | 命中率>70% | HtmlOutputConverter.convert<1ms
 ```
 
 ---
@@ -373,11 +432,12 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 
 | 测试文件 | 数量 | 覆盖 |
 |----------|------|------|
-| `AnchorInjectionOrchestratorTest` | 8 | skill执行、缓存命中/未命中、TTL=0、用户隔离、workflow、skill优先、skill/workflow不存在 |
+| `AnchorGraphFactoryTest` | 8 | buildInjectMode 线性图结构、缓存命中/未命中、TTL=0、用户隔离、skill优先、skill/UNAVAILABLE 不存在 |
+| `HtmlOutputConverterTest` | 6 | stripThinking (英文/中文/无前缀/DOCTYPE/null/空串)、sanitize、containerClass 包裹 |
 | `AnchorInjectionCacheTest` | 8 | put/get、missing、过期、per-entry TTL、max TTL、invalidateAll、size、custom maxSize |
 | `SnapAgentControllerInjectTest` | 6 | 200、cached、400缺anchorName、400无source、503未配置、500 skill不存在 |
 
-**总结**: Orchestrator.inject 主流程+异常全覆盖；Cache 全方法覆盖；stripThinking/skipThinking 已由 StripThinkingTest 和 AnthropicLlmClientTest 覆盖。
+**总结**: buildInjectMode 主流程+异常全覆盖; HtmlOutputConverter 6 参数化用例; Cache 全方法覆盖; stripThinking/skipThinking 已由 HtmlOutputConverterTest 和 LlmClientTest 覆盖。
 
 ### 8.3 E2E 关键路径
 
@@ -388,23 +448,26 @@ TTL: min=60s, max=604800s(7天), resolveEffectiveTtl: <=0→default,<min→min,>
 | E2E-3 | 400 错误: POST /anchor/inject (缺 anchorName / 缺 source) → 400 | POST /anchor/inject | ✅已覆盖 |
 | E2E-4 | 503 未配置: POST /anchor/inject (anchor.enabled=false) → 503 | POST /anchor/inject | ✅已覆盖 |
 | E2E-5 | 500 skill 不存在: POST /anchor/inject (skill 未找到) → 500 | POST /anchor/inject | ✅已覆盖 |
+| E2E-6 | 线性图三节点: buildInjectMode → preprocess→generate→cache→END | AnchorGraphFactory | ✅已覆盖 (AnchorGraphFactoryTest) |
 
 ### 8.4 测试缺口
 
 | ID | 描述 | 优先级 | 建议 |
 |----|------|--------|------|
-| GAP-1 | ✅已关闭: `stripThinking` 已由 `StripThinkingTest` 覆盖 (6个参数化用例: 英文前缀/中文前缀/无前缀/DOCTYPE/null/空串) | — | P0 |
-| GAP-2 | ✅已关闭: `AnthropicLlmClient.skipThinking` 已由 `AnthropicLlmClientTest` 覆盖 (tools空→skip thinking_delta / tools非空→传递) | — | P0 |
+| GAP-1 | ✅已关闭: `HtmlOutputConverter.stripThinking` 已由 `HtmlOutputConverterTest` 覆盖 (6个参数化用例: 英文前缀/中文前缀/无前缀/DOCTYPE/null/空串 + containerClass 包裹 + sanitize) | — | P0 |
+| GAP-2 | ✅已关闭: `LlmClient.skipThinking` 已由 `LlmClientTest` 覆盖 (tools空→skip thinking_delta / tools非空→传递) | — | P0 |
 | GAP-3 | ✅已关闭: InjectionRequest.fromMap/hasSource/getSourceId 已由 `InjectionRequestTest` 覆盖 (7个fromMap测试 + 5个hasSource测试 + 5个getSourceId测试) | — | P1 |
-| GAP-4 | ✅已关闭: buildInjectionPrompt 已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldIncludePageUrlAnchorNameAndUserIdInInjectionPrompt) | — | P1 |
-| GAP-5 | ✅已关闭: extractHtmlFromWorkflowResult 空结果路径已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldReturnFallbackWhenWorkflowResultIsNull/shouldReturnFallbackWhenStepResultsAreEmpty/shouldReturnFallbackWhenReportIsEmpty/shouldReturnFallbackWhenReportIsNull) | — | P1 |
-| GAP-6 | ✅已关闭: LLM onError→INJECTION_FAILED 路径已由 `AnchorInjectionOrchestratorTest` 覆盖 (shouldThrowInjectionFailedWhenLlmReportsError) | — | P1 |
+| GAP-4 | ✅已关闭: buildInjectionPrompt (skill.body→system prompt) 已由 `AnchorGraphFactoryTest` 覆盖 (shouldUseSkillBodyAsSystemPromptInGenerateNode) | — | P1 |
+| GAP-5 | ✅已关闭: workflow 兜底路径已由 `AnchorGraphFactoryTest` 覆盖 (shouldFallbackToWorkflowWhenSkillIdAbsent; legacy 兼容) | — | P1 |
+| GAP-6 | ✅已关闭: LLM onError→INJECTION_FAILED 路径已由 `AnchorGraphFactoryTest` 覆盖 (shouldThrowInjectionFailedWhenLlmReportsError; GraphExecutor catch + FAILED) | — | P1 |
 | GAP-7 | ✅已关闭: resolveEffectiveTtl 边界值已由 `SnapAgentPropertiesAnchorTest` 覆盖 (8个参数化测试: 0/negative/below min/equals min/normal/equals max/above max + shouldRespectCustomMinAndMaxTtl) | — | P1 |
-| GAP-8 | ✅已关闭: anchor.js 前端测试已由 Vitest + Playwright 覆盖 (`anchor.test.js` 24个单元测试: DOM扫描/路径匹配/drawer创建/注入模式/auth/MutationObserver; `app.test.js` 30+个单元测试: formatTime/escapeHtml/getSkillState/getTaskIssueState/profileLabel/toast/handleAuthError/toggleSection/authHeaders/loadSkills/loadModels; `ui.spec.js` 20+个E2E测试: 技能列表/模型选择/聊天SSE/文件上传/认证状态/功能导航) | — | P2 |
+| GAP-8 | ✅已关闭: anchor.js 前端测试已由 Vitest + Playwright 覆盖 (`anchor.test.js` 24个单元测试: DOM扫描/路径匹配/drawer创建/注入模式/auth/MutationObserver; `app.test.js` 30+个单元测试; `ui.spec.js` 20+个E2E测试) | — | P2 |
+| GAP-9 | ⚠边缘场景: HtmlOutputConverter.sanitize 对复杂嵌套 HTML 的边界行为 (script 标签/event handler) 需更多 fixture | P2 | 需扩展 XSS fixture |
 
 ### 8.5 Mock策略
 ```yaml
-Mock: LlmClient(doAnswer模拟stream), SkillRegistry, WorkflowEngine, SecurityGateway
+Mock: LlmClient(doAnswer模拟stream), SkillRegistry, ToolCallbackRegistry, Advisor
+Real: AnchorInjectionCache (Caffeine 真实实例), HtmlOutputConverter (真实实例)
 ```
 
 ---
@@ -415,7 +478,8 @@ Mock: LlmClient(doAnswer模拟stream), SkillRegistry, WorkflowEngine, SecurityGa
 |------|------|------|
 | LlmClient | 已完成 | INJECTION_FAILED |
 | SkillRegistry | 已完成 | SKILL_NOT_FOUND |
-| WorkflowEngine | 可选 | WORKFLOW_NOT_FOUND |
+| AnchorGraphFactory + GraphExecutor | 已完成 (2.x) | INJECTION_FAILED |
+| HtmlOutputConverter | 已完成 (2.x) | - |
 | Caffeine | 已完成 | - |
 
 ---
@@ -445,16 +509,21 @@ Mock: LlmClient(doAnswer模拟stream), SkillRegistry, WorkflowEngine, SecurityGa
 | 版本 | 日期 | 作者 | 内容 |
 |------|------|------|------|
 | 2.0 | 2026-07-23 | Team | 初始TDD规格 |
+| 2.1 | 2026-07-25 | Team | 适配 2.x: AnchorInjectionOrchestrator→AnchorGraphFactory.buildInjectMode 线性图 (preprocess→generate→cache); stripThinking/sanitize 合并入 HtmlOutputConverter; 引入 SkillUnavailableException; 新增 US-9 / UC-09-11 |
 
 ### 12.2 参考文档
 - `docs/superpowers/specs/2026-07-20-host-page-anchor-qa-design.md`
-- `.../anchor/AnchorInjectionOrchestrator.java`、`AnchorInjectionCache.java`、`InjectionCacheEntry.java`
+- `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md`
+- `.../anchor/AnchorGraphFactory.java`、`AnchorInjectionCache.java`、`InjectionCacheEntry.java`
+- `.../converter/HtmlOutputConverter.java`
 - `.../llm/AnthropicLlmClient.java` (skipThinking)、`.../static/snap-agent/anchor.js`
 
 ### 12.3 术语表
 | 术语 | 定义 |
 |------|------|
 | Inject Mode | 页面加载时自动生成HTML注入 |
-| stripThinking | 剥离LLM输出HTML前的推理文本 |
+| AnchorGraphFactory.buildInjectMode | 编译 preprocess→generate→cache 线性图 (2.x 替代 AnchorInjectionOrchestrator) |
+| HtmlOutputConverter | 2.x 统一 HTML 后处理 (containerClass/template/stripThinking/sanitize) |
+| stripThinking | 剥离LLM输出HTML前的推理文本 (现由 HtmlOutputConverter 承担) |
 | skipThinking | SSE解析跳过thinking_delta（tools为空时） |
 | InjectionCache | Caffeine LRU + per-entry TTL缓存 |

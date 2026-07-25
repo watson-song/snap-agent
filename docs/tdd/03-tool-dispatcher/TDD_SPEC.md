@@ -1,114 +1,257 @@
-# TDD需求规格说明书 — ToolDispatcher 路由与插件体系
+# TDD需求规格说明书 — @Tool 声明式工具 + ToolCallback SPI + ToolsNode
 
-> 版本: 2.0 | 模块: snap-agent-core / tool | 状态: 开发中
+> 版本: 3.0 | 模块: `snap-agent-core/tool` + `snap-agent-spring-boot-2x-starter/tool`
 
 ---
 
 ## 1. 需求元信息
 
 ```yaml
-需求ID: REQ-03-TOOL-DISPATCHER
-需求名称: ToolDispatcher 路由 + pluginOverrides + ToolProvider SPI + ToolPlugin 注解
-优先级: P0
-迭代: Sprint v0.5
-负责人: core-team
-状态: 开发中
+需求ID: REQ-03-TOOL
+需求名称: @Tool/@ToolParam 注解 + ToolCallback SPI + ToolCallbackRegistry + ToolsNode + @ToolApproval HITL
+优先级: P0 | 迭代: 2.x | 状态: 重构中
 ```
 
-### 1.1 背景与目标
-- **业务背景**: v1.0 的 `ToolDispatcher` 持有 `final unmodifiableMap`，无 add/remove API；`ToolPlugin` SPI 仅为元数据层，无法兑现"plugin 可热插拔 tool"承诺。
-- **用户价值**: 让宿主可运行时注册/启停/设默认/反注册 plugin，同一 toolType 可有多 plugin，按 default 或显式 `pluginOverrides` 路由，减少 50% 硬编码工具迁移成本。
-- **成功指标**: 旧 `@Component ToolProvider` bean 零修改仍可用；新 plugin 引用 `pluginOverrides` 端到端 < 2s。
+**背景**: v1.x 的 `ToolDispatcher` 持有不可变 Map，`ToolProvider` SPI 仅为元数据层，无法热插拔。2.x 重构删除 `ToolDispatcher`/`ToolProvider`/`@ToolPluginAnnotation`/`PluginRegistry`，替换为声明式 `@Tool` 注解 + 统一 `ToolCallback` SPI + 图节点 `ToolsNode`。工具定义从"接口实现 + YAML 清单"变为"注解声明 + 反射发现"，减少 80% 样板代码。
 
-### 1.2 范围边界
-- **包含**: `PluginDescriptor`/`PluginRegistry` SPI、`ToolDispatcher` 基于 registry 路由、`pluginOverrides`、`@ToolPluginAnnotation`、`ToolPlugin` SPI、`InMemoryPluginRegistry`。
-- **不包含**: JAR 上传 + URLClassLoader 隔离（见 09-plugin-mcp）、REST API 端点、Maven archetype。
+**目标**: LLM 看到的工具定义由 `@Tool` + `@ToolParam` 注解自动生成 JSON Schema；工具执行从 `ToolDispatcher.dispatch()` 变为 `ToolsNode` 图节点接收 `tool_use` → 调用 `ToolCallback.execute()` → 结果截断 → SSE 事件 → 回传 LLM。Plugin 热插拔通过 `ToolCallbacks.from()` 反射发现 + `ToolCallbackRegistry.register()` 实现。
 
-### 1.3 风险与假设
+**范围**: `@Tool`/`@ToolParam` 注解、`ToolCallback` SPI、`ToolCallbackRegistry` SPI、`ToolCallbacks.from()` 反射工厂、`ToolsNode` 图节点、`@ToolApproval` HITL 注解、`ToolResult` 值对象、JSON Schema 自动生成、Plugin 热加载产出 `ToolCallback[]`。**不含**: MCP 远程工具适配（见 09-plugin-mcp）、JAR 上传/ClassLoader 隔离（见 09-plugin-mcp）。
 
-| 风险ID | 描述 | 概率 | 影响 | 缓解措施 |
-|--------|------|------|------|----------|
-| R1 | `pluginOverrides` 指向已禁用 plugin 静默失效 | 中 | 高 | dispatcher 返回 `ToolResult.error`，LLM 自纠 |
-| R2 | 并发 register/disable 与 dispatch 竞争 | 中 | 中 | `ConcurrentHashMap` + `volatile` flag |
-| R3 | system plugin 误被反注册 | 低 | 高 | `unregister` 抛 `UnsupportedOperationException` |
-
-**关键假设**: 1 plugin = 1 tool；LLM 不感知 plugin，只看 toolType；现有 skill 不传 overrides → 走 default → 行为一致。
+| 风险 | 描述 | 缓解 |
+|------|------|------|
+| R1 | `@Tool` 方法签名复杂（泛型/可变参数）反射失败 | `ToolCallbacks.from()` 抛明确异常，文档约束支持类型 |
+| R2 | `ToolCallbackRegistry` 并发 register/unregister 与 ToolsNode 执行竞争 | `ConcurrentHashMap` + volatile |
+| R3 | `@ToolApproval` 的 HITL 中断后 checkpoint 丢失 | `InterruptException` → `GraphExecutor` 存 checkpoint → `PAUSED` |
+| R4 | 工具输出超长撑爆 LLM context | `ToolsNode` 截断 `maxToolResultChars`（默认 4000） |
 
 ---
 
 ## 2. 用户故事 (User Stories)
 
-### US-1: 默认 plugin 路由
+### US-1: @Tool 注解声明工具
 ```gherkin
-作为 Agent 执行循环
-我希望 dispatch(toolType, args, ctx) 时自动路由到该 toolType 的默认 plugin
-以便 现有 skill 不传 overrides 时行为 100% 向后兼容
+作为 工具开发者
+我希望 用 @Tool(name="mysql_query", description="执行只读SQL查询") 标注方法
+以便 无需实现 ToolProvider 接口即可声明工具，减少 80% 样板代码
 ```
-**AC:** AC1: Given "mysql"(toolType="mysql_query", isDefault=true, enabled=true) 已注册 / When dispatch 且 overrides 为空 / Then provider.execute 调用一次且 isSuccess()=true；AC2: Given registry 为空 / When dispatch("unknown_type") / Then 返回 error 含 "no plugin registered for: unknown_type"。
-
-### US-2: pluginOverrides 显式覆盖
+**AC:**
 ```gherkin
-作为 skill 编写者
-我希望 在 POST /runs 时传 pluginOverrides["log_read"]="remote-log" 来选远程 plugin
-以便 同一 toolType 的多个 plugin 可按场景显式选择，减少 30% 重复 plugin 部署
+AC1: Given 类 MySqlQueryTool 含方法 @Tool(name="mysql_query", description="执行SQL") String query(@ToolParam("SQL语句") String sql)
+  When ToolCallbacks.from(mySqlQueryTool)
+  Then 返回 ToolCallback[] 含1个 callback
+  And callback.getName() == "mysql_query"
+  And callback.getDescription() == "执行SQL"
+AC2: Given @Tool 无 name() 默认用方法名
+  When ToolCallbacks.from(target)
+  Then callback.getName() == 方法名
+AC3: Given @Tool(returnDirect=true)
+  When ToolCallback.execute 返回结果
+  Then ToolResult.isReturnDirect() == true（结果直接回传用户，不回传 LLM）
 ```
-**AC:** AC1: Given default "local-log" 和非 default "remote-log" / When override={"log_read":"remote-log"} dispatch / Then "remote-log".execute 调用，"local-log" 从未调用；AC2: Given "remote-log" enabled=false / When override 指向它 / Then error 含 "plugin disabled: remote-log"。
 
-### US-3: plugin 启停与默认切换
+### US-2: @ToolParam 参数元数据
 ```gherkin
-作为 运维管理员
-我希望 调用 registry.enable/disable/setDefault 来运行时切换 plugin 状态
-以便 不重启宿主即可降级或切换，运维变更窗口从 30 分钟降至 < 1s
+作为 工具开发者
+我希望 用 @ToolParam(description="SQL语句", required=true) 标注参数
+  以便 LLM 知道每个参数的用途和是否必填
 ```
-**AC:** AC1: Given "log1"(default) 和 "log2"(同 toolType) 已注册 / When registry.disable("log1") / Then "log1".enabled==false 且 getDefault("log_read")=="log2"(自动提升); AC2: Given disabled "log1" / When registry.enable("log1") / Then "log1".enabled==true; AC3: Given registry 为空 / When registry.setDefault("log_read", "nonexistent") / Then 不抛异常.
+**AC:**
+```gherkin
+AC1: Given 方法含 @ToolParam(description="SQL语句") String sql
+  When 生成 JSON Schema
+  Then schema 含 parameters.sql.description == "SQL语句"
+  And schema 含 parameters.sql.type == "string"
+AC2: Given @ToolParam(required=false) String mode
+  When 生成 JSON Schema
+  Then schema 含 parameters.mode.required == false（默认 true）
+AC3: Given 参数无 @ToolParam 注解
+  When ToolCallbacks.from(target)
+  Then 抛 IllegalStateException 含 "parameter missing @ToolParam: parameter 'sql'"
+```
 
-### US-4: system plugin 保护
+### US-3: ToolCallback 统一 SPI
 ```gherkin
 作为 平台开发者
-我希望 system=true 的 plugin 不可被 unregister
-以免 内置工具被误删导致 skill 全量失败
+我希望 所有工具（内置 @Tool、Plugin、MCP）实现统一 ToolCallback 接口
+  以便 ToolsNode 无差别调用，消除工具类型歧视
 ```
-**AC:** AC1: Given "mysql"(system=true) 已注册 / When registry.unregister("mysql") / Then 抛 UnsupportedOperationException 含 "cannot unregister system plugin"; AC2: Given "log1"(default, system=false) 和 "log2"(非 default, 同 toolType) 已注册 / When registry.unregister("log1") / Then getDefault("log_read")=="log2" 且 "log2".isDefault()==true.
-
-### US-5: @ToolPluginAnnotation 元数据声明
+**AC:**
 ```gherkin
-作为 plugin 开发者
-我希望 用 @ToolPluginAnnotation(id, toolType, version, isDefault) 标注类
-以便 扫描时自动读取元数据，减少 80% YAML 清单维护成本
+AC1: Given 内置 @Tool 方法 和 Plugin 产出 ToolCallback
+  When ToolsNode 执行 tool_use
+  Then 两者 execute() 调用方式完全一致，无 instanceof 分支
+AC2: Given ToolCallback.execute(args, ctx) 返回 ToolResult.success
+  When ToolsNode 处理
+  Then ToolResult.content 回传 LLM 作为 tool_result
+AC3: Given ToolCallback.execute 抛 RuntimeException
+  When ToolsNode 处理
+  Then 返回 ToolResult.error 含异常消息，LLM 收到错误自纠
 ```
-**AC:** AC1: Given 类标注 @ToolPluginAnnotation(id="remote-log", toolType="log_read", version="2.0.0", isDefault=true) / When 读取注解 / Then 各字段匹配且 displayName/description 为空串；AC2: Given 最小注解 @ToolPluginAnnotation(id="m", toolType="metrics_query") / Then version="1.0.0", isDefault=false。
 
-### US-6: ToolResult 截断保护
+### US-4: ToolCallbackRegistry 注册与查询
 ```gherkin
-作为 系统运维
-我希望 dispatch 超长 tool result 自动截断
-以防 LLM context 窗口被工具输出撑爆
+作为 平台开发者
+我希望 ToolCallbackRegistry 提供 register/unregister/getAll/find/toToolDefinitionsJson
+  以便 运行时动态管理工具集
 ```
-**AC:** AC1: Given maxToolResultChars=50 且 provider.execute 返回 content 长度 80 / When dispatch / Then result.isTruncated()==true 且 content 长度 <= 50; AC2: Given provider.execute 返回 error result / When dispatch / Then error result 不被截断.
-
-### US-7: 审计回调隔离
+**AC:**
 ```gherkin
-作为 安全审计员
-我希望 dispatch 每次调用都触发 audit callback 且 callback 异常不破坏主流程
-以便 审计日志完整且审计故障不影响诊断
+AC1: Given registry 为空
+  When register(callback)
+  Then getAll() 返回 size==1 且 find(callback.getName()) 命中
+AC2: Given registry 已注册 "mysql_query"
+  When register(同名 callback)
+  Then 抛 IllegalArgumentException "tool already registered: mysql_query"
+AC3: Given registry 已注册 "mysql_query"(system=true)
+  When unregister("mysql_query")
+  Then 抛 UnsupportedOperationException "cannot unregister system tool"
+AC4: Given registry 含3个 ToolCallback
+  When toToolDefinitionsJson()
+  Then 返回 JSON 数组含3个 {name, description, input_schema} 对象
 ```
-**AC:** AC1: Given ctx.auditCallback != null / When dispatch 成功 / Then callback.onToolExecuted 被调用 once，toolName 为 toolType（非 pluginId）; AC2: Given callback.onToolExecuted 抛 RuntimeException / When dispatch / Then 不向上抛出，正常返回 ToolResult.
 
-### US-8: activePlugins 去重计算
+### US-5: ToolCallbacks.from() 反射自动发现
+```gherkin
+作为 工具开发者
+我希望 ToolCallbacks.from(target) 自动扫描 @Tool 方法并生成 ToolCallback[]
+  以便 零配置注册工具
+```
+**AC:**
+```gherkin
+AC1: Given 类含3个 @Tool 方法
+  When ToolCallbacks.from(target)
+  Then 返回 ToolCallback[3]，每个含 name/description/jsonSchema
+AC2: Given 类无 @Tool 方法
+  When ToolCallbacks.from(target)
+  Then 返回 ToolCallback[0]（空数组，不抛异常）
+AC3: Given @Tool 方法参数无 @ToolParam 注解
+  When ToolCallbacks.from(target)
+  Then 抛 IllegalStateException 含 "parameter missing @ToolParam"
+AC4: Given @Tool 方法返回类型非 String
+  When ToolCallbacks.from(target)
+  Then ToolCallback.execute 返回 ToolResult.success(content=String.valueOf(result))
+```
+
+### US-6: ToolsNode 图节点执行
 ```gherkin
 作为 Agent 执行循环
-我希望 activePlugins() 每个 toolType 只暴露一个 plugin（default 或 override）
-以便 LLM 看到的工具定义无重复
+我希望 ToolsNode 接收 state["tool_calls"] 批量执行工具并回传结果
+  以便 ReAct 循环中工具执行作为图节点，可被 Advisor 增强
 ```
-**AC:** AC1: Given "local-log"(default, enabled) 和 "remote-log"(enabled) 同 toolType / When activePlugins() / Then 返回 size==1 且 pluginId=="local-log"; AC2: Given overrides={"log_read":"remote-log"} / When activePlugins(overrides) / Then 返回 size==1 且 pluginId=="remote-log"; AC3: Given "mysql"(default, enabled=false) / When activePlugins() / Then 返回空集合.
-
-### US-9: 旧构造器向后兼容
+**AC:**
 ```gherkin
-作为 宿主开发者
-我希望 现有 @Component ToolProvider bean 零修改仍可工作
-以便 升级 SnapAgent 版本时无需改宿主代码
+AC1: Given state["tool_calls"] 含2个 tool_use (mysql_query, log_read)
+  When ToolsNode.execute(state, ctx)
+  Then 2个 ToolCallback.execute 被调用
+  And state["tool_results"] 含2个 ToolResult
+  And SSE 推送2个 tool_result 事件
+AC2: Given tool_use 含 unknown tool name
+  When ToolsNode.execute
+  Then ToolResult.error 含 "tool not found: {name}"，回传 LLM
+AC3: Given ToolCallback.execute 返回 content 长度 > maxToolResultChars
+  When ToolsNode 处理
+  Then ToolResult.isTruncated()==true 且 content 被截断
 ```
-**AC:** AC1: Given 旧 @Component ToolProvider bean 已注册 / When ToolDispatcher 构造 / Then bean 被自动包装为 PluginDescriptor(system=true, isDefault=true) 且 dispatch 正常路由; AC2: Given 旧 bean 和新 @ToolPlugin 注解 plugin 同 toolType / When dispatch 无 override / Then 旧 bean (default) 被调用.
+
+### US-7: @ToolApproval HITL 人工审批
+```gherkin
+作为 安全审计员
+我希望 用 @ToolApproval(required=true) 标注高危工具，执行前需人工确认
+  以便 SQL 执行/文件删除等危险操作不自动触发
+```
+**AC:**
+```gherkin
+AC1: Given @Tool(name="execute_ddl") + @ToolApproval(required=true)
+  When ToolsNode 检测 tool_use["execute_ddl"]
+  Then 抛 InterruptException 含 toolName + args
+  And GraphExecutor 存 checkpoint → TaskStatus.PAUSED → SSE 推送 "paused" 事件
+AC2: Given 已 PAUSED 的任务
+  When POST /runs/{id}/resume {humanInput: "approved"}
+  Then GraphExecutor.resume() 注入 state["human.input"]="approved"
+  And ToolsNode 重新执行 execute_ddl，正常返回 ToolResult
+AC3: Given POST /runs/{id}/resume {humanInput: "rejected"}
+  When ToolsNode 处理
+  Then 返回 ToolResult.error 含 "human rejected"，LLM 收到拒绝消息
+AC4: Given @ToolApproval(required=false) 或无 @ToolApproval
+  When ToolsNode 执行
+  Then 不触发中断，直接执行
+```
+
+### US-8: ToolResult 值对象
+```gherkin
+作为 系统开发者
+我希望 ToolResult 是不可变值对象，含 success/error/truncated 三种状态
+  以便 工具执行结果语义明确，不可篡改
+```
+**AC:**
+```gherkin
+AC1: Given ToolResult.success("content", "toolId", 10)
+  When 检查
+  Then isSuccess()==true 且 isTruncated()==false 且 getContent()=="content"
+AC2: Given ToolResult.error("error message")
+  When 检查
+  Then isError()==true 且 getErrorMessage()=="error message"
+AC3: Given ToolResult.truncated("long...", 4000, 10000)
+  When 检查
+  Then isTruncated()==true 且 getOriginalLength()==10000
+```
+
+### US-9: per-request 工具子集路由
+```gherkin
+作为 skill 编写者
+我希望 POST /runs 传 pluginOverrides 选择本次执行的 ToolCallback 子集
+  以便 同一工具类型可有多实现，按场景选择
+```
+**AC:**
+```gherkin
+AC1: Given registry 含 "local-log" 和 "remote-log" 两个 ToolCallback
+  When ToolCallbackRegistry.subset({"log_read":"remote-log"})
+  Then 返回子集 registry 含 "remote-log"，不含 "local-log"
+AC2: Given 无 pluginOverrides
+  When subset(null)
+  Then 返回全部 ToolCallback
+AC3: Given override 指向不存在的 tool name
+  When subset({"log_read":"nonexistent"})
+  Then 抛 IllegalArgumentException 含 "tool not found in registry: nonexistent"
+```
+
+### US-10: Plugin 热加载产出 ToolCallback
+```gherkin
+作为 运维管理员
+我希望 Plugin JAR 上传后自动用 ToolCallbacks.from() 发现 @Tool 方法并注册
+  以便 运行时扩展工具能力，无需重启宿主
+```
+**AC:**
+```gherkin
+AC1: Given Plugin JAR 含类 LogTool with @Tool methods
+  When PluginUploader 加载 JAR → ToolCallbacks.from(logToolInstance)
+  Then 产出 ToolCallback[] 并注册到 ToolCallbackRegistry
+  And toToolDefinitionsJson() 含新工具
+AC2: Given Plugin 卸载
+  When ToolCallbackRegistry.unregister(pluginToolNames)
+  Then toToolDefinitionsJson() 不再含该 Plugin 的工具
+AC3: Given 内置 @Tool 和 Plugin @Tool 同名
+  When Plugin 注册
+  Then 抛 IllegalArgumentException "tool already registered: {name}"
+```
+
+---
+
+## 2.5 用户故事地图
+
+| 阶段 | 故事 | 价值 | 指标 | 依赖 |
+|------|------|------|------|------|
+| 声明 | US-1 @Tool 注解 | 零接口工具声明 | 样板减少 80% | - |
+| 元数据 | US-2 @ToolParam | LLM 知晓参数 | Schema 100% 覆盖 | US-1 |
+| 统一 | US-3 ToolCallback | 无差别调用 | instanceof 0 | US-1 |
+| 注册 | US-4 Registry | 运行时管理 | CRUD 完整 | US-3 |
+| 发现 | US-5 ToolCallbacks.from | 零配置注册 | 反射发现 100% | US-1,2 |
+| 执行 | US-6 ToolsNode | 图节点工具执行 | ReAct 循环集成 | US-3,4 |
+| 审批 | US-7 @ToolApproval | HITL 危险操作 | 中断+恢复 100% | US-6 |
+| 结果 | US-8 ToolResult | 语义明确结果 | 三状态覆盖 | US-3 |
+| 路由 | US-9 subset | per-request 选择 | 子集正确 100% | US-4 |
+| 热加载 | US-10 Plugin | 运行时扩展 | JAR→注册 < 2s | US-5,4 |
 
 ---
 
@@ -118,171 +261,481 @@
 
 | 用例ID | 名称 | 优先级 | AC | 类型 |
 |--------|------|--------|----|------|
-| UC-01 | dispatch 默认路由与 ctx=null | P0 | US-1 | 单元 |
-| UC-02 | dispatch pluginOverrides 覆盖 | P0 | US-2 | 单元 |
-| UC-03 | registry register 边界 | P0 | US-3 | 单元 |
-| UC-04 | registry unregister system保护与自动提升 | P0 | US-4 | 单元 |
-| UC-05 | registry setDefault 清旧 | P0 | US-5 | 单元 |
-| UC-06 | activePlugins 去重与override | P0 | US-8 | 单元 |
-| UC-07 | truncate 超长结果 | P1 | US-7 | 单元 |
-| UC-08 | audit callback 触发 | P1 | US-6 | 单元 |
+| UC-01 | @Tool 注解基础属性 | P0 | US-1 AC1/AC2 | 单元 |
+| UC-02 | @Tool returnDirect | P0 | US-1 AC3 | 单元 |
+| UC-03 | @ToolParam description+required | P0 | US-2 AC1/AC2 | 单元 |
+| UC-04 | 缺少 @ToolParam 抛异常 | P0 | US-2 AC3 | 单元 |
+| UC-05 | ToolCallback execute 成功 | P0 | US-3 AC1/AC2 | 单元 |
+| UC-06 | ToolCallback execute 异常 | P0 | US-3 AC3 | 单元 |
+| UC-07 | Registry register/getAll/find | P0 | US-4 AC1 | 单元 |
+| UC-08 | Registry 重复注册冲突 | P0 | US-4 AC2 | 单元 |
+| UC-09 | Registry system 不可 unregister | P0 | US-4 AC3 | 单元 |
+| UC-10 | Registry toToolDefinitionsJson | P0 | US-4 AC4 | 单元 |
+| UC-11 | ToolCallbacks.from 多方法 | P0 | US-5 AC1 | 单元 |
+| UC-12 | ToolCallbacks.from 无 @Tool | P1 | US-5 AC2 | 单元 |
+| UC-13 | ToolCallbacks.from 缺 @ToolParam | P0 | US-5 AC3 | 单元 |
+| UC-14 | ToolCallbacks.from 非String 返回 | P1 | US-5 AC4 | 单元 |
+| UC-15 | ToolsNode 批量执行 | P0 | US-6 AC1 | 单元 |
+| UC-16 | ToolsNode 未知工具 | P0 | US-6 AC2 | 单元 |
+| UC-17 | ToolsNode 结果截断 | P0 | US-6 AC3 | 单元 |
+| UC-18 | @ToolApproval 中断 | P0 | US-7 AC1 | 单元 |
+| UC-19 | @ToolApproval resume 批准 | P0 | US-7 AC2 | 单元 |
+| UC-20 | @ToolApproval resume 拒绝 | P0 | US-7 AC3 | 单元 |
+| UC-21 | @ToolApproval not required | P1 | US-7 AC4 | 单元 |
+| UC-22 | ToolResult success/error/truncated | P0 | US-8 AC1/2/3 | 单元 |
+| UC-23 | Registry subset per-request | P0 | US-9 AC1/2/3 | 单元 |
+| UC-24 | Plugin 热加载注册 | P0 | US-10 AC1 | 单元 |
+| UC-25 | Plugin 卸载反注册 | P0 | US-10 AC2 | 单元 |
+| UC-26 | Plugin 同名冲突 | P1 | US-10 AC3 | 单元 |
 | UC-R1 | GET /tools 工具列表 | P1 | - | 集成 |
-| UC-R2 | GET /tools/plugins 插件列表 | P1 | US-8 | 集成 |
-| UC-R3 | GET /tools/plugins/{id} 插件详情 | P1 | - | 集成 |
-| UC-R4 | POST /tools/plugins/upload 上传插件 | P0 | US-3 | 集成 |
-| UC-R5 | DELETE /tools/plugins/{id} 删除插件 | P0 | US-4 | 集成 |
-| UC-R6 | POST /tools/plugins/{id}/enable 启用 | P1 | - | 集成 |
-| UC-R7 | POST /tools/plugins/{id}/disable 禁用 | P1 | - | 集成 |
-| UC-R8 | PUT /tools/plugins/{id}/default 设默认 | P1 | US-5 | 集成 |
+| UC-R2 | GET /tools/{name} 工具详情 | P1 | - | 集成 |
 
 ### 3.2 详细用例 (Gherkin)
 
-#### UC-01: dispatch 默认路由与 ctx=null
+#### UC-01: @Tool 注解基础属性
 ```gherkin
 @priority:high @type:unit
-功能: 默认 plugin 路由
-  场景: 命中 default plugin
-    Given registry 注册 "mysql"(toolType="mysql_query", isDefault=true, enabled=true)
-    And provider.execute 返回 ToolResult.success("1", 1, 10L)
-    When dispatch("mysql_query", {sql:"SELECT 1"}, ctx) 且 ctx.pluginOverrides 为空
-    Then result.isSuccess() == true 且 provider.execute 被调用 once
-    And audit callback 收到 toolName="mysql_query"
-  场景: ctx 为 null 时仍能路由
-    Given registry 注册 default plugin
-    When dispatch("mysql_query", args, null)
-    Then 不抛 NPE 且仍调用 provider.execute(args, null)
+功能: @Tool 注解声明工具元数据
+  场景: 显式 name + description
+    Given 类 MySqlQueryTool 含方法:
+      @Tool(name="mysql_query", description="执行只读SQL查询")
+      public String query(@ToolParam("SQL语句") String sql) { return "result"; }
+    When ToolCallbacks.from(new MySqlQueryTool())
+    Then 返回 ToolCallback[1]
+    And callback.getName() == "mysql_query"
+    And callback.getDescription() == "执行只读SQL查询"
+  场景: 默认 name 用方法名
+    Given @Tool(description="查询") 无 name() 标注于方法 "query"
+    When ToolCallbacks.from(target)
+    Then callback.getName() == "query"
 ```
 
-#### UC-02: dispatch pluginOverrides 覆盖
+#### UC-02: @Tool returnDirect
 ```gherkin
 @priority:high @type:unit
-功能: pluginOverrides 显式覆盖
-  场景: override 命中非 default plugin
-    Given "local-log"(default) 和 "remote-log"(非 default) 同 toolType="log_read"
-    And ctx.pluginOverrides = {"log_read":"remote-log"}
-    When dispatch("log_read", {}, ctx)
-    Then "remote-log".execute 调用 once，"local-log".execute 从未调用
-  场景: override 指向不存在/已禁用 pluginId
-    Given ctx.pluginOverrides = {"log_read":"nonexistent"}
-    When dispatch("log_read", {}, ctx)
-    Then 返回 error 含 "no plugin registered for: log_read"
-    Given "remote-log" enabled=false 且 override 指向它
-    When dispatch("log_read", {}, ctx)
-    Then 返回 error 含 "plugin disabled: remote-log"
+功能: @Tool returnDirect 直接回传用户
+  场景: returnDirect=true 不回传 LLM
+    Given @Tool(name="render_html", returnDirect=true) String render()
+    When ToolCallbacks.from(target)
+    Then callback.isReturnDirect() == true
+    And ToolsNode 将 ToolResult 直接写入 state["direct_output"]
 ```
 
-#### UC-03: registry register 边界
+#### UC-03: @ToolParam 参数元数据
 ```gherkin
 @priority:high @type:unit
-功能: register 冲突与自动默认
-  场景: 重复 pluginId 抛异常
-    Given registry 已注册 "mysql"
-    When 注册新 plugin "mysql"
-    Then 抛 IllegalArgumentException 含 "plugin already registered: mysql"
-  场景: 首个 plugin 自动成 default + 新 default 清旧
+功能: @ToolParam 描述参数用途和必填性
+  场景: description + required=true
+    Given 方法含 @ToolParam(description="SQL语句", required=true) String sql
+    When 生成 JSON Schema
+    Then schema.parameters.properties.sql.description == "SQL语句"
+    And schema.parameters.properties.sql.type == "string"
+    And schema.parameters.required 含 "sql"
+  场景: required=false
+    Given @ToolParam(description="模式", required=false) String mode
+    When 生成 JSON Schema
+    Then schema.parameters.required 不含 "mode"
+```
+
+#### UC-04: 缺少 @ToolParam 抛异常
+```gherkin
+@priority:high @type:unit
+功能: 参数无 @ToolParam 注解时反射失败
+  场景: 参数无注解
+    Given 方法 query(String sql) 参数 sql 无 @ToolParam
+    When ToolCallbacks.from(target)
+    Then 抛 IllegalStateException 含 "parameter missing @ToolParam: parameter 'sql' in method 'query'"
+```
+
+#### UC-05: ToolCallback execute 成功
+```gherkin
+@priority:high @type:unit
+功能: ToolCallback.execute 正常执行返回成功
+  场景: 内置 @Tool 和 Plugin ToolCallback 无差别调用
+    Given 内置 MySqlQueryTool @Tool 方法产出 callbackA
+    And Plugin 产出 callbackB (name="log_read")
+    When ToolsNode 分别执行 tool_use["mysql_query"] 和 tool_use["log_read"]
+    Then callbackA.execute 和 callbackB.execute 调用方式一致
+    And 两者返回 ToolResult.success
+```
+
+#### UC-06: ToolCallback execute 异常
+```gherkin
+@priority:high @type:unit
+功能: ToolCallback.execute 抛异常时返回 error
+  场景: RuntimeException 不中断循环
+    Given ToolCallback.execute 抛 RuntimeException("DB connection failed")
+    When ToolsNode 处理
+    Then 返回 ToolResult.error("tool execution failed: DB connection failed")
+    And 不向上抛出异常
+    And state["tool_results"] 含 error 结果回传 LLM
+```
+
+#### UC-07: Registry register/getAll/find
+```gherkin
+@priority:high @type:unit
+功能: ToolCallbackRegistry CRUD
+  场景: 注册并查询
     Given registry 为空
-    When 注册 plugin(toolType="log_read", isDefault=false)
-    Then getDefault("log_read")==该 plugin 且 isDefault()==true
-    Given "log1"(isDefault=true) 已注册
-    When 注册 "log2"(同 toolType, isDefault=true)
-    Then "log1".isDefault()==false 且 "log2".isDefault()==true 且 getDefault=="log2"
+    When register(callback("mysql_query"))
+    Then getAll().size() == 1
+    And find("mysql_query") == callback
+    And find("nonexistent") == null
 ```
 
-#### UC-04: registry unregister system 保护与自动提升
+#### UC-08: Registry 重复注册冲突
 ```gherkin
 @priority:high @type:unit
-功能: unregister 与 system 保护
-  场景: system plugin 不可反注册
-    Given "mysql"(system=true) 已注册
-    When registry.unregister("mysql")
-    Then 抛 UnsupportedOperationException 含 "cannot unregister system plugin"
-  场景: 反注册 default 后自动提升 + unknown id no-op
-    Given "log1"(default) 和 "log2"(非 default, 同 toolType) 已注册
-    When registry.unregister("log1")
-    Then getDefault("log_read")=="log2" 且 "log2".isDefault()==true
-    Given registry 为空
-    When registry.unregister("nonexistent")
-    Then 不抛异常
+功能: 同名 ToolCallback 不可重复注册
+  场景: 冲突抛异常
+    Given registry 已注册 "mysql_query"
+    When register(callback("mysql_query"))
+    Then 抛 IllegalArgumentException "tool already registered: mysql_query"
 ```
 
-#### UC-05: registry setDefault 清旧
+#### UC-09: Registry system 不可 unregister
 ```gherkin
 @priority:high @type:unit
-功能: setDefault 切换
-  场景: 设新 default 清同 type 其他 + unknown no-op
-    Given "log1"(default) 和 "log2"(非 default) 同 toolType="log_read"
-    When registry.setDefault("log_read", "log2")
-    Then "log1".isDefault()==false 且 "log2".isDefault()==true 且 getDefault=="log2"
-    Given registry 为空
-    When registry.setDefault("log_read", "nonexistent")
-    Then 不抛异常
+功能: system ToolCallback 不可反注册
+  场景: system 保护
+    Given registry 含 "mysql_query" (system=true)
+    When unregister("mysql_query")
+    Then 抛 UnsupportedOperationException "cannot unregister system tool: mysql_query"
+  场景: 非 system 可反注册
+    Given registry 含 "custom_tool" (system=false)
+    When unregister("custom_tool")
+    Then getAll() 不含 "custom_tool"
 ```
 
-#### UC-06: activePlugins 去重与 override
+#### UC-10: Registry toToolDefinitionsJson
 ```gherkin
 @priority:high @type:unit
-功能: activePlugins 计算
-  场景: 同 toolType 多 plugin 只暴露 default + override 替换
-    Given "local-log"(default, enabled) 和 "remote-log"(enabled) 已注册
-    When activePlugins()
-    Then 返回 size==1 且 pluginId=="local-log"
-    Given overrides = {"log_read":"remote-log"}
-    When activePlugins(overrides)
-    Then 返回 size==1 且 pluginId=="remote-log"
-  场景: 禁用 plugin 不出现 + override 指向禁用不替换
-    Given "mysql"(default, enabled=false) 已注册
-    When activePlugins()
-    Then 返回集合为空
-    Given "local"(default, enabled) 和 "remote"(enabled=false) 且 overrides={"log_read":"remote"}
-    When activePlugins(overrides)
-    Then 返回 size==1 且 pluginId=="local"
+功能: 生成 LLM 工具定义 JSON
+  场景: 3个工具生成3个定义
+    Given registry 含 mysql_query, log_read, metrics_query
+    When toToolDefinitionsJson()
+    Then 返回 JSON 数组 size==3
+    And 每个对象含 name, description, input_schema
+    And input_schema 含 type=object, properties, required 数组
 ```
 
-#### UC-07: truncate 超长结果
+#### UC-11: ToolCallbacks.from 多方法
+```gherkin
+@priority:high @type:unit
+功能: 反射发现多个 @Tool 方法
+  场景: 3个方法
+    Given 类含3个 @Tool 方法: query, insert, delete
+    When ToolCallbacks.from(target)
+    Then 返回 ToolCallback[3]
+    And names == ["query", "insert", "delete"]
+```
+
+#### UC-12: ToolCallbacks.from 无 @Tool
 ```gherkin
 @priority:medium @type:unit
-功能: ToolResult 截断
-  场景大纲: 内容长度边界
-    Given maxToolResultChars = <max>，provider.execute 返回 content 长度 <len>
-    When dispatch 被调用
-    Then result.isTruncated() == <truncated>
-    例子:
-      | max | len | truncated | 说明       |
-      | 50  | 80  | true      | 超限截断   |
-      | 50  | 50  | false     | 等于上限   |
-      | 5   | 25(error) | false | error 不截 |
+功能: 无 @Tool 方法返回空数组
+  场景: 空类
+    Given 类无任何 @Tool 方法
+    When ToolCallbacks.from(target)
+    Then 返回 ToolCallback[0] 不抛异常
 ```
 
-#### UC-08: audit callback 触发
+#### UC-13: ToolCallbacks.from 缺 @ToolParam
+```gherkin
+@priority:high @type:unit
+功能: 参数缺少 @ToolParam 时抛异常
+  场景: 参数无注解
+    Given @Tool 方法 query(String sql) 参数无 @ToolParam
+    When ToolCallbacks.from(target)
+    Then 抛 IllegalStateException 含 "parameter missing @ToolParam"
+```
+
+#### UC-14: ToolCallbacks.from 非String 返回
 ```gherkin
 @priority:medium @type:unit
-功能: audit 回调
-  场景: 命中/未知 toolType 均触发 + audit 异常不破坏主流程
-    Given ctx.auditCallback != null
-    When dispatch 成功执行
-    Then callback.onToolExecuted("mysql_query", args, result) 调用 once，toolName 是 toolType 不是 pluginId
-    Given ctx.auditCallback != null
-    When dispatch("foo", ...) 返回 error
-    Then callback.onToolExecuted("foo", args, errorResult) 调用 once
-    Given callback.onToolExecuted 抛 RuntimeException
-    When dispatch 被调用
-    Then 不向上抛出，正常返回 ToolResult
+功能: 非 String 返回类型自动转换
+  场景: 返回 int/boolean/POJO
+    Given @Tool 方法返回 int
+    When ToolCallbacks.from(target)
+    Then ToolCallback.execute 返回 ToolResult.success(content=String.valueOf(result))
+    Given @Tool 方法返回 POJO
+    When ToolCallback.execute
+    Then ToolResult.success(content=JSON.toJSONString(result))
+```
+
+#### UC-15: ToolsNode 批量执行
+```gherkin
+@priority:high @type:unit
+功能: ToolsNode 批量执行 tool_use
+  场景: 2个 tool_use 并行执行
+    Given state["tool_calls"] = [{id:"t1", name:"mysql_query", input:{sql:"SELECT 1"}}, {id:"t2", name:"log_read", input:{file:"app.log"}}]
+    And registry 含 mysql_query 和 log_read ToolCallback
+    When ToolsNode.execute(state, ctx)
+    Then 2个 ToolCallback.execute 被调用
+    And state["tool_results"] 含2个 ToolResult (id="t1", id="t2")
+    And ctx.emit 被调用2次 (tool_result 事件)
+```
+
+#### UC-16: ToolsNode 未知工具
+```gherkin
+@priority:high @type:unit
+功能: tool_use 引用不存在的工具名
+  场景: 返回 error 回传 LLM
+    Given state["tool_calls"] 含 name="nonexistent"
+    And registry 不含 "nonexistent"
+    When ToolsNode.execute
+    Then ToolResult.error("tool not found: nonexistent")
+    And state["tool_results"] 含 error 结果
+```
+
+#### UC-17: ToolsNode 结果截断
+```gherkin
+@priority:high @type:unit
+功能: 工具输出超长截断
+  场景: content 超过 maxToolResultChars
+    Given maxToolResultChars=50
+    And ToolCallback.execute 返回 content 长度 100
+    When ToolsNode 处理
+    Then ToolResult.isTruncated() == true
+    And content 长度 <= 50
+    And content 含截断标记 "...[truncated]"
+  场景: error 结果不截断
+    Given ToolCallback.execute 抛异常，error message 长度 100
+    When ToolsNode 处理
+    Then ToolResult.isError()==true 且 isTruncated()==false
+```
+
+#### UC-18: @ToolApproval 中断
+```gherkin
+@priority:high @type:unit
+功能: 高危工具触发 HITL 中断
+  场景: @ToolApproval(required=true) 抛 InterruptException
+    Given @Tool(name="execute_ddl") + @ToolApproval(required=true)
+    And state["tool_calls"] 含 execute_ddl
+    When ToolsNode.execute
+    Then 抛 InterruptException
+    And exception 含 toolName="execute_ddl" + args
+    And GraphExecutor 存 checkpoint → TaskStatus.PAUSED
+    And SSE 推送 "paused" 事件含 toolName + args
+```
+
+#### UC-19: @ToolApproval resume 批准
+```gherkin
+@priority:high @type:unit
+功能: 人工批准后继续执行
+  场景: resume approved
+    Given Task 已 PAUSED (因 @ToolApproval)
+    When POST /runs/{id}/resume {humanInput: "approved"}
+    Then GraphExecutor.resume() 注入 state["human.input"]="approved"
+    And ToolsNode 重新执行 execute_ddl
+    And ToolResult.success 正常回传
+```
+
+#### UC-20: @ToolApproval resume 拒绝
+```gherkin
+@priority:high @type:unit
+功能: 人工拒绝后回传 LLM
+  场景: resume rejected
+    Given Task 已 PAUSED
+    When POST /runs/{id}/resume {humanInput: "rejected"}
+    Then ToolsNode 返回 ToolResult.error("human rejected: execute_ddl")
+    And state["tool_results"] 含拒绝结果
+    And LLM 在下一轮收到拒绝消息
+```
+
+#### UC-21: @ToolApproval not required
+```gherkin
+@priority:medium @type:unit
+功能: 无 @ToolApproval 或 required=false 不中断
+  场景: 普通工具直接执行
+    Given @Tool(name="mysql_query") 无 @ToolApproval
+    When ToolsNode.execute
+    Then 不抛 InterruptException
+    And 正常返回 ToolResult
+```
+
+#### UC-22: ToolResult 值对象
+```gherkin
+@priority:high @type:unit
+功能: ToolResult 不可变值对象三状态
+  场景: success
+    When ToolResult.success("content", "tool-1", 10)
+    Then isSuccess()==true 且 isTruncated()==false
+    And getContent()=="content" 且 getToolUseId()=="tool-1"
+  场景: error
+    When ToolResult.error("error msg")
+    Then isError()==true 且 getErrorMessage()=="error msg"
+  场景: truncated
+    When ToolResult.truncated("short...", 4000, 10000)
+    Then isTruncated()==true 且 getOriginalLength()==10000
+```
+
+#### UC-23: Registry subset per-request
+```gherkin
+@priority:high @type:unit
+功能: per-request 工具子集
+  场景: override 选择
+    Given registry 含 "local-log" 和 "remote-log"
+    When subset({"log_read":"remote-log"})
+    Then 返回子集含 "remote-log" 不含 "local-log"
+  场景: null 返回全部
+    Given registry 含3个 ToolCallback
+    When subset(null)
+    Then 返回全部3个
+  场景: 不存在的 override
+    Given subset({"log_read":"nonexistent"})
+    Then 抛 IllegalArgumentException "tool not found in registry: nonexistent"
+```
+
+#### UC-24: Plugin 热加载注册
+```gherkin
+@priority:high @type:unit
+功能: Plugin JAR → ToolCallbacks.from() → Registry 注册
+  场景: 加载并注册
+    Given Plugin JAR 含 LogTool with @Tool methods
+    When PluginUploader 加载 JAR
+    Then ToolCallbacks.from(logToolInstance) 产出 ToolCallback[]
+    And ToolCallbackRegistry.register(each)
+    And toToolDefinitionsJson() 含新工具
+```
+
+#### UC-25: Plugin 卸载反注册
+```gherkin
+@priority:high @type:unit
+功能: Plugin 卸载移除 ToolCallback
+  场景: 反注册
+    Given Plugin "log-plugin" 已注册 "log_read" ToolCallback
+    When Plugin 卸载
+    Then ToolCallbackRegistry.unregister("log_read")
+    And toToolDefinitionsJson() 不含 "log_read"
+```
+
+#### UC-26: Plugin 同名冲突
+```gherkin
+@priority:medium @type:unit
+功能: 内置与 Plugin 同名冲突
+  场景: 冲突抛异常
+    Given registry 含 "mysql_query" (内置)
+    When Plugin 注册同名 "mysql_query"
+    Then 抛 IllegalArgumentException "tool already registered: mysql_query"
 ```
 
 ---
 
 ## 4. 接口规格 (API Specs)
 
+### 4.1 @Tool 注解
 ```java
-/** ToolDispatcher.dispatch: 路由 tool_use 调用
- * 1. ctx.pluginOverrides[toolType] → 指定 plugin  2. registry.getDefault(toolType) → 默认
- * 3. 命中且 enabled → provider.execute(args, ctx)  4. 未命中或禁用 → ToolResult.error
- * 测试要点: 默认命中/override命中/未知type/禁用plugin/ctx=null/provider返回null/provider抛异常 */
-ToolResult dispatch(String toolType, Map<String,Object> args, ToolContext ctx);
-/** PluginRegistry: register(冲突→IllegalException, 首个toolType自动default, 新default清旧)
- *   unregister(system→UnsupportedOperationException, default被删时自动提升下一个)
- *   setDefault(清同type其他default, unknown pluginId no-op) */
-void register(PluginDescriptor); void unregister(String); void setDefault(String, String);
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface Tool {
+    String name() default "";           // 默认用方法名
+    String description();               // 必填
+    boolean returnDirect() default false; // true=结果直接回传用户
+}
+```
+
+### 4.2 @ToolParam 注解
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.PARAMETER)
+public @interface ToolParam {
+    String description();              // 必填
+    boolean required() default true;   // 默认必填
+}
+```
+
+### 4.3 @ToolApproval 注解
+```java
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.METHOD)
+public @interface ToolApproval {
+    boolean required() default false;  // true=执行前需人工确认
+}
+```
+
+### 4.4 ToolCallback SPI
+```java
+public interface ToolCallback {
+    String getName();
+    String getDescription();
+    String getJsonSchema();            // JSON Schema for LLM tool definitions
+    ToolResult execute(Map<String, Object> args, ToolContext ctx);
+    boolean isReturnDirect();
+    boolean isSystem();                // system=true 不可 unregister
+}
+```
+
+### 4.5 ToolCallbackRegistry SPI
+```java
+public interface ToolCallbackRegistry {
+    void register(ToolCallback callback);    // 冲突→IllegalArgumentException, system不可unregister
+    void unregister(String toolName);         // system→UnsupportedOperationException
+    List<ToolCallback> getAll();
+    ToolCallback find(String toolName);       // null=不存在
+    String toToolDefinitionsJson();           // LLM 工具定义 JSON 数组
+    ToolCallbackRegistry subset(Map<String, String> pluginOverrides); // per-request 子集
+}
+```
+
+### 4.6 ToolCallbacks 反射工厂
+```java
+public class ToolCallbacks {
+    public static ToolCallback[] from(Object target);  // 扫描 @Tool 方法
+    public static ToolCallback[] from(Class<?> clazz);  // 静态方法扫描
+    // 反射: @Tool name/description/returnDirect → ToolCallback
+    //        @ToolParam description/required → JSON Schema
+    //        参数类型 → schema type (String→string, int→integer, boolean→boolean, POJO→object)
+    //        返回类型: String→直接, int/boolean→String.valueOf, POJO→JSON序列化
+}
+```
+
+### 4.7 ToolsNode 图节点
+```java
+public class ToolsNode implements Node {
+    private final ToolCallbackRegistry registry;
+    private final int maxToolResultChars;  // 默认 4000
+
+    @Override
+    public GraphState execute(GraphState state, ExecutionContext ctx) {
+        // 1. 从 state["tool_calls"] 获取 tool_use 列表
+        // 2. 对每个 tool_use:
+        //    a. registry.find(name) → 未知 → ToolResult.error
+        //    b. 检查 @ToolApproval(required=true) → 抛 InterruptException
+        //    c. ToolCallback.execute(args, ctx)
+        //    d. 结果截断 (content > maxToolResultChars)
+        //    e. ctx.emit(TranscriptEvent.toolResult(...))
+        // 3. 写入 state["tool_results"]
+        // 4. return state
+    }
+}
+```
+
+### 4.8 ToolResult 值对象
+```java
+public final class ToolResult {
+    private final boolean success;
+    private final boolean truncated;
+    private final String content;
+    private final String errorMessage;
+    private final String toolUseId;
+    private final int originalLength;   // truncated 时原始长度
+
+    // 工厂方法
+    public static ToolResult success(String content, String toolUseId, int durationMs);
+    public static ToolResult error(String errorMessage);
+    public static ToolResult truncated(String content, int maxLen, int originalLen);
+
+    // 查询
+    public boolean isSuccess();
+    public boolean isError();
+    public boolean isTruncated();
+    public boolean isReturnDirect();
+    public String getContent();
+    public String getErrorMessage();
+    public String getToolUseId();
+    public int getOriginalLength();
+}
 ```
 
 ---
@@ -290,138 +743,249 @@ void register(PluginDescriptor); void unregister(String); void setDefault(String
 ## 5. 数据规格 (Data Specs)
 
 ```yaml
-实体: PluginDescriptor
-字段:
-  pluginId: String 非 null 唯一 | toolType: String 非 null | displayName/description/version: String
-  isDefault: volatile boolean(可变) | enabled: volatile boolean(可变) | system: boolean(不可变)
-  provider: ToolProvider | classLoader/jarPath/pluginContext: 自定义非 null, system 为 null
-约束: pluginId/toolType 非 null 否则构造抛 IllegalArgumentException
-测试数据: {mysql,mysql_query,system=true} {local-log,log_read} {remote-log,log_read,system=false}
-边界: pluginId=null→抛异常 | provider返回null→error | provider抛异常→error
+@Tool 注解:
+  name: String, 默认 "" (用方法名)
+  description: String, 必填
+  returnDirect: boolean, 默认 false
+
+@ToolParam 注解:
+  description: String, 必填
+  required: boolean, 默认 true
+
+@ToolApproval 注解:
+  required: boolean, 默认 false
+
+ToolCallback:
+  name: String, 非 null 唯一
+  description: String
+  jsonSchema: String, JSON 格式
+  returnDirect: boolean
+  system: boolean, 不可变
+
+ToolResult:
+  不可变值对象, 工厂方法构造
+  success | error | truncated 三状态互斥
+
+JSON Schema 格式:
+  {
+    "name": "mysql_query",
+    "description": "执行只读SQL查询",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "sql": { "type": "string", "description": "SQL语句" }
+      },
+      "required": ["sql"]
+    }
+  }
+
+参数类型映射:
+  String → "string"
+  int/Integer/long/Long → "integer"
+  boolean/Boolean → "boolean"
+  float/Float/double/Double → "number"
+  POJO → "object" (反射属性)
+  List<?> → "array"
+
+返回类型处理:
+  String → 直接 content
+  int/boolean → String.valueOf
+  POJO → JSON.toJSONString (Jackson)
+  void → content="void"
+
+截断规则:
+  maxToolResultChars: 默认 4000
+  content > max → 截断 + "...[truncated]" 标记
+  error 结果不截断
 ```
 
 ---
 
-## 6. 错误处理规格 (Error Handling)
+## 6. 错误处理规格
 
-| 错误码 | 级别 | 描述 | 告警策略 |
-|--------|------|------|----------|
-| E301 | WARN | 未注册 toolType | 不告警 |
-| E302 | WARN | plugin 禁用 | 不告警 |
-| E303 | ERROR | provider 返回 null | 不告警 |
-| E304 | ERROR | provider 抛异常 | 连续 3 次告警 |
-| E305 | WARN | register 冲突 | 不告警 |
-| E306 | ERROR | system unregister | 告警 |
+| 错误码 | 描述 | 用户提示 | 行为 |
+|--------|------|----------|------|
+| E301 | tool not found | "tool not found: {name}" | ToolResult.error 回传 LLM |
+| E302 | tool execution failed | "tool execution failed: {msg}" | ToolResult.error 回传 LLM |
+| E303 | tool already registered | "tool already registered: {name}" | 抛 IllegalArgumentException |
+| E304 | cannot unregister system tool | "cannot unregister system tool: {name}" | 抛 UnsupportedOperationException |
+| E305 | parameter missing @ToolParam | "parameter missing @ToolParam: {param}" | 抛 IllegalStateException |
+| E306 | human rejected | "human rejected: {toolName}" | ToolResult.error 回传 LLM |
+| E307 | tool not found in registry (subset) | "tool not found in registry: {name}" | 抛 IllegalArgumentException |
 
 ```gherkin
-场景: provider.execute 抛 RuntimeException
-  When provider.execute 抛 new RuntimeException("boom")
-  Then dispatcher 返回 ToolResult.error 含 "plugin execution failed: boom" 且 audit 仍触发
-场景: provider.execute 返回 null
-  When provider.execute 返回 null
-  Then dispatcher 返回 ToolResult.error 含 "tool returned null result" 且不抛 NPE
+场景: ToolCallback.execute 抛 RuntimeException
+  When execute 抛 RuntimeException("DB connection failed")
+  Then ToolResult.error("tool execution failed: DB connection failed")
+  And 不向上抛出异常
+  And LLM 在下一轮收到错误描述
+
+场景: @ToolApproval required=true 未 resume 超时
+  Given Task PAUSED 超过 24h
+  When Task 超时
+  Then TaskStatus → TIMEOUT, errorMessage 含 "awaiting human approval timeout"
 ```
 
 ---
 
 ## 7. 非功能需求 (NFR)
 
-- **性能**: dispatch 路由 P95<1ms；activePlugins<5ms(100 plugin)；registry 并发>10000 ops/s
-- **安全**: system plugin 不可反注册；audit 异常不破坏主流程；pluginOverrides 不可变 Map
-- **可测试性**: 核心逻辑覆盖率>90%；所有 public 方法有测试；并发+边界值测试
+```yaml
+性能:
+  - ToolCallbacks.from() 反射扫描 P95 < 100ms (10个 @Tool 方法)
+  - ToolCallbackRegistry.find() P99 < 1ms
+  - ToolsNode 批量执行 5 个工具 P95 < 500ms (不含工具自身耗时)
+  - toToolDefinitionsJson() 100个工具 P95 < 10ms
+  - subset() P99 < 5ms
+
+安全:
+  - system ToolCallback 不可 unregister
+  - @ToolApproval 高危工具强制 HITL
+  - 工具输出截断防 LLM context 溢出
+  - pluginId 正则 ^[a-zA-Z0-9_-]+$ 防路径穿越
+
+可测试性:
+  - 核心逻辑单元覆盖率 > 80%
+  - @Tool/@ToolParam/@ToolApproval 注解全路径测试
+  - ToolCallbackRegistry 并发测试 (register/unregister/find)
+  - ToolsNode 批量/异常/截断/中断全分支覆盖
+  - ToolResult 三状态 + 不可变性测试
+```
 
 ---
 
 ## 8. 测试策略 (Test Strategy)
 
-| 测试ID | 类型 | 描述 | 优先级 |
-|--------|------|------|--------|
-| UT-301~305 | 单元 | dispatch 默认/override/未知/禁用/ctx=null | P0 |
-| UT-306~307 | 单元 | dispatch provider 返回 null/抛异常 | P1 |
-| UT-308~309 | 单元 | truncate 超长/audit callback 触发与隔离 | P1 |
-| UT-310~311 | 单元 | activePlugins 去重+override/跳过禁用 | P0 |
-| UT-312~314 | 单元 | register 冲突/自动default/unregister system保护 | P0 |
-| UT-315~316 | 单元 | unregister 自动提升/setDefault 清旧 | P0/P1 |
-| UT-317 | 单元 | enable/disable | P0 |
-| UT-318 | 单元 | @ToolPluginAnnotation 读取 | P1 |
-| UT-319 | 单元 | 旧构造器向后兼容 | P0 |
-| UT-320 | 并发 | register/disable 与 dispatch 竞争 | P1 |
+### 8.1 已有测试覆盖
 
-**Mock 策略**: Mock ToolProvider/AuditCallback/PluginContext；不Mock InMemoryPluginRegistry/PluginDescriptor/ToolDispatcher
+| 测试文件 | 类型 | 覆盖用例 |
+|----------|------|----------|
+| (2.x 重构后旧测试已废弃，新测试待编写) | - | - |
+
+**总结**: 2.x 重构删除旧 `ToolDispatcher`/`ToolProvider`/`PluginRegistry`/`@ToolPluginAnnotation`，所有 2.x 测试为新增。优先实现 UC-01~26 (单元) 和 UC-R1~2 (集成)。
+
+### 8.2 E2E 关键路径
+
+| 路径ID | 关键路径 | 端点/组件 | 状态 |
+|--------|----------|-----------|------|
+| E2E-1 | 工具列表: GET /tools → 200 (toToolDefinitionsJson) | GET /tools | ⚠未实现 (GAP-9) |
+| E2E-2 | 工具详情: GET /tools/{name} → 200 (ToolCallback 详情) / 404 | GET /tools/{name} | ⚠未实现 (GAP-10) |
+| E2E-3 | ReAct 工具执行: POST /runs → 图执行 → ToolsNode → tool_result → SSE | POST /runs, ToolsNode | ⚠未实现 (GAP-11 P0) |
+| E2E-4 | HITL 审批: POST /runs → @ToolApproval 中断 → PAUSED → POST /runs/{id}/resume → 继续 | POST /runs, POST /runs/{id}/resume | ⚠未实现 (GAP-12 P0) |
+| E2E-5 | Plugin 热加载: POST /tools/plugins/upload (JAR) → ToolCallbacks.from() → 注册 → GET /tools 含新工具 | POST /tools/plugins/upload, GET /tools | ⚠未实现 (GAP-13) |
+
+### 8.3 测试缺口
+
+| ID | 描述 | 优先级 | 建议 |
+|----|------|--------|------|
+| GAP-1 | `@Tool` 注解 name 默认方法名 无单测 | P0 | UC-01 |
+| GAP-2 | `@Tool` returnDirect=true 无单测 | P0 | UC-02 |
+| GAP-3 | `@ToolParam` description/required 生成 JSON Schema 无单测 | P0 | UC-03 |
+| GAP-4 | 缺少 `@ToolParam` 抛异常 无单测 | P0 | UC-04 |
+| GAP-5 | `ToolCallback.execute` 成功/异常 无单测 | P0 | UC-05/06 |
+| GAP-6 | `ToolCallbackRegistry` register/unregister/find/toToolDefinitionsJson 无单测 | P0 | UC-07~10 |
+| GAP-7 | `ToolCallbackRegistry` 重复注册冲突 无单测 | P0 | UC-08 |
+| GAP-8 | `ToolCallbackRegistry` system 不可 unregister 无单测 | P0 | UC-09 |
+| GAP-9 | E2E缺失: GET /tools REST 端点无 E2E 覆盖 — 见 E2E-1 | P1 | 需 E2E 集成测试 |
+| GAP-10 | E2E缺失: GET /tools/{name} REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
+| GAP-11 | E2E缺失: ReAct 工具执行 ReAct 循环 → ToolsNode → tool_result → SSE 无 E2E — 见 E2E-3 | P0 | 需 E2E 集成测试 |
+| GAP-12 | E2E缺失: @ToolApproval HITL 中断→resume→继续 无 E2E — 见 E2E-4 | P0 | 需 E2E 集成测试 |
+| GAP-13 | E2E缺失: Plugin JAR 热加载→注册→GET /tools 含新工具 无 E2E — 见 E2E-5 | P1 | 需 E2E 集成测试 |
+| GAP-14 | `ToolCallbacks.from()` 反射多方法/无方法/缺注解/非String返回 无单测 | P0 | UC-11~14 |
+| GAP-15 | `ToolsNode` 批量执行/未知工具/截断 无单测 | P0 | UC-15~17 |
+| GAP-16 | `@ToolApproval` 中断/resume 批准/拒绝/不中断 无单测 | P0 | UC-18~21 |
+| GAP-17 | `ToolResult` success/error/truncated 不可变 无单测 | P0 | UC-22 |
+| GAP-18 | `ToolCallbackRegistry.subset()` per-request 路由 无单测 | P0 | UC-23 |
+| GAP-19 | Plugin 热加载/卸载/冲突 无单测 | P0 | UC-24~26 |
+| GAP-20 | `ToolsNode` 并发执行 + Registry 并发 register/unregister 竞争 无单测 | P1 | 并发测试 |
+
+### 8.4 Mock 策略
+```yaml
+Mock: ToolCallback(匿名实现), ToolCallbackRegistry(ConcurrentHashMap实现), ExecutionContext(Mockito)
+反射: 真实 @Tool 注解类 (MySqlQueryTool, LogTool 等)
+Plugin: @TempDir + 真实 JAR (JarOutputStream) + URLClassLoader
+HITL: InterruptException 捕获 + checkpoint mock
+```
 
 ---
 
 ## 9. 依赖与前置条件
 
-外部依赖: Mockito 5.x / JUnit 5 / AssertJ (已完成)
-内部依赖: ToolProvider SPI / ToolResult / ToolContext / PluginContext (已完成)
+| 依赖 | 状态 | 降级 |
+|------|------|------|
+| snap-agent-core graph SPI (Node, GraphState, ExecutionContext) | 2.x 新增 | 无 |
+| snap-agent-core execution (InterruptException) | 2.x 新增 | 无 |
+| Jackson ObjectMapper (JSON 序列化) | 已就绪 | 缺失时 POJO 返回 toString |
+| JDK 反射 API (Java 8+) | 已就绪 | 无 |
+| Plugin JAR 加载 (URLClassLoader) | 09-plugin-mcp 提供 | 无 Plugin 时仅内置 @Tool |
 
 ---
 
 ## 10. 可观测性设计
 
-日志: dispatch 入口记录 toolType+pluginId+override+durationMs+truncated+error
-指标: tool_dispatch_count{toolType,pluginId,result} / tool_dispatch_duration_seconds / plugin_registry_size
+```yaml
+日志:
+  INFO "tool registered: {name} (system={system}, returnDirect={returnDirect})"
+  INFO "tool unregistered: {name}"
+  INFO "tool executed: name={name} duration={ms}ms truncated={truncated}"
+  WARN "tool not found: {name}"
+  WARN "tool execution failed: name={name} error={msg}"
+  INFO "HITL approval required: tool={name} pausing execution"
+  INFO "HITL approval resolved: tool={name} decision={approved|rejected}"
+
+指标:
+  tool_callback_count
+  tool_execute_count{tool_name,result}
+  tool_execute_duration_seconds{tool_name}
+  tool_registry_size
+  tool_truncated_total{tool_name}
+  hitl_approval_required_total
+  hitl_approval_resolved_total{decision}
+
+追踪:
+  MicrometerObservationAdvisor span "snap-agent.tool.execute" (ToolsNode 执行)
+  span tag: tool.name, tool.success, tool.truncated
+```
 
 ---
 
 ## 11. 原型与交互参考
 
-无 UI 交互，纯后端 SPI。
+| 操作 | 成功 | 错误 |
+|------|------|------|
+| GET /tools | 200 `[{name, description, input_schema}]` | - |
+| GET /tools/{name} | 200 `{name, description, input_schema, system}` | 404 |
+| POST /runs (含 @ToolApproval) | 202 → PAUSED → "paused" SSE 事件 | - |
+| POST /runs/{id}/resume | 202 → RUNNING → 继续执行 | 404 |
 
 ---
 
 ## 12. 附录
 
-### 12.1 已有测试覆盖
+### 12.1 变更历史
 
-| 测试文件 | 测试数 | 覆盖点 |
-|----------|--------|--------|
-| `snap-agent-core/src/test/java/cn/watsontech/snapagent/core/tool/ToolDispatcherTest.java` | 20 | 默认/override 路由、未注册/禁用 error、truncate、audit、activePlugins、旧构造器、pluginContext 注入 |
-| `snap-agent-core/src/test/java/cn/watsontech/snapagent/core/tool/InMemoryPluginRegistryTest.java` | 14 | register/unregister/enable/disable/setDefault、冲突、自动 default、system 保护、自动提升 |
-| `snap-agent-core/src/test/java/cn/watsontech/snapagent/core/tool/ToolPluginAnnotationTest.java` | 4 | 注解 id/toolType 读取、默认值、自定义值 |
+| 版本 | 日期 | 作者 | 变更 |
+|------|------|------|------|
+| 2.0 | 2026-07-23 | snap-agent team | 初始 TDD 规格 (ToolDispatcher + ToolProvider + PluginRegistry) |
+| 3.0 | 2026-07-25 | snap-agent team | 2.x 重构: @Tool/@ToolParam 声明式注解 + ToolCallback 统一 SPI + ToolCallbacks.from() 反射工厂 + ToolsNode 图节点 + @ToolApproval HITL + ToolResult 值对象 + per-request subset 路由，删除旧 ToolDispatcher/ToolProvider/PluginRegistry/@ToolPluginAnnotation |
 
-**结论**: 核心路由逻辑、registry 生命周期、注解读取已较完整覆盖（38 个测试）。
+### 12.2 参考文档
+- `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md` (Section 2 @Tool+ToolCallback)
+- `docs/embeed-skills-agent/04-tools-and-mcp.md`
+- `docs/tdd/TEMPLATE.md`
 
-### 12.2 E2E 关键路径
-
-| 路径ID | 关键路径 | 端点 | 状态 |
-|--------|----------|------|------|
-| E2E-1 | Tool 列表查询: GET /tools → 200 列表; GET /tools/plugins → 200 plugin 列表 | GET /tools, GET /tools/plugins | ⚠未实现 (G-311) |
-| E2E-2 | Plugin 上传流程: POST /tools/plugins/upload (JAR) → 200 → GET /tools/plugins 验证新 plugin | POST /tools/plugins/upload | ⚠未实现 (G-312) |
-| E2E-3 | Plugin 删除流程: DELETE /tools/plugins/{custom-id} → 200; DELETE /tools/plugins/{system-id} → 403 | DELETE /tools/plugins/{id} | ⚠未实现 (G-313) |
-| E2E-4 | Plugin 启停流程: POST /tools/plugins/{id}/enable → 200; POST /tools/plugins/{id}/disable → 200; POST /tools/plugins/{id}/default → 200 | POST /tools/plugins/{id}/{action} | ⚠未实现 (G-314) |
-| E2E-5 | 认证/权限: GET /tools 无认证 → 401 / 无权限 → 403 | GET /tools | ⚠未实现 (G-315) |
-
-### 12.3 测试缺口
-
-| 缺口ID | 描述 | 优先级 | 建议测试 |
-|--------|------|--------|----------|
-| G-301 | `dispatch` 时 provider.execute 返回 null 分支未显式覆盖 | P1 | UT-306 |
-| G-302 | `dispatch` 时 provider.execute 抛 RuntimeException 分支未覆盖 | P1 | UT-307 |
-| G-303 | `unregister(null)` no-op 未覆盖 | P2 | UT-315a |
-| G-304 | `setDefault` 对 unknown pluginId no-op 未覆盖 | P2 | UT-316a |
-| G-305 | `activePlugins` override 指向禁用 plugin fallback 未覆盖 | P1 | UT-311a |
-| G-306 | 并发 register/disable 与 dispatch 竞争 | P1 | UT-320 |
-| G-307 | `ToolPlugin` SPI 接口（非注解）无单测 | P2 | UT-318a |
-| G-308 | `PluginDescriptor` 构造 null pluginId/toolType 抛异常未覆盖 | P2 | UT-312a |
-| G-309 | `buildToolDefinitions` @Deprecated 兼容性未覆盖 | P3 | UT-319a |
-| G-310 | `availableToolTypes` 与 `availableToolNames` 等价性未覆盖 | P3 | UT-319b |
-| G-311 | ⚠E2E缺失: GET /tools, GET /tools/plugins REST 端点无 E2E 覆盖 — 见 E2E-1 | P1 | 需 E2E 集成测试 |
-| G-312 | ⚠E2E缺失: POST /tools/plugins/upload (JAR) REST 端点无 E2E 覆盖 — 见 E2E-2 | P1 | 需 E2E 集成测试 |
-| G-313 | ⚠E2E缺失: DELETE /tools/plugins/{id} REST 端点无 E2E 覆盖 (custom vs system 403) — 见 E2E-3 | P1 | 需 E2E 集成测试 |
-| G-314 | ⚠E2E缺失: POST /tools/plugins/{id}/enable\|disable\|default REST 端点无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
-| G-315 | ⚠E2E缺失: GET /tools 401/403 认证权限路径无 E2E 覆盖 — 见 E2E-5 | P2 | 需 E2E 集成测试 |
-
-### 12.4 参考文档
-- `docs/embeed-skills-agent/04-tools-and-mcp.md` | `docs/superpowers/specs/2026-07-21-plugin-architecture-refactor-design.md` | `docs/tdd/TEMPLATE.md`
-
-### 12.5 术语表
+### 12.3 术语表
 
 | 术语 | 定义 |
 |------|------|
-| toolType | LLM 在 tool_use 中调用的工具名，等价于 `ToolProvider.name()` |
-| pluginId | plugin 实例唯一标识，可与 toolType 不同 |
-| pluginOverrides | skill 执行时传的 `toolType→pluginId` 映射 |
-| system plugin | 内置不可删除的 plugin，`PluginDescriptor.system=true` |
-| default plugin | 某 toolType 的默认 plugin，无 override 时 dispatcher 路由到此 |
+| @Tool | 方法级注解，声明工具元数据 (name, description, returnDirect) |
+| @ToolParam | 参数级注解，声明参数元数据 (description, required) |
+| @ToolApproval | 方法级注解，标记高危工具需人工审批 (required=true) |
+| ToolCallback | 2.x 统一工具 SPI，内置 @Tool 和 Plugin 共用 |
+| ToolCallbackRegistry | 工具注册表 SPI，register/unregister/find/toToolDefinitionsJson/subset |
+| ToolCallbacks.from() | 反射工厂，自动发现 @Tool 方法生成 ToolCallback[] |
+| ToolsNode | 图节点，接收 state["tool_calls"] 执行工具并回传结果 |
+| ToolResult | 不可变值对象，success/error/truncated 三状态 |
+| returnDirect | @Tool 属性，true=结果直接回传用户不回传 LLM |
+| system ToolCallback | 内置不可删除的工具，isSystem()==true |
+| subset | per-request 工具子集，根据 pluginOverrides 路由 |

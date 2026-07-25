@@ -1,6 +1,7 @@
 # TDD 需求规格说明书 — Plugin & MCP 集成
 
-> 版本: 1.0 | 日期: 2026-07-23 | 模块: snap-agent-spring-boot-2x-starter / snap-agent-core
+> 版本: 2.1 (SnapAgent 2.x 架构重构) | 日期: 2026-07-25 | 模块: snap-agent-spring-boot-2x-starter / snap-agent-core
+> 变更: Plugin 产出 ToolCallback[] via ToolCallbacks.from() (替代 ToolProvider); MCP McpToolProvider 实现 ToolCallback; PluginRegistry 保留 JAR 上传 + ClassLoader 隔离; pluginOverrides 仍按 per-request 路由
 
 ---
 
@@ -10,17 +11,17 @@
 需求ID: REQ-09-PLUGIN-MCP
 需求名称: Plugin 上传/隔离/MCP SSE 集成
 优先级: P0
-迭代: v0.5
+迭代: v0.5 (2.x 适配)
 状态: 开发中
 ```
 
 ### 1.1 背景与目标
-- **业务背景**: v1.0 `ToolPlugin` SPI 仅为元数据层，`ToolDispatcher.providers` 为 `final unmodifiableMap`，无 add/remove API。
-- **用户价值**: 宿主可上传独立 JAR、隔离 ClassLoader、运行时启停；MCP Phase 2 接 SSE/HTTP 远端工具。
-- **成功指标**: 上传→扫描→注册→`pluginOverrides` 路由全链路单测覆盖率 ≥ 80%。
+- **业务背景**: v1.0 `ToolPlugin` SPI 仅为元数据层，`ToolDispatcher.providers` 为 `final unmodifiableMap`，无 add/remove API。SnapAgent 2.x 将工具模型统一为 `@Tool` + `ToolCallback` SPI，PluginRegistry 保留 JAR 上传 + ClassLoader 隔离机制，但产出的对象改为 `ToolCallback[]` (via `ToolCallbacks.from()`)，与内置 @Tool 工具共用同一注册表。
+- **用户价值**: 宿主可上传独立 JAR、隔离 ClassLoader、运行时启停；MCP Phase 2 接 SSE/HTTP 远端工具；插件工具与内置 @Tool 工具一致地参与图执行。
+- **成功指标**: 上传→扫描→注册→`pluginOverrides` 路由全链路单测覆盖率 ≥ 80%；插件 ToolCallback 与内置 @Tool 工具在 ToolsNode 中无差异。
 
 ### 1.2 范围边界
-- **包含**: `PluginDescriptor`+`PluginRegistry` SPI、`ToolDispatcher` 重构、`@ToolPlugin` 注解 + `plugin-info.yml` 双来源、JAR 上传 + URLClassLoader 隔离、`snap-agent.tools.{pluginId}.*` 配置注入、REST API、Maven archetype、MCP SSE/HTTP 接入。
+- **包含**: `PluginDescriptor`+`PluginRegistry` SPI、`ToolCallbackRegistry` 重构、`@ToolPlugin` 注解 + `plugin-info.yml` 双来源、JAR 上传 + URLClassLoader 隔离、`snap-agent.tools.{pluginId}.*` 配置注入、REST API、Maven archetype、MCP SSE/HTTP 接入、`ToolCallbacks.from()` 自动发现 @Tool 方法。
 - **不包含**: 独立 jar 打包拆分、classpath 扫描、`@ConfigurationProperties` 强类型、plugin 间依赖、热升级。
 
 ## 1.3 风险与假设
@@ -28,6 +29,7 @@
 - R2: Plugin 启动非 daemon 线程（低/高，缓解：文档禁止 + ThreadMXBean 检测）
 - R3: 恶意 plugin 代码执行（低/高，缓解：`snap-agent:plugin:manage` 权限）
 - R4: MCP server 只读性远端保证（中/中，缓解：文档标注信任边界）
+- R5: Plugin 的 @Tool 方法签名与 ToolCallbacks.from() 反射解析不兼容（低/中，缓解：扫描期校验 + 标 INVALID_PLUGIN）
 
 ---
 
@@ -36,17 +38,18 @@
 ### US-1: 上传自定义 plugin JAR
 ```gherkin
 作为 宿主开发者
-我希望 通过 REST 上传独立 JAR 并隔离 ClassLoader
+我希望 通过 REST 上传独立 JAR 并隔离 ClassLoader，产出 ToolCallback[]
 以便 在不停机情况下扩展 LLM 可用工具集
 ```
 **AC:**
 ```gherkin
 AC1: 上传成功
-  Given 含 @ToolPlugin 注解的合法 JAR (pluginId="remote-log")
+  Given 含 @ToolPlugin 注解的合法 JAR (pluginId="remote-log") 且 plugin 类含 @Tool 注解方法
   When POST /tools/plugins/upload
   Then 返回 200 + pluginId/toolType/version
   And JAR 落盘 <uploadDir>/remote-log/plugin.jar
   And registry.getPlugin("remote-log") 非空且 enabled=true
+  And ToolCallbacks.from(pluginInstance) 返回 ToolCallback[] 且全部注册到 ToolCallbackRegistry
 
 AC2: pluginId 路径穿越拒绝
   Given scanner 返回 pluginId="../../etc/evil"
@@ -59,15 +62,15 @@ AC2: pluginId 路径穿越拒绝
 ```gherkin
 作为 skill 作者
 我希望 POST /runs 携带 pluginOverrides 指定具体 plugin
-以便 LLM 不感知 plugin，dispatcher 按 override 路由
+以便 LLM 不感知 plugin，ToolsNode 按 override 路由
 ```
 **AC:**
 ```gherkin
 AC3: override 命中 non-default
-  Given registry 注册 default "default-mysql" + non-default "remote-mysql"
+  Given registry 注册 default "default-mysql" + non-default "remote-mysql" (均为 ToolCallback[])
   When POST /runs body pluginOverrides={"mysql_query":"remote-mysql"}
   Then 202 + taskId
-  And dispatcher.activePlugins(overrides) 首元素 pluginId="remote-mysql"
+  And ToolCallbackRegistry 子集 (per-request view) 首元素 pluginId="remote-mysql"
 
 AC4: override 校验失败
   Given registry 无 pluginId "nonexistent"
@@ -94,10 +97,10 @@ AC3: Given JAR 无注解无 yml
   Then 抛 IllegalStateException 含 "no plugin metadata found"
 ```
 
-### US-4: MCP SSE 远端工具适配
+### US-4: MCP SSE 远端工具适配 (ToolCallback)
 ```gherkin
 作为 运维
-我希望 配置 snap-agent.mcp.servers 后自动拉取远端工具
+我希望 配置 snap-agent.mcp.servers 后自动拉取远端工具，McpToolProvider 实现 ToolCallback
   以便 不修改代码即可接入外部 MCP server
 ```
 **AC:**
@@ -106,19 +109,23 @@ AC1: Given baseUrl="https://mcp-server/sse" authHeader="X-Token"
   When client.connect()
   Then 发送 initialize (protocolVersion="2024-11-05", clientInfo.name="snap-agent")
   And 接收 endpoint event + tools/list 返回工具列表 size > 0
+  And 每个 MCP tool 包装为 McpToolProvider implements ToolCallback
 AC2: Given serverName="data-map" toolName="search_table"
-  When new McpToolProvider(serverName, toolInfo, client).name()
+  When new McpToolProvider(serverName, toolInfo, client).getName()
   Then 返回 "mcp__data-map__search_table"
-AC3: Given provider.execute(args, ctx)
+AC3: Given callback.execute(args, ctx)
   When callTool 被调用
   Then client.callTool(toolName, args, 30s) 被调用
   And 从 response.content[] 提取 type="text" 拼接为 ToolResult
+AC4: Given McpToolProvider 已注册到 ToolCallbackRegistry
+  When 图编译
+  Then ToolsNode 通过 toToolDefinitionsJson() 看到该 MCP 工具，与内置 @Tool 无差异
 ```
 
 ### US-5: 反注册 + 资源清理
 ```gherkin
 作为 宿主管理员
-我希望 DELETE /tools/plugins/{id} 关闭 URLClassLoader 并删除 JAR
+我希望 DELETE /tools/plugins/{id} 关闭 URLClassLoader、删除 JAR 并从 ToolCallbackRegistry 反注册
 以便 不残留磁盘句柄和资源
 ```
 **AC:**
@@ -127,11 +134,13 @@ AC5: system plugin 不可删
   Given registry 含 system=true 的 "mysql"
   When DELETE /tools/plugins/mysql
   Then 403 且 registry.getPlugin("mysql") 仍存在
+  And ToolCallbackRegistry 仍含 mysql 工具
 
 AC6: 非 system plugin 清理
-  Given 已注册 custom plugin 含 URLClassLoader 和 jarPath
+  Given 已注册 custom plugin 含 URLClassLoader 和 jarPath，ToolCallback[] 已注册
   When uploader.cleanupPlugin(descriptor)
   Then JAR 和父目录被删除，URLClassLoader.close() 被调用
+  And ToolCallbackRegistry.unregister(toolName) 被调用 (每个 plugin 产出的工具)
 ```
 
 ### US-6: PluginConfigExtractor 配置注入
@@ -172,26 +181,47 @@ AC2: Given 环境变量 BDP_TOKEN 未设置 (${BDP_TOKEN:})
 ### US-8: Maven archetype 脚手架
 ```gherkin
 作为 plugin 开发者
-我希望 用 Maven archetype 快速生成 plugin 项目骨架
+我希望 用 Maven archetype 快速生成 plugin 项目骨架 (含 @Tool 方法模板)
   以便 5 分钟内创建可打包的 plugin 项目
 ```
 **AC:**
 ```gherkin
 AC1: Given 执行 mvn archetype:generate -DarchetypeArtifactId=snap-agent-plugin
   When 项目生成
-  Then 含 pom.xml、@ToolPlugin 注解类、plugin-info.yml 模板
+  Then 含 pom.xml、@ToolPlugin 注解类、plugin-info.yml 模板、@Tool 注解方法示例
 AC2: Given 生成的项目
   When mvn package
   Then 产出可上传的 JAR 且 PluginMetadataScanner 能识别
+  And ToolCallbacks.from(pluginInstance) 能反射发现 @Tool 方法
 ```
 
 > 环境限制: 测试 Maven archetype 需要调用 mvn archetype:generate + mvn package，这是 Maven 插件集成测试。standalone 单元测试无法调用 Maven 构建生命周期。需要 maven-invoker-plugin 或 exec-maven-plugin 在集成测试阶段运行。snap-agent-plugin-archetype 模块当前无任何测试文件。
+
+### US-9: Plugin ToolCallback 与内置 @Tool 无差异 (2.x 新增)
+```gherkin
+作为 平台开发者
+我希望 Plugin 产出的 ToolCallback 与内置 @Tool 工具在 ToolCallbackRegistry 中无差异
+  以便 ToolsNode / Advisor / GraphExecutor 无需感知工具来源
+```
+**AC:**
+```gherkin
+AC1: Given plugin "remote-log" 注册了 ToolCallback "log_read"
+  And 内置 @Tool 方法 "mysql_query" 也注册为 ToolCallback
+  When ToolCallbackRegistry.getAll()
+  Then 两者均以 ToolCallback 形式存在，无 source 字段差异
+  And toToolDefinitionsJson() 输出格式一致
+
+AC2: Given plugin "remote-log" 被反注册
+  When registry.unregister("log_read")
+  Then ToolCallbackRegistry 不再含 "log_read"
+  And 内置 "mysql_query" 不受影响
+```
 
 ---
 
 ## 2.5 用户故事地图
 
-开发(US-3)→部署(US-1)→调用(US-2 overrides)→配置(US-6)→集成(US-4 MCP)→安全(US-7)→运维(US-5 反注册)→脚手架(US-8)，每阶段依赖前一阶段。
+开发(US-3)→部署(US-1)→调用(US-2 overrides)→配置(US-6)→集成(US-4 MCP)→安全(US-7)→运维(US-5 反注册)→脚手架(US-8)→统一(US-9)，每阶段依赖前一阶段。
 
 ---
 
@@ -201,28 +231,33 @@ AC2: Given 生成的项目
 
 | ID | 用例 | 优先级 | AC | 类型 |
 |----|------|--------|----|------|
-| UC-01 | JAR 上传+扫描+注册+加载/实例化失败 | P0 | AC1 | 单元 |
+| UC-01 | JAR 上传+扫描+注册+加载/实例化失败 (产出 ToolCallback[]) | P0 | AC1 | 单元 |
 | UC-02 | pluginId 路径穿越/特殊字符/重复拒绝 | P0 | AC1,AC2 | 单元 |
 | UC-03 | pluginOverrides 路由+HTTP 校验 | P0 | AC3,AC4 | 单元+集成 |
 | UC-04 | 注解优先+YAML 兜底扫描 | P0 | US-3 | 单元 |
-| UC-05 | MCP SSE 握手+命名+执行 | P1 | US-4 | 单元 |
-| UC-06 | cleanupPlugin+system 保护 | P0 | AC5,AC6 | 单元 |
-| UC-07 | PluginConfigExtractor | P1 | US-1 | 单元 |
+| UC-05 | MCP SSE 握手+命名+执行 (McpToolProvider implements ToolCallback) | P1 | US-4 | 单元 |
+| UC-06 | cleanupPlugin+system 保护 (含 ToolCallbackRegistry.unregister) | P0 | AC5,AC6 | 单元 |
+| UC-07 | PluginConfigExtractor | P1 | US-6 | 单元 |
+| UC-08 | ToolCallbacks.from 反射发现 @Tool | P0 | US-9 | 单元 |
+| UC-09 | Plugin ToolCallback 与内置 @Tool 等价 | P0 | US-9 | 单元 |
 
 ### 3.2 详细用例 (Gherkin)
 
 #### UC-01: JAR 上传并注册
 ```gherkin
 @priority:high @type:unit
-功能: 上传 JAR 并注册 PluginDescriptor
+功能: 上传 JAR 并注册 PluginDescriptor (产出 ToolCallback[])
 
   场景: 合法 JAR 上传成功
     Given scanner.scan 返回 metadata(pluginId="upload-test-plugin", toolType="log_read", providerClass="SimpleTestToolProvider")
     And registry.getPlugin 返回 null 且 configExtractor.extract 返回 {"base-url":"http://test:8080"}
+    And ToolCallbacks.from(providerInstance) 返回 ToolCallback[size=1, name="simple-test-tool"]
     When uploader.upload(jarFile)
     Then descriptor.pluginId="upload-test-plugin" 且 enabled=true 且 system=false
-    And descriptor.provider.name()="simple-test-tool" 且 jarPath 以 "plugin.jar" 结尾且存在
-    And descriptor.pluginContext.getConfiguration() 含 base-url 且 registry.register 被调用一次
+    And descriptor.toolCallbacks[0].getName()="simple-test-tool" 且 jarPath 以 "plugin.jar" 结尾且存在
+    And descriptor.pluginContext.getConfiguration() 含 base-url
+    And registry.register 被调用一次
+    And ToolCallbackRegistry.register(simple-test-tool) 被调用一次
 
   场景大纲: provider 加载/实例化失败
     Given scanner 返回 metadata(providerClass=<className>)
@@ -260,7 +295,7 @@ AC2: Given 生成的项目
 #### UC-03: pluginOverrides 路由与 HTTP 校验
 ```gherkin
 @priority:high @type:unit+integration
-功能: ToolDispatcher 按 pluginOverrides 路由 + HTTP 校验
+功能: per-request ToolCallbackRegistry 子集按 pluginOverrides 路由 + HTTP 校验
 
   场景大纲: override 路由命中与校验
     Given registry 注册 plugin 配置见 <setup>
@@ -269,8 +304,8 @@ AC2: Given 生成的项目
 
     例子:
       | setup | action | expect |
-      | default+non-default "remote-mysql" | activePlugins({"mysql_query":"remote-mysql"}) | 首元素 pluginId="remote-mysql" |
-      | 同上 | activePlugins() (无 override) | 首元素 pluginId="default-mysql" |
+      | default+non-default "remote-mysql" | perRequestRegistry({"mysql_query":"remote-mysql"}) | 首元素 pluginId="remote-mysql" |
+      | 同上 | perRequestRegistry() (无 override) | 首元素 pluginId="default-mysql" |
       | 仅 "mysql" | POST /runs pluginOverrides={"mysql_query":"nonexistent"} | 400 $.error="INVALID_PLUGIN_OVERRIDE" |
       | "custom-mysql" disabled | POST /runs pluginOverrides={"mysql_query":"custom-mysql"} | 400 $.error="INVALID_PLUGIN_OVERRIDE" |
       | "mysql" enabled | POST /runs 无 pluginOverrides | 202 向后兼容 |
@@ -296,7 +331,7 @@ AC2: Given 生成的项目
 #### UC-05: MCP SSE 握手与命名
 ```gherkin
 @priority:medium @type:unit
-功能: McpSseClient 握手 + McpToolProvider 命名/执行
+功能: McpSseClient 握手 + McpToolProvider (implements ToolCallback) 命名/执行
 
   场景大纲: MCP 行为
     Given <setup>
@@ -304,16 +339,16 @@ AC2: Given 生成的项目
     Then <expect>
     例子:
       | setup | action | expect |
-      | baseUrl="https://bdp-mcp/sit/sse" authHeader="X-Bdp-Token" | client.connect() | 发送 initialize (protocolVersion="2024-11-05", clientInfo.name="snap-agent") + tools/list，返回 McpToolInfo 列表 size>0 |
+      | baseUrl="https://bdp-mcp/sit/sse" authHeader="X-Bdp-Token" | client.connect() | 发送 initialize (protocolVersion="2024-11-05", clientInfo.name="snap-agent") + tools/list，返回 McpToolInfo 列表 size>0，每个包装为 McpToolProvider implements ToolCallback |
       | - | McpSseClient.buildRequest(id=1, method="tools/list", params={}) | JSON 含 "jsonrpc":"2.0","id":1,"method":"tools/list" |
-      | serverName="bdp-data-map" toolName="search_table" | new McpToolProvider(...).name() | 返回 "mcp__bdp-data-map__search_table" |
-      | 同上 | provider.execute(args, ctx) | client.callTool 被调用(toolName, args, 30s)，从 response.result.content[] 提取 type="text" 拼接 |
+      | serverName="bdp-data-map" toolName="search_table" | new McpToolProvider(...).getName() | 返回 "mcp__bdp-data-map__search_table" |
+      | 同上 | callback.execute(args, ctx) | client.callTool 被调用(toolName, args, 30s)，从 response.result.content[] 提取 type="text" 拼接 |
 ```
 
 #### UC-06: cleanupPlugin 与 system 保护
 ```gherkin
 @priority:high @type:unit
-功能: 资源清理与 system plugin 保护
+功能: 资源清理与 system plugin 保护 (含 ToolCallbackRegistry.unregister)
 
   场景大纲: cleanup 行为
     Given <precondition>
@@ -321,7 +356,7 @@ AC2: Given 生成的项目
     Then <expect>
     例子:
       | precondition | expect |
-      | descriptor.jarPath 存在且 classLoader 为 URLClassLoader | jarPath/父目录删除，URLClassLoader.close() 调用 |
+      | descriptor.jarPath 存在且 classLoader 为 URLClassLoader，ToolCallback[size=2] 已注册 | jarPath/父目录删除，URLClassLoader.close() 调用，ToolCallbackRegistry.unregister 调用 2 次 |
       | null descriptor | 无异常 |
       | null classLoader + null jarPath | 无异常 |
 
@@ -329,22 +364,44 @@ AC2: Given 生成的项目
     Given registry 含 system=true 的 "mysql"
     When controller.deletePlugin("mysql")
     Then 状态码 403 且 registry 仍含 "mysql"
+    And ToolCallbackRegistry 仍含 mysql 工具
 ```
 
-#### UC-07: PluginConfigExtractor
+#### UC-08: ToolCallbacks.from 反射发现 @Tool
 ```gherkin
-@priority:medium @type:unit
-功能: 从 Environment 绑定 snap-agent.tools.{pluginId}.*
+@priority:high @type:unit
+功能: ToolCallbacks.from(pluginInstance) 自动发现 @Tool 方法
 
-  场景大纲: 配置抽取
-    Given <env>
-    When extractor.extract(env, <pluginId>)
-    Then <expect>
-    例子:
-      | env | pluginId | expect |
-      | snap-agent.tools.remote-log.base-url + max-lines | "remote-log" | map 含 base-url 和 max-lines |
-      | 任意 env | null | 返回 emptyMap |
-      | 无相关配置 | "nonexistent" | 返回 emptyMap |
+  场景: 含 @Tool 注解方法的 plugin
+    Given pluginInstance class 含 method annotated @Tool(name="log_read", description="read log")
+    When ToolCallbacks.from(pluginInstance)
+    Then 返回 ToolCallback[size=1]
+    And callback[0].getName()="log_read"
+    And callback[0].getJsonSchema() 含参数 schema
+
+  场景: 无 @Tool 方法的 plugin
+    Given pluginInstance class 无 @Tool 方法
+    When ToolCallbacks.from(pluginInstance)
+    Then 返回 ToolCallback[size=0]
+```
+
+#### UC-09: Plugin ToolCallback 与内置 @Tool 等价
+```gherkin
+@priority:high @type:unit
+功能: ToolCallbackRegistry 中 plugin 工具与内置 @Tool 工具无差异
+
+  场景: 注册混合来源工具
+    Given plugin "remote-log" 产出 ToolCallback "log_read"
+    And 内置 @Tool 方法 "mysql_query" 也注册为 ToolCallback
+    When ToolCallbackRegistry.getAll()
+    Then 两者均以 ToolCallback 形式存在
+    And toToolDefinitionsJson() 输出格式一致 (无 source 字段)
+
+  场景: 反注册 plugin 工具不影响内置
+    Given plugin "remote-log" 已注册 "log_read"
+    When registry.unregister("log_read")
+    Then ToolCallbackRegistry 不再含 "log_read"
+    And 内置 "mysql_query" 仍存在
 ```
 
 ---
@@ -357,17 +414,51 @@ AC2: Given 生成的项目
 - `POST /runs` — 现有权限（body 可选 pluginOverrides）
 
 ### 4.2 内部接口
-`upload(MultipartFile)`, `cleanupPlugin(PluginDescriptor)`, `scan(URLClassLoader)`, `extract(Environment, pluginId)`, `connect()` (McpSseClient), `callTool(toolName, args, timeoutSec)`。
+`upload(MultipartFile)`, `cleanupPlugin(PluginDescriptor)`, `scan(URLClassLoader)`, `extract(Environment, pluginId)`, `connect()` (McpSseClient), `callTool(toolName, args, timeoutSec)`。新增: `ToolCallbacks.from(Object target)` 反射发现 @Tool 方法。
 
 ### 4.3 MCP JSON-RPC
-请求 `POST <postEndpoint>`：`{"jsonrpc":"2.0","id":<int>,"method":"tools/call","params":{"name":<toolName>,"arguments":<args>}}`，Headers `{auth-header, content-type:application/json}`；响应 200 `{"result":{"content":[{"type":"text","text":"..."}]}}`。
+请求 `POST <postEndpoint>`：`{"jsonrpc":"2.0","id":<int>,"method":"tools/call","params":{"name":<toolName>,"arguments":<args>}}`，Headers `{auth-header, content-type:application/json}`；响应 200 `{"result":{"content":[{"type":"text","text":"..."}]}}`。McpToolProvider 实现 ToolCallback，包装 JSON-RPC 调用。
+
+### 4.4 ToolCallback SPI (2.x)
+```java
+public interface ToolCallback {
+    String getName();
+    String getDescription();
+    String getJsonSchema();
+    ToolResult execute(Map<String, Object> args, ToolContext ctx);
+}
+
+public interface ToolCallbackRegistry {
+    void register(ToolCallback callback);
+    void unregister(String toolName);
+    List<ToolCallback> getAll();
+    ToolCallback find(String toolName);
+    String toToolDefinitionsJson();
+    // per-request 子集视图 (per-request pluginOverrides)
+    ToolCallbackRegistry subset(Map<String, String> pluginOverrides);
+}
+
+// 自动发现 @Tool 方法
+public class ToolCallbacks {
+    public static ToolCallback[] from(Object target);
+    public static ToolCallback[] from(Class<?> clazz);
+}
+
+// McpToolProvider 实现 ToolCallback (2.x)
+public class McpToolProvider implements ToolCallback {
+    public String getName();  // "mcp__{serverName}__{toolName}"
+    public String getDescription();
+    public String getJsonSchema();
+    public ToolResult execute(Map<String, Object> args, ToolContext ctx);
+}
+```
 
 ---
 
 ## 5. 数据规格
 
 ### 5.1 PluginDescriptor
-字段：`pluginId`(PK, 正则 `^[a-zA-Z0-9_-]+$`), `toolType`, `displayName`, `version`, `description`, `isDefault`(volatile), `enabled`(volatile), `system`(final), `provider`(ToolProvider), `classLoader`(URLClassLoader|null), `jarPath`(Path|null), `pluginContext`(PluginContext|null)；并发靠 volatile + ConcurrentHashMap。
+字段：`pluginId`(PK, 正则 `^[a-zA-Z0-9_-]+$`), `toolType`, `displayName`, `version`, `description`, `isDefault`(volatile), `enabled`(volatile), `system`(final), `toolCallbacks`(ToolCallback[], 由 ToolCallbacks.from() 反射产出), `classLoader`(URLClassLoader|null), `jarPath`(Path|null), `pluginContext`(PluginContext|null)；并发靠 volatile + ConcurrentHashMap。
 
 ### 5.2 plugin-info.yml
 `id/toolType/displayName/description/version/isDefault/providerClass` 六字段 YAML（示例：`id: remote-log, toolType: log_read, providerClass: com.example.RemoteLogToolProvider`）。
@@ -385,19 +476,21 @@ AC2: Given 生成的项目
 | E104 | no plugin metadata found | "no plugin metadata found in JAR" |
 | E105 | MCP SSE connect failed | "MCP SSE connect failed: HTTP {code}" |
 | E106 | MCP endpoint not sent | "MCP server did not send endpoint event" |
+| E107 | INVALID_PLUGIN | "@Tool method signature invalid: {method}" |
+| E108 | INVALID_PLUGIN_OVERRIDE | "plugin override invalid: {toolType}={pluginId}" |
 
 ---
 
 ## 7. 非功能需求
 
 ### 7.1 性能
-- JAR 上传+扫描+实例化 P95 < 2s（JAR ≤ 5MB）
+- JAR 上传+扫描+实例化+ToolCallbacks.from() P95 < 2s（JAR ≤ 5MB）
 - MCP initialize+tools/list P95 < 3s
-- `dispatcher.activePlugins` P99 < 5ms
+- per-request ToolCallbackRegistry.subset() P99 < 5ms
 
 ### 7.2 安全 — pluginId 正则防路径穿越；上传需 `snap-agent:plugin:manage` 权限；system plugin 不可 unregister；MCP auth header 走环境变量 `${BDP_TOKEN:}`；plugin 受宿主 SecurityGateway + audit 约束。
 
-### 7.3 可测试性 — `@TempDir` + 真实 JAR 构造；Scanner 用 URLClassLoader 指向临时 JAR；McpSseClient 静态方法无网络可测；ToolDispatcher 路由用 Mockito。
+### 7.3 可测试性 — `@TempDir` + 真实 JAR 构造；Scanner 用 URLClassLoader 指向临时 JAR；McpSseClient 静态方法无网络可测；per-request ToolCallbackRegistry 子集用 Mockito。
 
 ---
 
@@ -407,37 +500,41 @@ AC2: Given 生成的项目
 
 | 测试文件 | 类型 | 覆盖用例 |
 |----------|------|----------|
-| `PluginUploaderTest` | 单元 | UC-01/02 + 路径穿越/重复/加载/实例化失败/cleanup |
+| `PluginUploaderTest` | 单元 | UC-01/02 + 路径穿越/重复/加载/实例化失败/cleanup (含 ToolCallbackRegistry.unregister) |
 | `PluginMetadataScannerTest` | 单元 | UC-04 注解优先+YAML 兜底+空异常 |
 | `PluginConfigExtractorTest` | 单元 | UC-07 抽取配置+null/空配置 |
 | `PluginEndpointTest` | 单元 | UC-06 system 保护+list/get/enable/disable/setDefault |
-| `PluginOverridesTest` | 集成 | UC-03 override 校验+400 |
-| `PluginAutoWrappingTest` | 单元 | 内置 ToolProvider 自动包装+路由 |
+| `PluginOverridesTest` | 集成 | UC-03 override 校验+400 (per-request ToolCallbackRegistry.subset) |
+| `PluginAutoWrappingTest` | 单元 | 内置 @Tool 自动包装为 ToolCallback + 路由 |
 | `PluginInfoYmlParserTest` | 单元 | YAML 解析 |
+| `ToolCallbacksFromTest` | 单元 | UC-08 反射发现 @Tool 方法 (含/无/签名错误) |
+| `McpToolProviderTest` | 单元 | UC-05 McpToolProvider implements ToolCallback (name/schema/execute) |
 
 ### 8.2 E2E 关键路径
 
 | 路径ID | 关键路径 | 端点/组件 | 状态 |
 |--------|----------|-----------|------|
-| E2E-1 | MCP SSE 客户端全流程: McpSseClient.connect() → SSE endpoint → initialize JSON-RPC → tools/list → McpToolProvider.schema() | McpSseClient (静态方法) | ⚠未实现 (P1 GAP) |
+| E2E-1 | MCP SSE 客户端全流程: McpSseClient.connect() → SSE endpoint → initialize JSON-RPC → tools/list → McpToolProvider.getJsonSchema() | McpSseClient (静态方法) | ⚠未实现 (P1 GAP) |
 | E2E-2 | MCP callTool: McpSseClient.callTool(toolName, args) → JSON-RPC → content[].text 提取 | McpSseClient (静态方法) | ⚠未实现 (P1 GAP) |
-| E2E-3 | Plugin 上传→启用→执行: POST /tools/plugins/upload (JAR) → POST /tools/plugins/{id}/enable → POST /runs (使用 plugin) | POST /tools/plugins/upload, POST /tools/plugins/{id}/enable, POST /runs | ⚠未实现 |
-| E2E-4 | Plugin 删除 system 403: DELETE /tools/plugins/{system-id} → 403 | DELETE /tools/plugins/{id} | ⚠未实现 |
+| E2E-3 | Plugin 上传→启用→执行: POST /tools/plugins/upload (JAR) → POST /tools/plugins/{id}/enable → POST /runs (使用 plugin) → ToolsNode 调 ToolCallback | POST /tools/plugins/upload, POST /tools/plugins/{id}/enable, POST /runs | ⚠未实现 |
+| E2E-4 | Plugin 删除 system 403: DELETE /tools/plugins/{system-id} → 403 + ToolCallbackRegistry 不变 | DELETE /tools/plugins/{id} | ⚠未实现 |
 | E2E-5 | MCP auth header: McpSseClient.connect() 携带 ${BDP_TOKEN} → MCP server 验证 | McpSseClient | ⚠未实现 (P2 GAP) |
 | E2E-6 | 认证/权限: POST /tools/plugins/upload 无认证 → 401 / 无 plugin:manage 权限 → 403 | POST /tools/plugins/upload | ⚠未实现 |
+| E2E-7 | Plugin 与内置 @Tool 等价: POST /runs (pluginOverrides 含 plugin 工具 + 内置 @Tool) → ToolsNode 调用两者无差异 | POST /runs, ToolsNode | ⚠未实现 |
 
 ### 8.3 测试缺口
 - P1: `McpSseClient.connect()` 全流程 mock（MockWebServer 验证 SSE endpoint + initialize + tools/list）
 - P1: `McpSseClient.callTool` JSON-RPC 透传（MockWebServer 验证 content[].text 提取）
-- P2: `McpToolProvider.schema()` JSON 合法性（解析断言 name/description/input_schema）
+- P2: `McpToolProvider.getJsonSchema()` JSON 合法性（解析断言 name/description/input_schema）
 - P2: `McpBootstrap` 多 provider 累积、`ToolPluginRegistry` 空/null 列表
 - P2: 上传 JAR 写盘 IOException、MCP SSE auth header 缺失分支
+- P2: `ToolCallbacks.from()` 签名错误场景 (无 @ToolParam / 复杂泛型)
 - P3: `cleanupPlugin(null classLoader+jarPath)` 组合边界
 
 ### 8.4 Mock 策略
 ```yaml
-单元: PluginRegistry/Scanner=Mockito, Environment=MockEnvironment, MultipartFile=MockMultipartFile, 真实 JAR=JarOutputStream
-集成: MockMvc + InMemoryPluginRegistry 真实实例
+单元: PluginRegistry/Scanner=Mockito, Environment=MockEnvironment, MultipartFile=MockMultipartFile, 真实 JAR=JarOutputStream, ToolCallbackRegistry=Mockito
+集成: MockMvc + InMemoryPluginRegistry 真实实例 + InMemoryToolCallbackRegistry
 MCP: 静态方法无 Mock; connect/callTool 用 MockWebServer
 ```
 
@@ -450,17 +547,19 @@ MCP: 静态方法无 Mock; connect/callTool 用 MockWebServer
 - Jackson ObjectMapper（已就绪）
 - InMemoryPluginRegistry（已就绪，可替换为 DB 实现）
 - JDK URLClassLoader Java 8+（反射 newInstance()）
+- ToolCallbackRegistry SPI (2.x 已就绪)
+- ToolCallbacks.from() 反射工具 (2.x 已就绪)
 
 ---
 
 ## 10. 可观测性
 
 ```yaml
-日志: INFO "plugin uploaded: {pluginId} toolType={toolType} jarSize={bytes}"
-      INFO "plugin unregistered: {pluginId}"
-      INFO "MCP server POST endpoint: {url}" / "MCP returned {n} tools"
+日志: INFO "plugin uploaded: {pluginId} toolType={toolType} jarSize={bytes} toolCount={n}"
+      INFO "plugin unregistered: {pluginId} (unregistered {n} ToolCallbacks)"
+      INFO "MCP server POST endpoint: {url}" / "MCP returned {n} tools (wrapped as ToolCallback[])"
 审计: PLUGIN_UPLOAD/UNREGISTER/ENABLE/DISABLE/SET_DEFAULT
-指标: plugin_upload_total{result}, plugin_active_count, mcp_tool_call_duration_seconds
+指标: plugin_upload_total{result}, plugin_active_count, plugin_tool_callback_count, mcp_tool_call_duration_seconds
 ```
 
 ---
@@ -469,7 +568,7 @@ MCP: 静态方法无 Mock; connect/callTool 用 MockWebServer
 
 | 操作 | 成功 | 错误 |
 |------|------|------|
-| 上传 JAR | 200 `{pluginId, toolType, version}` | 400/409 |
+| 上传 JAR | 200 `{pluginId, toolType, version, toolCount}` | 400/409 |
 | 启停 | 200 `{enabled:bool}` | 404 |
 | 设默认 | 200 `{toolType, pluginId}` | 404 |
 
@@ -481,9 +580,11 @@ MCP: 静态方法无 Mock; connect/callTool 用 MockWebServer
 | 版本 | 日期 | 作者 | 变更 |
 |------|------|------|------|
 | 1.0 | 2026-07-23 | TDD Bot | 初始版本 |
+| 2.1 | 2026-07-25 | TDD Bot | 适配 2.x: Plugin 产出 ToolCallback[] via ToolCallbacks.from() 替代 ToolProvider; McpToolProvider implements ToolCallback; 新增 ToolCallbackRegistry.subset() per-request 路由; 新增 US-9 / UC-08/09 工具等价性 |
 
 ### 12.2 参考文档
 - `docs/superpowers/specs/2026-07-21-plugin-architecture-refactor-design.md`
+- `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md`
 - `docs/embeed-skills-agent/04-tools-and-mcp.md`
 - `docs/tdd/TEMPLATE.md`
 
@@ -493,5 +594,9 @@ MCP: 静态方法无 Mock; connect/callTool 用 MockWebServer
 | toolType | LLM 看到的工具名，dispatcher 路由键 |
 | pluginId | plugin 唯一标识，正则 `^[a-zA-Z0-9_-]+$` |
 | pluginOverrides | POST /runs body 字段，toolType→pluginId 路由覆盖 |
-| system plugin | 内置 ToolProvider 自动包装，不可 unregister |
+| system plugin | 内置 @Tool 自动包装为 ToolCallback，不可 unregister |
+| ToolCallback | 2.x 统一工具 SPI，Plugin 与内置 @Tool 共用 |
+| ToolCallbacks.from() | 反射自动发现 @Tool 方法，返回 ToolCallback[] |
+| ToolCallbackRegistry | 工具注册表 SPI，Plugin 与内置工具统一注册 |
+| McpToolProvider | MCP 工具适配器，implements ToolCallback |
 | MCP SSE | Model Context Protocol over Server-Sent Events transport |
