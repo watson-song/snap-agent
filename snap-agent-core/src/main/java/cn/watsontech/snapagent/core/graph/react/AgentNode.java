@@ -26,6 +26,8 @@ import java.util.Map;
  * Parses structured output. Sets stop_reason in state.
  *
  * <p>Phase 2: tool defs built from ToolCallbackRegistry.getAll().</p>
+ * <p>Phase 5 (UC-20): tool defs filtered by skill.getTools() — only declared
+ * tools appear in the LLM request.</p>
  */
 public class AgentNode implements Node {
     private static final Logger log = LoggerFactory.getLogger(AgentNode.class);
@@ -59,15 +61,20 @@ public class AgentNode implements Node {
         List<Message> messages = new ArrayList<>();
         messages.add(Message.user(userMessage));
 
-        // Build tool defs from registry
+        // Build tool defs from registry, filtered by skill.tools (UC-20)
         List<ToolDef> toolDefs = new ArrayList<>();
         if (toolRegistry != null) {
+            List<String> skillTools = skill.getTools();
             for (ToolCallback callback : toolRegistry.getAll()) {
-                toolDefs.add(new ToolDef(
-                    callback.getName(),
-                    callback.getDescription(),
-                    callback.getJsonSchema()
-                ));
+                // When skill declares a tool list, only include matching tools
+                if (skillTools == null || skillTools.isEmpty()
+                        || skillTools.contains(callback.getName())) {
+                    toolDefs.add(new ToolDef(
+                        callback.getName(),
+                        callback.getDescription(),
+                        callback.getJsonSchema()
+                    ));
+                }
             }
         }
 
