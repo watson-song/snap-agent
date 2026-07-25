@@ -70,7 +70,7 @@ AC2: Given snap-agent.enabled=false (或未设置)
 ```gherkin
 AC3: Given snap-agent.enabled=true 且 snap-agent.jdbc.enabled=false
   When 容器初始化
-  Then JdbcQueryToolProvider bean 不存在
+  Then JdbcQueryTools bean 不存在
   And 其他核心 bean 正常存在
 AC4: Given snap-agent.knowledge.enabled=true (legacy) 或 snap-agent.rag.enabled=true (2.x)
   When 容器初始化
@@ -226,14 +226,14 @@ AC25: Given snap-agent.rag.enabled=true 且 VectorStore 含匹配片段
 ### US-10: 插件自动包装与注册 (2.x 重构)
 ```gherkin
 作为 插件开发者
-我希望 ToolPlugin 实现 @Component 自动被 ToolPluginRegistry 发现，经 ToolCallbacks.from() 包装为 ToolCallback[] 注册到 ToolCallbackRegistry
+我希望 @ToolPlugin 类实现 @Component 自动被 PluginRegistry 发现，经 ToolCallbacks.from() 包装为 ToolCallback[] 注册到 ToolCallbackRegistry
 以便 无需手动注册即可扩展工具
 ```
 **AC:**
 ```gherkin
-AC26: Given classpath 含 ToolPlugin 实现 @Component 且类含 @Tool 注解方法
+AC26: Given classpath 含 @ToolPlugin @Component 类且类含 @Tool 注解方法
   When 容器初始化
-  Then ToolPluginRegistry 自动发现并注册该插件
+  Then PluginRegistry 自动发现并注册该插件
   And ToolCallbacks.from(pluginInstance) 返回 ToolCallback[]
   And ToolCallbackRegistry.register(callback) 被调用
   And 插件可通过 enable/disable 控制
@@ -397,10 +397,10 @@ AC34: Given snap-agent.memory.type=jdbc 且宿主 DataSource 存在
     Then LlmClient bean 不存在
     And GraphExecutor 仍存在但图执行将抛 IllegalStateException
 
-  场景: jdbc.enabled=false 时不创建 JdbcQueryToolProvider
+  场景: jdbc.enabled=false 时不创建 JdbcQueryTools
     Given snap-agent.enabled=true 且 snap-agent.jdbc.enabled=false
     When 容器初始化
-    Then JdbcQueryToolProvider 不存在
+    Then JdbcQueryTools 不存在
     And 其他核心 bean 正常存在
 
   场景: rag.enabled=true 时创建 RAG bean

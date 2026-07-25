@@ -114,7 +114,7 @@ AC2: Given skillName="custom-diag" / When onEvent / Then SkillRegistry.get("cust
 ```gherkin
 AC1: Given 诊断任务完成 / When proposeSolution / Then status=SOLUTION_PROPOSED，含方案选项
 AC2: Given status=FIX_IN_PROGRESS / When verify / Then 运行verify-fix Skill (经 ReActGraphFactory 编译)，status=VERIFIED
-AC3: Given status=VERIFIED / When close / Then 提取KnowledgeFragment+reload，status=CLOSED
+AC3: Given status=VERIFIED / When close / Then KnowledgeSedimentationService提取Document+VectorStore.add，status=CLOSED
 ```
 
 ### US-8: 外部工单创建与状态流转
@@ -145,12 +145,12 @@ AC3: Given issue.status 为 RESOLVED
 ```
 **AC:**
 ```gherkin
-AC1: Given issue 关闭时 KnowledgeSedimentationExtractor 提取 KnowledgeFragment
-  When KnowledgeBase.reload() / VectorStore.add(docs)
+AC1: Given issue 关闭时 KnowledgeSedimentationService 提取 Document
+  When VectorStore.add(docs)
   Then 下次 ReActGraphFactory.build(skill, task, advisors) 时 RetrievalAugmentationAdvisor.beforeNode("agent") 返回含经验沉淀的片段
   And state["rag.context"] 含"业务知识参考"和"经验沉淀"标记
 
-AC2: Given KnowledgeBase 与 VectorStore 均为 null
+AC2: Given VectorStore 为 null
   When issue.close()
   Then 不报错，status=CLOSED
   And RetrievalAugmentationAdvisor 无新片段可注入 (state["rag.context"] 为空)
@@ -336,9 +336,9 @@ AC2: Given snap-agent.patrol.issue-closure-node=false (默认)
   场景: 关闭+沉淀
     Given status=VERIFIED
     When close("issue-005")
-    Then KnowledgeFragment提取，VectorStore.add 调用，status=CLOSED，knowledgeEntryId="sedimentation:issue-005"
-  场景: 关闭—knowledgeBase=null不报错
-    Given knowledgeBase=null 且 VectorStore=null
+    Then KnowledgeSedimentationService提取Document，VectorStore.add 调用，status=CLOSED，knowledgeEntryId="sedimentation:issue-005"
+  场景: 关闭—VectorStore=null不报错
+    Given VectorStore=null
     Then status=CLOSED，VectorStore.add 未调用
 ```
 
@@ -348,15 +348,15 @@ AC2: Given snap-agent.patrol.issue-closure-node=false (默认)
 功能: 问题沉淀知识通过 RetrievalAugmentationAdvisor 注入 agent 节点
   场景: 关闭后沉淀知识可被后续诊断检索
     Given IssueClosure(issueId="issue-005", userQuery="为什么订单服务超时?", rootCause="连接池打满")
-    And KnowledgeSedimentationExtractor.extract 提取 KnowledgeFragment
+    And KnowledgeSedimentationService.sediment 提取 Document
     When close("issue-005")
-    Then KnowledgeBase.reload + VectorStore.add 被调用
+    Then VectorStore.add 被调用
     And 下次 ReActGraphFactory.build(skill, task, advisors) 时
     And RetrievalAugmentationAdvisor.beforeNode("agent", state, ctx) 调用 DocumentRetriever.retrieve
     And state["rag.context"] 返回非空含"经验沉淀"和"连接池打满"
 
-  场景: knowledgeBase=null + VectorStore=null 时关闭不报错且不注入
-    Given knowledgeBase=null 且 VectorStore=null
+  场景: VectorStore=null 时关闭不报错且不注入
+    Given VectorStore=null
     When close("issue-005")
     Then status=CLOSED，不抛异常
     And RetrievalAugmentationAdvisor 检索结果为空 (state["rag.context"] 为空串)
@@ -511,7 +511,7 @@ CheckpointStore: 2.x 新增 — 巡检任务失败可 resume (threadId="patrol:{
 | GAP-15 | ✅已关闭: IssueClosureNode 路由已由 `IssueClosureServiceTest` 覆盖 (shouldRouteToEndViaIssueClosureNodeWhenEnabled/shouldSkipIssueClosureNodeWhenDisabled) | — | P1 |
 
 ### 8.4 Mock策略
-TaskScheduler(mock可立即执行) / ReActGraphFactory(mock 返回预设 CompiledGraph) / GraphExecutor(mock设status/report) / SkillRegistry(mock) / JavaMailSender(mock+ArgumentCaptor) / AlertConverger/IssueStore/IssueTracker/VectorStore/KnowledgeBase(mock) / PatrolLockProvider(mock默认true) / HTTP测试(继承覆写httpPost捕获参数)
+TaskScheduler(mock可立即执行) / ReActGraphFactory(mock 返回预设 CompiledGraph) / GraphExecutor(mock设status/report) / SkillRegistry(mock) / JavaMailSender(mock+ArgumentCaptor) / AlertConverger/IssueStore/IssueTracker/VectorStore(mock) / PatrolLockProvider(mock默认true) / HTTP测试(继承覆写httpPost捕获参数)
 
 ---
 
@@ -522,7 +522,7 @@ TaskScheduler(mock可立即执行) / ReActGraphFactory(mock 返回预设 Compile
 | SkillRegistry | 已完成(v0.1) | SkillUnavailableException |
 | TaskScheduler | Spring自带 | NoopLockProvider单Pod |
 | JavaMailSender | 可选(starter-mail) | @ConditionalOnClass保护 |
-| VectorStore + EmbeddingModel | 可选 (2.x) | null 时跳过 reload |
+| VectorStore + EmbeddingModel | 可选 (2.x) | null 时跳过沉淀 |
 | IssueStore/Tracker | 已完成(v0.9) | Noop默认空实现 |
 
 ---

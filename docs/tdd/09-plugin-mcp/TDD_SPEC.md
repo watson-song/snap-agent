@@ -426,6 +426,8 @@ public interface ToolCallback {
     String getDescription();
     String getJsonSchema();
     ToolResult execute(Map<String, Object> args, ToolContext ctx);
+    boolean isReturnDirect();
+    boolean isSystem();
 }
 
 public interface ToolCallbackRegistry {
@@ -526,7 +528,7 @@ public class McpToolProvider implements ToolCallback {
 - P1: `McpSseClient.connect()` 全流程 mock（MockWebServer 验证 SSE endpoint + initialize + tools/list）
 - P1: `McpSseClient.callTool` JSON-RPC 透传（MockWebServer 验证 content[].text 提取）
 - P2: `McpToolProvider.getJsonSchema()` JSON 合法性（解析断言 name/description/input_schema）
-- P2: `McpBootstrap` 多 provider 累积、`ToolPluginRegistry` 空/null 列表
+- P2: `McpBootstrap` 多 provider 累积、`PluginRegistry` 空/null 列表
 - P2: 上传 JAR 写盘 IOException、MCP SSE auth header 缺失分支
 - P2: `ToolCallbacks.from()` 签名错误场景 (无 @ToolParam / 复杂泛型)
 - P3: `cleanupPlugin(null classLoader+jarPath)` 组合边界

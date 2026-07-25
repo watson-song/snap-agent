@@ -511,10 +511,10 @@ jobs:
 |---|------|----------|------|
 | 01 | `01-agent-engine` | [TDD_SPEC.md](01-agent-engine/TDD_SPEC.md) | Agent 引擎 |
 | 02 | `02-skill-system` | [TDD_SPEC.md](02-skill-system/TDD_SPEC.md) | Skill 系统 |
-| 03 | `03-tool-dispatcher` | [TDD_SPEC.md](03-tool-dispatcher/TDD_SPEC.md) | ToolDispatcher 路由与插件体系 |
+| 03 | `03-tool-dispatcher` | [TDD_SPEC.md](03-tool-dispatcher/TDD_SPEC.md) | @Tool 声明式工具 + ToolCallback SPI + ToolsNode |
 | 04 | `04-anchor-qa` | [TDD_SPEC.md](04-anchor-qa/TDD_SPEC.md) | Anchor Q&A 锚点问答模式 |
 | 05 | `05-anchor-inject` | [TDD_SPEC.md](05-anchor-inject/TDD_SPEC.md) | 锚点注入模式 (Anchor Injection) |
-| 06 | `06-knowledge` | [TDD_SPEC.md](06-knowledge/TDD_SPEC.md) | 业务知识库 (Knowledge Base) |
+| 06 | `06-knowledge` | [TDD_SPEC.md](06-knowledge/TDD_SPEC.md) | 知识库 + VectorStore + 模块化 RAG |
 | 07 | `07-workflow` | [TDD_SPEC.md](07-workflow/TDD_SPEC.md) | 工作流引擎 (Workflow Engine) |
 | 08 | `08-patrol-alert` | [TDD_SPEC.md](08-patrol-alert/TDD_SPEC.md) | 巡检告警与问题闭环 (Patrol, Alert & Issue Closure) |
 | 09 | `09-plugin-mcp` | [TDD_SPEC.md](09-plugin-mcp/TDD_SPEC.md) | Plugin & MCP 集成 |

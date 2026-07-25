@@ -651,6 +651,7 @@ public @interface ToolParam {
 @Target(ElementType.METHOD)
 public @interface ToolApproval {
     boolean required() default false;  // true=执行前需人工确认
+    String prompt() default "";  // 自定义审批提示
 }
 ```
 

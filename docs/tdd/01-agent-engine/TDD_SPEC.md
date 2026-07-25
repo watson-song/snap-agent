@@ -1213,7 +1213,7 @@ public class ShouldContinue implements EdgeCondition {
 ### 4.5 HITL 与 @ToolApproval
 ```java
 @Retention(RetentionPolicy.RUNTIME)
-@Target(ElementType.TYPE)  // 标注在 ToolCallback 实现类上
+@Target(ElementType.METHOD)  // 标注在 @Tool 方法上
 public @interface ToolApproval {
     boolean required() default false;
     String prompt() default "";  // 自定义审批提示
