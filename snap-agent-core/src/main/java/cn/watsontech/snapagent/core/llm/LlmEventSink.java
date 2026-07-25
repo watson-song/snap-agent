@@ -5,7 +5,7 @@ import java.util.Map;
 /**
  * Callback interface receiving streaming events from {@link LlmClient#stream}.
  *
- * <p>Implementations (typically the {@code AgentExecutor}) translate these
+ * <p>Implementations (typically the {@code AgentNode}) translate these
  * events into transcript entries and SSE pushes.</p>
  */
 public interface LlmEventSink {
