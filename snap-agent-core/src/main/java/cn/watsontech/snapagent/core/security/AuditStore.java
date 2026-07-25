@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.core.security;
 
+import cn.watsontech.snapagent.core.agent.AuditRecord;
+
 import java.util.List;
 
 /**
@@ -9,6 +11,19 @@ import java.util.List;
 public interface AuditStore {
 
     void record(AuditEntry entry);
+
+    /**
+     * Saves a tool/LLM invocation audit record.
+     * Default is noop — host implementations override.
+     */
+    default void saveRecord(AuditRecord record) { }
+
+    /**
+     * Lists audit records for a specific task.
+     */
+    default List<AuditRecord> listByTask(String taskId) {
+        return java.util.Collections.emptyList();
+    }
 
     /**
      * Query audit entries with optional filters.

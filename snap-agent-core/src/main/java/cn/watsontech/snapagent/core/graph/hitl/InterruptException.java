@@ -10,6 +10,11 @@ public class InterruptException extends Exception {
         this.checkpointPayload = checkpointPayload;
     }
 
+    public InterruptException(String message, Map<String, Object> checkpointPayload) {
+        super(message);
+        this.checkpointPayload = checkpointPayload;
+    }
+
     public Map<String, Object> getCheckpointPayload() {
         return checkpointPayload;
     }

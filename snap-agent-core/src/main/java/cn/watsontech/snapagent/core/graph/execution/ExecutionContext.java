@@ -9,6 +9,7 @@ public interface ExecutionContext {
     ToolCallbackRegistry getTools();
     String getTaskId();
     String getUserId();
+    String getSkillName();
     void emit(TranscriptEvent event);
     boolean isCancelled();
 }

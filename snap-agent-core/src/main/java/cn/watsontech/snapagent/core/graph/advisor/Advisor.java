@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.graph.advisor;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 
 /**
  * Cross-cutting concern as graph node decorator.
@@ -9,6 +10,6 @@ import cn.watsontech.snapagent.core.graph.GraphState;
 public interface Advisor {
     int getOrder();
     String getName();
-    GraphState beforeNode(String nodeName, GraphState state, Object ctx);
-    GraphState afterNode(String nodeName, GraphState state, Object ctx);
+    GraphState beforeNode(String nodeName, GraphState state, Object ctx) throws InterruptException;
+    GraphState afterNode(String nodeName, GraphState state, Object ctx) throws InterruptException;
 }
