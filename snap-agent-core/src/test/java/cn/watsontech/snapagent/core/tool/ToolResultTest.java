@@ -74,4 +74,20 @@ class ToolResultTest {
         assertThat(str).contains("x");
         assertThat(str).contains("ToolResult");
     }
+
+    @Test
+    void truncatedWithOriginalLength() {
+        String longContent = "abcdefghij"; // 10 chars
+        ToolResult result = ToolResult.truncated(longContent.substring(0, 5), 5, 10, 10);
+        assertThat(result.isTruncated()).isTrue();
+        assertThat(result.getOriginalLength()).isEqualTo(10);
+        assertThat(result.getContent()).hasSize(5);
+    }
+
+    @Test
+    void successWithToolUseId() {
+        ToolResult result = ToolResult.success("content", 5, 100, "tu-1");
+        assertThat(result.getToolUseId()).isEqualTo("tu-1");
+        assertThat(result.isSuccess()).isTrue();
+    }
 }
