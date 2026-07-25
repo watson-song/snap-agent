@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
@@ -12,8 +13,6 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggester;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.issue.VerificationRunner;
-import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
-import cn.watsontech.snapagent.core.knowledge.KnowledgeFragment;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.slf4j.Logger;
@@ -31,11 +30,12 @@ import java.util.UUID;
  *
  * <p>Connects {@link AgentExecutor} (for running solution-suggest/verify-fix skills),
  * {@link IssueStore} (for persistence), {@link IssueTracker} (for external issue
- * systems), and {@link KnowledgeBase} (for experience sedimentation).</p>
+ * systems), and optionally a {@link KnowledgeSedimentationService} (for experience
+ * sedimentation into the vector store).</p>
  *
- * <p>The {@link KnowledgeBase} dependency may be {@code null} when knowledge features
- * are disabled; in that case, close() still records the knowledge entry ID but
- * does not reload the knowledge base.</p>
+ * <p>The {@link KnowledgeSedimentationService} dependency may be {@code null} when
+ * knowledge features are disabled; in that case, close() still records the
+ * knowledge entry ID but does not sediment into the vector store.</p>
  */
 public class IssueClosureService {
 
@@ -46,8 +46,7 @@ public class IssueClosureService {
     private final SkillRegistry skillRegistry;
     private final IssueStore issueStore;
     private final IssueTracker issueTracker;
-    private final KnowledgeBase knowledgeBase;
-    private final KnowledgeSedimentationExtractor sedimentationExtractor;
+    private final KnowledgeSedimentationService sedimentationService;
     private final SolutionSuggester solutionSuggester;
     private final VerificationRunner verificationRunner;
     private final String systemUserId;
@@ -60,8 +59,7 @@ public class IssueClosureService {
      * @param skillRegistry         the skill registry (for resolving skill metadata)
      * @param issueStore            the issue store (for persistence)
      * @param issueTracker          the issue tracker (for external issue systems)
-     * @param knowledgeBase         the knowledge base (may be {@code null} if knowledge disabled)
-     * @param sedimentationExtractor the knowledge sedimentation extractor
+     * @param sedimentationService  the knowledge sedimentation service (may be {@code null} if knowledge disabled)
      * @param solutionSuggester     the solution suggester (may be {@code null} to fall back to skill-based suggestion)
      * @param verificationRunner    the verification runner (may be {@code null} to fall back to skill-based verification)
      * @param systemUserId          the system user ID used when executing skills
@@ -71,8 +69,7 @@ public class IssueClosureService {
                                 SkillRegistry skillRegistry,
                                 IssueStore issueStore,
                                 IssueTracker issueTracker,
-                                KnowledgeBase knowledgeBase,
-                                KnowledgeSedimentationExtractor sedimentationExtractor,
+                                KnowledgeSedimentationService sedimentationService,
                                 SolutionSuggester solutionSuggester,
                                 VerificationRunner verificationRunner,
                                 String systemUserId) {
@@ -81,8 +78,7 @@ public class IssueClosureService {
         this.skillRegistry = skillRegistry;
         this.issueStore = issueStore;
         this.issueTracker = issueTracker;
-        this.knowledgeBase = knowledgeBase;
-        this.sedimentationExtractor = sedimentationExtractor;
+        this.sedimentationService = sedimentationService;
         this.solutionSuggester = solutionSuggester;
         this.verificationRunner = verificationRunner;
         this.systemUserId = systemUserId;
@@ -313,11 +309,11 @@ public class IssueClosureService {
     }
 
     /**
-     * Close an issue and sediment the experience into the knowledge base.
+     * Close an issue and sediment the experience into the vector store.
      *
-     * <p>Extracts a knowledge fragment via {@link KnowledgeSedimentationExtractor},
-     * reloads the {@link KnowledgeBase} (if available) to pick up new fragments,
-     * and marks the issue as {@link IssueStatus#CLOSED}.</p>
+     * <p>When a {@link KnowledgeSedimentationService} is available, extracts the
+     * Q&A from the issue and writes it to the vector store via embed + add.
+     * Then marks the issue as {@link IssueStatus#CLOSED}.</p>
      *
      * @param issueId the issue ID
      * @return the updated issue closure, or {@code null} if the issue is not found
@@ -329,19 +325,20 @@ public class IssueClosureService {
             return null;
         }
 
-        KnowledgeFragment fragment = sedimentationExtractor.extract(issue);
-        log.info("Extracted knowledge fragment for issue {}: {}", issueId, fragment.getTitle());
-
-        if (knowledgeBase != null) {
-            knowledgeBase.reload();
-            log.info("KnowledgeBase reloaded after sedimentation of issue {}", issueId);
+        if (sedimentationService != null) {
+            try {
+                sedimentationService.sediment(issue);
+                log.info("Issue {} sedimented into vector store", issueId);
+            } catch (RuntimeException e) {
+                log.warn("Sedimentation failed for issue {}: {}", issueId, e.getMessage());
+            }
         }
 
         long now = System.currentTimeMillis();
         IssueClosure updated = issue.withKnowledgeEntry("sedimentation:" + issueId, now)
                 .withStatus(IssueStatus.CLOSED, now);
         issueStore.save(updated);
-        log.info("Issue {} closed and sedimented", issueId);
+        log.info("Issue {} closed", issueId);
         return updated;
     }
 

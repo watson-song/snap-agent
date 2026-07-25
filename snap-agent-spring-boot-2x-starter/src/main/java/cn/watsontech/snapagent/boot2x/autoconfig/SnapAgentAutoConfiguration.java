@@ -10,7 +10,6 @@ import cn.watsontech.snapagent.boot2x.cost.DefaultCostTracker;
 import cn.watsontech.snapagent.boot2x.cost.FileCostStore;
 import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
-import cn.watsontech.snapagent.boot2x.issue.KnowledgeSedimentationExtractor;
 import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
 import cn.watsontech.snapagent.boot2x.issue.SimpleVerificationRunner;
 import cn.watsontech.snapagent.boot2x.issue.TemplateSolutionSuggester;
@@ -941,80 +940,43 @@ public class SnapAgentAutoConfiguration {
         return new cn.watsontech.snapagent.boot2x.patrol.TemplateBugfixSuggester();
     }
 
-    // ---- Knowledge Base (v0.7) ----
+    // ---- Knowledge (v2.x) ----
+    // Old v0.7 KnowledgeBase/SimpleKeywordSearcher/MarkdownKnowledgeSource/KnowledgeInjector
+    // deleted. New 2.x VectorStore/EmbeddingModel/RetrievalAugmentationAdvisor SPIs
+    // are wired conditionally when implementations are available.
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-            prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+            prefix = "snap-agent.vectorstore", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public cn.watsontech.snapagent.core.knowledge.KnowledgeSearcher simpleKeywordSearcher() {
-        log.info("SimpleKeywordSearcher assembled");
-        return new cn.watsontech.snapagent.boot2x.knowledge.SimpleKeywordSearcher();
+    public cn.watsontech.snapagent.boot2x.knowledge.KnowledgeETLPipeline knowledgeETLPipeline(
+            ObjectProvider<cn.watsontech.snapagent.core.vectorstore.VectorStore> vectorStoreProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.embedding.EmbeddingModel> embeddingModelProvider) {
+        log.info("KnowledgeETLPipeline assembled");
+        return new cn.watsontech.snapagent.boot2x.knowledge.KnowledgeETLPipeline(
+                vectorStoreProvider.getIfAvailable(),
+                embeddingModelProvider.getIfAvailable());
     }
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-            prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
+            prefix = "snap-agent.vectorstore", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase(
-            SnapAgentProperties props,
-            cn.watsontech.snapagent.core.knowledge.KnowledgeSearcher searcher,
-            ObjectProvider<cn.watsontech.snapagent.core.knowledge.KnowledgeSource> sourceProvider) {
-        List<cn.watsontech.snapagent.core.knowledge.KnowledgeSource> sources =
-                new ArrayList<cn.watsontech.snapagent.core.knowledge.KnowledgeSource>();
-        // Collect any custom KnowledgeSource beans declared by the host application.
-        sources.addAll(sourceProvider.orderedStream()
-                .collect(java.util.stream.Collectors.toList()));
-        // Add configured markdown sources; default to the builtin knowledge directory
-        // when the host did not configure any sources.
-        List<SnapAgentProperties.KnowledgeSourceConfig> configs =
-                props.getKnowledge().getSources();
-        if (configs == null || configs.isEmpty()) {
-            log.info("No knowledge sources configured; using default classpath:/docs/knowledge/");
-            sources.add(new cn.watsontech.snapagent.boot2x.knowledge.MarkdownKnowledgeSource(
-                    "classpath:/docs/knowledge/"));
-        } else {
-            for (SnapAgentProperties.KnowledgeSourceConfig srcCfg : configs) {
-                if ("markdown".equalsIgnoreCase(srcCfg.getType()) && !srcCfg.getDir().isEmpty()) {
-                    log.info("MarkdownKnowledgeSource assembled (dir={})", srcCfg.getDir());
-                    sources.add(new cn.watsontech.snapagent.boot2x.knowledge.MarkdownKnowledgeSource(
-                            srcCfg.getDir()));
-                } else {
-                    log.warn("Skipping knowledge source with unknown type or empty dir: type={}, dir={}",
-                            srcCfg.getType(), srcCfg.getDir());
-                }
-            }
-        }
-        cn.watsontech.snapagent.core.knowledge.KnowledgeBase kb =
-                new cn.watsontech.snapagent.core.knowledge.KnowledgeBase(sources, searcher);
-        log.info("KnowledgeBase assembled ({} fragments)", kb.size());
-        return kb;
-    }
-
-    // KnowledgeInjector coexists with ProjectContextExtender as separate beans —
-    // do NOT use @ConditionalOnMissingBean(SystemPromptExtender.class) here, since
-    // that would suppress whichever extender is evaluated second (spec §5).
-    @Bean
-    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
-            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class)
-    public cn.watsontech.snapagent.core.agent.SystemPromptExtender knowledgeInjector(
-            SnapAgentProperties props,
-            cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase) {
-        int maxFrag = props.getKnowledge().getMaxFragments();
-        double minScore = props.getKnowledge().getMinScore();
-        log.info("KnowledgeInjector assembled (maxFragments={}, minScore={})", maxFrag, minScore);
-        return new cn.watsontech.snapagent.boot2x.knowledge.KnowledgeInjector(
-                knowledgeBase, maxFrag, minScore);
-    }
-
-    @Bean
-    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
-            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class)
-    public cn.watsontech.snapagent.boot2x.web.KnowledgeController knowledgeController(
-            cn.watsontech.snapagent.core.knowledge.KnowledgeBase knowledgeBase,
-            SnapAgentProperties props) {
-        log.info("KnowledgeController assembled");
-        return new cn.watsontech.snapagent.boot2x.web.KnowledgeController(knowledgeBase, props);
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean({
+            cn.watsontech.snapagent.core.vectorstore.VectorStore.class,
+            cn.watsontech.snapagent.core.embedding.EmbeddingModel.class
+    })
+    public cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor retrievalAugmentationAdvisor(
+            cn.watsontech.snapagent.core.vectorstore.VectorStore vectorStore,
+            cn.watsontech.snapagent.core.embedding.EmbeddingModel embeddingModel) {
+        log.info("RetrievalAugmentationAdvisor assembled");
+        cn.watsontech.snapagent.core.rag.DocumentRetriever retriever = (query, topK) ->
+                vectorStore.similaritySearch(
+                        new cn.watsontech.snapagent.core.vectorstore.SearchRequest(query, topK, 0.75, null));
+        return new cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor(
+                (q, ctx) -> q,
+                retriever,
+                new cn.watsontech.snapagent.core.rag.DefaultQueryAugmenter(false));
     }
 
     // ---- Code Graph (v0.8) ----
@@ -1091,9 +1053,13 @@ public class SnapAgentAutoConfiguration {
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public KnowledgeSedimentationExtractor knowledgeSedimentationExtractor() {
-        log.info("KnowledgeSedimentationExtractor assembled");
-        return new KnowledgeSedimentationExtractor();
+    public cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService knowledgeSedimentationService(
+            ObjectProvider<cn.watsontech.snapagent.core.vectorstore.VectorStore> vectorStoreProvider,
+            ObjectProvider<cn.watsontech.snapagent.core.embedding.EmbeddingModel> embeddingModelProvider) {
+        log.info("KnowledgeSedimentationService assembled");
+        return new cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService(
+                vectorStoreProvider.getIfAvailable(),
+                embeddingModelProvider.getIfAvailable());
     }
 
     @Bean
@@ -1130,8 +1096,7 @@ public class SnapAgentAutoConfiguration {
             SkillRegistry skillRegistry,
             IssueStore issueStore,
             IssueTracker issueTracker,
-            ObjectProvider<cn.watsontech.snapagent.core.knowledge.KnowledgeBase> knowledgeBaseProvider,
-            KnowledgeSedimentationExtractor sedimentationExtractor,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService> sedimentationServiceProvider,
             ObjectProvider<cn.watsontech.snapagent.core.issue.SolutionSuggester> solutionSuggesterProvider,
             ObjectProvider<cn.watsontech.snapagent.core.issue.VerificationRunner> verificationRunnerProvider,
             SnapAgentProperties properties) {
@@ -1139,8 +1104,7 @@ public class SnapAgentAutoConfiguration {
                 properties.getIssueClosure().getSystemUserId());
         return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
                 issueStore, issueTracker,
-                knowledgeBaseProvider.getIfAvailable(),
-                sedimentationExtractor,
+                sedimentationServiceProvider.getIfAvailable(),
                 solutionSuggesterProvider.getIfAvailable(),
                 verificationRunnerProvider.getIfAvailable(),
                 properties.getIssueClosure().getSystemUserId());

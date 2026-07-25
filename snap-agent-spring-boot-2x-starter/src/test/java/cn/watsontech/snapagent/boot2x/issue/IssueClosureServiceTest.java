@@ -13,7 +13,7 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggester;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.issue.VerificationRunner;
-import cn.watsontech.snapagent.core.knowledge.KnowledgeBase;
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
@@ -49,8 +49,7 @@ class IssueClosureServiceTest {
     private SkillRegistry skillRegistry;
     private IssueStore issueStore;
     private IssueTracker issueTracker;
-    private KnowledgeBase knowledgeBase;
-    private KnowledgeSedimentationExtractor sedimentationExtractor;
+    private KnowledgeSedimentationService sedimentationService;
     private SolutionSuggester solutionSuggester;
     private VerificationRunner verificationRunner;
 
@@ -63,8 +62,7 @@ class IssueClosureServiceTest {
         skillRegistry = mock(SkillRegistry.class);
         issueStore = mock(IssueStore.class);
         issueTracker = mock(IssueTracker.class);
-        knowledgeBase = mock(KnowledgeBase.class);
-        sedimentationExtractor = new KnowledgeSedimentationExtractor();
+        sedimentationService = mock(KnowledgeSedimentationService.class);
         solutionSuggester = null;
         verificationRunner = null;
 
@@ -75,7 +73,7 @@ class IssueClosureServiceTest {
     private IssueClosureService newIssueClosureService(
             SolutionSuggester suggester, VerificationRunner runner) {
         return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
-                issueStore, issueTracker, knowledgeBase, sedimentationExtractor,
+                issueStore, issueTracker, sedimentationService,
                 suggester, runner, "system");
     }
 
@@ -397,7 +395,7 @@ class IssueClosureServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.getStatus()).isEqualTo(IssueStatus.CLOSED);
         assertThat(result.getKnowledgeEntryId()).isEqualTo("sedimentation:issue-005");
-        verify(knowledgeBase).reload();
+        verify(sedimentationService).sediment(any(IssueClosure.class));
         verify(issueStore).save(any(IssueClosure.class));
     }
 
@@ -411,12 +409,15 @@ class IssueClosureServiceTest {
         verify(issueStore, never()).save(any(IssueClosure.class));
     }
 
-    // ---- null knowledgeBase ----
+    // ---- null sedimentationService ----
 
     @Test
-    void shouldCloseWithoutKnowledgeBaseWhenDisabled() {
-        // Service with null knowledgeBase
-        IssueClosureService serviceNoKb = newIssueClosureService(null, null);
+    void shouldCloseWithoutSedimentationWhenDisabled() {
+        // Service with null sedimentationService
+        IssueClosureService serviceNoSed = new IssueClosureService(
+                agentExecutor, taskStore, skillRegistry,
+                issueStore, issueTracker, null,
+                null, null, "system");
 
         IssueClosure existing = new IssueClosure(
                 "issue-006", null, "task-600",
@@ -427,12 +428,12 @@ class IssueClosureServiceTest {
                 1_000L, 2_000L);
         when(issueStore.load("issue-006")).thenReturn(existing);
 
-        IssueClosure result = serviceNoKb.close("issue-006");
+        IssueClosure result = serviceNoSed.close("issue-006");
 
         assertThat(result).isNotNull();
         assertThat(result.getStatus()).isEqualTo(IssueStatus.CLOSED);
         assertThat(result.getKnowledgeEntryId()).isEqualTo("sedimentation:issue-006");
-        // Should not throw even though knowledgeBase is null
+        // Should not throw even though sedimentationService is null
         verify(issueStore).save(any(IssueClosure.class));
     }
 

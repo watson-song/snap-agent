@@ -1317,13 +1317,11 @@ public class SnapAgentProperties {
     }
 
     /**
-     * Embedded business knowledge base configuration (v0.7).
+     * Knowledge base configuration (v2.x).
      *
-     * <p>When {@code enabled=true}, a {@link cn.watsontech.snapagent.core.knowledge.KnowledgeBase}
-     * is assembled from the configured {@code sources} (Markdown directories by default),
-     * and a {@link cn.watsontech.snapagent.boot2x.knowledge.KnowledgeInjector} is registered
-     * as a {@link cn.watsontech.snapagent.core.agent.SystemPromptExtender} so that relevant
-     * business knowledge is injected into the system prompt at runtime.</p>
+     * <p>When {@code snap-agent.vectorstore.enabled=true}, VectorStore and EmbeddingModel
+     * SPIs are wired, enabling semantic search and RAG context injection via
+     * {@link cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor}.</p>
      */
     public static class Knowledge {
         /** Master switch. Default false — zero knowledge beans when disabled. */
