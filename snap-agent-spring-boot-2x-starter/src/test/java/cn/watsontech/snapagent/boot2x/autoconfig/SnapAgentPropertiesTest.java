@@ -412,4 +412,25 @@ class SnapAgentPropertiesTest {
         assertThat(memory.getMaxMessages()).isEqualTo(50);
         assertThat(memory.getJdbc().getTableName()).isEqualTo("custom_memory");
     }
+
+    @Test
+    void shouldDefaultCostMaxTokensPerRun() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Cost cost = props.getCost();
+
+        assertThat(cost.isEnabled()).isFalse();
+        assertThat(cost.getMaxTokensPerRun()).isEqualTo(100000);
+    }
+
+    @Test
+    void shouldSetCostMaxTokensPerRun() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Cost cost = props.getCost();
+
+        cost.setEnabled(true);
+        cost.setMaxTokensPerRun(50000);
+
+        assertThat(cost.isEnabled()).isTrue();
+        assertThat(cost.getMaxTokensPerRun()).isEqualTo(50000);
+    }
 }

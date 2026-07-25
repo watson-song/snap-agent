@@ -1495,6 +1495,9 @@ public class SnapAgentProperties {
         /** Budget utilization ratio at which to emit a warning (0.0-1.0). */
         private double warnThreshold = 0.8;
 
+        /** Maximum tokens allowed per agent run. Default 100000. */
+        private int maxTokensPerRun = 100000;
+
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public Pricing getPricing() { return pricing; }
@@ -1505,6 +1508,8 @@ public class SnapAgentProperties {
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
         public double getWarnThreshold() { return warnThreshold; }
         public void setWarnThreshold(double warnThreshold) { this.warnThreshold = warnThreshold; }
+        public int getMaxTokensPerRun() { return maxTokensPerRun; }
+        public void setMaxTokensPerRun(int maxTokensPerRun) { this.maxTokensPerRun = maxTokensPerRun; }
 
         /** Per-million-token pricing. */
         public static class Pricing {
