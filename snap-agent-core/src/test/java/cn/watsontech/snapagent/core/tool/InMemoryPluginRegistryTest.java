@@ -197,4 +197,29 @@ class InMemoryPluginRegistryTest {
         registry.setDefault("log_read", "nonexistent");
         assertThat(registry.getDefault("log_read")).isNull();
     }
+
+    // --- G-03C: disable default plugin does not auto-promote ---
+
+    @Test
+    void shouldNotAutoPromoteWhenDefaultPluginDisabled() {
+        PluginDescriptor first = newPlugin("log1", "log_read", false, true);
+        PluginDescriptor second = newPlugin("log2", "log_read", false, false);
+        registry.register(first);
+        registry.register(second);
+
+        // Before disable: first is the default and enabled
+        assertThat(registry.getDefault("log_read")).isSameAs(first);
+        assertThat(first.isDefault()).isTrue();
+        assertThat(first.isEnabled()).isTrue();
+
+        registry.disable("log1");
+
+        // After disable: the disabled plugin remains the default (disable does NOT auto-promote)
+        assertThat(first.isEnabled()).isFalse();
+        assertThat(first.isDefault()).isTrue();
+        assertThat(registry.getDefault("log_read")).isSameAs(first);
+        // The second plugin is NOT promoted
+        assertThat(second.isDefault()).isFalse();
+        assertThat(second.isEnabled()).isTrue();
+    }
 }

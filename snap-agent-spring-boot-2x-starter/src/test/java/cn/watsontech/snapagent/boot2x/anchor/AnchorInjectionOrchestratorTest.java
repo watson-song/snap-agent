@@ -353,4 +353,37 @@ class AnchorInjectionOrchestratorTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("INVALID_INPUT");
     }
+
+    // ---- GAP-7: systemPrompt = skill body ----
+
+    @Test
+    void shouldSetSystemPromptFromSkillBody() {
+        String skillBody = "你是公告生成助手，请生成简洁的 HTML 内容。";
+        SkillMeta skillMeta = new SkillMeta("announcement", "公告",
+                Collections.<String>emptyList(), Collections.emptyList(),
+                skillBody, SkillAvailability.AVAILABLE, null);
+        when(skillRegistry.get("announcement")).thenReturn(skillMeta);
+
+        doAnswer(invocation -> {
+            LlmEventSink sink = invocation.getArgument(1);
+            sink.onThought("<p>generated content</p>");
+            sink.onStop("end_turn");
+            return null;
+        }).when(llmClient).stream(any(), any(), anyString());
+
+        InjectionRequest req = new InjectionRequest(
+                "公告", "/page", "announcement", null, 0);
+
+        orchestrator.inject("user001", req);
+
+        // Capture the LlmRequest passed to llmClient.stream and verify systemPrompt
+        org.mockito.ArgumentCaptor<LlmRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(LlmRequest.class);
+        verify(llmClient).stream(captor.capture(), any(), anyString());
+
+        LlmRequest captured = captor.getValue();
+        assertThat(captured.getSystemPrompt()).isEqualTo(skillBody);
+        assertThat(captured.getMaxTokens())
+                .isEqualTo(Math.min(props.getInjectionMaxTokens(), 1024));
+    }
 }

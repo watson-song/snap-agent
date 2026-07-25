@@ -156,6 +156,8 @@ AC2: 非 .md 文件不触发
   Then refresh 不被调用
 ```
 
+> 环境限制: macOS WatchService 对非 .md 文件的事件过滤行为与 Linux 不同，单元测试无法模拟真实文件系统事件过滤逻辑。standalone 单元测试无法验证。
+
 ### US-6: Classpath 两遍扫描保护
 ```gherkin
 As a platform developer

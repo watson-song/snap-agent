@@ -16,8 +16,8 @@ public class CodeGraph {
     private final List<CodeGraphEdge> edges;
 
     public CodeGraph(List<CodeGraphNode> nodes, List<CodeGraphEdge> edges) {
-        this.nodes = new ArrayList<CodeGraphNode>(nodes);
-        this.edges = new ArrayList<CodeGraphEdge>(edges);
+        this.nodes = nodes == null ? new ArrayList<CodeGraphNode>() : new ArrayList<CodeGraphNode>(nodes);
+        this.edges = edges == null ? new ArrayList<CodeGraphEdge>() : new ArrayList<CodeGraphEdge>(edges);
     }
 
     public List<CodeGraphNode> getNodes() {

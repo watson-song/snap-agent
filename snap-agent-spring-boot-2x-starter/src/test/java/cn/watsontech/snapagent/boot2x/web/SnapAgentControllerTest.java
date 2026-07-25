@@ -22,6 +22,7 @@ import cn.watsontech.snapagent.core.tool.ToolProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -822,6 +823,48 @@ class SnapAgentControllerTest {
         verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
     }
 
+    // ---- POST /runs with skillId="auto" SSE thought streaming (G-420) ----
+
+    @Test
+    void shouldStreamAnchorThoughtEventsViaSse() throws Exception {
+        properties.getAnchor().setEnabled(true);
+        AnchorOrchestrator mockOrchestrator = org.mockito.Mockito.mock(AnchorOrchestrator.class);
+        controller.setAnchorOrchestrator(mockOrchestrator);
+        when(rateLimiter.tryAcquire("user001")).thenReturn(true);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        Map<String, Object> anchor = new LinkedHashMap<String, Object>();
+        anchor.put("name", "announcement-section");
+        anchor.put("content", "System maintenance scheduled for tonight");
+        anchor.put("pageUrl", "/dashboard");
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "auto");
+        body.put("anchor", anchor);
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("message", "What is the maintenance about?");
+        body.put("inputs", inputs);
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.taskId").isNotEmpty())
+                .andExpect(jsonPath("$.streamUrl").isNotEmpty())
+                .andExpect(jsonPath("$.streamUrl").value(containsString("/runs/")))
+                .andExpect(jsonPath("$.streamUrl").value(containsString("/stream")));
+
+        // Verify the task is created with anchor mode (skillId="auto")
+        ArgumentCaptor<AgentTask> taskCaptor = ArgumentCaptor.forClass(AgentTask.class);
+        verify(taskStore).save(taskCaptor.capture());
+        AgentTask savedTask = taskCaptor.getValue();
+        assertThat(savedTask.getSkillId()).isEqualTo("auto");
+        assertThat(savedTask.getUserId()).isEqualTo("user001");
+        assertThat(savedTask.getInputs().get("message")).isEqualTo("What is the maintenance about?");
+    }
+
     // ---- POST /skills/upload tests (GAP-11: .md upload REST E2E) ----
 
     @Test
@@ -898,6 +941,57 @@ class SnapAgentControllerTest {
     void shouldReturn400WhenUploadFolderHasNoFiles() throws Exception {
         mockMvc.perform(multipart("/snap-agent/skills/upload-folder"))
                 .andExpect(status().isBadRequest());
+    }
+
+    // ---- GET /auth-config (public, returns frontend auth config) ----
+
+    @Test
+    void shouldReturnAuthConfigWhenGetAuthConfig() throws Exception {
+        properties.getSecurity().setAuthTokenHeader("X-Auth-Token");
+        properties.getSecurity().setAuthTokenCookie("auth_token");
+        properties.getSecurity().setAuthTokenLocalStorageKey("snap_auth_token");
+
+        mockMvc.perform(get("/snap-agent/auth-config"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authHeader").value("X-Auth-Token"))
+                .andExpect(jsonPath("$.authCookie").value("auth_token"))
+                .andExpect(jsonPath("$.authLocalStorageKey").value("snap_auth_token"));
+    }
+
+    // ---- POST /runs with skillId="off" and anchor context (direct LLM Q&A) ----
+
+    @Test
+    void shouldReturn202WhenSkillIdIsOffWithAnchorContext() throws Exception {
+        properties.getAnchor().setEnabled(true);
+        AnchorOrchestrator mockOrchestrator = org.mockito.Mockito.mock(AnchorOrchestrator.class);
+        controller.setAnchorOrchestrator(mockOrchestrator);
+        when(rateLimiter.tryAcquire("user001")).thenReturn(true);
+        doAnswer(invocation -> {
+            invocation.getArgument(0, Runnable.class).run();
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        Map<String, Object> anchor = new LinkedHashMap<String, Object>();
+        anchor.put("name", "summary-section");
+        anchor.put("content", "This is the page content");
+        anchor.put("pageUrl", "/dashboard");
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "off");
+        body.put("anchor", anchor);
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("message", "What is this about?");
+        body.put("inputs", inputs);
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.taskId").isNotEmpty())
+                .andExpect(jsonPath("$.streamUrl").isNotEmpty());
+
+        // "off" mode delegates to AnchorOrchestrator.executeWithAnchor (no tools)
+        verify(mockOrchestrator).executeWithAnchor(
+                any(), any(), any(), any());
     }
 
     private void deleteRecursively(java.nio.file.Path path) {

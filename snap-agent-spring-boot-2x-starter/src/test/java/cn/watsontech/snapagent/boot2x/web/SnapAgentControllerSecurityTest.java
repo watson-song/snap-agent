@@ -9,6 +9,9 @@ import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.security.SecurityAuditLogger;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.security.UserInfo;
+import cn.watsontech.snapagent.core.skill.InputSpec;
+import cn.watsontech.snapagent.core.skill.SkillAvailability;
+import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -25,6 +29,7 @@ import java.util.Collections;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -281,5 +286,55 @@ class SnapAgentControllerSecurityTest {
                 .andExpect(jsonPath("$.authenticated").value(false))
                 .andExpect(jsonPath("$.authorized").value(false))
                 .andExpect(jsonPath("$.message").value("security not configured"));
+    }
+
+    // ---- G-10A: Anonymous user rejection + audit skip ----
+
+    @Test
+    void shouldRejectAnonymousUserAndSkipAuditWhenCurrentUserIdIsNull() throws Exception {
+        // When SecurityGateway.currentUserId() returns null (unauthenticated),
+        // requireAuth() returns 401 before the audit() call is reached.
+        when(securityGateway.currentUserId()).thenReturn(null);
+
+        mockMvc.perform(get("/snap-agent/skills"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("UNAUTHORIZED"));
+
+        // Actual behavior: audit is NOT called when the user is not authenticated,
+        // because requireAuth() returns early and the controller never reaches audit().
+        verify(auditLogger, never()).onApiAccess(
+                anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    // ---- P-10: RateLimiter + audit linkage with resolved userId ----
+
+    @Test
+    void shouldCallRateLimiterWithResolvedUserIdOnApiAccess() throws Exception {
+        // AC14: When PrincipalResolver returns "user-001",
+        // audit userId="user-001" AND RateLimiter.tryAcquire("user-001") is called.
+        when(securityGateway.currentUserId()).thenReturn("user-001");
+
+        SkillMeta skill = new SkillMeta("test-skill", "test",
+                Collections.singletonList("mysql_query"),
+                Collections.<InputSpec>emptyList(),
+                "body", SkillAvailability.AVAILABLE, null);
+        when(skillRegistry.get("test-skill")).thenReturn(skill);
+        when(rateLimiter.tryAcquire("user-001")).thenReturn(true);
+        doAnswer(invocation -> {
+            // Do not actually run the task — just accept submission
+            return null;
+        }).when(taskExecutor).execute(any(Runnable.class));
+
+        mockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillId\":\"test-skill\"}"))
+                .andExpect(status().isAccepted());
+
+        // Verify RateLimiter was called with the resolved user id
+        verify(rateLimiter).tryAcquire("user-001");
+        // Verify audit was called with the resolved user id
+        verify(auditLogger).onApiAccess(
+                eq("user-001"), eq("POST"), eq("/runs"),
+                eq("RUN_SKILL"), any());
     }
 }

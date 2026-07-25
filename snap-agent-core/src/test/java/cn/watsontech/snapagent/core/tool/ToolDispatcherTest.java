@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -569,5 +570,49 @@ class ToolDispatcherTest {
 
         assertThat(types).isEqualTo(names);
         assertThat(types).isEmpty();
+    }
+
+    // --- G-03A: audit callback exception isolation ---
+
+    @Test
+    void shouldNotThrowWhenAuditCallbackThrowsRuntimeException() {
+        AuditCallback callback = mock(AuditCallback.class);
+        org.mockito.Mockito.doThrow(new RuntimeException("audit failure"))
+                .when(callback).onToolExecuted(any(), any(), any());
+
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        ToolContext ctx = new ToolContext("t1", "u1", callback);
+        when(mysqlProvider.execute(any(), any())).thenReturn(ToolResult.success("1", 1, 1L));
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), ctx);
+
+        // dispatch must return normally even though the audit callback threw
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).isEqualTo("1");
+        verify(callback, times(1)).onToolExecuted(eq("mysql_query"), any(), any());
+    }
+
+    // --- G-03B: dispatch with null context ---
+
+    @Test
+    void shouldNotThrowNpeWhenContextIsNull() {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+        registry.register(new PluginDescriptor(
+                "mysql", "mysql_query", "MySQL", "", "1.0",
+                true, true, true, mysqlProvider, null, null, null));
+        ToolDispatcher dispatcher = new ToolDispatcher(registry, 50000);
+        when(mysqlProvider.execute(any(), any())).thenReturn(ToolResult.success("ok", 1, 1L));
+
+        ToolResult result = dispatcher.dispatch("mysql_query", new HashMap<>(), null);
+
+        // dispatch must not throw NPE when ctx is null
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).isEqualTo("ok");
+        // provider.execute is called with null context (no override, no plugin context injection)
+        verify(mysqlProvider, times(1)).execute(any(), isNull());
     }
 }
