@@ -6,7 +6,7 @@ import java.util.Map;
 /**
  * Audit record for a single tool invocation.
  *
- * <p>Created by the agent layer after each {@code ToolDispatcher.dispatch} call.</p>
+ * <p>Created by the agent layer after each {@code ToolCallback.execute} call.</p>
  */
 public final class AuditRecord {
 

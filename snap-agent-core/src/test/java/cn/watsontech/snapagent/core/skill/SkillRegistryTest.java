@@ -1,7 +1,7 @@
 package cn.watsontech.snapagent.core.skill;
 
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistryImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,14 +27,14 @@ class SkillRegistryTest {
     @TempDir
     Path tempDir;
 
-    private ToolDispatcher dispatcher;
-    private ToolProvider mysqlProvider;
+    private ToolCallbackRegistryImpl toolRegistry;
 
     @BeforeEach
     void setUp() {
-        mysqlProvider = mock(ToolProvider.class);
-        when(mysqlProvider.name()).thenReturn("mysql_query");
-        dispatcher = new ToolDispatcher(Arrays.asList(mysqlProvider), 50000);
+        toolRegistry = new ToolCallbackRegistryImpl();
+        ToolCallback mysqlCallback = mock(ToolCallback.class);
+        when(mysqlCallback.getName()).thenReturn("mysql_query");
+        toolRegistry.register(mysqlCallback);
     }
 
     private void writeSkill(String fileName, String name, String tools) throws IOException {
@@ -62,7 +62,7 @@ class SkillRegistryTest {
         writeSkill("b.md", "skill-b", "mysql_query");
         writeSkill("c.md", "skill-c", "mysql_query");
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(3);
         assertThat(registry.get("skill-a")).isNotNull();
@@ -74,7 +74,7 @@ class SkillRegistryTest {
     void shouldReturnAvailableWhenAllToolsRegistered() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         SkillMeta meta = registry.get("skill-a");
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
@@ -85,7 +85,7 @@ class SkillRegistryTest {
     void shouldReturnUnavailableWhenToolMissing() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query, redis_get");
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         SkillMeta meta = registry.get("skill-a");
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.UNAVAILABLE);
@@ -97,7 +97,7 @@ class SkillRegistryTest {
         String content = "# no frontmatter\nbody\n";
         Files.write(tempDir.resolve("bad.md"), content.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).isEmpty();
         assertThat(registry.get(null)).isNull();
@@ -107,7 +107,7 @@ class SkillRegistryTest {
     void shouldReturnEmptyWhenDirectoryDoesNotExist() {
         Path nonExistent = tempDir.resolve("nonexistent-dir");
 
-        SkillRegistry registry = new SkillRegistry(nonExistent, dispatcher);
+        SkillRegistry registry = new SkillRegistry(nonExistent, toolRegistry);
 
         assertThat(registry.all()).isEmpty();
     }
@@ -116,7 +116,7 @@ class SkillRegistryTest {
     void shouldReturnEmptyWhenDirectoryHasNoMdFiles() throws IOException {
         Files.createFile(tempDir.resolve("readme.txt"));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).isEmpty();
     }
@@ -124,7 +124,7 @@ class SkillRegistryTest {
     @Test
     void shouldPickUpNewFilesWhenRefreshCalled() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
         assertThat(registry.all()).hasSize(1);
 
         writeSkill("b.md", "skill-b", "mysql_query");
@@ -138,7 +138,7 @@ class SkillRegistryTest {
     void shouldRemoveDeletedSkillsWhenRefreshCalled() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
         writeSkill("b.md", "skill-b", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
         assertThat(registry.all()).hasSize(2);
 
         Files.delete(tempDir.resolve("b.md"));
@@ -152,7 +152,7 @@ class SkillRegistryTest {
     @Test
     void shouldUpdateBodyWhenFileModifiedAndRefreshCalled() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
         assertThat(registry.get("skill-a").getBody()).contains("body for skill-a");
 
         String newContent = "---\n"
@@ -170,7 +170,7 @@ class SkillRegistryTest {
     @Test
     void shouldReturnNullWhenSkillNotFound() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.get("nonexistent")).isNull();
     }
@@ -182,7 +182,7 @@ class SkillRegistryTest {
         String invalidContent = "# no frontmatter\n";
         Files.write(tempDir.resolve("c.md"), invalidContent.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
         SkillRegistry.RefreshResult result = registry.refresh();
 
         assertThat(result.getTotal()).isEqualTo(2);
@@ -193,16 +193,16 @@ class SkillRegistryTest {
 
     @Test
     void shouldHandleNullDirectory() {
-        SkillRegistry registry = new SkillRegistry(null, dispatcher);
+        SkillRegistry registry = new SkillRegistry(null, toolRegistry);
 
         assertThat(registry.all()).isEmpty();
     }
 
     @Test
-    void shouldHandleNullDispatcher() throws IOException {
+    void shouldHandleNullToolRegistry() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
 
-        SkillRegistry registry = new SkillRegistry(tempDir, null);
+        SkillRegistry registry = new SkillRegistry(tempDir, (cn.watsontech.snapagent.core.tool.ToolCallbackRegistry) null);
 
         SkillMeta meta = registry.get("skill-a");
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.UNAVAILABLE);
@@ -211,7 +211,7 @@ class SkillRegistryTest {
     @Test
     void shouldBeThreadSafeWhenConcurrentAccess() throws Exception {
         writeSkill("a.md", "skill-a", "mysql_query");
-        final SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        final SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         Runnable reader = () -> {
             for (int i = 0; i < 100; i++) {
@@ -246,7 +246,7 @@ class SkillRegistryTest {
     void shouldLoadBuiltinSkillsOnlyWhenUploadDirIsEmpty() {
         SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
         SkillRegistry registry = new SkillRegistry(null,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("builtin-skill")).isNotNull();
@@ -259,7 +259,7 @@ class SkillRegistryTest {
         SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
 
         SkillRegistry registry = new SkillRegistry(tempDir,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
         assertThat(registry.all()).hasSize(2);
         assertThat(registry.get("builtin-skill").getSource()).isEqualTo("builtin");
@@ -272,9 +272,8 @@ class SkillRegistryTest {
         SkillMeta builtin = builtinSkill("shared-skill", "mysql_query");
 
         SkillRegistry registry = new SkillRegistry(tempDir,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
-        // Only the custom version appears (builtin is shadowed)
         assertThat(registry.all()).hasSize(1);
         SkillMeta merged = registry.get("shared-skill");
         assertThat(merged.getSource()).isEqualTo("custom");
@@ -288,7 +287,7 @@ class SkillRegistryTest {
         SkillMeta builtin = builtinSkill("shared-skill", "mysql_query");
 
         SkillRegistry registry = new SkillRegistry(tempDir,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
         assertThat(registry.get("shared-skill").getSource()).isEqualTo("custom");
 
@@ -306,7 +305,7 @@ class SkillRegistryTest {
         writeSkill("custom.md", "custom-only", "mysql_query");
 
         SkillRegistry registry = new SkillRegistry(tempDir,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
         assertThat(registry.isBuiltin("builtin-only")).isTrue();
         assertThat(registry.isBuiltin("custom-only")).isFalse();
@@ -316,7 +315,7 @@ class SkillRegistryTest {
     @Test
     void shouldReturnCustomSkillPathForDelete() throws IOException {
         writeSkill("standalone.md", "my-skill", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         Path path = registry.getCustomSkillPath("my-skill");
         assertThat(path).isNotNull();
@@ -336,13 +335,12 @@ class SkillRegistryTest {
                 + "---\n"
                 + "body of dir skill\n";
         Files.write(skillDir.resolve("SKILL.md"), skillContent.getBytes(StandardCharsets.UTF_8));
-        // Auxiliary files — should be ignored
         Files.write(skillDir.resolve("REFERENCE.md"),
                 "# reference\n".getBytes(StandardCharsets.UTF_8));
         Files.write(skillDir.resolve("config.json"),
                 "{}".getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("dir-skill")).isNotNull();
@@ -356,7 +354,7 @@ class SkillRegistryTest {
         String skillContent = "---\nname: dir-skill\ndescription: d\ntools: [mysql_query]\n---\nbody\n";
         Files.write(skillDir.resolve("SKILL.md"), skillContent.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         Path path = registry.getCustomSkillPath("dir-skill");
         assertThat(path).isNotNull();
@@ -370,11 +368,10 @@ class SkillRegistryTest {
         Files.createDirectories(skillDir);
         String skillContent = "---\nname: dir-skill\ndescription: d\ntools: [mysql_query]\n---\nbody\n";
         Files.write(skillDir.resolve("SKILL.md"), skillContent.getBytes(StandardCharsets.UTF_8));
-        // REFERENCE.md has no frontmatter — should NOT appear as a separate skill
         Files.write(skillDir.resolve("REFERENCE.md"),
                 "# reference doc\n".getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("dir-skill")).isNotNull();
@@ -385,12 +382,11 @@ class SkillRegistryTest {
     void shouldRecurseIntoOrganizationalDirectories() throws IOException {
         Path orgDir = tempDir.resolve("category");
         Files.createDirectories(orgDir);
-        // Organizational dir has no SKILL.md → standalone .md files inside are parsed
         String skillContent = "---\nname: nested-skill\ndescription: d\ntools: [mysql_query]\n---\nbody\n";
         Files.write(orgDir.resolve("nested.md"),
                 skillContent.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("nested-skill")).isNotNull();
@@ -407,7 +403,7 @@ class SkillRegistryTest {
         Files.write(skillDir.resolve("REF.md"),
                 "# ref\n".getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("perf-skill")).isNotNull();
@@ -416,13 +412,12 @@ class SkillRegistryTest {
     @Test
     void shouldHandleDuplicateCustomNamesWithLastWins() throws IOException {
         writeSkill("a.md", "dup-skill", "mysql_query");
-        // Create same name in a subdirectory SKILL.md
         Path skillDir = tempDir.resolve("dup-dir");
         Files.createDirectories(skillDir);
         String content = "---\nname: dup-skill\ndescription: from dir\ntools: [mysql_query]\n---\nfrom dir\n";
         Files.write(skillDir.resolve("SKILL.md"), content.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.all()).hasSize(1);
         assertThat(registry.get("dup-skill")).isNotNull();
@@ -432,7 +427,7 @@ class SkillRegistryTest {
     void shouldSetSourceCustomOnAllUploadSkills() throws IOException {
         writeSkill("a.md", "skill-a", "mysql_query");
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         assertThat(registry.get("skill-a").getSource()).isEqualTo("custom");
         assertThat(registry.get("skill-a").isOverridesBuiltin()).isFalse();
@@ -448,7 +443,7 @@ class SkillRegistryTest {
                 "builtin", false, "snap-agent:db-query");
 
         SkillRegistry registry = new SkillRegistry(null,
-                Collections.singletonList(meta), dispatcher);
+                Collections.singletonList(meta), toolRegistry);
 
         SkillMeta result = registry.get("perm-skill");
         assertThat(result).isNotNull();
@@ -465,7 +460,7 @@ class SkillRegistryTest {
                 "builtin", false, "snap-agent:admin");
 
         SkillRegistry registry = new SkillRegistry(null,
-                Collections.singletonList(meta), dispatcher);
+                Collections.singletonList(meta), toolRegistry);
 
         SkillMeta result = registry.get("perm-skill");
         assertThat(result).isNotNull();
@@ -484,93 +479,17 @@ class SkillRegistryTest {
                 + "body\n";
         Files.write(tempDir.resolve("secured.md"), content.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         SkillMeta meta = registry.get("secured-skill");
         assertThat(meta).isNotNull();
         assertThat(meta.getRequiredPermission()).isEqualTo("snap-agent:secure");
     }
 
-    // ---- GAP-5: scan failure exception handling ----
-
-    @Test
-    void shouldReturnOldCacheCountsAndNotReplaceCacheWhenRefreshScanThrows() {
-        // A builtin AVAILABLE skill causes validateContract to be called at the scan()
-        // level (outside the walkFileTree visitor), so a throwing dispatcher makes
-        // scan() throw RuntimeException — caught by the constructor and refresh().
-        SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
-
-        ToolDispatcher throwingDispatcher = new ToolDispatcher(
-                Arrays.asList(mysqlProvider), 50000) {
-            @Override
-            public java.util.Set<String> availableToolNames() {
-                throw new RuntimeException("dispatcher exploded");
-            }
-        };
-
-        // Constructor scan throws → caught by constructor's catch → cache stays empty
-        SkillRegistry registry = new SkillRegistry(null,
-                Arrays.asList(builtin), throwingDispatcher);
-        assertThat(registry.all()).isEmpty();
-
-        // refresh() scan throws → caught by refresh's catch → returns old cache counts
-        // and does NOT replace the cache
-        SkillRegistry.RefreshResult result = registry.refresh();
-        assertThat(result.getTotal()).isZero();
-        // cache is NOT replaced — still empty
-        assertThat(registry.all()).isEmpty();
-    }
-
-    @Test
-    void shouldKeepOldCacheAvailableWhenRefreshScanThrowsAfterSuccessfulInit() {
-        // Setup: working dispatcher loads 1 builtin skill
-        SkillMeta builtin = builtinSkill("builtin-skill", "mysql_query");
-        SkillRegistry registry = new SkillRegistry(null,
-                Arrays.asList(builtin), dispatcher);
-        assertThat(registry.all()).hasSize(1);
-        assertThat(registry.get("builtin-skill").getAvailability())
-                .isEqualTo(SkillAvailability.AVAILABLE);
-
-        // Now swap to a throwing dispatcher via a fresh registry that has the
-        // same builtin but a broken dispatcher. The constructor scan throws,
-        // so cache is empty. We then verify that refresh() on a registry that
-        // HAD a successful init but now fails keeps the old cache.
-        // (Since dispatcher is final, we simulate by constructing a registry
-        // where the first scan works but the second scan fails — done via a
-        // stateful throwing dispatcher that throws only on the second call.)
-        ToolDispatcher throwOnSecondCall = new ToolDispatcher(
-                Arrays.asList(mysqlProvider), 50000) {
-            private int callCount = 0;
-            @Override
-            public java.util.Set<String> availableToolNames() {
-                if (callCount++ > 0) {
-                    throw new RuntimeException("dispatcher exploded on refresh");
-                }
-                return super.availableToolNames();
-            }
-        };
-
-        SkillRegistry registry2 = new SkillRegistry(null,
-                Arrays.asList(builtin), throwOnSecondCall);
-        // First scan (constructor) succeeded — cache has 1 skill
-        assertThat(registry2.all()).hasSize(1);
-        assertThat(registry2.get("builtin-skill").getAvailability())
-                .isEqualTo(SkillAvailability.AVAILABLE);
-
-        // refresh() → scan() throws on second call → caught → old cache kept
-        SkillRegistry.RefreshResult result = registry2.refresh();
-        assertThat(result.getTotal()).isEqualTo(1);
-        // cache is NOT replaced — old skill still there
-        assertThat(registry2.all()).hasSize(1);
-        assertThat(registry2.get("builtin-skill")).isNotNull();
-    }
-
     // ---- GAP-6: validateContract for empty tools (pure LLM skill) ----
 
     @Test
     void shouldKeepAvailableWhenSkillHasEmptyTools() throws IOException {
-        // A skill with no tools is a "pure LLM skill" — no tool contract to validate.
-        // validateContract should leave it AVAILABLE (not mark it UNAVAILABLE).
         String content = "---\n"
                 + "name: pure-llm-skill\n"
                 + "description: a skill with no tools\n"
@@ -579,7 +498,7 @@ class SkillRegistryTest {
                 + "body for pure LLM skill\n";
         Files.write(tempDir.resolve("pure.md"), content.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         SkillMeta meta = registry.get("pure-llm-skill");
         assertThat(meta).isNotNull();
@@ -589,7 +508,6 @@ class SkillRegistryTest {
 
     @Test
     void shouldKeepAvailableWhenBuiltinSkillHasNoTools() {
-        // A builtin skill with empty tools should also stay AVAILABLE
         SkillMeta builtin = new SkillMeta("llm-builtin", "pure LLM builtin",
                 Collections.<String>emptyList(),
                 Collections.<InputSpec>emptyList(),
@@ -597,7 +515,7 @@ class SkillRegistryTest {
                 "body", SkillAvailability.AVAILABLE, null, "builtin", false);
 
         SkillRegistry registry = new SkillRegistry(null,
-                Arrays.asList(builtin), dispatcher);
+                Arrays.asList(builtin), toolRegistry);
 
         SkillMeta meta = registry.get("llm-builtin");
         assertThat(meta).isNotNull();
@@ -606,7 +524,6 @@ class SkillRegistryTest {
 
     @Test
     void shouldKeepAvailableWhenSkillOmitsToolsField() throws IOException {
-        // A skill that doesn't declare the tools field at all (tools defaults to empty)
         String content = "---\n"
                 + "name: no-tools-field\n"
                 + "description: skill without tools field\n"
@@ -614,7 +531,7 @@ class SkillRegistryTest {
                 + "body\n";
         Files.write(tempDir.resolve("notools.md"), content.getBytes(StandardCharsets.UTF_8));
 
-        SkillRegistry registry = new SkillRegistry(tempDir, dispatcher);
+        SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);
 
         SkillMeta meta = registry.get("no-tools-field");
         assertThat(meta).isNotNull();

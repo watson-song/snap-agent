@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.core.skill;
 
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,12 +17,11 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Scans built-in (classpath) and upload (filesystem) skill sources, parses
  * {@code .md} files into {@link SkillMeta}, validates the tools contract
- * against a {@link ToolDispatcher}, and caches the merged results in memory.
+ * against a {@link ToolCallbackRegistry}, and caches the merged results in memory.
  *
  * <p><b>Two-tier model:</b> built-in skills are passed in as a pre-parsed list
  * (typically from {@code ClasspathSkillScanner} in the starter module). Upload
@@ -47,7 +46,7 @@ public class SkillRegistry {
 
     private final Path uploadDir;
     private final List<SkillMeta> builtinMetas;
-    private final ToolDispatcher dispatcher;
+    private final ToolCallbackRegistry toolRegistry;
     private final SkillLoader loader;
     private volatile Cache cache;
 
@@ -84,23 +83,23 @@ public class SkillRegistry {
         }
     }
 
-    public SkillRegistry(Path uploadDir, ToolDispatcher dispatcher) {
-        this(uploadDir, Collections.<SkillMeta>emptyList(), dispatcher);
+    public SkillRegistry(Path uploadDir, ToolCallbackRegistry toolRegistry) {
+        this(uploadDir, Collections.<SkillMeta>emptyList(), toolRegistry);
     }
 
     public SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills,
-                         ToolDispatcher dispatcher) {
-        this(uploadDir, builtinSkills, dispatcher, new SkillLoader());
+                         ToolCallbackRegistry toolRegistry) {
+        this(uploadDir, builtinSkills, toolRegistry, new SkillLoader());
     }
 
     public SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills,
-                         ToolDispatcher dispatcher, SkillLoader loader) {
+                         ToolCallbackRegistry toolRegistry, SkillLoader loader) {
         this.uploadDir = uploadDir != null
                 ? uploadDir.toAbsolutePath().normalize() : null;
         this.builtinMetas = builtinSkills == null
                 ? Collections.<SkillMeta>emptyList()
                 : new ArrayList<SkillMeta>(builtinSkills);
-        this.dispatcher = dispatcher;
+        this.toolRegistry = toolRegistry;
         this.loader = loader;
         this.cache = new Cache(Collections.<SkillMeta>emptyList(),
                 Collections.<String, SkillMeta>emptyMap(),
@@ -318,17 +317,16 @@ public class SkillRegistry {
         if (meta.getAvailability() != SkillAvailability.AVAILABLE) {
             return meta;
         }
-        if (dispatcher == null) {
+        if (toolRegistry == null) {
             return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
                     meta.getInputs(), meta.getShortcuts(), meta.getBody(),
                     SkillAvailability.UNAVAILABLE,
-                    "tool dispatcher not configured", meta.getSource(),
+                    "tool registry not configured", meta.getSource(),
                     meta.isOverridesBuiltin(), meta.getRequiredPermission());
         }
-        Set<String> available = dispatcher.availableToolNames();
         List<String> missing = new ArrayList<String>();
         for (String tool : meta.getTools()) {
-            if (!available.contains(tool)) {
+            if (toolRegistry.find(tool) == null) {
                 missing.add(tool);
             }
         }
