@@ -114,6 +114,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- SQLite JDBC (optional, for SqliteCheckpointStore dev environment) -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.42.0.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- SLF4J -->
         <dependency>
             <groupId>org.slf4j</groupId>
