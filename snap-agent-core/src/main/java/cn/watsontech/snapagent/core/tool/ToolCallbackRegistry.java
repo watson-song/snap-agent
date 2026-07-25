@@ -5,4 +5,5 @@ package cn.watsontech.snapagent.core.tool;
  * registration, lookup, etc.) comes in Phase 2 (Tool System).
  */
 public interface ToolCallbackRegistry {
+    ToolCallback find(String name);
 }
