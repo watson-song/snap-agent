@@ -56,6 +56,13 @@ public class ToolsNode implements Node {
                 continue;
             }
 
+            if (callback.isApprovalRequired()) {
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("toolName", toolUse.getName());
+                payload.put("toolInput", toolUse.getInput());
+                throw new InterruptException(payload);
+            }
+
             try {
                 ToolResult result = callback.execute(toolUse.getInput(), null);
                 if (result.getContent() != null && result.getContent().length() > maxToolResultChars) {

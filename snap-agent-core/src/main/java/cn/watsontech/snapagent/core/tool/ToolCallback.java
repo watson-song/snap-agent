@@ -12,4 +12,5 @@ public interface ToolCallback {
     String getName();
     default boolean isReturnDirect() { return false; }
     default boolean isSystem() { return false; }
+    default boolean isApprovalRequired() { return false; }
 }
