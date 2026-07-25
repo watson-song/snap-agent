@@ -336,4 +336,80 @@ class PatrolEndpointIntegrationTest {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("FORBIDDEN"));
     }
+
+    // ── G-08C: GET /patrol/reports/{id} ──────────────────────────
+
+    @Test
+    @DisplayName("G-08C: GET /patrol/reports/{id} returns 200 with report content")
+    void shouldGetPatrolReportById() throws Exception {
+        PatrolReport report = new PatrolReport("r1", "p1", "t1", "health-patrol",
+                1000L, "SUCCESS", "all checks passed", false);
+        when(patrolScheduler.getReports(anyString(), anyInt(), anyInt()))
+                .thenReturn(Collections.singletonList(report));
+
+        mockMvc.perform(get("/snap-agent/patrol/reports/r1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("r1"))
+                .andExpect(jsonPath("$.patrolId").value("p1"))
+                .andExpect(jsonPath("$.skillName").value("health-patrol"))
+                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.summary").value("all checks passed"));
+    }
+
+    @Test
+    @DisplayName("G-08C: GET /patrol/reports/{id} returns 404 when report not found")
+    void shouldReturn404WhenReportNotFound() throws Exception {
+        when(patrolScheduler.getReports(anyString(), anyInt(), anyInt()))
+                .thenReturn(Collections.<PatrolReport>emptyList());
+
+        mockMvc.perform(get("/snap-agent/patrol/reports/unknown-id"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("report not found"));
+    }
+
+    // ── E2E: full patrol task lifecycle ────────────────────────────
+
+    @Test
+    @DisplayName("E2E: create → list → toggle → delete patrol task")
+    void shouldCompleteFullPatrolLifecycle() throws Exception {
+        String taskId = "patrol-lifecycle-001";
+
+        // Step 1: POST /patrol/tasks → create task
+        doAnswer(invocation -> {
+            PatrolTask task = invocation.getArgument(0);
+            task.setId(taskId);
+            return null;
+        }).when(patrolScheduler).schedule(any(PatrolTask.class));
+
+        mockMvc.perform(post("/snap-agent/patrol/tasks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"skillName\":\"health-patrol\",\"cron\":\"0 */5 * * * *\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(taskId))
+                .andExpect(jsonPath("$.skillName").value("health-patrol"))
+                .andExpect(jsonPath("$.cron").value("0 */5 * * * *"));
+
+        // Step 2: GET /patrol/tasks → verify task in list
+        PatrolTask createdTask = new PatrolTask(taskId, "health-patrol",
+                "0 */5 * * * *", "test-user", null);
+        when(patrolScheduler.listTasks()).thenReturn(Collections.singletonList(createdTask));
+
+        mockMvc.perform(get("/snap-agent/patrol/tasks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(taskId))
+                .andExpect(jsonPath("$[0].skillName").value("health-patrol"));
+
+        // Step 3: PATCH /patrol/tasks/{id}/toggle → disable
+        when(patrolScheduler.toggleEnabled(taskId)).thenReturn(false);
+
+        mockMvc.perform(patch("/snap-agent/patrol/tasks/" + taskId + "/toggle"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(taskId))
+                .andExpect(jsonPath("$.enabled").value(false));
+
+        // Step 4: DELETE /patrol/tasks/{id} → delete
+        mockMvc.perform(delete("/snap-agent/patrol/tasks/" + taskId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deleted").value(true));
+    }
 }

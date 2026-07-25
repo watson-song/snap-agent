@@ -454,6 +454,10 @@ GET /snap-agent/anchor/config (新增, 公开): Response: 200 {enabled:boolean, 
 | G-419 | `POST /runs` rate limit 429 无覆盖 | P2 | IT-413 |
 | G-420 | SSE stream for anchor 无端到端断言 | P1 | IT-414 |
 
+> 环境限制 (G-419): anchor 专属的 maxConcurrentPerUser=1 并发限流场景需要多线程并发请求验证。standalone 单元测试是单线程的，通用 429 路径已由 shouldReturn429WhenRateLimited 覆盖，但 anchor 专属并发场景需要 @SpringBootTest + 多线程或 CountDownLatch。
+
+> 环境限制 (G-420): SSE 是 SseEmitter 异步推送，standalone MockMvc 的 asyncReturn 机制无法完整模拟 EventSource 客户端消费。需要真实 SSE 连接（@SpringBootTest + WebTestClient 或 Playwright E2E）。现有测试 shouldStreamEventsInOrderForTerminalTask 和 shouldStreamAnchorThoughtEventsViaSse 部分覆盖了任务创建和 streamUrl 返回，但未验证实际 SSE 事件序列。
+
 ### 12.4 参考文档
 - `docs/superpowers/specs/2026-07-20-host-page-anchor-qa-design.md` | `docs/tdd/TEMPLATE.md`
 

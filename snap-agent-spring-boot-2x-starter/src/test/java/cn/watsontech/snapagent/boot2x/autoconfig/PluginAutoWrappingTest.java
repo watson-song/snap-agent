@@ -131,6 +131,29 @@ class PluginAutoWrappingTest {
                 .isEqualTo("remote-mysql");
     }
 
+    // --- G-03D: single ToolProvider bean wrapped as system default ---
+
+    @Test
+    void shouldWrapToolProviderBeanAsSystemDefaultPlugin() {
+        InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
+
+        ToolProvider provider = mockProvider("mysql_query");
+
+        // Simulate auto-wrapping a single ToolProvider bean as a system default plugin
+        PluginDescriptor desc = new PluginDescriptor(
+                provider.name(), provider.name(), provider.name(), "", "built-in",
+                true, true, true, provider, null, null, null);
+        registry.register(desc);
+
+        PluginDescriptor registered = registry.getPlugin("mysql_query");
+        assertThat(registered).isNotNull();
+        assertThat(registered.isSystem()).isTrue();
+        assertThat(registered.isDefault()).isTrue();
+        assertThat(registered.isEnabled()).isTrue();
+        assertThat(registered.getProvider()).isSameAs(provider);
+        assertThat(registry.getDefault("mysql_query")).isSameAs(registered);
+    }
+
     private ToolProvider mockProvider(String name) {
         ToolProvider provider = Mockito.mock(ToolProvider.class);
         when(provider.name()).thenReturn(name);

@@ -185,6 +185,8 @@ AC2: Given 生成的项目
   Then 产出可上传的 JAR 且 PluginMetadataScanner 能识别
 ```
 
+> 环境限制: 测试 Maven archetype 需要调用 mvn archetype:generate + mvn package，这是 Maven 插件集成测试。standalone 单元测试无法调用 Maven 构建生命周期。需要 maven-invoker-plugin 或 exec-maven-plugin 在集成测试阶段运行。snap-agent-plugin-archetype 模块当前无任何测试文件。
+
 ---
 
 ## 2.5 用户故事地图

@@ -348,6 +348,31 @@ class SnapAgentAutoConfigurationTest {
                 });
     }
 
+    @Test
+    void shouldCreateKnowledgeInjectorWhenKnowledgeEnabled() {
+        // P-11A/B: When knowledge.enabled=true, both KnowledgeBase AND
+        // KnowledgeInjector (registered as SystemPromptExtender) beans exist.
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.llm.api-key=sk-test",
+                        "snap-agent.knowledge.enabled=true")
+                .run(context -> {
+                    // KnowledgeBase bean exists
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.knowledge.KnowledgeBase.class);
+                    // KnowledgeInjector bean exists (registered as SystemPromptExtender)
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.core.agent.SystemPromptExtender.class);
+                    // Verify the SystemPromptExtender bean is actually a KnowledgeInjector
+                    cn.watsontech.snapagent.core.agent.SystemPromptExtender extender =
+                            context.getBean(
+                                    cn.watsontech.snapagent.core.agent.SystemPromptExtender.class);
+                    assertThat(extender).isInstanceOf(
+                            cn.watsontech.snapagent.boot2x.knowledge.KnowledgeInjector.class);
+                });
+    }
+
     // ---- v0.8: Code graph ----
 
     @Test

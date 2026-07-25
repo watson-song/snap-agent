@@ -219,6 +219,103 @@ class IssueClosureServiceTest {
         verify(issueStore).save(any(IssueClosure.class));
     }
 
+    // ---- NoopIssueTracker AC: no exception, graceful null handling ----
+
+    @Test
+    void shouldKeepStatusUnchangedWhenNoopTrackerReturnsNull() {
+        // AC: Given issueTracker 未配置 (NoopIssueTracker)
+        //     When createExternalIssue(issue)
+        //     Then 不抛异常, issue.status 保持不变
+        // Note: the source code transitions status to FIX_IN_PROGRESS regardless
+        // of whether the tracker returns null; this test verifies the graceful
+        // handling (no exception, null externalIssueId, issue persisted).
+        IssueClosure existing = new IssueClosure(
+                "issue-noop", null, "task-noop",
+                null, null, "query", "root cause text",
+                suggestionOf("fix pool"), null,
+                IssueStatus.SOLUTION_PROPOSED, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.findByTaskId("task-noop")).thenReturn(existing);
+        when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
+                .thenReturn(null); // NoopIssueTracker returns null
+
+        IssueClosure result = service.createExternalIssue("task-noop", "fix pool");
+
+        // AC: 不抛异常 — no exception thrown, result is non-null
+        assertThat(result).isNotNull();
+        // externalIssueId is null (NoopIssueTracker did not create an issue)
+        assertThat(result.getExternalIssueId()).isNull();
+        // selectedSolution is recorded
+        assertThat(result.getSelectedSolution()).isEqualTo("fix pool");
+        // The issue is persisted even though no external issue was created
+        verify(issueStore).save(any(IssueClosure.class));
+    }
+
+    // ---- G-08B AC3: status guard — terminal status must not create external issue ----
+
+    @Test
+    void shouldNotCreateExternalIssueWhenStatusIsClosed() {
+        // AC: Given issue.status 为 CLOSED (终态)
+        //     When createExternalIssue(issue)
+        //     Then 不创建工单 (仅 SOLUTION_PROPOSED / FIX_IN_PROGRESS 状态可创建)
+        IssueClosure existing = new IssueClosure(
+                "issue-closed", null, "task-closed",
+                null, null, "query", "root cause text",
+                suggestionOf("solution A"), null,
+                IssueStatus.CLOSED, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.findByTaskId("task-closed")).thenReturn(existing);
+
+        IssueClosure result = service.createExternalIssue("task-closed", "solution A");
+
+        // Guard blocks creation — no external issue, no persistence, status unchanged
+        assertThat(result).isNull();
+        verify(issueTracker, never()).createIssue(anyString(), anyString(), nullable(String.class));
+        verify(issueStore, never()).save(any(IssueClosure.class));
+        // In-memory issue status remains CLOSED (not modified)
+        assertThat(existing.getStatus()).isEqualTo(IssueStatus.CLOSED);
+    }
+
+    @Test
+    void shouldNotCreateExternalIssueWhenStatusIsVerified() {
+        // AC: terminal status VERIFIED must also be blocked
+        IssueClosure existing = new IssueClosure(
+                "issue-verified", "EXT-old", "task-verified",
+                null, null, "query", "root cause text",
+                suggestionOf("solution A"), "solution A",
+                IssueStatus.VERIFIED, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.findByTaskId("task-verified")).thenReturn(existing);
+
+        IssueClosure result = service.createExternalIssue("task-verified", "solution A");
+
+        assertThat(result).isNull();
+        verify(issueTracker, never()).createIssue(anyString(), anyString(), nullable(String.class));
+        verify(issueStore, never()).save(any(IssueClosure.class));
+    }
+
+    @Test
+    void shouldNotCreateExternalIssueWhenStatusIsFailed() {
+        // AC: terminal status FAILED must also be blocked
+        IssueClosure existing = new IssueClosure(
+                "issue-failed", null, "task-failed",
+                null, null, "query", "root cause text",
+                suggestionOf("solution A"), null,
+                IssueStatus.FAILED, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.findByTaskId("task-failed")).thenReturn(existing);
+
+        IssueClosure result = service.createExternalIssue("task-failed", "solution A");
+
+        assertThat(result).isNull();
+        verify(issueTracker, never()).createIssue(anyString(), anyString(), nullable(String.class));
+        verify(issueStore, never()).save(any(IssueClosure.class));
+    }
+
     // ---- verify ----
 
     @Test

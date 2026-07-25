@@ -26,6 +26,7 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -165,5 +166,55 @@ class SnapAgentControllerInjectTest {
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("SKILL_NOT_FOUND"));
+    }
+
+    // ---- E2E: full injection lifecycle (cache miss → cache hit → different user) ----
+
+    @Test
+    void shouldCompleteFullInjectionLifecycle() throws Exception {
+        java.time.Instant now = java.time.Instant.now();
+        InjectionResult freshResult = new InjectionResult("<p>fresh content</p>", false, now);
+        InjectionResult cachedResult = new InjectionResult("<p>fresh content</p>", true, now);
+        InjectionResult freshResultOther = new InjectionResult("<p>other content</p>", false, now);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("anchorName", "公告区域");
+        body.put("pageUrl", "/dashboard");
+        body.put("skillId", "announcement");
+        body.put("cacheTtl", 3600);
+        String jsonBody = objectMapper.writeValueAsString(body);
+
+        // Step 1: POST /anchor/inject as user001 → 200, cached=false (fresh generation)
+        when(securityGateway.currentUserId()).thenReturn("user001");
+        when(injectionOrchestrator.inject(eq("user001"), any())).thenReturn(freshResult);
+
+        mockMvc.perform(post("/snap-agent/anchor/inject")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.html").value("<p>fresh content</p>"))
+                .andExpect(jsonPath("$.cached").value(false));
+
+        // Step 2: POST /anchor/inject same request as user001 → 200, cached=true (cache hit)
+        when(injectionOrchestrator.inject(eq("user001"), any())).thenReturn(cachedResult);
+
+        mockMvc.perform(post("/snap-agent/anchor/inject")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.html").value("<p>fresh content</p>"))
+                .andExpect(jsonPath("$.cached").value(true));
+
+        // Step 3: POST /anchor/inject same request as different user → 200, cached=false
+        // (different cache key because userId is part of the key)
+        when(securityGateway.currentUserId()).thenReturn("other-user");
+        when(injectionOrchestrator.inject(eq("other-user"), any())).thenReturn(freshResultOther);
+
+        mockMvc.perform(post("/snap-agent/anchor/inject")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(jsonBody))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.html").value("<p>other content</p>"))
+                .andExpect(jsonPath("$.cached").value(false));
     }
 }

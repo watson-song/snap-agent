@@ -350,6 +350,48 @@ class KnowledgeBaseTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    // ---- G-06: Single source failure isolation ----
+
+    @Test
+    void shouldIsolateFailedSourceAndLoadOthers() {
+        // sourceA returns fragments normally
+        KnowledgeFragment f1 = fragment("数据库诊断", "连接池打满检查");
+        KnowledgeFragment f2 = fragment("日志分析", "OOM 错误分析");
+        KnowledgeSource sourceA = sourceWith(Arrays.asList(f1, f2));
+
+        // sourceB throws on load() — simulates a broken file or DB connection
+        KnowledgeSource sourceB = new KnowledgeSource() {
+            @Override
+            public List<KnowledgeFragment> load() {
+                throw new RuntimeException("sourceB failed to load");
+            }
+
+            @Override
+            public void reload() {
+                // no-op for test
+            }
+
+            @Override
+            public String type() {
+                return "broken-source";
+            }
+        };
+
+        // Construct KnowledgeBase with both sources — should not throw
+        KnowledgeBase kb = new KnowledgeBase(
+                Arrays.asList(sourceA, sourceB),
+                contentContainsSearcher());
+
+        // sourceA's fragments are loaded despite sourceB's failure
+        assertThat(kb.size()).isEqualTo(2);
+        assertThat(kb.listAll()).contains(f1, f2);
+
+        // Search still works with sourceA's fragments
+        List<KnowledgeFragment> result = kb.search("连接池", 5, 0.5);
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).getTitle()).isEqualTo("数据库诊断");
+    }
+
     private static org.assertj.core.data.Offset<Double> within(double tolerance) {
         return org.assertj.core.data.Offset.offset(tolerance);
     }

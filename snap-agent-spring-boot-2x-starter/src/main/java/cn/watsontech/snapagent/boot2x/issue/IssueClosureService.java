@@ -201,11 +201,25 @@ public class IssueClosureService {
      * @param taskId           the diagnostic task ID
      * @param selectedSolution the user's selected solution text
      * @return the updated issue closure, or {@code null} if no issue exists for the task
+     *         or the issue is not in {@link IssueStatus#SOLUTION_PROPOSED} /
+     *         {@link IssueStatus#FIX_IN_PROGRESS} status
      */
     public IssueClosure createExternalIssue(String taskId, String selectedSolution) {
         IssueClosure issue = issueStore.findByTaskId(taskId);
         if (issue == null) {
             log.warn("Issue not found for taskId: {}", taskId);
+            return null;
+        }
+
+        // Status guard: only SOLUTION_PROPOSED (normal entry) and FIX_IN_PROGRESS
+        // (recovery when a previous noop tracker returned null) may create an
+        // external issue. Terminal statuses (VERIFIED, CLOSED, FAILED) and
+        // pre-solution statuses (DIAGNOSED, ISSUE_CREATED) are blocked.
+        IssueStatus status = issue.getStatus();
+        if (status != IssueStatus.SOLUTION_PROPOSED
+                && status != IssueStatus.FIX_IN_PROGRESS) {
+            log.warn("Cannot create external issue for task {}: issue status is {} (only {} or {} allowed)",
+                    taskId, status, IssueStatus.SOLUTION_PROPOSED, IssueStatus.FIX_IN_PROGRESS);
             return null;
         }
 

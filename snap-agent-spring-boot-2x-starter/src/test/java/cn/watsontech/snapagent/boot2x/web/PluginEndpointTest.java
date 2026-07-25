@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockMultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -146,5 +148,58 @@ class PluginEndpointTest {
         ResponseEntity<Object> response = controller.enablePlugin("nonexistent");
 
         assertThat(response.getStatusCodeValue()).isEqualTo(404);
+    }
+
+    // --- G-03E: POST /tools/plugins/upload ---
+
+    @Test
+    void shouldUploadPluginJarSuccessfully() {
+        PluginUploader uploader = Mockito.mock(PluginUploader.class);
+        ToolProvider provider = Mockito.mock(ToolProvider.class);
+        when(provider.name()).thenReturn("custom_tool");
+        PluginDescriptor desc = new PluginDescriptor(
+                "custom-plugin", "log_read", "Custom", "desc", "1.0.0",
+                false, true, false, provider, null, null, null);
+        when(uploader.upload(Mockito.any())).thenReturn(desc);
+
+        SnapAgentController uploadController = new SnapAgentController(
+                null, null, null, null, props, securityGateway,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, registry, uploader);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "plugin.jar", "application/java-archive", new byte[]{1, 2, 3});
+
+        ResponseEntity<Object> response = uploadController.uploadPlugin(file);
+
+        assertThat(response.getStatusCodeValue()).isEqualTo(201);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body.get("pluginId")).isEqualTo("custom-plugin");
+        assertThat(body.get("toolType")).isEqualTo("log_read");
+        assertThat(body.get("system")).isEqualTo(false);
+    }
+
+    @Test
+    void shouldReturn400WhenUploadFileIsEmpty() {
+        PluginUploader uploader = Mockito.mock(PluginUploader.class);
+
+        SnapAgentController uploadController = new SnapAgentController(
+                null, null, null, null, props, securityGateway,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, registry, uploader);
+
+        MockMultipartFile emptyFile = new MockMultipartFile(
+                "file", "empty.jar", "application/java-archive", new byte[0]);
+
+        ResponseEntity<Object> response = uploadController.uploadPlugin(emptyFile);
+
+        assertThat(response.getStatusCodeValue()).isEqualTo(400);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = (Map<String, Object>) response.getBody();
+        assertThat(body.get("error")).isEqualTo("INVALID_INPUT");
+        Mockito.verify(uploader, Mockito.never()).upload(Mockito.any());
     }
 }

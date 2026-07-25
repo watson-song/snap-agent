@@ -571,6 +571,8 @@ PeerRouter:
 | GAP-7 | `SnapAgentProperties.Routing` 嵌套属性完整设值测试 | P3 | Routing 组独立验证 |
 | GAP-8 | ⚠功能缺失: `conversation.enabled` 属性在源码中不存在（ConversationStore 仅用 @ConditionalOnMissingBean），需先添加条件注解再测试 | P2 | 功能未实现 |
 
+> 环境限制 (GAP-6): 跨 Pod SSE 中继需要 2+ Pod 实例，通过 K8s API/DNS 发现 peer 并转发 SSE 事件。standalone 单元测试只能 mock PeerRouter 和 PeerSseRelay，真实跨 Pod 通信需要 K8s 集群或 Testcontainers + 多实例环境。PeerSseRelayTest 已覆盖单实例 mock 场景，K8sApiPeerRouterTest 覆盖 K8s API 调用，但端到端跨 Pod SSE 流未验证。
+
 ### 8.5 Mock策略
 ```yaml
 集成测试: ApplicationContextRunner + AutoConfigurations.of()
