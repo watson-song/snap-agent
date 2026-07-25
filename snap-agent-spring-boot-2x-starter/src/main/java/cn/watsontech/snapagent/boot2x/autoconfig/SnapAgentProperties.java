@@ -67,6 +67,12 @@ public class SnapAgentProperties {
     private Workflows workflows = new Workflows();
     private Skill skill = new Skill();
     private Anchor anchor = new Anchor();
+    // 2.x new property groups
+    private Checkpoint checkpoint = new Checkpoint();
+    private VectorStore vectorStore = new VectorStore();
+    private Embedding embedding = new Embedding();
+    private Rag rag = new Rag();
+    private Memory memory = new Memory();
 
     // ---- getters / setters ----
 
@@ -284,6 +290,48 @@ public class SnapAgentProperties {
 
     public void setAnchor(Anchor anchor) {
         this.anchor = anchor;
+    }
+
+    // 2.x new property groups
+
+    public Checkpoint getCheckpoint() {
+        return checkpoint;
+    }
+
+    public void setCheckpoint(Checkpoint checkpoint) {
+        this.checkpoint = checkpoint;
+    }
+
+    public VectorStore getVectorStore() {
+        return vectorStore;
+    }
+
+    public void setVectorStore(VectorStore vectorStore) {
+        this.vectorStore = vectorStore;
+    }
+
+    public Embedding getEmbedding() {
+        return embedding;
+    }
+
+    public void setEmbedding(Embedding embedding) {
+        this.embedding = embedding;
+    }
+
+    public Rag getRag() {
+        return rag;
+    }
+
+    public void setRag(Rag rag) {
+        this.rag = rag;
+    }
+
+    public Memory getMemory() {
+        return memory;
+    }
+
+    public void setMemory(Memory memory) {
+        this.memory = memory;
     }
 
     // ---- nested classes ----
@@ -1728,6 +1776,203 @@ public class SnapAgentProperties {
                 }
             }
             return false;
+        }
+    }
+
+    // ---- 2.x new property groups ----
+
+    /**
+     * Checkpoint storage configuration (2.x).
+     *
+     * <p>Controls the {@code CheckpointStore} SPI implementation used by
+     * {@code GraphExecutor} for HITL pause/resume and replay.</p>
+     */
+    public static class Checkpoint {
+        /** Storage type: "sqlite" (default) or "redis". */
+        private String type = "sqlite";
+        /** SQLite configuration. */
+        private Sqlite sqlite = new Sqlite();
+        /** Redis configuration. */
+        private Redis redis = new Redis();
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public Sqlite getSqlite() { return sqlite; }
+        public void setSqlite(Sqlite sqlite) { this.sqlite = sqlite; }
+        public Redis getRedis() { return redis; }
+        public void setRedis(Redis redis) { this.redis = redis; }
+
+        public static class Sqlite {
+            /** SQLite database file path. */
+            private String path = "snap-agent-checkpoints.db";
+            public String getPath() { return path; }
+            public void setPath(String path) { this.path = path; }
+        }
+
+        public static class Redis {
+            /** RedisTemplate bean name to use. Empty = auto-detect. */
+            private String redisTemplateBeanName = "";
+            /** TTL in seconds (default 7 days). */
+            private int ttlSeconds = 604800;
+            public String getRedisTemplateBeanName() { return redisTemplateBeanName; }
+            public void setRedisTemplateBeanName(String v) { this.redisTemplateBeanName = v; }
+            public int getTtlSeconds() { return ttlSeconds; }
+            public void setTtlSeconds(int v) { this.ttlSeconds = v; }
+        }
+    }
+
+    /**
+     * Vector store configuration (2.x).
+     *
+     * <p>When {@code enabled=true}, a {@code VectorStore} SPI bean is created
+     * for semantic search, enabling RAG context injection.</p>
+     */
+    public static class VectorStore {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+        /** Storage type: "redis" (default) or "jdbc". */
+        private String type = "redis";
+        /** Redis vector store configuration. */
+        private RedisConfig redis = new RedisConfig();
+        /** JDBC vector store configuration. */
+        private JdbcConfig jdbc = new JdbcConfig();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public RedisConfig getRedis() { return redis; }
+        public void setRedis(RedisConfig redis) { this.redis = redis; }
+        public JdbcConfig getJdbc() { return jdbc; }
+        public void setJdbc(JdbcConfig jdbc) { this.jdbc = jdbc; }
+
+        public static class RedisConfig {
+            /** RedisTemplate bean name. Empty = auto-detect. */
+            private String redisTemplateBeanName = "";
+            /** Redis index key for vector storage. */
+            private String indexKey = "snap-agent-vectors";
+            public String getRedisTemplateBeanName() { return redisTemplateBeanName; }
+            public void setRedisTemplateBeanName(String v) { this.redisTemplateBeanName = v; }
+            public String getIndexKey() { return indexKey; }
+            public void setIndexKey(String v) { this.indexKey = v; }
+        }
+
+        public static class JdbcConfig {
+            /** DataSource bean name. Empty = auto-detect. */
+            private String datasourceBeanName = "";
+            /** Table name for vector storage. */
+            private String tableName = "snap_agent_vectors";
+            public String getDatasourceBeanName() { return datasourceBeanName; }
+            public void setDatasourceBeanName(String v) { this.datasourceBeanName = v; }
+            public String getTableName() { return tableName; }
+            public void setTableName(String v) { this.tableName = v; }
+        }
+    }
+
+    /**
+     * Embedding model configuration (2.x).
+     *
+     * <p>Configures the embedding provider for vector embeddings.
+     * Required when {@code vectorstore.enabled=true}.</p>
+     */
+    public static class Embedding {
+        /** Provider: "openai" (default) or "ollama". */
+        private String provider = "openai";
+        /** Embedding model name. */
+        private String model = "text-embedding-3-small";
+        /** OpenAI configuration. */
+        private OpenAi openai = new OpenAi();
+        /** Ollama configuration. */
+        private Ollama ollama = new Ollama();
+
+        public String getProvider() { return provider; }
+        public void setProvider(String provider) { this.provider = provider; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+        public OpenAi getOpenai() { return openai; }
+        public void setOpenai(OpenAi openai) { this.openai = openai; }
+        public Ollama getOllama() { return ollama; }
+        public void setOllama(Ollama ollama) { this.ollama = ollama; }
+
+        public static class OpenAi {
+            /** API key. Falls back to OPENAI_API_KEY env var. */
+            private String apiKey = "";
+            /** Base URL override. */
+            private String baseUrl = "";
+            public String getApiKey() { return apiKey; }
+            public void setApiKey(String v) { this.apiKey = v; }
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String v) { this.baseUrl = v; }
+        }
+
+        public static class Ollama {
+            /** Ollama base URL. */
+            private String baseUrl = "http://ollama:11434";
+            /** Ollama embedding model. */
+            private String model = "nomic-embed-text";
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String v) { this.baseUrl = v; }
+            public String getModel() { return model; }
+            public void setModel(String v) { this.model = v; }
+        }
+    }
+
+    /**
+     * RAG (Retrieval-Augmented Generation) configuration (2.x).
+     *
+     * <p>When {@code enabled=true}, a {@code RetrievalAugmentationAdvisor}
+     * (order=200) is created and added to the advisor chain.</p>
+     */
+    public static class Rag {
+        /** Master switch. Default false. */
+        private boolean enabled = false;
+        /** Maximum number of fragments to retrieve. */
+        private int topK = 4;
+        /** Minimum similarity score [0.0, 1.0]. */
+        private double similarityThreshold = 0.75;
+        /** Optional filter expression. */
+        private String filterExpression = "";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getTopK() { return topK; }
+        public void setTopK(int topK) { this.topK = topK; }
+        public double getSimilarityThreshold() { return similarityThreshold; }
+        public void setSimilarityThreshold(double v) { this.similarityThreshold = v; }
+        public String getFilterExpression() { return filterExpression; }
+        public void setFilterExpression(String v) { this.filterExpression = v; }
+    }
+
+    /**
+     * Chat memory configuration (2.x).
+     *
+     * <p>Controls the {@code ChatMemory} + {@code ChatMemoryRepository} SPI
+     * and the {@code MessageChatMemoryAdvisor} (order=100).</p>
+     */
+    public static class Memory {
+        /** Storage type: "in-memory" (default) or "jdbc". */
+        private String type = "in-memory";
+        /** Maximum messages to retain (sliding window). */
+        private int maxMessages = 20;
+        /** JDBC configuration. */
+        private JdbcConfig jdbc = new JdbcConfig();
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public int getMaxMessages() { return maxMessages; }
+        public void setMaxMessages(int v) { this.maxMessages = v; }
+        public JdbcConfig getJdbc() { return jdbc; }
+        public void setJdbc(JdbcConfig jdbc) { this.jdbc = jdbc; }
+
+        public static class JdbcConfig {
+            /** DataSource bean name. Empty = auto-detect. */
+            private String datasourceBeanName = "";
+            /** Table name for chat memory. */
+            private String tableName = "snap_agent_chat_memory";
+            public String getDatasourceBeanName() { return datasourceBeanName; }
+            public void setDatasourceBeanName(String v) { this.datasourceBeanName = v; }
+            public String getTableName() { return tableName; }
+            public void setTableName(String v) { this.tableName = v; }
         }
     }
 }

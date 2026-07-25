@@ -281,4 +281,135 @@ class SnapAgentPropertiesTest {
         assertThat(props.getMcp()).isNotNull();
         assertThat(props.getSecurity()).isNotNull();
     }
+
+    // ---- 2.x new property groups ----
+
+    @Test
+    void shouldDefaultCheckpointToSqlite() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Checkpoint checkpoint = props.getCheckpoint();
+
+        assertThat(checkpoint.getType()).isEqualTo("sqlite");
+        assertThat(checkpoint.getSqlite().getPath()).isEqualTo("snap-agent-checkpoints.db");
+        assertThat(checkpoint.getRedis().getTtlSeconds()).isEqualTo(604800);
+    }
+
+    @Test
+    void shouldSetCheckpointProperties() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Checkpoint checkpoint = props.getCheckpoint();
+
+        checkpoint.setType("redis");
+        checkpoint.getRedis().setTtlSeconds(86400);
+        checkpoint.getSqlite().setPath("/custom/checkpoint.db");
+
+        assertThat(checkpoint.getType()).isEqualTo("redis");
+        assertThat(checkpoint.getRedis().getTtlSeconds()).isEqualTo(86400);
+        assertThat(checkpoint.getSqlite().getPath()).isEqualTo("/custom/checkpoint.db");
+    }
+
+    @Test
+    void shouldDefaultVectorStoreToDisabledRedis() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.VectorStore vs = props.getVectorStore();
+
+        assertThat(vs.isEnabled()).isFalse();
+        assertThat(vs.getType()).isEqualTo("redis");
+        assertThat(vs.getRedis().getIndexKey()).isEqualTo("snap-agent-vectors");
+        assertThat(vs.getJdbc().getTableName()).isEqualTo("snap_agent_vectors");
+    }
+
+    @Test
+    void shouldSetVectorStoreProperties() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.VectorStore vs = props.getVectorStore();
+
+        vs.setEnabled(true);
+        vs.setType("jdbc");
+        vs.getJdbc().setTableName("custom_vectors");
+        vs.getRedis().setIndexKey("custom-key");
+
+        assertThat(vs.isEnabled()).isTrue();
+        assertThat(vs.getType()).isEqualTo("jdbc");
+        assertThat(vs.getJdbc().getTableName()).isEqualTo("custom_vectors");
+        assertThat(vs.getRedis().getIndexKey()).isEqualTo("custom-key");
+    }
+
+    @Test
+    void shouldDefaultEmbeddingToOpenAi() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Embedding emb = props.getEmbedding();
+
+        assertThat(emb.getProvider()).isEqualTo("openai");
+        assertThat(emb.getModel()).isEqualTo("text-embedding-3-small");
+        assertThat(emb.getOllama().getBaseUrl()).isEqualTo("http://ollama:11434");
+        assertThat(emb.getOllama().getModel()).isEqualTo("nomic-embed-text");
+    }
+
+    @Test
+    void shouldSetEmbeddingProperties() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Embedding emb = props.getEmbedding();
+
+        emb.setProvider("ollama");
+        emb.setModel("custom-model");
+        emb.getOpenai().setApiKey("sk-test");
+        emb.getOllama().setBaseUrl("http://custom:11434");
+
+        assertThat(emb.getProvider()).isEqualTo("ollama");
+        assertThat(emb.getModel()).isEqualTo("custom-model");
+        assertThat(emb.getOpenai().getApiKey()).isEqualTo("sk-test");
+        assertThat(emb.getOllama().getBaseUrl()).isEqualTo("http://custom:11434");
+    }
+
+    @Test
+    void shouldDefaultRagToDisabled() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Rag rag = props.getRag();
+
+        assertThat(rag.isEnabled()).isFalse();
+        assertThat(rag.getTopK()).isEqualTo(4);
+        assertThat(rag.getSimilarityThreshold()).isEqualTo(0.75);
+        assertThat(rag.getFilterExpression()).isEmpty();
+    }
+
+    @Test
+    void shouldSetRagProperties() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Rag rag = props.getRag();
+
+        rag.setEnabled(true);
+        rag.setTopK(10);
+        rag.setSimilarityThreshold(0.9);
+        rag.setFilterExpression("type=doc");
+
+        assertThat(rag.isEnabled()).isTrue();
+        assertThat(rag.getTopK()).isEqualTo(10);
+        assertThat(rag.getSimilarityThreshold()).isEqualTo(0.9);
+        assertThat(rag.getFilterExpression()).isEqualTo("type=doc");
+    }
+
+    @Test
+    void shouldDefaultMemoryToInMemory() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Memory memory = props.getMemory();
+
+        assertThat(memory.getType()).isEqualTo("in-memory");
+        assertThat(memory.getMaxMessages()).isEqualTo(20);
+        assertThat(memory.getJdbc().getTableName()).isEqualTo("snap_agent_chat_memory");
+    }
+
+    @Test
+    void shouldSetMemoryProperties() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Memory memory = props.getMemory();
+
+        memory.setType("jdbc");
+        memory.setMaxMessages(50);
+        memory.getJdbc().setTableName("custom_memory");
+
+        assertThat(memory.getType()).isEqualTo("jdbc");
+        assertThat(memory.getMaxMessages()).isEqualTo(50);
+        assertThat(memory.getJdbc().getTableName()).isEqualTo("custom_memory");
+    }
 }
