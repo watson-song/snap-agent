@@ -16,6 +16,7 @@ public final class TranscriptEvent {
     public static final String TYPE_TOOL_RESULT = "tool_result";
     public static final String TYPE_DONE = "done";
     public static final String TYPE_ERROR = "error";
+    public static final String TYPE_PAUSED = "paused";
 
     private final String type;
     private final String text;
@@ -74,6 +75,10 @@ public final class TranscriptEvent {
 
     public static TranscriptEvent error(String message) {
         return new TranscriptEvent(TYPE_ERROR, message, null, System.currentTimeMillis());
+    }
+
+    public static TranscriptEvent paused(String reason) {
+        return new TranscriptEvent(TYPE_PAUSED, reason, null, System.currentTimeMillis());
     }
 
     public String getType() {

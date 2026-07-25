@@ -41,7 +41,7 @@ public class GraphExecutor {
                 currentState = node.execute(currentState, ctx);
             } catch (InterruptException e) {
                 saveCheckpointSafe(currentState, currentNode, ctx);
-                ctx.emit(TranscriptEvent.done("paused", "interrupted"));
+                ctx.emit(TranscriptEvent.paused("interrupted"));
                 return new TaskResult(TaskStatus.PAUSED, "interrupted");
             } catch (RuntimeException e) {
                 saveCheckpointSafe(currentState, currentNode, ctx);
