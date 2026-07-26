@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
 import org.springframework.core.env.Environment;
 import org.springframework.web.multipart.MultipartFile;
@@ -156,9 +157,9 @@ public class PluginUploader {
                 metadata.isDefault(),   // isDefault
                 true,                   // enabled
                 false,                  // system
-                provider,
+                ToolCallbacks.from(provider),
                 pluginClassLoader,
-                finalJarPath,
+                finalJarPath != null ? finalJarPath.toString() : null,
                 pluginContext
         );
 
@@ -188,8 +189,9 @@ public class PluginUploader {
         }
 
         // Delete the JAR file and its parent directory from disk
-        Path jarPath = descriptor.getJarPath();
-        if (jarPath != null) {
+        String jarPathStr = descriptor.getJarPath();
+        if (jarPathStr != null) {
+            Path jarPath = java.nio.file.Paths.get(jarPathStr);
             deleteQuietly(jarPath);
             Path parentDir = jarPath.getParent();
             if (parentDir != null) {

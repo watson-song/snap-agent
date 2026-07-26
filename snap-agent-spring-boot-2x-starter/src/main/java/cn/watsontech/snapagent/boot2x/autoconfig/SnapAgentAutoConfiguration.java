@@ -77,6 +77,7 @@ import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
 import cn.watsontech.snapagent.core.tool.ToolProvider;
@@ -460,7 +461,7 @@ public class SnapAgentAutoConfiguration {
             if (p == null || p.name() == null) continue;
             PluginDescriptor desc = new PluginDescriptor(
                     p.name(), p.name(), p.name(), "", "built-in",
-                    true, true, true, p, null, null, null);
+                    true, true, true, ToolCallbacks.from(p), null, null, null);
             registry.register(desc);
         }
         log.info("PluginRegistry assembled with {} system plugin(s)", providers.size());
@@ -1013,12 +1014,12 @@ public class SnapAgentAutoConfiguration {
             prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(cn.watsontech.snapagent.core.codegraph.CodeGraphIndex.class)
     @ConditionalOnMissingBean
-    public cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider codeGraphToolProvider(
+    public cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools codeGraphTools(
             cn.watsontech.snapagent.core.codegraph.CodeGraphIndex index,
             SnapAgentProperties props) {
-        log.info("CodeGraphToolProvider assembled (maxDepth={}, maxImpactDepth={})",
+        log.info("CodeGraphTools assembled (maxDepth={}, maxImpactDepth={})",
                 props.getCodeGraph().getMaxDepth(), props.getCodeGraph().getMaxImpactDepth());
-        return new cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider(
+        return new cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools(
                 index, props.getCodeGraph().getMaxDepth(),
                 props.getCodeGraph().getMaxImpactDepth());
     }

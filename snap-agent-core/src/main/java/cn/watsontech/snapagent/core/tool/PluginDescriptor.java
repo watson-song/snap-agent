@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.core.tool;
 
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -64,6 +65,28 @@ public class PluginDescriptor {
     public ClassLoader getClassLoader() { return classLoader; }
     public String getJarPath() { return jarPath; }
     public Object getPluginContext() { return pluginContext; }
+
+    /**
+     * Compatibility adapter: wraps the first {@link ToolCallback} as a
+     * {@link ToolProvider} for 1.x code that expects the old SPI.
+     * Returns {@code null} if no tool callbacks are registered.
+     */
+    public ToolProvider getProvider() {
+        if (toolCallbacks == null || toolCallbacks.length == 0) {
+            return null;
+        }
+        final ToolCallback cb = toolCallbacks[0];
+        return new ToolProvider() {
+            @Override
+            public String name() { return cb.getName(); }
+            @Override
+            public String schema() { return cb.getJsonSchema(); }
+            @Override
+            public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
+                return cb.execute(args, ctx);
+            }
+        };
+    }
 
     public void setDefault(boolean isDefault) { this.isDefault = isDefault; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }

@@ -46,5 +46,51 @@ public interface PluginRegistry {
      * @param pluginId the plugin ID
      * @return the new enabled state, or null if the plugin doesn't exist
      */
+    /**
+     * Toggles the enabled flag on a plugin.
+     *
+     * @param pluginId the plugin ID
+     * @return the new enabled state, or null if the plugin doesn't exist
+     */
     Boolean toggleEnabled(String pluginId);
+
+    /**
+     * Compatibility: alias for {@link #listPlugins()}.
+     * @deprecated use {@link #listPlugins()}
+     */
+    @Deprecated
+    default List<PluginDescriptor> list() { return listPlugins(); }
+
+    /**
+     * Compatibility: enables a plugin.
+     * @return the new enabled state, or null if not found
+     */
+    default Boolean enable(String pluginId) {
+        PluginDescriptor desc = getPlugin(pluginId);
+        if (desc == null) return null;
+        desc.setEnabled(true);
+        return true;
+    }
+
+    /**
+     * Compatibility: disables a plugin.
+     * @return the new enabled state, or null if not found
+     */
+    default Boolean disable(String pluginId) {
+        PluginDescriptor desc = getPlugin(pluginId);
+        if (desc == null) return null;
+        desc.setEnabled(false);
+        return false;
+    }
+
+    /**
+     * Compatibility: sets the default plugin for a tool type.
+     */
+    default void setDefault(String toolType, String pluginId) {
+        for (PluginDescriptor desc : listPlugins()) {
+            if (desc.getToolType() != null && desc.getToolType().equals(toolType)) {
+                desc.setDefault(desc.getPluginId().equals(pluginId));
+            }
+        }
+    }
 }
