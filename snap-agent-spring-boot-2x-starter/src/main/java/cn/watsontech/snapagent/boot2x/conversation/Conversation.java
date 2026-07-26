@@ -1,4 +1,4 @@
-package cn.watsontech.snapagent.core.conversation;
+package cn.watsontech.snapagent.boot2x.conversation;
 
 import java.util.ArrayList;
 import java.util.Collections;

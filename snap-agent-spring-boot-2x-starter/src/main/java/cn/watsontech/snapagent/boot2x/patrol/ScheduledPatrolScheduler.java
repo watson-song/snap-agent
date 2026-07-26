@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.patrol;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.patrol.AlertConverger;
@@ -34,7 +34,7 @@ import java.util.regex.Pattern;
  *
  * <p>Schedules patrol tasks by cron expression. When a patrol fires, it looks up
  * the skill via {@link SkillRegistry}, creates an {@link AgentTask}, and calls
- * {@link AgentExecutor#execute}. The resulting status and report are stored as
+ * {@link AgentService#execute}. The resulting status and report are stored as
  * a {@link PatrolReport}.</p>
  */
 public class ScheduledPatrolScheduler implements PatrolScheduler {
@@ -42,7 +42,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private static final Logger log = LoggerFactory.getLogger(ScheduledPatrolScheduler.class);
 
     private final TaskScheduler taskScheduler;
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final SkillRegistry skillRegistry;
     private final PatrolReportStore reportStore;
     private final PatrolLockProvider lockProvider;
@@ -53,34 +53,34 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
     private final ConcurrentHashMap<String, ScheduledFuture<?>> scheduledFutures = new ConcurrentHashMap<>();
     private final AtomicLong idCounter = new AtomicLong(0);
 
-    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentService agentService,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore) {
-        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+        this(taskScheduler, agentService, skillRegistry, reportStore,
                 new NoopPatrolLockProvider(), 300L, Collections.<AlertPushChannel>emptyList(), null);
     }
 
-    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentService agentService,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds) {
-        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+        this(taskScheduler, agentService, skillRegistry, reportStore,
                 lockProvider, lockTtlSeconds, Collections.<AlertPushChannel>emptyList(), null);
     }
 
-    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentService agentService,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds,
                                     List<AlertPushChannel> pushChannels) {
-        this(taskScheduler, agentExecutor, skillRegistry, reportStore,
+        this(taskScheduler, agentService, skillRegistry, reportStore,
                 lockProvider, lockTtlSeconds, pushChannels, null);
     }
 
-    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentExecutor agentExecutor,
+    public ScheduledPatrolScheduler(TaskScheduler taskScheduler, AgentService agentService,
                                     SkillRegistry skillRegistry, PatrolReportStore reportStore,
                                     PatrolLockProvider lockProvider, long lockTtlSeconds,
                                     List<AlertPushChannel> pushChannels,
                                     AlertConverger alertConverger) {
         this.taskScheduler = taskScheduler;
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.skillRegistry = skillRegistry;
         this.reportStore = reportStore;
         this.lockProvider = lockProvider;
@@ -199,7 +199,7 @@ public class ScheduledPatrolScheduler implements PatrolScheduler {
                 AgentTask agentTask = AgentTask.create(
                         task.getUserId(), task.getSkillName(),
                         patrolInputs, null);
-                agentExecutor.execute(agentTask, skill);
+                agentService.execute(agentTask, skill);
 
                 TaskStatus status = agentTask.getStatus();
                 String statusStr = status != null ? status.name() : "UNKNOWN";

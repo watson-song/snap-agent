@@ -26,7 +26,10 @@ public class ToolCallbacks {
 
     private static ToolCallback[] from(Class<?> clazz, Object instance) {
         List<ToolCallback> callbacks = new ArrayList<>();
-        for (Method method : clazz.getDeclaredMethods()) {
+        // Use getMethods() to also discover @Tool methods inherited from parent
+        // classes (e.g., test subclasses that override protected helpers but
+        // inherit the public @Tool-annotated method from the parent).
+        for (Method method : clazz.getMethods()) {
             Tool toolAnnotation = method.getAnnotation(Tool.class);
             if (toolAnnotation == null) {
                 continue;

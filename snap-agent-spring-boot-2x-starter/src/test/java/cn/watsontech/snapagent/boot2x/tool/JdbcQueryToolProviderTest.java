@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.AfterEach;
@@ -17,28 +19,28 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Integration tests for {@link JdbcQueryToolProvider} using H2 in-memory.
+ * Integration tests for {@link JdbcQueryTools} using H2 in-memory.
  *
  * <p>Covers normal query, row truncation, SQL guard rejection
  * (TDD_SPEC §UC-12), multi-environment mode (v0.6), and backward compat.</p>
  */
-class JdbcQueryToolProviderTest {
+class JdbcQueryToolsTest {
 
     private DataSource dataSource;
-    private JdbcQueryToolProvider provider;
-    private JdbcQueryToolProvider providerWithSmallMax;
+    private JdbcQueryTools provider;
+    private JdbcQueryTools providerWithSmallMax;
 
     // Multi-env fixtures
     private DataSource sitDataSource;
     private DataSource uatDataSource;
     private DataSourceRegistry registry;
-    private JdbcQueryToolProvider multiEnvProvider;
+    private JdbcQueryTools multiEnvProvider;
 
     @BeforeEach
     void setUp() throws Exception {
         dataSource = createH2WithTestData("testdb");
-        provider = new JdbcQueryToolProvider(dataSource, new SqlGuard(1000));
-        providerWithSmallMax = new JdbcQueryToolProvider(dataSource, new SqlGuard(2));
+        provider = new JdbcQueryTools(dataSource, new SqlGuard(1000));
+        providerWithSmallMax = new JdbcQueryTools(dataSource, new SqlGuard(2));
 
         // Multi-env: two separate in-memory DBs with different data
         sitDataSource = createH2WithTestData("sitdb", "SIT-Alice", "SIT-Bob");
@@ -47,7 +49,7 @@ class JdbcQueryToolProviderTest {
         dsMap.put("sit", sitDataSource);
         dsMap.put("uat", uatDataSource);
         registry = new DataSourceRegistry(dsMap, "sit");
-        multiEnvProvider = new JdbcQueryToolProvider(registry, new SqlGuard(1000));
+        multiEnvProvider = new JdbcQueryTools(registry, new SqlGuard(1000));
     }
 
     @AfterEach
@@ -74,14 +76,14 @@ class JdbcQueryToolProviderTest {
 
     @Test
     void shouldReturnNameMysqlQuery() {
-        assertThat(provider.name()).isEqualTo("mysql_query");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("mysql_query");
     }
 
     @Test
     void shouldReturnSchemaContainingSqlProperty() {
-        String schema = provider.schema();
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("mysql_query");
 
-        assertThat(schema).contains("mysql_query");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("sql");
         assertThat(schema).contains("required");
     }
@@ -91,10 +93,9 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT * FROM test_table ORDER BY id");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
         assertThat(result.getContent()).contains("Alice");
         assertThat(result.getContent()).contains("Bob");
         assertThat(result.getContent()).contains("Charlie");
@@ -105,11 +106,10 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT * FROM test_table ORDER BY id");
 
-        ToolResult result = providerWithSmallMax.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(providerWithSmallMax)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
-        assertThat(result.isTruncated()).isTrue();
+        assertThat(result.getContent()).contains("truncated");
     }
 
     @Test
@@ -117,11 +117,10 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "DELETE FROM test_table WHERE id=1");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("只读策略拒绝");
-        assertThat(result.getError()).contains("DELETE");
+        assertThat(result.getContent()).contains("只读策略拒绝");
+        assertThat(result.getContent()).contains("DELETE");
     }
 
     @Test
@@ -129,10 +128,9 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT * FROM (INSERT INTO test_table VALUES(99,'X'))");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("INSERT");
+        assertThat(result.getContent()).contains("INSERT");
     }
 
     @Test
@@ -140,21 +138,21 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT * FROM test_table");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         // LIMIT 1000 should have been appended by SqlGuard
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("Alice");
+        assertThat(result.getContent()).contains("Charlie");
     }
 
     @Test
     void shouldReturnErrorWhenSqlIsMissing() {
         Map<String, Object> args = new HashMap<String, Object>();
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("sql");
+        assertThat(result.getContent()).containsIgnoringCase("sql");
     }
 
     @Test
@@ -162,10 +160,9 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT name FROM test_table WHERE id=1");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(1);
         assertThat(result.getContent()).contains("Alice");
     }
 
@@ -174,7 +171,7 @@ class JdbcQueryToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("sql", "SELECT name FROM test_table WHERE id=1");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).containsIgnoringCase("name");
@@ -184,17 +181,19 @@ class JdbcQueryToolProviderTest {
 
     @Test
     void shouldExposeEnvParameterInSchemaWhenMultiEnv() {
-        String schema = multiEnvProvider.schema();
+        String schema = ToolCallbacks.from(multiEnvProvider)[0].getJsonSchema();
 
         assertThat(schema).contains("env");
         assertThat(schema).contains("Environment name");
     }
 
     @Test
-    void shouldNotExposeEnvParameterInSchemaWhenSingleEnv() {
-        String schema = provider.schema();
+    void shouldExposeEnvParameterInSchemaEvenWhenSingleEnv() {
+        // In 2.x the @ToolParam is always present on the method signature,
+        // so the schema always includes "env" regardless of single/multi-env mode.
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
 
-        assertThat(schema).doesNotContain("\"env\"");
+        assertThat(schema).contains("env");
     }
 
     @Test
@@ -203,7 +202,7 @@ class JdbcQueryToolProviderTest {
         args.put("sql", "SELECT name FROM test_table ORDER BY id");
         args.put("env", "sit");
 
-        ToolResult result = multiEnvProvider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(multiEnvProvider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("SIT-Alice");
@@ -216,7 +215,7 @@ class JdbcQueryToolProviderTest {
         args.put("sql", "SELECT name FROM test_table ORDER BY id");
         args.put("env", "uat");
 
-        ToolResult result = multiEnvProvider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(multiEnvProvider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("UAT-Charlie");
@@ -229,7 +228,7 @@ class JdbcQueryToolProviderTest {
         args.put("sql", "SELECT name FROM test_table ORDER BY id");
         // env not provided
 
-        ToolResult result = multiEnvProvider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(multiEnvProvider)[0].execute(args, ctx());
 
         // defaultEnv = "sit"
         assertThat(result.isSuccess()).isTrue();
@@ -242,10 +241,9 @@ class JdbcQueryToolProviderTest {
         args.put("sql", "SELECT 1");
         args.put("env", "prod");
 
-        ToolResult result = multiEnvProvider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(multiEnvProvider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("prod");
+        assertThat(result.getContent()).contains("prod");
     }
 
     @Test
@@ -256,10 +254,11 @@ class JdbcQueryToolProviderTest {
         // env param is ignored in single-env mode
         args.put("env", "anything");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("Alice");
+        assertThat(result.getContent()).contains("Charlie");
     }
 
     // ---- helpers ----

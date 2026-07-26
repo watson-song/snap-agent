@@ -1,23 +1,31 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
- * {@link ToolProvider} implementation for reading source code files.
+ * 2.x code reading tools exposed via {@code @Tool} annotation methods.
+ *
+ * <p>Refactored from the 1.x {@code CodeReaderToolProvider} (which implemented the
+ * now-removed {@code ToolProvider} SPI) to individual {@code @Tool} methods
+ * discovered by {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.
+ * Each method becomes a separate {@link cn.watsontech.snapagent.core.tool.ToolCallback}
+ * with auto-generated JSON Schema, registered to
+ * {@link cn.watsontech.snapagent.core.tool.ToolCallbackRegistry} alongside
+ * built-in tools.</p>
  *
  * <p>Tool name: {@code code_read}. Reads source files within the configured
  * project root ({@code snap-agent.code.project-root}). Supports line-range
@@ -26,62 +34,42 @@ import java.util.Map;
  * <p>All path safety is delegated to {@link CodePathGuard}. The tool never
  * writes, deletes, or modifies files.</p>
  */
-public class CodeReaderToolProvider implements ToolProvider {
+public class CodeReaderTools {
 
-    private static final Logger log = LoggerFactory.getLogger(CodeReaderToolProvider.class);
-
-    private static final String SCHEMA = "{\"name\":\"code_read\","
-            + "\"description\":\"读取项目源码文件内容。支持按行范围读取和关键词过滤（带上下文）。路径必须在项目根目录下。\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"file_path\":{\"type\":\"string\",\"description\":\"项目内文件的相对路径（基于项目根目录）或绝对路径\"},"
-            + "\"start_line\":{\"type\":\"integer\",\"description\":\"起始行号（1-based），默认 1\",\"default\":1},"
-            + "\"end_line\":{\"type\":\"integer\",\"description\":\"结束行号（1-based），默认文件末尾\"},"
-            + "\"keyword\":{\"type\":\"string\",\"description\":\"可选，只返回包含该关键词的行（上下文 ±2 行）\"},"
-            + "\"max_lines\":{\"type\":\"integer\",\"description\":\"最大返回行数（默认 500）\",\"default\":500}"
-            + "},"
-            + "\"required\":[\"file_path\"]}}";
+    private static final Logger log = LoggerFactory.getLogger(CodeReaderTools.class);
 
     private final CodePathGuard pathGuard;
 
-    public CodeReaderToolProvider(CodePathGuard pathGuard) {
+    public CodeReaderTools(CodePathGuard pathGuard) {
         if (pathGuard == null) {
             throw new IllegalArgumentException("pathGuard must not be null");
         }
         this.pathGuard = pathGuard;
     }
 
-    @Override
-    public String name() {
-        return "code_read";
-    }
+    @Tool(name = "code_read", description = "读取项目源码文件内容。支持按行范围读取和关键词过滤（带上下文）。路径必须在项目根目录下。")
+    public String codeRead(
+            @ToolParam(description = "项目内文件的相对路径（基于项目根目录）或绝对路径", required = true) String file_path,
+            @ToolParam(description = "起始行号（1-based），默认 1", required = false) Integer start_line,
+            @ToolParam(description = "结束行号（1-based），默认文件末尾", required = false) Integer end_line,
+            @ToolParam(description = "可选，只返回包含该关键词的行（上下文 ±2 行）", required = false) String keyword,
+            @ToolParam(description = "最大返回行数（默认 500）", required = false) Integer max_lines) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String filePath = extractString(args, "file_path");
-        if (filePath == null || filePath.isEmpty()) {
-            return ToolResult.error("missing required parameter: file_path", elapsed(start));
+        if (file_path == null || file_path.isEmpty()) {
+            return "Error: missing required parameter: file_path";
         }
 
-        CodePathGuard.Result guardResult = pathGuard.validate(filePath);
+        CodePathGuard.Result guardResult = pathGuard.validate(file_path);
         if (!guardResult.isAllowed()) {
             String reason = guardResult.getReason();
             log.warn("Code path rejected by guard: {}", reason);
-            return ToolResult.error(reason, elapsed(start));
+            return "Error: " + reason;
         }
 
         Path path = guardResult.getPath();
-        int startLine = extractInt(args, "start_line", 1);
-        int endLine = extractInt(args, "end_line", Integer.MAX_VALUE);
-        String keyword = extractString(args, "keyword");
-        int maxLines = extractInt(args, "max_lines", pathGuard.getMaxLines());
+        int startLine = start_line != null ? start_line : 1;
+        int endLine = end_line != null ? end_line : Integer.MAX_VALUE;
+        int maxLines = max_lines != null ? max_lines : 500;
         if (maxLines <= 0 || maxLines > pathGuard.getMaxLines()) {
             maxLines = pathGuard.getMaxLines();
         }
@@ -112,16 +100,18 @@ public class CodeReaderToolProvider implements ToolProvider {
                     totalLines, keyword);
             boolean truncated = resultLines.size() >= maxLines
                     && (endLine - startLine + 1) > maxLines;
-            long duration = elapsed(start);
             if (truncated) {
-                return ToolResult.truncated(content, resultLines.size(), duration);
+                return content + "\n# (truncated, showing " + resultLines.size()
+                        + " of " + totalLines + " lines)\n";
             }
-            return ToolResult.success(content, resultLines.size(), duration);
+            return content;
         } catch (IOException e) {
             log.error("Code read failed: {}", e.getMessage());
-            return ToolResult.error("Code read failed: " + e.getMessage(), elapsed(start));
+            return "Error: Code read failed: " + e.getMessage();
         }
     }
+
+    // ---- Internal helpers (reused from 1.x CodeReaderToolProvider) ----
 
     private List<LineEntry> readRange(List<String> allLines, int startLine,
                                        int endLine, int maxLines) {
@@ -142,7 +132,7 @@ public class CodeReaderToolProvider implements ToolProvider {
         int to = Math.min(allLines.size(), endLine);
 
         // Find matching lines, then include ±2 context lines
-        java.util.Set<Integer> matchIndices = new java.util.HashSet<Integer>();
+        Set<Integer> matchIndices = new HashSet<Integer>();
         for (int i = from; i < to; i++) {
             if (allLines.get(i).toLowerCase(Locale.ROOT).contains(keywordLower)) {
                 matchIndices.add(i);
@@ -150,7 +140,7 @@ public class CodeReaderToolProvider implements ToolProvider {
         }
 
         // Expand context: ±2 lines around each match
-        java.util.Set<Integer> includeIndices = new java.util.TreeSet<Integer>();
+        Set<Integer> includeIndices = new TreeSet<Integer>();
         for (int idx : matchIndices) {
             for (int c = Math.max(from, idx - 2); c <= Math.min(to - 1, idx + 2); c++) {
                 includeIndices.add(c);
@@ -200,41 +190,6 @@ public class CodeReaderToolProvider implements ToolProvider {
             // Path not under project root — show absolute
             return path.toString();
         }
-    }
-
-    // ---- arg extraction helpers (same pattern as LogReadToolProvider) ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private int extractInt(Map<String, Object> args, String key, int defaultValue) {
-        if (args == null) {
-            return defaultValue;
-        }
-        Object value = args.get(key);
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 
     /** Internal line entry for formatting. */

@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
-import cn.watsontech.snapagent.core.tool.ToolPluginAnnotation;
+import cn.watsontech.snapagent.core.tool.ToolPlugin;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,7 +16,7 @@ import java.util.jar.JarFile;
  * <p>
  * Resolution order:
  * <ol>
- *   <li>Scan all JAR URLs for classes annotated with {@link ToolPluginAnnotation}.</li>
+ *   <li>Scan all JAR URLs for classes annotated with {@link ToolPlugin}.</li>
  *   <li>If no annotation found, attempt to read {@code META-INF/snap-agent/plugin-info.yml}.</li>
  *   <li>If neither succeeds, throw {@link IllegalStateException}.</li>
  * </ol>
@@ -33,7 +33,7 @@ public class PluginMetadataScanner {
      * @throws IllegalStateException if no metadata is found
      */
     public PluginMetadata scan(URLClassLoader classLoader) {
-        // Phase 1: scan for @ToolPluginAnnotation
+        // Phase 1: scan for @ToolPlugin
         PluginMetadata annotationMetadata = scanForAnnotation(classLoader);
         if (annotationMetadata != null) {
             return annotationMetadata;
@@ -46,7 +46,7 @@ public class PluginMetadataScanner {
         }
 
         // Phase 3: nothing found
-        throw new IllegalStateException("no plugin metadata found in JAR (neither @ToolPluginAnnotation nor plugin-info.yml)");
+        throw new IllegalStateException("no plugin metadata found in JAR (neither @ToolPlugin nor plugin-info.yml)");
     }
 
     private PluginMetadata scanForAnnotation(URLClassLoader classLoader) {
@@ -81,8 +81,8 @@ public class PluginMetadataScanner {
                     continue;
                 }
 
-                if (clazz.isAnnotationPresent(ToolPluginAnnotation.class)) {
-                    ToolPluginAnnotation ann = clazz.getAnnotation(ToolPluginAnnotation.class);
+                if (clazz.isAnnotationPresent(ToolPlugin.class)) {
+                    ToolPlugin ann = clazz.getAnnotation(ToolPlugin.class);
                     return new PluginMetadata(
                             ann.id(),
                             ann.toolType(),

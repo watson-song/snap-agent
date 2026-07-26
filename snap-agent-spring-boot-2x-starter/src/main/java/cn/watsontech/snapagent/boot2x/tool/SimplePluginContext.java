@@ -1,17 +1,13 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
-import cn.watsontech.snapagent.core.tool.PluginContext;
-
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Simple immutable implementation of {@link PluginContext}.
- * The configuration map is defensively copied on construction and
- * wrapped in an unmodifiable view.
+ * Simple immutable holder for plugin configuration.
  */
-public class SimplePluginContext implements PluginContext {
+public class SimplePluginContext {
 
     private final Map<String, Object> configuration;
 
@@ -23,7 +19,6 @@ public class SimplePluginContext implements PluginContext {
         }
     }
 
-    @Override
     public Map<String, Object> getConfiguration() {
         return configuration;
     }

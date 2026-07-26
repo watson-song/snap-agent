@@ -71,8 +71,8 @@ public class KnowledgeETLPipeline {
                 }
                 if (vectorStore != null) {
                     vectorStore.add(Collections.singletonList(doc));
+                    written++;
                 }
-                written++;
             } catch (RuntimeException e) {
                 log.warn("ETL chunk failed in {}: {}", fileName, e.getMessage());
             }
@@ -139,7 +139,8 @@ public class KnowledgeETLPipeline {
         if (firstH2 < 0) firstH2 = content.indexOf("## ");
         if (firstH2 > 0) {
             String overview = content.substring(0, firstH2).trim();
-            if (!overview.isEmpty()) {
+            // Skip overview if it's just the h1 title (already captured as category)
+            if (!overview.isEmpty() && !overview.equals("# " + category)) {
                 Map<String, Object> meta = new LinkedHashMap<String, Object>();
                 meta.put("source", fileName);
                 if (!category.isEmpty()) meta.put("category", category);

@@ -1,6 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,14 +16,14 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link TraceSearchToolProvider}.
+ * Unit tests for {@link TraceSearchTools}.
  *
  * <p>Uses the subclass-and-override-httpGet pattern (design doc §8.1) to inject
  * mock Jaeger JSON responses without a real HTTP backend.</p>
  *
  * <p>See design doc §8.2 for the test matrix.</p>
  */
-class TraceSearchToolProviderTest {
+class TraceSearchToolsTest {
 
     private SnapAgentProperties.Trace config;
 
@@ -38,17 +40,17 @@ class TraceSearchToolProviderTest {
     @Test
     @DisplayName("name() returns 'trace_search'")
     void shouldReturnNameTraceSearch() {
-        TraceSearchToolProvider provider = new TraceSearchToolProvider(config);
-        assertThat(provider.name()).isEqualTo("trace_search");
+        TraceSearchTools provider = new TraceSearchTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("trace_search");
     }
 
     @Test
     @DisplayName("schema() contains service and trace_id properties")
     void shouldReturnSchemaWithServiceAndTraceId() {
-        TraceSearchToolProvider provider = new TraceSearchToolProvider(config);
-        String schema = provider.schema();
+        TraceSearchTools provider = new TraceSearchTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("trace_search");
 
-        assertThat(schema).contains("trace_search");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("\"service\"");
         assertThat(schema).contains("\"trace_id\"");
     }
@@ -66,10 +68,10 @@ class TraceSearchToolProviderTest {
         args.put("service", "order-service");
         args.put("start", "1689700000");
         args.put("end", "1689700060");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(1);
+        assertThat(result.getContent()).contains("# Traces: 1");
         assertThat(result.getContent()).contains("abc123");
         assertThat(result.getContent()).contains("POST /api/orders");
         assertThat(provider.capturedUrl).contains("/api/traces");
@@ -91,7 +93,7 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("trace_id", "xyz789");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("xyz789");
@@ -110,7 +112,7 @@ class TraceSearchToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
         args.put("min_duration", "500ms");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(provider.capturedUrl).contains("minDuration=500ms");
@@ -127,7 +129,7 @@ class TraceSearchToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
         args.put("operation", "POST /api/orders");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("operation=POST");
     }
@@ -137,14 +139,14 @@ class TraceSearchToolProviderTest {
     @Test
     @DisplayName("neither service nor trace_id provided returns error")
     void shouldReturnErrorWhenNeitherServiceNorTraceId() {
-        TraceSearchToolProvider provider = new TraceSearchToolProvider(config);
+        TraceSearchTools provider = new TraceSearchTools(config);
 
         Map<String, Object> args = new HashMap<String, Object>();
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("service");
-        assertThat(result.getError()).contains("trace_id");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("service");
+        assertThat(result.getContent()).contains("trace_id");
     }
 
     // ---- max-traces clamp ----
@@ -159,7 +161,7 @@ class TraceSearchToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
         args.put("limit", 100);
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("limit=5");
     }
@@ -191,7 +193,7 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("POST /api/orders");
@@ -234,7 +236,7 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "svc");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("slow-op");
@@ -257,7 +259,7 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "no-such-service");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getRowCount()).isEqualTo(0);
@@ -269,7 +271,7 @@ class TraceSearchToolProviderTest {
     @Test
     @DisplayName("IOException from httpGet returns error result")
     void shouldHandleIOExceptionFromBackend() {
-        TraceSearchToolProvider provider = new TraceSearchToolProvider(config) {
+        TraceSearchTools provider = new TraceSearchTools(config) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) throws IOException {
@@ -279,10 +281,10 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("503");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("503");
     }
 
     // ---- auth header ----
@@ -298,7 +300,7 @@ class TraceSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("service", "order-service");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedHeaders).containsEntry("Authorization", "Bearer jaeger-token");
     }
@@ -331,7 +333,7 @@ class TraceSearchToolProviderTest {
     /**
      * Subclass that captures httpGet arguments and returns a canned response.
      */
-    static class CapturingProvider extends TraceSearchToolProvider {
+    static class CapturingProvider extends TraceSearchTools {
         final String mockResponse;
         String capturedUrl;
         Map<String, String> capturedHeaders;

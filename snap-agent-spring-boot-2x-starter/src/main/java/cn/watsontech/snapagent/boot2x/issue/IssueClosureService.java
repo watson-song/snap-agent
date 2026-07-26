@@ -1,7 +1,7 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
@@ -28,7 +28,7 @@ import java.util.UUID;
  * Orchestration service for the issue closure lifecycle:
  * diagnose -> propose solution -> create issue -> verify -> close + sediment.
  *
- * <p>Connects {@link AgentExecutor} (for running solution-suggest/verify-fix skills),
+ * <p>Connects {@link AgentService} (for running solution-suggest/verify-fix skills),
  * {@link IssueStore} (for persistence), {@link IssueTracker} (for external issue
  * systems), and optionally a {@link KnowledgeSedimentationService} (for experience
  * sedimentation into the vector store).</p>
@@ -41,7 +41,7 @@ public class IssueClosureService {
 
     private static final Logger log = LoggerFactory.getLogger(IssueClosureService.class);
 
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final TaskStore taskStore;
     private final SkillRegistry skillRegistry;
     private final IssueStore issueStore;
@@ -54,7 +54,7 @@ public class IssueClosureService {
     /**
      * Construct the issue closure service.
      *
-     * @param agentExecutor         the agent executor (for running skills synchronously)
+     * @param agentService         the agent executor (for running skills synchronously)
      * @param taskStore             the task store (for looking up diagnostic tasks)
      * @param skillRegistry         the skill registry (for resolving skill metadata)
      * @param issueStore            the issue store (for persistence)
@@ -64,7 +64,7 @@ public class IssueClosureService {
      * @param verificationRunner    the verification runner (may be {@code null} to fall back to skill-based verification)
      * @param systemUserId          the system user ID used when executing skills
      */
-    public IssueClosureService(AgentExecutor agentExecutor,
+    public IssueClosureService(AgentService agentService,
                                 TaskStore taskStore,
                                 SkillRegistry skillRegistry,
                                 IssueStore issueStore,
@@ -73,7 +73,7 @@ public class IssueClosureService {
                                 SolutionSuggester solutionSuggester,
                                 VerificationRunner verificationRunner,
                                 String systemUserId) {
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.taskStore = taskStore;
         this.skillRegistry = skillRegistry;
         this.issueStore = issueStore;
@@ -176,7 +176,7 @@ public class IssueClosureService {
         }
 
         AgentTask solutionTask = AgentTask.create(systemUserId, "solution-suggest", inputs, null);
-        agentExecutor.execute(solutionTask, skill);
+        agentService.execute(solutionTask, skill);
 
         List<String> lines = parseSolutionLines(solutionTask.getReport());
         List<SolutionOption> options = new ArrayList<SolutionOption>();
@@ -297,7 +297,7 @@ public class IssueClosureService {
         }
 
         AgentTask verifyTask = AgentTask.create(systemUserId, "verify-fix", inputs, null);
-        agentExecutor.execute(verifyTask, skill);
+        agentService.execute(verifyTask, skill);
 
         String report = verifyTask.getReport();
         boolean passed = report != null

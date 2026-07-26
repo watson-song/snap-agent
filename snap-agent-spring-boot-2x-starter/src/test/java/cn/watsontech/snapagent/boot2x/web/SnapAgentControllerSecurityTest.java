@@ -2,7 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.security.LoggingSecurityAuditLogger;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -13,7 +13,7 @@ import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,9 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SnapAgentControllerSecurityTest {
 
     @Mock private SkillRegistry skillRegistry;
-    @Mock private AgentExecutor agentExecutor;
+    @Mock private AgentService agentExecutor;
     @Mock private TaskStore taskStore;
-    @Mock private ToolDispatcher toolDispatcher;
+    @Mock private ToolCallbackRegistry toolDispatcher;
     @Mock private SecurityGateway securityGateway;
     @Mock private RateLimiter rateLimiter;
     @Mock private AsyncTaskExecutor taskExecutor;

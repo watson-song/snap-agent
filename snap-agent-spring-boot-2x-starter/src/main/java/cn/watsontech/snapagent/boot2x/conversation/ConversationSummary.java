@@ -1,4 +1,4 @@
-package cn.watsontech.snapagent.core.conversation;
+package cn.watsontech.snapagent.boot2x.conversation;
 
 /**
  * Summary of a conversation for list views (no message bodies).

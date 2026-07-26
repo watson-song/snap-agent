@@ -9,10 +9,10 @@ import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
-import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
-import cn.watsontech.snapagent.core.workflow.WorkflowResult;
-import cn.watsontech.snapagent.core.workflow.StepResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowResult;
+import cn.watsontech.snapagent.boot2x.workflow.StepResult;
 
 import java.time.Instant;
 import java.time.LocalDateTime;

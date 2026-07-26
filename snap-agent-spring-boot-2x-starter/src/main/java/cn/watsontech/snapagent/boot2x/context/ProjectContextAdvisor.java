@@ -1,9 +1,9 @@
 package cn.watsontech.snapagent.boot2x.context;
 
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
-import cn.watsontech.snapagent.core.agent.AgentTask;
-import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
-import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.advisor.Advisor;
+import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,19 +18,19 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * {@link SystemPromptExtender} that injects a project structure summary
- * into the system prompt.
+ * 2.x replacement for the 1.x {@code ProjectContextExtender} (which implemented
+ * the now-removed {@code SystemPromptExtender}). Implements {@link Advisor} to
+ * inject project structure context into the system prompt after the entry node
+ * sets it.
  *
  * <p>Scans the project root at construction time (once, at startup) and caches
- * the result as a String. The summary identifies Maven/Gradle modules, counts
- * Java files per module, and lists key directories.</p>
- *
- * <p>The cached summary is truncated to ~1500 characters to keep the system
- * prompt within reasonable token bounds.</p>
+ * the result. The summary identifies Maven/Gradle modules, counts Java files
+ * per module, and lists key directories. The cached summary is appended to the
+ * {@code system.prompt} in the graph state after the entry node runs.</p>
  */
-public class ProjectContextExtender implements SystemPromptExtender {
+public class ProjectContextAdvisor implements Advisor {
 
-    private static final Logger log = LoggerFactory.getLogger(ProjectContextExtender.class);
+    private static final Logger log = LoggerFactory.getLogger(ProjectContextAdvisor.class);
 
     private static final Set<String> EXCLUDED_DIRS = new HashSet<String>(Arrays.asList(
             "target", ".git", "node_modules", "build", ".idea", ".settings",
@@ -40,19 +40,38 @@ public class ProjectContextExtender implements SystemPromptExtender {
 
     private final String cachedSummary;
 
-    public ProjectContextExtender(CodePathGuard pathGuard, int structureDepth) {
+    public ProjectContextAdvisor(CodePathGuard pathGuard, int structureDepth) {
         this.cachedSummary = generateSummary(pathGuard.getProjectRoot(), structureDepth);
-        log.info("ProjectContextExtender initialized (summary {} chars)", cachedSummary.length());
+        log.info("ProjectContextAdvisor initialized (summary {} chars)", cachedSummary.length());
+    }
+
+    public ProjectContextAdvisor(CodePathGuard pathGuard) {
+        this(pathGuard, 3);
     }
 
     @Override
-    public String extend(SkillMeta skill, AgentTask task) {
-        return cachedSummary;
+    public int getOrder() { return 10; }
+
+    @Override
+    public String getName() { return "project-context"; }
+
+    @Override
+    public GraphState beforeNode(String nodeName, GraphState state, Object ctx) throws InterruptException {
+        return state;
     }
 
-    /**
-     * Get the cached summary (visible for testing).
-     */
+    @Override
+    public GraphState afterNode(String nodeName, GraphState state, Object ctx) throws InterruptException {
+        // After the entry node sets system.prompt, append project context
+        if ("entry".equals(nodeName)) {
+            String systemPrompt = state.get("system.prompt", "");
+            if (systemPrompt != null && !systemPrompt.isEmpty()) {
+                return state.with("system.prompt", systemPrompt + "\n" + cachedSummary);
+            }
+        }
+        return state;
+    }
+
     String getCachedSummary() {
         return cachedSummary;
     }
@@ -66,15 +85,12 @@ public class ProjectContextExtender implements SystemPromptExtender {
         sb.append("## 项目结构\n\n");
         sb.append("项目根: ").append(projectRoot).append("\n\n");
 
-        // Find modules (directories containing pom.xml or build.gradle)
         List<ModuleInfo> modules = findModules(projectRoot, maxDepth);
         if (!modules.isEmpty()) {
             sb.append("模块:\n");
             for (ModuleInfo mod : modules) {
                 String relPath = relativize(projectRoot, mod.path);
-                if (relPath.isEmpty()) {
-                    relPath = ".";
-                }
+                if (relPath.isEmpty()) relPath = ".";
                 sb.append("- ").append(mod.name)
                         .append(" (").append(relPath).append(")")
                         .append(" — ").append(mod.javaFileCount).append(" 个 Java 文件\n");
@@ -82,7 +98,6 @@ public class ProjectContextExtender implements SystemPromptExtender {
             sb.append("\n");
         }
 
-        // List key directories (depth <= maxDepth, excluding build artifacts)
         sb.append("关键目录:\n");
         List<String> keyDirs = findKeyDirectories(projectRoot, maxDepth);
         if (keyDirs.isEmpty()) {
@@ -93,11 +108,9 @@ public class ProjectContextExtender implements SystemPromptExtender {
             }
         }
 
-        // Truncate to max chars
         String result = sb.toString();
         if (result.length() > MAX_SUMMARY_CHARS) {
-            result = result.substring(0, MAX_SUMMARY_CHARS - 20)
-                    + "\n... (截断)\n";
+            result = result.substring(0, MAX_SUMMARY_CHARS - 20) + "\n... (截断)\n";
         }
         return result;
     }
@@ -110,11 +123,8 @@ public class ProjectContextExtender implements SystemPromptExtender {
 
     private void findModulesRecursive(Path root, Path current, int depth,
                                        int maxDepth, List<ModuleInfo> modules) {
-        if (depth > maxDepth || modules.size() >= 20) {
-            return;
-        }
+        if (depth > maxDepth || modules.size() >= 20) return;
 
-        // Check if current directory is a module (has pom.xml or build.gradle)
         if (Files.exists(current.resolve("pom.xml"))
                 || Files.exists(current.resolve("build.gradle"))) {
             String name = current.getFileName() != null
@@ -123,9 +133,7 @@ public class ProjectContextExtender implements SystemPromptExtender {
             modules.add(new ModuleInfo(current, name, javaCount));
         }
 
-        if (depth >= maxDepth) {
-            return;
-        }
+        if (depth >= maxDepth) return;
 
         try (java.util.stream.Stream<Path> stream = Files.list(current)) {
             stream.filter(Files::isDirectory)
@@ -143,9 +151,7 @@ public class ProjectContextExtender implements SystemPromptExtender {
     }
 
     private void countJavaFilesRecursive(Path dir, int depth, int maxDepth, int[] count) {
-        if (depth > maxDepth || count[0] >= 500) {
-            return;
-        }
+        if (depth > maxDepth || count[0] >= 500) return;
         try (java.util.stream.Stream<Path> stream = Files.list(dir)) {
             stream.forEach(p -> {
                 if (Files.isRegularFile(p)) {
@@ -171,9 +177,7 @@ public class ProjectContextExtender implements SystemPromptExtender {
 
     private void findKeyDirsRecursive(Path root, Path current, int depth,
                                        int maxDepth, List<String> dirs) {
-        if (depth >= maxDepth || dirs.size() >= 15) {
-            return;
-        }
+        if (depth >= maxDepth || dirs.size() >= 15) return;
         try (java.util.stream.Stream<Path> stream = Files.list(current)) {
             List<Path> subdirs = new ArrayList<Path>();
             stream.filter(Files::isDirectory)
@@ -183,7 +187,6 @@ public class ProjectContextExtender implements SystemPromptExtender {
             for (Path sub : subdirs) {
                 String relPath = relativize(root, sub).replace('\\', '/');
                 String dirName = sub.getFileName().toString();
-                // Include meaningful directory names
                 if (isMeaningfulDir(dirName, relPath)) {
                     dirs.add(relPath + "/");
                 }
@@ -195,11 +198,9 @@ public class ProjectContextExtender implements SystemPromptExtender {
     }
 
     private boolean isMeaningfulDir(String dirName, String relPath) {
-        // Skip trivial directories
         if ("src".equals(dirName) || "main".equals(dirName) || "test".equals(dirName)) {
             return false;
         }
-        // Include directories that look like packages or config dirs
         return relPath.contains("java/") || relPath.contains("resources/")
                 || "config".equals(dirName) || "controller".equals(dirName)
                 || "service".equals(dirName) || "mapper".equals(dirName)
@@ -212,14 +213,12 @@ public class ProjectContextExtender implements SystemPromptExtender {
 
     private String relativize(Path root, Path path) {
         try {
-            Path rel = root.relativize(path);
-            return rel.toString();
+            return root.relativize(path).toString();
         } catch (IllegalArgumentException e) {
             return path.toString();
         }
     }
 
-    /** Internal module info. */
     private static final class ModuleInfo {
         final Path path;
         final String name;

@@ -1,7 +1,7 @@
 package cn.watsontech.snapagent.boot2x.workflow;
 
-import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
-import cn.watsontech.snapagent.core.workflow.WorkflowStep;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;

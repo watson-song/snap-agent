@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,15 +19,15 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link LogReadToolProvider}.
+ * Unit tests for {@link LogReadTools}.
  */
-class LogReadToolProviderTest {
+class LogReadToolsTest {
 
     @TempDir
     Path tempDir;
 
     private Path logFile;
-    private LogReadToolProvider provider;
+    private LogReadTools provider;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -43,19 +45,19 @@ class LogReadToolProviderTest {
         LogPathGuard guard = new LogPathGuard(
                 Collections.singletonList(tempDir.toString()),
                 500, 10L * 1024 * 1024);
-        provider = new LogReadToolProvider(guard);
+        provider = new LogReadTools(guard);
     }
 
     @Test
     void shouldReturnNameLogRead() {
-        assertThat(provider.name()).isEqualTo("log_read");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("log_read");
     }
 
     @Test
     void shouldReturnSchemaContainingFilePathProperty() {
-        String schema = provider.schema();
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("log_read");
 
-        assertThat(schema).contains("log_read");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("file_path");
         assertThat(schema).contains("required");
     }
@@ -64,12 +66,12 @@ class LogReadToolProviderTest {
     void shouldReadAllLinesWithoutFilter() {
         Map<String, Object> args = args("file_path", logFile.toString());
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("Starting application");
         assertThat(result.getContent()).contains("Application started");
-        assertThat(result.getRowCount()).isEqualTo(8);
+        assertThat(result.getContent()).contains("# Lines: 8");
     }
 
     @Test
@@ -78,10 +80,10 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("keyword", "ERROR");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("# Lines: 3");
         assertThat(result.getContent()).contains("NullPointerException");
         assertThat(result.getContent()).contains("Database connection failed");
         assertThat(result.getContent()).contains("Timeout waiting for response");
@@ -94,10 +96,10 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("level", "ERROR");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("# Lines: 3");
     }
 
     @Test
@@ -106,10 +108,10 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("level", "error");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("# Lines: 3");
     }
 
     @Test
@@ -119,10 +121,10 @@ class LogReadToolProviderTest {
         args.put("keyword", "Database");
         args.put("level", "ERROR");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(1);
+        assertThat(result.getContent()).contains("# Lines: 1");
         assertThat(result.getContent()).contains("Database connection failed");
     }
 
@@ -133,10 +135,10 @@ class LogReadToolProviderTest {
         args.put("tail", true);
         args.put("max_lines", 3);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
+        assertThat(result.getContent()).contains("# Lines: 3");
         assertThat(result.getContent()).contains("Timeout waiting for response");
         assertThat(result.getContent()).contains("Application started");
         assertThat(result.getContent()).doesNotContain("Starting application");
@@ -148,37 +150,36 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("max_lines", 2);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
-        assertThat(result.isTruncated()).isTrue();
+        assertThat(result.getContent()).contains("# Lines: 2");
     }
 
     @Test
     void shouldCapAtGuardMaxLinesWhenExceeded() {
         LogPathGuard smallGuard = new LogPathGuard(
                 Collections.singletonList(tempDir.toString()), 2, 10L * 1024 * 1024);
-        LogReadToolProvider smallProvider = new LogReadToolProvider(smallGuard);
+        LogReadTools smallProvider = new LogReadTools(smallGuard);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("file_path", logFile.toString());
         args.put("max_lines", 1000);
 
-        ToolResult result = smallProvider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(smallProvider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("# Lines: 2");
     }
 
     @Test
     void shouldRejectMissingFilePath() {
         Map<String, Object> args = new HashMap<String, Object>();
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("file_path");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("路径为空");
     }
 
     @Test
@@ -186,10 +187,9 @@ class LogReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("file_path", "/etc/passwd");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("不在允许");
+        assertThat(result.getContent()).contains("不在允许");
     }
 
     @Test
@@ -197,10 +197,9 @@ class LogReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("file_path", tempDir.resolve("nope.log").toString());
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("不存在");
+        assertThat(result.getContent()).contains("不存在");
     }
 
     @Test
@@ -209,7 +208,7 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("keyword", "ERROR");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.getContent()).contains("# Log:");
         assertThat(result.getContent()).contains("# Filters:");
@@ -223,10 +222,9 @@ class LogReadToolProviderTest {
         args.put("file_path", logFile.toString());
         args.put("keyword", "nonexistent_keyword_xyz");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(0);
         assertThat(result.getContent()).contains("# Lines: 0");
     }
 
@@ -238,10 +236,10 @@ class LogReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("file_path", emptyLog.toString());
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(0);
+        assertThat(result.getContent()).contains("# Lines: 0");
     }
 
     @Test
@@ -252,10 +250,10 @@ class LogReadToolProviderTest {
         args.put("tail", true);
         args.put("max_lines", 2);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("# Lines: 2");
         // Last 2 ERROR lines
         assertThat(result.getContent()).contains("Database connection failed");
         assertThat(result.getContent()).contains("Timeout waiting for response");

@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.patrol;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
@@ -27,7 +27,7 @@ import java.util.Map;
  * <ol>
  *   <li>Records the alert via {@link AlertConverger} (if available)</li>
  *   <li>Determines the skill to trigger (from event, or defaults to "error-spike-investigation")</li>
- *   <li>Triggers the skill via {@link AgentExecutor}</li>
+ *   <li>Triggers the skill via {@link AgentService}</li>
  *   <li>Stores the result as a {@link PatrolReport}</li>
  * </ol></p>
  */
@@ -35,26 +35,26 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultAnomalyEventListener.class);
 
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final SkillRegistry skillRegistry;
     private final AlertConverger alertConverger;
     private final PatrolReportStore reportStore;
     private final List<AlertPushChannel> pushChannels;
 
-    public DefaultAnomalyEventListener(AgentExecutor agentExecutor,
+    public DefaultAnomalyEventListener(AgentService agentService,
                                        SkillRegistry skillRegistry,
                                        AlertConverger alertConverger,
                                        PatrolReportStore reportStore) {
-        this(agentExecutor, skillRegistry, alertConverger, reportStore,
+        this(agentService, skillRegistry, alertConverger, reportStore,
                 Collections.<AlertPushChannel>emptyList());
     }
 
-    public DefaultAnomalyEventListener(AgentExecutor agentExecutor,
+    public DefaultAnomalyEventListener(AgentService agentService,
                                        SkillRegistry skillRegistry,
                                        AlertConverger alertConverger,
                                        PatrolReportStore reportStore,
                                        List<AlertPushChannel> pushChannels) {
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.skillRegistry = skillRegistry;
         this.alertConverger = alertConverger;
         this.reportStore = reportStore;
@@ -106,7 +106,7 @@ public class DefaultAnomalyEventListener implements AnomalyEventListener {
             }
 
             AgentTask agentTask = AgentTask.create("patrol-user", skillName, inputs, null);
-            agentExecutor.execute(agentTask, skill);
+            agentService.execute(agentTask, skill);
 
             TaskStatus status = agentTask.getStatus();
             String statusStr = status != null ? status.name() : "UNKNOWN";

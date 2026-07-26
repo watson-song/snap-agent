@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.patrol;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
@@ -42,7 +42,7 @@ import static org.mockito.Mockito.*;
 class ScheduledPatrolSchedulerTest {
 
     private TaskScheduler taskScheduler;
-    private AgentExecutor agentExecutor;
+    private AgentService agentExecutor;
     private SkillRegistry skillRegistry;
     private PatrolReportStore reportStore;
     private PatrolLockProvider lockProvider;
@@ -54,7 +54,7 @@ class ScheduledPatrolSchedulerTest {
     @BeforeEach
     void setUp() {
         taskScheduler = mock(TaskScheduler.class);
-        agentExecutor = mock(AgentExecutor.class);
+        agentExecutor = mock(AgentService.class);
         skillRegistry = mock(SkillRegistry.class);
         reportStore = mock(PatrolReportStore.class);
         lockProvider = mock(PatrolLockProvider.class);

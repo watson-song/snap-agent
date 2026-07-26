@@ -2,7 +2,7 @@ package cn.watsontech.snapagent.boot2x.web;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -14,8 +14,8 @@ import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -49,9 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PluginOverridesTest {
 
     @Mock private SkillRegistry skillRegistry;
-    @Mock private AgentExecutor agentExecutor;
+    @Mock private AgentService agentExecutor;
     @Mock private TaskStore taskStore;
-    @Mock private ToolDispatcher toolDispatcher;
+    @Mock private ToolCallbackRegistry toolDispatcher;
     @Mock private SecurityGateway securityGateway;
     @Mock private AsyncTaskExecutor taskExecutor;
     @Mock private RateLimiter rateLimiter;
@@ -88,11 +88,9 @@ class PluginOverridesTest {
     }
 
     private void registerPlugin(String id, String toolType, boolean enabled) {
-        ToolProvider provider = org.mockito.Mockito.mock(ToolProvider.class);
-        when(provider.name()).thenReturn(id);
         PluginDescriptor desc = new PluginDescriptor(
-                id, toolType, id, "", "1.0",
-                true, enabled, false, provider, null, null, null);
+                id, toolType, id, "1.0", "",
+                true, enabled, false, new ToolCallback[0], null, null, null);
         registry.register(desc);
         if (!enabled) registry.disable(id);
     }

@@ -2,10 +2,10 @@ package cn.watsontech.snapagent.boot2x.conversation;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import cn.watsontech.snapagent.core.conversation.Conversation;
-import cn.watsontech.snapagent.core.conversation.ConversationMessage;
-import cn.watsontech.snapagent.core.conversation.ConversationStore;
-import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.boot2x.conversation.Conversation;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationMessage;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationSummary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

@@ -1,9 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,71 +15,50 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * {@link ToolProvider} implementation for searching logs in Loki.
+ * 2.x log search tools exposed via {@code @Tool} annotation methods.
+ *
+ * <p>Refactored from the 1.x {@code LogSearchToolProvider} (which implemented the
+ * now-removed {@code ToolProvider} SPI) to a {@code @Tool} method discovered by
+ * {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.</p>
  *
  * <p>Tool name: {@code log_search}. Queries Loki's LogQL via the
  * {@code /loki/api/v1/query_range} endpoint. Note that Loki uses
- * <strong>nanosecond</strong> timestamps (epoch seconds × 1_000_000_000).</p>
+ * <strong>nanosecond</strong> timestamps (epoch seconds &times; 1_000_000_000).</p>
  *
- * <p>See design doc §4.2 for the contract.</p>
+ * <p>See design doc &sect;4.2 for the contract.</p>
  */
-public class LogSearchToolProvider extends ObservabilityHttpClient implements ToolProvider {
+public class LogSearchTools extends ObservabilityHttpClient {
 
-    private static final Logger log = LoggerFactory.getLogger(LogSearchToolProvider.class);
-
-    private static final String SCHEMA = "{\"name\":\"log_search\","
-            + "\"description\":\"Search application logs in Loki using LogQL. Returns matching log lines within a time window. Use for error pattern analysis, frequency counting, and root cause investigation.\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"query\":{\"type\":\"string\",\"description\":\"LogQL expression, e.g. '{job=\\\"orders\\\"} |= \\\"error\\\" | json | line_format \\\"{{.msg}}\\\"'\"},"
-            + "\"start\":{\"type\":\"string\",\"description\":\"Time range start. Relative ('1h'), epoch seconds, or ISO-8601. Default '1h'.\",\"default\":\"1h\"},"
-            + "\"end\":{\"type\":\"string\",\"description\":\"Time range end. Default 'now'.\",\"default\":\"now\"},"
-            + "\"limit\":{\"type\":\"integer\",\"description\":\"Max log lines to return (default 500). Hard cap by config max-lines.\",\"default\":500},"
-            + "\"direction\":{\"type\":\"string\",\"enum\":[\"forward\",\"backward\"],\"description\":\"Log direction. 'backward' = newest first (default).\",\"default\":\"backward\"}"
-            + "},"
-            + "\"required\":[\"query\"]}}";
+    private static final Logger log = LoggerFactory.getLogger(LogSearchTools.class);
 
     private final SnapAgentProperties.LogSearch config;
 
-    public LogSearchToolProvider(SnapAgentProperties.LogSearch config) {
+    public LogSearchTools(SnapAgentProperties.LogSearch config) {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
         this.config = config;
     }
 
-    @Override
-    public String name() {
-        return "log_search";
-    }
+    @Tool(name = "log_search", description = "Search application logs in Loki using LogQL. Returns matching log lines within a time window. Use for error pattern analysis, frequency counting, and root cause investigation.")
+    public String search(
+            @ToolParam(description = "LogQL expression, e.g. '{job=\"orders\"} |= \"error\" | json | line_format \"{{.msg}}\"'") String query,
+            @ToolParam(description = "Time range start. Relative ('1h'), epoch seconds, or ISO-8601. Default '1h'.", required = false) String start,
+            @ToolParam(description = "Time range end. Default 'now'.", required = false) String end,
+            @ToolParam(description = "Max log lines to return (default 500). Hard cap by config max-lines.", required = false) Integer limit,
+            @ToolParam(description = "Log direction. 'forward' or 'backward' (default 'backward' = newest first).", required = false) String direction) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String query = extractString(args, "query");
         if (query == null || query.isEmpty()) {
-            return ToolResult.error("missing required parameter: query", elapsed(start));
+            return "Error: missing required parameter: query";
         }
 
-        String startStr = extractString(args, "start");
-        if (startStr == null || startStr.isEmpty()) {
-            startStr = "1h";
-        }
-        String endStr = extractString(args, "end");
-        // null/empty → now (TimeRangeParser handles this)
-        String direction = extractString(args, "direction");
-        if (direction == null || direction.isEmpty()) {
-            direction = "backward";
-        }
-        int limit = extractInt(args, "limit", config.getMaxLines());
-        if (limit <= 0 || limit > config.getMaxLines()) {
-            limit = config.getMaxLines();
+        String startStr = (start == null || start.isEmpty()) ? "1h" : start;
+        // null/empty end -> now (TimeRangeParser handles this)
+        String endStr = end;
+        String directionStr = (direction == null || direction.isEmpty()) ? "backward" : direction;
+        int limitVal = limit != null ? limit : config.getMaxLines();
+        if (limitVal <= 0 || limitVal > config.getMaxLines()) {
+            limitVal = config.getMaxLines();
         }
 
         long startEpoch;
@@ -89,7 +67,7 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
             startEpoch = TimeRangeParser.parseToEpochSeconds(startStr);
             endEpoch = TimeRangeParser.parseToEpochSeconds(endStr);
         } catch (IllegalArgumentException e) {
-            return ToolResult.error("invalid time format: " + e.getMessage(), elapsed(start));
+            return "Error: invalid time format: " + e.getMessage();
         }
 
         // Loki uses nanosecond timestamps
@@ -100,17 +78,17 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
         try {
             encodedQuery = URLEncoder.encode(query, "UTF-8");
         } catch (UnsupportedEncodingException e) {
-            return ToolResult.error("failed to encode query: " + e.getMessage(), elapsed(start));
+            return "Error: failed to encode query: " + e.getMessage();
         }
 
         String url = config.getBaseUrl() + "/loki/api/v1/query_range?query=" + encodedQuery
                 + "&start=" + startNs + "&end=" + endNs
-                + "&limit=" + limit + "&direction=" + direction;
+                + "&limit=" + limitVal + "&direction=" + directionStr;
 
         Map<String, String> headers = buildAuthHeaders();
         int timeoutMs = config.getTimeoutSeconds() * 1000;
 
-        log.info("Log search: {} (limit={}, direction={})", query, limit, direction);
+        log.info("Log search: {} (limit={}, direction={})", query, limitVal, directionStr);
 
         try {
             String body = httpGet(url, headers, timeoutMs, timeoutMs);
@@ -119,13 +97,12 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
             String status = root.path("status").asText();
             if (!"success".equals(status)) {
                 String errorMsg = root.path("error").asText("");
-                return ToolResult.error("Loki error: " + errorMsg, elapsed(start));
+                return "Error: Loki error: " + errorMsg;
             }
 
             JsonNode resultArray = root.path("data").path("result");
             if (!resultArray.isArray() || resultArray.size() == 0) {
-                String content = "# Loki Query: " + query + "\n# No log lines returned\n";
-                return ToolResult.success(content, 0, elapsed(start));
+                return "# Loki Query: " + query + "\n# No log lines returned\n";
             }
 
             StringBuilder streamContent = new StringBuilder();
@@ -142,7 +119,7 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
 
                 if (values.isArray()) {
                     for (JsonNode entry : values) {
-                        if (totalLines >= limit) {
+                        if (totalLines >= limitVal) {
                             break;
                         }
                         if (entry.isArray() && entry.size() >= 2) {
@@ -161,17 +138,13 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
             sb.append("# Loki Query: ").append(query).append("\n");
             sb.append("# Streams: ").append(streamCount)
                     .append(" | Lines: ").append(totalLines)
-                    .append(" (limit ").append(limit).append(", ").append(direction).append(")\n");
+                    .append(" (limit ").append(limitVal).append(", ").append(directionStr).append(")\n");
             sb.append(streamContent);
 
-            long duration = elapsed(start);
-            if (totalLines >= limit) {
-                return ToolResult.truncated(sb.toString(), totalLines, duration);
-            }
-            return ToolResult.success(sb.toString(), totalLines, duration);
+            return sb.toString();
         } catch (IOException e) {
             log.warn("Log search failed: {}", e.getMessage());
-            return ToolResult.error("Log search failed: " + e.getMessage(), elapsed(start));
+            return "Error: Log search failed: " + e.getMessage();
         }
     }
 
@@ -213,40 +186,5 @@ public class LogSearchToolProvider extends ObservabilityHttpClient implements To
             return headers;
         }
         return null;
-    }
-
-    // ---- arg extraction helpers (same pattern as LogReadToolProvider) ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private int extractInt(Map<String, Object> args, String key, int defaultValue) {
-        if (args == null) {
-            return defaultValue;
-        }
-        Object value = args.get(key);
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 }

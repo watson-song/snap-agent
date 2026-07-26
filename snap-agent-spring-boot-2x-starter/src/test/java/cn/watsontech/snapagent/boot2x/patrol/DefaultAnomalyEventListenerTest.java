@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.patrol;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.patrol.AlertConvergence;
@@ -32,7 +32,7 @@ import static org.mockito.Mockito.*;
  */
 class DefaultAnomalyEventListenerTest {
 
-    private AgentExecutor agentExecutor;
+    private AgentService agentExecutor;
     private SkillRegistry skillRegistry;
     private AlertConverger alertConverger;
     private PatrolReportStore reportStore;
@@ -40,7 +40,7 @@ class DefaultAnomalyEventListenerTest {
 
     @BeforeEach
     void setUp() {
-        agentExecutor = mock(AgentExecutor.class);
+        agentExecutor = mock(AgentService.class);
         skillRegistry = mock(SkillRegistry.class);
         alertConverger = mock(AlertConverger.class);
         reportStore = mock(PatrolReportStore.class);

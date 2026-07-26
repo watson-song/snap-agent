@@ -1,8 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,11 +13,19 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
- * {@link ToolProvider} implementation for scanning project directory structure.
+ * 2.x project structure tools exposed via {@code @Tool} annotation methods.
+ *
+ * <p>Refactored from the 1.x {@code ProjectStructureToolProvider} (which implemented
+ * the now-removed {@code ToolProvider} SPI) to individual {@code @Tool} methods
+ * discovered by {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.
+ * Each method becomes a separate {@link cn.watsontech.snapagent.core.tool.ToolCallback}
+ * with auto-generated JSON Schema, registered to
+ * {@link cn.watsontech.snapagent.core.tool.ToolCallbackRegistry} alongside
+ * built-in tools.</p>
  *
  * <p>Tool name: {@code project_structure}. Walks the directory tree under the
  * configured project root up to a specified depth, skipping build artifacts and
@@ -27,81 +34,61 @@ import java.util.Set;
  * <p>All path safety is delegated to {@link CodePathGuard}. The tool never
  * writes, deletes, or modifies files.</p>
  */
-public class ProjectStructureToolProvider implements ToolProvider {
+public class ProjectStructureTools {
 
-    private static final Logger log = LoggerFactory.getLogger(ProjectStructureToolProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(ProjectStructureTools.class);
 
     private static final Set<String> EXCLUDED_DIRS = new HashSet<String>(Arrays.asList(
             "target", ".git", "node_modules", "build", ".idea", ".settings",
             "dist", ".gradle", ".mvn", "__pycache__"));
 
-    private static final String SCHEMA = "{\"name\":\"project_structure\","
-            + "\"description\":\"扫描项目目录结构，返回树形布局。可指定子路径和扫描深度。\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"path\":{\"type\":\"string\",\"description\":\"要扫描的子路径（相对项目根目录），默认为项目根\"},"
-            + "\"depth\":{\"type\":\"integer\",\"description\":\"扫描深度（默认 3）\",\"default\":3},"
-            + "\"pattern\":{\"type\":\"string\",\"description\":\"可选，只返回路径名包含此关键词的条目\"}"
-            + "}}}";
-
     private final CodePathGuard pathGuard;
 
-    public ProjectStructureToolProvider(CodePathGuard pathGuard) {
+    public ProjectStructureTools(CodePathGuard pathGuard) {
         if (pathGuard == null) {
             throw new IllegalArgumentException("pathGuard must not be null");
         }
         this.pathGuard = pathGuard;
     }
 
-    @Override
-    public String name() {
-        return "project_structure";
-    }
+    @Tool(name = "project_structure", description = "扫描项目目录结构，返回树形布局。可指定子路径和扫描深度。")
+    public String projectStructure(
+            @ToolParam(description = "要扫描的子路径（相对项目根目录），默认为项目根", required = false) String path,
+            @ToolParam(description = "扫描深度（默认 3，范围 1-10）", required = false) Integer depth,
+            @ToolParam(description = "可选，只返回路径名包含此关键词的条目", required = false) String pattern) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String pathStr = extractString(args, "path");
-        int depth = extractInt(args, "depth", 3);
-        if (depth <= 0 || depth > 10) {
-            depth = 3;
+        int effectiveDepth = depth != null ? depth : 3;
+        if (effectiveDepth <= 0 || effectiveDepth > 10) {
+            effectiveDepth = 3;
         }
-        String pattern = extractString(args, "pattern");
         String patternLower = pattern != null && !pattern.isEmpty()
                 ? pattern.toLowerCase(Locale.ROOT) : null;
 
-        Path scanRoot = pathGuard.resolveWithinProject(pathStr);
+        Path scanRoot = pathGuard.resolveWithinProject(path);
         if (scanRoot == null) {
-            return ToolResult.error("路径被拒绝：包含 .. 或不在项目根目录下", elapsed(start));
+            return "Error: 路径被拒绝：包含 .. 或不在项目根目录下";
         }
         if (!Files.exists(scanRoot)) {
-            return ToolResult.error("路径不存在: " + scanRoot, elapsed(start));
+            return "Error: 路径不存在: " + scanRoot;
         }
 
-        log.info("Scanning project structure: {} (depth={}, pattern={})", scanRoot, depth, pattern);
+        log.info("Scanning project structure: {} (depth={}, pattern={})", scanRoot, effectiveDepth, pattern);
 
         try {
-            List<Entry> entries = scan(scanRoot, depth, patternLower);
-            String content = formatOutput(scanRoot, entries, depth, pattern);
-            long duration = elapsed(start);
-            int fileCount = (int) entries.stream().filter(e -> !e.isDirectory).count();
-            int dirCount = (int) entries.stream().filter(e -> e.isDirectory).count();
+            List<Entry> entries = scan(scanRoot, effectiveDepth, patternLower);
+            String content = formatOutput(scanRoot, entries, effectiveDepth, pattern);
             boolean truncated = entries.size() >= 500;
             if (truncated) {
-                return ToolResult.truncated(content, entries.size(), duration);
+                return content + "\n# (truncated at 500 entries)\n";
             }
-            return ToolResult.success(content, entries.size(), duration);
+            return content;
         } catch (IOException e) {
             log.error("Project structure scan failed: {}", e.getMessage());
-            return ToolResult.error("Scan failed: " + e.getMessage(), elapsed(start));
+            return "Error: Scan failed: " + e.getMessage();
         }
     }
+
+    // ---- Internal helpers (reused from 1.x ProjectStructureToolProvider) ----
 
     private List<Entry> scan(Path root, int maxDepth, String patternLower) throws IOException {
         List<Entry> entries = new ArrayList<Entry>();
@@ -119,7 +106,7 @@ public class ProjectStructureToolProvider implements ToolProvider {
         }
 
         List<Path> children = new ArrayList<Path>();
-        try (java.util.stream.Stream<Path> stream = Files.list(current)) {
+        try (Stream<Path> stream = Files.list(current)) {
             stream.forEach(children::add);
         }
         // Sort: directories first, then by name
@@ -199,41 +186,6 @@ public class ProjectStructureToolProvider implements ToolProvider {
         sb.append("\n");
 
         return sb.toString();
-    }
-
-    // ---- arg extraction helpers ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private int extractInt(Map<String, Object> args, String key, int defaultValue) {
-        if (args == null) {
-            return defaultValue;
-        }
-        Object value = args.get(key);
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 
     /** Internal entry for tree formatting. */

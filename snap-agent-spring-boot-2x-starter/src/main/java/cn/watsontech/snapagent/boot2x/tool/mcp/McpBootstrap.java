@@ -1,26 +1,27 @@
 package cn.watsontech.snapagent.boot2x.tool.mcp;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * Holds MCP tool providers discovered on startup. Each provider is also
+ * Holds MCP tool callbacks discovered on startup. Each callback is also
  * registered as an individual singleton on the
  * {@link org.springframework.beans.factory.config.ConfigurableListableBeanFactory
- * BeanFactory} so {@code ObjectProvider<ToolProvider>} in the toolDispatcher
- * picks them up automatically. This holder additionally lets the toolDispatcher
- * add them explicitly, ensuring correct ordering regardless of bean creation
- * timing.
+ * BeanFactory} so {@code ObjectProvider} in the pluginRegistry picks them up
+ * automatically. This holder additionally lets the pluginRegistry add them
+ * explicitly, ensuring correct ordering regardless of bean creation timing.
  */
 public class McpBootstrap {
-    private final List<McpToolProvider> providers = new ArrayList<McpToolProvider>();
+    private final List<ToolCallback> callbacks = new ArrayList<ToolCallback>();
 
-    public void addProvider(McpToolProvider provider) {
-        providers.add(provider);
+    public void addCallback(ToolCallback callback) {
+        callbacks.add(callback);
     }
 
-    public List<McpToolProvider> getProviders() {
-        return Collections.unmodifiableList(providers);
+    public List<ToolCallback> getCallbacks() {
+        return Collections.unmodifiableList(callbacks);
     }
 }

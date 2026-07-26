@@ -1,7 +1,8 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.boot2x.conversation.FileConversationStore;
-import cn.watsontech.snapagent.boot2x.context.ProjectContextExtender;
+import cn.watsontech.snapagent.boot2x.context.ProjectContextAdvisor;
 import cn.watsontech.snapagent.boot2x.cost.BudgetEnforcer;
 import cn.watsontech.snapagent.boot2x.cost.CostCalculator;
 import cn.watsontech.snapagent.boot2x.cost.CostSummaryService;
@@ -26,28 +27,28 @@ import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.boot2x.security.SpringSecurityAdapter;
 import cn.watsontech.snapagent.boot2x.skill.ClasspathSkillScanner;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
-import cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider;
-import cn.watsontech.snapagent.boot2x.tool.ConfigReadToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.CodeReaderTools;
+import cn.watsontech.snapagent.boot2x.tool.ConfigReadTools;
 import cn.watsontech.snapagent.boot2x.tool.DataSourceRegistry;
-import cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.GitLogTools;
 import cn.watsontech.snapagent.boot2x.skill.SkillHotReloader;
-import cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.JdbcQueryTools;
 import cn.watsontech.snapagent.boot2x.tool.LogPathGuard;
-import cn.watsontech.snapagent.boot2x.tool.LogReadToolProvider;
-import cn.watsontech.snapagent.boot2x.tool.LogSearchToolProvider;
-import cn.watsontech.snapagent.boot2x.tool.MetricsToolProvider;
-import cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider;
-import cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.LogReadTools;
+import cn.watsontech.snapagent.boot2x.tool.LogSearchTools;
+import cn.watsontech.snapagent.boot2x.tool.MetricsTools;
+import cn.watsontech.snapagent.boot2x.tool.ProjectStructureTools;
+import cn.watsontech.snapagent.boot2x.tool.RedisReadTools;
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
 import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.tool.PluginMetadataScanner;
 import cn.watsontech.snapagent.boot2x.tool.PluginConfigExtractor;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
-import cn.watsontech.snapagent.boot2x.tool.TraceSearchToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.TraceSearchTools;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpBootstrap;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpSseClient;
 import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolInfo;
-import cn.watsontech.snapagent.boot2x.tool.mcp.McpToolProvider;
+import cn.watsontech.snapagent.boot2x.tool.mcp.McpTools;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorContextSummarizer;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorInjectionCache;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorInjectionOrchestrator;
@@ -59,13 +60,12 @@ import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
 import cn.watsontech.snapagent.boot2x.workflow.SimpleWorkflowEngine;
 import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
-import cn.watsontech.snapagent.core.agent.SystemPromptExtender;
 import cn.watsontech.snapagent.core.agent.TaskStore;
-import cn.watsontech.snapagent.core.conversation.ConversationStore;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.cost.CostStore;
 import cn.watsontech.snapagent.core.cost.CostTracker;
+import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -77,11 +77,11 @@ import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallbacks;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -281,42 +281,42 @@ public class SnapAgentAutoConfiguration {
         }
     }
 
-    // ---- JdbcQueryToolProvider ----
+    // ---- JdbcQueryTools ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.jdbc", name = "enabled", havingValue = "true")
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean
-    public JdbcQueryToolProvider jdbcQueryToolProvider(
+    public JdbcQueryTools jdbcQueryTools(
             ObjectProvider<DataSource> dataSourceProvider,
             ObjectProvider<DataSourceRegistry> registryProvider,
             SnapAgentProperties props,
             SqlGuard sqlGuard) {
         DataSourceRegistry registry = registryProvider.getIfAvailable();
         if (registry != null) {
-            log.info("JdbcQueryToolProvider assembled with DataSourceRegistry ({} envs)", registry.size());
-            return new JdbcQueryToolProvider(registry, sqlGuard);
+            log.info("JdbcQueryTools assembled with DataSourceRegistry ({} envs)", registry.size());
+            return new JdbcQueryTools(registry, sqlGuard);
         }
         DataSource ds = dataSourceProvider.getIfAvailable();
-        log.info("JdbcQueryToolProvider assembled with single DataSource: {}",
+        log.info("JdbcQueryTools assembled with single DataSource: {}",
                 props.getJdbc().getDatasourceBeanName());
-        return new JdbcQueryToolProvider(ds, sqlGuard);
+        return new JdbcQueryTools(ds, sqlGuard);
     }
 
-    // ---- RedisReadToolProvider ----
+    // ---- RedisReadTools ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.redis", name = "enabled", havingValue = "true")
     @ConditionalOnClass(name = "org.springframework.data.redis.core.RedisTemplate")
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
             type = "org.springframework.data.redis.core.RedisTemplate")
     @ConditionalOnMissingBean
-    public RedisReadToolProvider redisReadToolProvider(
+    public RedisReadTools redisReadTools(
             org.springframework.beans.factory.BeanFactory beanFactory,
             SnapAgentProperties props) {
         String beanName = props.getRedis().getRedisTemplateBeanName();
         org.springframework.data.redis.core.RedisTemplate template =
                 beanFactory.getBean(beanName, org.springframework.data.redis.core.RedisTemplate.class);
-        log.info("RedisReadToolProvider assembled with RedisTemplate bean '{}'", beanName);
-        return new RedisReadToolProvider(template);
+        log.info("RedisReadTools assembled with RedisTemplate bean '{}'", beanName);
+        return new RedisReadTools(template);
     }
 
     // ---- LogPathGuard ----
@@ -331,13 +331,13 @@ public class SnapAgentAutoConfiguration {
                 props.getLogs().getMaxFileBytes());
     }
 
-    // ---- LogReadToolProvider ----
+    // ---- LogReadTools ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.logs", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public LogReadToolProvider logReadToolProvider(LogPathGuard logPathGuard) {
-        log.info("LogReadToolProvider assembled");
-        return new LogReadToolProvider(logPathGuard);
+    public LogReadTools logReadTools(LogPathGuard logPathGuard) {
+        log.info("LogReadTools assembled");
+        return new LogReadTools(logPathGuard);
     }
 
     // ---- CodePathGuard (v0.3) ----
@@ -359,124 +359,192 @@ public class SnapAgentAutoConfiguration {
                 props.getCode().getMaxLines(), props.getCode().getMaxFileBytes());
     }
 
-    // ---- ProjectContextExtender (v0.3) ----
+    // ---- ProjectContextAdvisor (v0.3) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.code", name = "context-injection",
             havingValue = "true", matchIfMissing = true)
     @ConditionalOnMissingBean
-    public SystemPromptExtender projectContextExtender(CodePathGuard codePathGuard,
+    public ProjectContextAdvisor projectContextAdvisor(CodePathGuard codePathGuard,
                                                         SnapAgentProperties props) {
-        log.info("ProjectContextExtender assembled (structure-depth={})",
+        log.info("ProjectContextAdvisor assembled (structure-depth={})",
                 props.getCode().getStructureDepth());
-        return new ProjectContextExtender(codePathGuard, props.getCode().getStructureDepth());
+        return new ProjectContextAdvisor(codePathGuard);
     }
 
-    // ---- CodeReaderToolProvider (v0.3) ----
+    // ---- CodeReaderTools (v0.3) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
     @ConditionalOnMissingBean
-    public CodeReaderToolProvider codeReaderToolProvider(CodePathGuard codePathGuard) {
-        log.info("CodeReaderToolProvider assembled");
-        return new CodeReaderToolProvider(codePathGuard);
+    public CodeReaderTools codeReaderTools(CodePathGuard codePathGuard) {
+        log.info("CodeReaderTools assembled");
+        return new CodeReaderTools(codePathGuard);
     }
 
-    // ---- ProjectStructureToolProvider (v0.3) ----
+    // ---- ProjectStructureTools (v0.3) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
     @ConditionalOnMissingBean
-    public ProjectStructureToolProvider projectStructureToolProvider(CodePathGuard codePathGuard) {
-        log.info("ProjectStructureToolProvider assembled");
-        return new ProjectStructureToolProvider(codePathGuard);
+    public ProjectStructureTools projectStructureTools(CodePathGuard codePathGuard) {
+        log.info("ProjectStructureTools assembled");
+        return new ProjectStructureTools(codePathGuard);
     }
 
-    // ---- GitLogToolProvider (v0.3) ----
+    // ---- GitLogTools (v0.3) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
     @ConditionalOnMissingBean
-    public GitLogToolProvider gitLogToolProvider(CodePathGuard codePathGuard) {
-        log.info("GitLogToolProvider assembled");
-        return new GitLogToolProvider(codePathGuard);
+    public GitLogTools gitLogTools(CodePathGuard codePathGuard) {
+        log.info("GitLogTools assembled");
+        return new GitLogTools(codePathGuard);
     }
 
-    // ---- MetricsToolProvider (v0.4) ----
+    // ---- MetricsTools (v0.4) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.metrics", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public MetricsToolProvider metricsToolProvider(SnapAgentProperties props) {
-        log.info("MetricsToolProvider assembled (base-url={})", props.getMetrics().getBaseUrl());
-        return new MetricsToolProvider(props.getMetrics());
+    public MetricsTools metricsTools(SnapAgentProperties props) {
+        log.info("MetricsTools assembled (base-url={})", props.getMetrics().getBaseUrl());
+        return new MetricsTools(props.getMetrics());
     }
 
-    // ---- LogSearchToolProvider (v0.4) ----
+    // ---- LogSearchTools (v0.4) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.log-search", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public LogSearchToolProvider logSearchToolProvider(SnapAgentProperties props) {
-        log.info("LogSearchToolProvider assembled (base-url={})", props.getLogSearch().getBaseUrl());
-        return new LogSearchToolProvider(props.getLogSearch());
+    public LogSearchTools logSearchTools(SnapAgentProperties props) {
+        log.info("LogSearchTools assembled (base-url={})", props.getLogSearch().getBaseUrl());
+        return new LogSearchTools(props.getLogSearch());
     }
 
-    // ---- TraceSearchToolProvider (v0.4) ----
+    // ---- TraceSearchTools (v0.4) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.trace", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public TraceSearchToolProvider traceSearchToolProvider(SnapAgentProperties props) {
-        log.info("TraceSearchToolProvider assembled (base-url={})", props.getTrace().getBaseUrl());
-        return new TraceSearchToolProvider(props.getTrace());
+    public TraceSearchTools traceSearchTools(SnapAgentProperties props) {
+        log.info("TraceSearchTools assembled (base-url={})", props.getTrace().getBaseUrl());
+        return new TraceSearchTools(props.getTrace());
     }
 
-    // ---- ConfigReadToolProvider (v0.4) ----
+    // ---- ConfigReadTools (v0.4) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
             prefix = "snap-agent.config-read", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
-    public ConfigReadToolProvider configReadToolProvider(
+    public ConfigReadTools configReadTools(
             SnapAgentProperties props,
             org.springframework.core.env.Environment environment) {
-        log.info("ConfigReadToolProvider assembled");
-        return new ConfigReadToolProvider(props.getConfigRead(), environment);
+        log.info("ConfigReadTools assembled");
+        return new ConfigReadTools(props.getConfigRead(), environment);
     }
 
     // ---- PluginRegistry (v0.5) ----
-    // Wraps every built-in ToolProvider bean as a system plugin so the
-    // ToolDispatcher routes via PluginRegistry instead of a static map.
+    // Wraps every built-in *Tools bean as a system plugin so the
+    // ToolCallbackRegistry routes via PluginRegistry instead of a static map.
     @Bean
     @ConditionalOnMissingBean
     public PluginRegistry pluginRegistry(
-            ObjectProvider<ToolProvider> toolProviders,
+            ObjectProvider<JdbcQueryTools> jdbcTools,
+            ObjectProvider<RedisReadTools> redisTools,
+            ObjectProvider<LogReadTools> logReadTools,
+            ObjectProvider<CodeReaderTools> codeReaderTools,
+            ObjectProvider<ProjectStructureTools> projectStructureTools,
+            ObjectProvider<GitLogTools> gitLogTools,
+            ObjectProvider<MetricsTools> metricsTools,
+            ObjectProvider<LogSearchTools> logSearchTools,
+            ObjectProvider<TraceSearchTools> traceSearchTools,
+            ObjectProvider<ConfigReadTools> configReadTools,
             ObjectProvider<McpBootstrap> mcpBootstrapProvider) {
         InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
-        List<ToolProvider> providers = new ArrayList<ToolProvider>(
-                toolProviders.orderedStream().collect(java.util.stream.Collectors.toList()));
+        // Collect all tools beans and register their ToolCallbacks
+        List<Object> toolsBeans = new ArrayList<>();
+        addIfAvailable(toolsBeans, jdbcTools);
+        addIfAvailable(toolsBeans, redisTools);
+        addIfAvailable(toolsBeans, logReadTools);
+        addIfAvailable(toolsBeans, codeReaderTools);
+        addIfAvailable(toolsBeans, projectStructureTools);
+        addIfAvailable(toolsBeans, gitLogTools);
+        addIfAvailable(toolsBeans, metricsTools);
+        addIfAvailable(toolsBeans, logSearchTools);
+        addIfAvailable(toolsBeans, traceSearchTools);
+        addIfAvailable(toolsBeans, configReadTools);
+
         McpBootstrap mcp = mcpBootstrapProvider.getIfAvailable();
         if (mcp != null) {
-            providers.addAll(mcp.getProviders());
+            for (ToolCallback cb : mcp.getCallbacks()) {
+                PluginDescriptor desc = new PluginDescriptor(
+                    cb.getName(), cb.getName(), cb.getName(), "", "built-in",
+                    true, true, true, new ToolCallback[]{cb}, null, null, null);
+                registry.register(desc);
+            }
         }
-        for (ToolProvider p : providers) {
-            if (p == null || p.name() == null) continue;
-            PluginDescriptor desc = new PluginDescriptor(
-                    p.name(), p.name(), p.name(), "", "built-in",
-                    true, true, true, ToolCallbacks.from(p), null, null, null);
-            registry.register(desc);
+
+        for (Object tools : toolsBeans) {
+            if (tools == null) continue;
+            ToolCallback[] callbacks = ToolCallbacks.from(tools);
+            for (ToolCallback cb : callbacks) {
+                PluginDescriptor desc = new PluginDescriptor(
+                    cb.getName(), cb.getName(), cb.getName(), "", "built-in",
+                    true, true, true, new ToolCallback[]{cb}, null, null, null);
+                registry.register(desc);
+            }
         }
-        log.info("PluginRegistry assembled with {} system plugin(s)", providers.size());
+        log.info("PluginRegistry assembled with {} tool(s)", registry.listPlugins().size());
         return registry;
     }
 
-    // ---- ToolDispatcher ----
+    private void addIfAvailable(List<Object> list, ObjectProvider<?> provider) {
+        Object bean = provider.getIfAvailable();
+        if (bean != null) list.add(bean);
+    }
+
+    // ---- ToolCallbackRegistry ----
     @Bean
     @ConditionalOnMissingBean
-    public ToolDispatcher toolDispatcher(
-            PluginRegistry pluginRegistry,
-            SnapAgentProperties props) {
-        log.info("ToolDispatcher assembled with PluginRegistry ({} plugin(s))",
-                pluginRegistry.list().size());
-        return new ToolDispatcher(pluginRegistry, props.getAgent().getMaxToolResultChars());
+    public ToolCallbackRegistry toolCallbackRegistry(PluginRegistry pluginRegistry) {
+        // PluginRegistry's default ToolCallbackRegistry implementation
+        return new ToolCallbackRegistry() {
+            @Override
+            public ToolCallback find(String name) {
+                for (PluginDescriptor desc : pluginRegistry.listPlugins()) {
+                    if (desc.isEnabled() && desc.getToolCallbacks() != null) {
+                        for (ToolCallback cb : desc.getToolCallbacks()) {
+                            if (cb.getName().equals(name)) return cb;
+                        }
+                    }
+                }
+                return null;
+            }
+            @Override
+            public List<ToolCallback> getAll() {
+                List<ToolCallback> all = new ArrayList<>();
+                for (PluginDescriptor desc : pluginRegistry.listPlugins()) {
+                    if (desc.isEnabled() && desc.getToolCallbacks() != null) {
+                        for (ToolCallback cb : desc.getToolCallbacks()) {
+                            all.add(cb);
+                        }
+                    }
+                }
+                return all;
+            }
+            @Override
+            public String toToolDefinitionsJson() {
+                StringBuilder sb = new StringBuilder("[");
+                boolean first = true;
+                for (ToolCallback cb : getAll()) {
+                    if (!first) sb.append(",");
+                    sb.append("{\"name\":\"").append(cb.getName()).append("\",\"schema\":")
+                      .append(cb.getJsonSchema()).append("}");
+                    first = false;
+                }
+                sb.append("]");
+                return sb.toString();
+            }
+        };
     }
 
     // ---- PluginUploader (v0.5) ----
@@ -498,10 +566,10 @@ public class SnapAgentAutoConfiguration {
 
     // ---- McpBootstrap (MCP server discovery) ----
     // When snap-agent.mcp.enabled=true, connect to each configured MCP server,
-    // discover tools, register each McpToolProvider as an individual singleton on
-    // the bean factory (so ObjectProvider<ToolProvider> can see them), and hold
-    // them in McpBootstrap so toolDispatcher can add them explicitly too. When
-    // MCP is disabled (the default), this bean is not created and toolDispatcher
+    // discover tools, register each McpTools as an individual singleton on
+    // the bean factory (so ObjectProvider<ToolCallback> can see them), and hold
+    // them in McpBootstrap so toolCallbackRegistry can add them explicitly too. When
+    // MCP is disabled (the default), this bean is not created and toolCallbackRegistry
     // behaves exactly as before.
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.mcp", name = "enabled", havingValue = "true")
@@ -528,12 +596,12 @@ public class SnapAgentAutoConfiguration {
                         server.getAuthHeaderValue(), httpClient);
                 List<McpToolInfo> tools = client.connect();
                 for (McpToolInfo tool : tools) {
-                    McpToolProvider provider = new McpToolProvider(
+                    ToolCallback callback = McpTools.from(
                             serverName, tool.getName(), tool.getDescription(),
                             tool.getInputSchema(), client);
                     String beanName = "mcpTool_" + serverName + "_" + tool.getName();
-                    beanFactory.registerSingleton(beanName, provider);
-                    bootstrap.addProvider(provider);
+                    beanFactory.registerSingleton(beanName, callback);
+                    bootstrap.addCallback(callback);
                 }
                 log.info("Registered {} MCP tools from server '{}'", tools.size(), serverName);
             } catch (Exception e) {
@@ -562,7 +630,7 @@ public class SnapAgentAutoConfiguration {
     // ---- SkillRegistry ----
     @Bean
     @ConditionalOnMissingBean
-    public SkillRegistry skillRegistry(SnapAgentProperties props, ToolDispatcher toolDispatcher,
+    public SkillRegistry skillRegistry(SnapAgentProperties props, ToolCallbackRegistry toolCallbackRegistry,
                                        ClasspathSkillScanner classpathSkillScanner) {
         // Scan classpath for builtin skills
         List<cn.watsontech.snapagent.core.skill.SkillMeta> builtinSkills =
@@ -571,7 +639,7 @@ public class SnapAgentAutoConfiguration {
         // Resolve upload dir (filesystem, read-write)
         Path uploadDir = resolveUploadDir(props.getUploadSkillsDir());
 
-        return new SkillRegistry(uploadDir, builtinSkills, toolDispatcher);
+        return new SkillRegistry(uploadDir, builtinSkills, toolCallbackRegistry);
     }
 
     // ---- SkillHotReloader (auto-refresh on file change) ----
@@ -585,20 +653,20 @@ public class SnapAgentAutoConfiguration {
         return new SkillHotReloader(uploadDir, skillRegistry, 1000);
     }
 
-    // ---- AgentExecutor ----
+    // ---- AgentService ----
     @Bean
     @ConditionalOnMissingBean
-    public AgentExecutor agentExecutor(
+    public AgentService agentService(
             ObjectProvider<LlmClient> llmClientProvider,
-            ToolDispatcher toolDispatcher,
+            ToolCallbackRegistry toolCallbackRegistry,
             TaskStore taskStore,
             SnapAgentProperties props,
-            ObjectProvider<SystemPromptExtender> extenderProvider,
+            ObjectProvider<Advisor> advisorProvider,
             ObjectProvider<CostTracker> costTrackerProvider,
             ObjectProvider<CostCalculator> costCalculatorProvider) {
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         if (llmClient == null) {
-            log.warn("LlmClient not available; AgentExecutor will not function");
+            log.warn("LlmClient not available; AgentService will not function");
         }
         // Wrap LlmClient with CostTrackingLlmClient when cost tracking is enabled
         CostTracker costTracker = costTrackerProvider.getIfAvailable();
@@ -617,18 +685,12 @@ public class SnapAgentAutoConfiguration {
                     props.getIssueClosure().getSystemUserId(), "");
             log.info("LlmClient wrapped with CostTrackingLlmClient (cost tracking enabled)");
         }
-        List<SystemPromptExtender> extenders = extenderProvider.orderedStream()
+        List<Advisor> advisors = advisorProvider.orderedStream()
                 .collect(java.util.stream.Collectors.toList());
-        if (!extenders.isEmpty()) {
-            log.info("AgentExecutor assembled with {} SystemPromptExtender(s): {}",
-                    extenders.size(),
-                    extenders.stream()
-                            .map(e -> e.getClass().getSimpleName())
-                            .collect(java.util.stream.Collectors.joining(", ")));
-        }
-        return new AgentExecutor(llmClient, toolDispatcher, taskStore,
-                props.getAgent().getMaxTurns(), props.getLlm().getMaxTokens(),
-                extenders);
+        log.info("AgentService assembled with {} Advisor(s): {}", advisors.size(),
+                advisors.stream().map(Advisor::getName).collect(java.util.stream.Collectors.joining(", ")));
+        return new AgentService(llmClient, toolCallbackRegistry, taskStore,
+                props.getAgent().getMaxTurns(), advisors);
     }
 
     // ---- ThreadPoolTaskExecutor ----
@@ -698,9 +760,9 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public SnapAgentController snapAgentController(
             SkillRegistry skillRegistry,
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             TaskStore taskStore,
-            ToolDispatcher toolDispatcher,
+            ToolCallbackRegistry toolCallbackRegistry,
             SnapAgentProperties properties,
             ObjectProvider<SecurityGateway> securityGatewayProvider,
             RateLimiter rateLimiter,
@@ -755,7 +817,7 @@ public class SnapAgentAutoConfiguration {
             }
         }
         SnapAgentController controller = new SnapAgentController(
-                skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, gateway, rateLimiter, taskExecutor, relay, llmClient,
                 auditLogger, conversationStore,
                 patrolScheduler, alertConverger, bugfixSuggester, issueClosureService,
@@ -841,7 +903,7 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnMissingBean
     public cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler scheduledPatrolScheduler(
             org.springframework.scheduling.TaskScheduler patrolTaskScheduler,
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             SkillRegistry skillRegistry,
             cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
             cn.watsontech.snapagent.core.patrol.PatrolLockProvider patrolLockProvider,
@@ -857,7 +919,7 @@ public class SnapAgentAutoConfiguration {
                 patrolLockProvider.type(), pushChannels.size(), props.getPatrol().getLockTtlSeconds(),
                 alertConverger != null ? alertConverger.getClass().getSimpleName() : "none");
         return new cn.watsontech.snapagent.boot2x.patrol.ScheduledPatrolScheduler(
-                patrolTaskScheduler, agentExecutor, skillRegistry, patrolReportStore,
+                patrolTaskScheduler, agentService, skillRegistry, patrolReportStore,
                 patrolLockProvider, props.getPatrol().getLockTtlSeconds(), pushChannels, alertConverger);
     }
 
@@ -879,7 +941,7 @@ public class SnapAgentAutoConfiguration {
     @ConditionalOnProperty(prefix = "snap-agent.patrol", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
     public cn.watsontech.snapagent.boot2x.patrol.DefaultAnomalyEventListener defaultAnomalyEventListener(
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             SkillRegistry skillRegistry,
             ObjectProvider<cn.watsontech.snapagent.core.patrol.AlertConverger> alertConvergerProvider,
             cn.watsontech.snapagent.core.patrol.PatrolReportStore patrolReportStore,
@@ -890,7 +952,7 @@ public class SnapAgentAutoConfiguration {
                 .collect(java.util.stream.Collectors.toList()));
         log.info("DefaultAnomalyEventListener assembled (pushChannels={})", pushChannels.size());
         return new cn.watsontech.snapagent.boot2x.patrol.DefaultAnomalyEventListener(
-                agentExecutor, skillRegistry, alertConvergerProvider.getIfAvailable(),
+                agentService, skillRegistry, alertConvergerProvider.getIfAvailable(),
                 patrolReportStore, pushChannels);
     }
 
@@ -1077,13 +1139,13 @@ public class SnapAgentAutoConfiguration {
             prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean(cn.watsontech.snapagent.core.issue.VerificationRunner.class)
     public SimpleVerificationRunner simpleVerificationRunner(
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             TaskStore taskStore,
             SkillRegistry skillRegistry,
             SnapAgentProperties properties) {
         log.info("SimpleVerificationRunner assembled (system-user-id={})",
                 properties.getIssueClosure().getSystemUserId());
-        return new SimpleVerificationRunner(agentExecutor, taskStore, skillRegistry,
+        return new SimpleVerificationRunner(agentService, taskStore, skillRegistry,
                 properties.getIssueClosure().getSystemUserId());
     }
 
@@ -1092,7 +1154,7 @@ public class SnapAgentAutoConfiguration {
             prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean
     public IssueClosureService issueClosureService(
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             TaskStore taskStore,
             SkillRegistry skillRegistry,
             IssueStore issueStore,
@@ -1103,7 +1165,7 @@ public class SnapAgentAutoConfiguration {
             SnapAgentProperties properties) {
         log.info("IssueClosureService assembled (system-user-id={})",
                 properties.getIssueClosure().getSystemUserId());
-        return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
+        return new IssueClosureService(agentService, taskStore, skillRegistry,
                 issueStore, issueTracker,
                 sedimentationServiceProvider.getIfAvailable(),
                 solutionSuggesterProvider.getIfAvailable(),
@@ -1222,12 +1284,12 @@ public class SnapAgentAutoConfiguration {
             prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
     @ConditionalOnMissingBean(WorkflowEngine.class)
     public SimpleWorkflowEngine simpleWorkflowEngine(
-            AgentExecutor agentExecutor,
+            AgentService agentService,
             SkillRegistry skillRegistry,
             SnapAgentProperties props) {
         String systemUserId = props.getIssueClosure().getSystemUserId();
         log.info("SimpleWorkflowEngine assembled (systemUserId={})", systemUserId);
-        return new SimpleWorkflowEngine(agentExecutor, skillRegistry, systemUserId);
+        return new SimpleWorkflowEngine(agentService, skillRegistry, systemUserId);
     }
 
     // ---- file system helpers ----

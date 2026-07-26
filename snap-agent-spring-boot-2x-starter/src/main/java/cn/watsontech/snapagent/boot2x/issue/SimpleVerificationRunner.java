@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
@@ -33,7 +33,7 @@ public class SimpleVerificationRunner implements VerificationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(SimpleVerificationRunner.class);
 
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final TaskStore taskStore;
     private final SkillRegistry skillRegistry;
     private final String systemUserId;
@@ -41,16 +41,16 @@ public class SimpleVerificationRunner implements VerificationRunner {
     /**
      * Construct the verification runner.
      *
-     * @param agentExecutor the agent executor (for re-running the diagnostic skill)
+     * @param agentService the agent executor (for re-running the diagnostic skill)
      * @param taskStore      the task store (for loading the original diagnostic task)
      * @param skillRegistry the skill registry (for resolving skill metadata)
      * @param systemUserId  the system user ID used when executing the verification task
      */
-    public SimpleVerificationRunner(AgentExecutor agentExecutor,
+    public SimpleVerificationRunner(AgentService agentService,
                                     TaskStore taskStore,
                                     SkillRegistry skillRegistry,
                                     String systemUserId) {
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.taskStore = taskStore;
         this.skillRegistry = skillRegistry;
         this.systemUserId = systemUserId;
@@ -89,7 +89,7 @@ public class SimpleVerificationRunner implements VerificationRunner {
 
         Map<String, String> inputs = originalTask.getInputs();
         AgentTask verifyTask = AgentTask.create(systemUserId, skillName, inputs, null);
-        agentExecutor.execute(verifyTask, skill);
+        agentService.execute(verifyTask, skill);
 
         String beforeStatus = originalTask.getStatus() != null
                 ? originalTask.getStatus().name() : null;

@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
@@ -44,7 +44,7 @@ import static org.mockito.Mockito.when;
  */
 class IssueClosureServiceTest {
 
-    private AgentExecutor agentExecutor;
+    private AgentService agentExecutor;
     private TaskStore taskStore;
     private SkillRegistry skillRegistry;
     private IssueStore issueStore;
@@ -57,7 +57,7 @@ class IssueClosureServiceTest {
 
     @BeforeEach
     void setUp() {
-        agentExecutor = mock(AgentExecutor.class);
+        agentExecutor = mock(AgentService.class);
         taskStore = mock(TaskStore.class);
         skillRegistry = mock(SkillRegistry.class);
         issueStore = mock(IssueStore.class);
@@ -499,7 +499,7 @@ class IssueClosureServiceTest {
         assertThat(result.getStatus()).isEqualTo(IssueStatus.SOLUTION_PROPOSED);
         assertThat(result.getSolution()).isSameAs(expectedSuggestion);
         assertThat(result.getSolution().getRecommendedOptionId()).isEqualTo("opt-1");
-        // AgentExecutor should NOT be invoked when a suggester is configured.
+        // AgentService should NOT be invoked when a suggester is configured.
         verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
         verify(issueStore).save(any(IssueClosure.class));
     }

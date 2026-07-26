@@ -18,9 +18,9 @@ import java.util.HashMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link ProjectContextExtender}.
+ * Unit tests for {@link ProjectContextAdvisor}.
  */
-class ProjectContextExtenderTest {
+class ProjectContextAdvisorTest {
 
     @TempDir
     Path tempDir;
@@ -66,7 +66,7 @@ class ProjectContextExtenderTest {
 
     @Test
     void shouldGenerateSummaryWithModules() {
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         String summary = extender.getCachedSummary();
 
@@ -82,7 +82,7 @@ class ProjectContextExtenderTest {
 
     @Test
     void shouldIncludeKeyDirectoriesInSummary() {
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         String summary = extender.getCachedSummary();
 
@@ -91,7 +91,7 @@ class ProjectContextExtenderTest {
 
     @Test
     void shouldCountJavaFilesPerModule() {
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         String summary = extender.getCachedSummary();
 
@@ -106,7 +106,7 @@ class ProjectContextExtenderTest {
         Files.write(projectRoot.resolve("target/classes/Compiled.class"),
                 Arrays.asList("compiled"));
 
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         String summary = extender.getCachedSummary();
 
@@ -116,15 +116,15 @@ class ProjectContextExtenderTest {
 
     @Test
     void shouldReturnSameCachedSummaryOnMultipleCalls() {
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         SkillMeta skill = new SkillMeta("test", "desc",
                 Collections.emptyList(), Collections.emptyList(),
                 "body", SkillAvailability.AVAILABLE, null);
         AgentTask task = AgentTask.create("u", "s", new HashMap<>(), "m");
 
-        String first = extender.extend(skill, task);
-        String second = extender.extend(skill, task);
+        String first = extender.getCachedSummary();
+        String second = extender.getCachedSummary();
 
         assertThat(first).isSameAs(second);
     }
@@ -140,7 +140,7 @@ class ProjectContextExtenderTest {
                     Arrays.asList("public class MainApplicationClass {}"));
         }
 
-        ProjectContextExtender extender = new ProjectContextExtender(pathGuard, 5);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(pathGuard, 5);
 
         String summary = extender.getCachedSummary();
 
@@ -155,7 +155,7 @@ class ProjectContextExtenderTest {
         CodePathGuard emptyGuard = new CodePathGuard(emptyRoot.toString(),
                 Arrays.asList(".java"), 500, 1024);
 
-        ProjectContextExtender extender = new ProjectContextExtender(emptyGuard, 3);
+        ProjectContextAdvisor extender = new ProjectContextAdvisor(emptyGuard, 3);
 
         String summary = extender.getCachedSummary();
 

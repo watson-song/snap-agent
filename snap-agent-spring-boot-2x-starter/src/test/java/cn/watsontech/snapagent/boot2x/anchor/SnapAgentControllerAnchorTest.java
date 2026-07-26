@@ -3,13 +3,13 @@ package cn.watsontech.snapagent.boot2x.anchor;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,9 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SnapAgentControllerAnchorTest {
 
     @Mock private SkillRegistry skillRegistry;
-    @Mock private AgentExecutor agentExecutor;
+    @Mock private AgentService agentExecutor;
     @Mock private TaskStore taskStore;
-    @Mock private ToolDispatcher toolDispatcher;
+    @Mock private ToolCallbackRegistry toolDispatcher;
     @Mock private SecurityGateway securityGateway;
     @Mock private AsyncTaskExecutor taskExecutor;
     @Mock private RateLimiter rateLimiter;

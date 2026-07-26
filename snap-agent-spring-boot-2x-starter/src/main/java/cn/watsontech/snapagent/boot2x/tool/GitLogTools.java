@@ -1,8 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,14 +12,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
- * {@link ToolProvider} implementation for viewing git history.
+ * 2.x git history tool exposed via {@code @Tool} annotation methods.
  *
- * <p>Tool name: {@code git_log}. Provides three modes:
+ * <p>Refactored from the 1.x {@code GitLogToolProvider} (which implemented the
+ * now-removed {@code ToolProvider} SPI) to a single {@code @Tool} method
+ * discovered by {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.
+ *
+ * <p>Provides three modes:
  * <ul>
  *   <li>{@code log} — commit history (optionally limited to a file)</li>
  *   <li>{@code blame} — line-level author attribution for a file</li>
@@ -31,104 +33,84 @@ import java.util.regex.Pattern;
  * command injection. {@code commit_hash} is validated against
  * {@code ^[0-9a-f]{7,40}$}. All file paths pass through {@link CodePathGuard}.</p>
  */
-public class GitLogToolProvider implements ToolProvider {
+public class GitLogTools {
 
-    private static final Logger log = LoggerFactory.getLogger(GitLogToolProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(GitLogTools.class);
 
     private static final Pattern COMMIT_HASH_PATTERN = Pattern.compile("^[0-9a-f]{7,40}$");
 
     private static final int PROCESS_TIMEOUT_SECONDS = 10;
     private static final int MAX_ENTRIES_LIMIT = 100;
 
-    private static final String SCHEMA = "{\"name\":\"git_log\","
-            + "\"description\":\"查看项目的 git 历史。支持 log（提交历史）、blame（行级别作者）和 show（查看具体 commit）。\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"file_path\":{\"type\":\"string\",\"description\":\"可选，限定到指定文件的 git 历史\"},"
-            + "\"mode\":{\"type\":\"string\",\"enum\":[\"log\",\"blame\",\"show\"],\"description\":\"操作模式\",\"default\":\"log\"},"
-            + "\"max_entries\":{\"type\":\"integer\",\"description\":\"最大返回条数（默认 20）\",\"default\":20},"
-            + "\"commit_hash\":{\"type\":\"string\",\"description\":\"commit hash（仅 show 模式）\"}"
-            + "}}}";
-
     private final CodePathGuard pathGuard;
 
-    public GitLogToolProvider(CodePathGuard pathGuard) {
+    public GitLogTools(CodePathGuard pathGuard) {
         if (pathGuard == null) {
             throw new IllegalArgumentException("pathGuard must not be null");
         }
         this.pathGuard = pathGuard;
     }
 
-    @Override
-    public String name() {
-        return "git_log";
-    }
+    @Tool(name = "git_log", description = "查看项目的 git 历史。支持 log（提交历史）、blame（行级别作者）和 show（查看具体 commit）。")
+    public String gitLog(
+            @ToolParam(description = "可选，限定到指定文件的 git 历史", required = false) String file_path,
+            @ToolParam(description = "操作模式: log/blame/show（可选，默认 log）", required = false) String mode,
+            @ToolParam(description = "最大返回条数（可选，默认 20，上限 100）", required = false) Integer max_entries,
+            @ToolParam(description = "commit hash（仅 show 模式必填，只接受 7-40 位十六进制字符）", required = false) String commit_hash) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String mode = extractString(args, "mode", "log");
-        String filePath = extractString(args, "file_path");
-        int maxEntries = extractInt(args, "max_entries", 20);
+        String modeStr = mode != null && !mode.isEmpty() ? mode : "log";
+        int maxEntries = max_entries != null ? max_entries : 20;
         if (maxEntries < 1 || maxEntries > MAX_ENTRIES_LIMIT) {
             maxEntries = 20;
         }
-        String commitHash = extractString(args, "commit_hash");
 
         // Validate commit hash for show mode
-        if ("show".equals(mode)) {
-            if (commitHash == null || commitHash.isEmpty()) {
-                return ToolResult.error("show 模式需要 commit_hash 参数", elapsed(start));
+        if ("show".equals(modeStr)) {
+            if (commit_hash == null || commit_hash.isEmpty()) {
+                return "Error: show 模式需要 commit_hash 参数";
             }
-            if (!COMMIT_HASH_PATTERN.matcher(commitHash).matches()) {
-                return ToolResult.error("commit_hash 格式无效，只接受 7-40 位十六进制字符", elapsed(start));
+            if (!COMMIT_HASH_PATTERN.matcher(commit_hash).matches()) {
+                return "Error: commit_hash 格式无效，只接受 7-40 位十六进制字符";
             }
         }
 
         // Validate file path if provided
         Path validatedPath = null;
-        if (filePath != null && !filePath.isEmpty()) {
-            CodePathGuard.Result guardResult = pathGuard.validate(filePath);
+        if (file_path != null && !file_path.isEmpty()) {
+            CodePathGuard.Result guardResult = pathGuard.validate(file_path);
             if (!guardResult.isAllowed()) {
-                return ToolResult.error(guardResult.getReason(), elapsed(start));
+                return "Error: " + guardResult.getReason();
             }
             validatedPath = guardResult.getPath();
         }
 
         // blame mode requires a file path
-        if ("blame".equals(mode) && validatedPath == null) {
-            return ToolResult.error("blame 模式需要 file_path 参数", elapsed(start));
+        if ("blame".equals(modeStr) && validatedPath == null) {
+            return "Error: blame 模式需要 file_path 参数";
         }
 
-        List<String> command = buildCommand(mode, validatedPath, maxEntries, commitHash);
+        List<String> command = buildCommand(modeStr, validatedPath, maxEntries, commit_hash);
         if (command == null) {
-            return ToolResult.error("不支持的 mode: " + mode, elapsed(start));
+            return "Error: 不支持的 mode: " + modeStr;
         }
 
-        log.info("Executing git command: {} (mode={})", command, mode);
+        log.info("Executing git command: {} (mode={})", command, modeStr);
 
         try {
             String output = runGit(command);
-            String content = formatOutput(mode, output, validatedPath, maxEntries, commitHash);
+            String content = formatOutput(modeStr, output, validatedPath, maxEntries, commit_hash);
             int lineCount = countLines(output);
-            long duration = elapsed(start);
-            boolean truncated = lineCount >= maxEntries && "log".equals(mode);
+            boolean truncated = lineCount >= maxEntries && "log".equals(modeStr);
             if (truncated) {
-                return ToolResult.truncated(content, lineCount, duration);
+                return content + "\n# (output may be truncated — increase max_entries to see more)\n";
             }
-            return ToolResult.success(content, lineCount, duration);
+            return content;
         } catch (IOException e) {
             log.error("Git command failed: {}", e.getMessage());
-            return ToolResult.error("Git command failed: " + e.getMessage(), elapsed(start));
+            return "Error: Git command failed: " + e.getMessage();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return ToolResult.error("Git command timed out", elapsed(start));
+            return "Error: Git command timed out";
         }
     }
 
@@ -225,7 +207,7 @@ public class GitLogToolProvider implements ToolProvider {
     }
 
     private String formatOutput(String mode, String output, Path filePath,
-                                 int maxEntries, String commitHash) {
+                                int maxEntries, String commitHash) {
         StringBuilder sb = new StringBuilder();
         if ("log".equals(mode)) {
             sb.append("# Git Log (max ").append(maxEntries).append(")");
@@ -265,45 +247,5 @@ public class GitLogToolProvider implements ToolProvider {
             }
         }
         return count;
-    }
-
-    // ---- arg extraction helpers ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private String extractString(Map<String, Object> args, String key, String defaultValue) {
-        String value = extractString(args, key);
-        return value != null && !value.isEmpty() ? value : defaultValue;
-    }
-
-    private int extractInt(Map<String, Object> args, String key, int defaultValue) {
-        if (args == null) {
-            return defaultValue;
-        }
-        Object value = args.get(key);
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 }

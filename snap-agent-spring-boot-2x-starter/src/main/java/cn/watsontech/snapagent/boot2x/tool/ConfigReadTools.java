@@ -1,9 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.ConfigurableEnvironment;
@@ -21,7 +20,16 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * {@link ToolProvider} implementation for reading application configuration.
+ * 2.x config-read tool exposed via the {@code @Tool} annotation pattern.
+ *
+ * <p>Refactored from the 1.x {@code ConfigReadToolProvider} (which implemented
+ * the now-removed {@code ToolProvider} SPI) to an {@code @Tool}-annotated
+ * method discovered by {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.
+ * The method returns a {@link String} directly (success text or {@code "Error: ..."}
+ * on failure) instead of {@code ToolResult}.</p>
+ *
+ * <p>Still extends {@link ObservabilityHttpClient} so the Nacos HTTP call can
+ * reuse the shared {@code httpGet} helper (and remain overridable in tests).</p>
  *
  * <p>Tool name: {@code config_read}. Supports two sources:</p>
  * <ul>
@@ -34,26 +42,14 @@ import java.util.Map;
  *
  * <p>See design doc §4.4 for the contract.</p>
  */
-public class ConfigReadToolProvider extends ObservabilityHttpClient implements ToolProvider {
+public class ConfigReadTools extends ObservabilityHttpClient {
 
-    private static final Logger log = LoggerFactory.getLogger(ConfigReadToolProvider.class);
-
-    private static final String SCHEMA = "{\"name\":\"config_read\","
-            + "\"description\":\"Read application configuration. Supports local Spring properties (no network) and remote Nacos configs. Use for verifying current config, comparing across environments, and diagnosing config-related issues.\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"source\":{\"type\":\"string\",\"enum\":[\"local\",\"nacos\"],\"description\":\"Config source. 'local' reads Spring Environment; 'nacos' reads from Nacos.\",\"default\":\"local\"},"
-            + "\"key_prefix\":{\"type\":\"string\",\"description\":\"Property key prefix to filter local config (e.g. 'spring.datasource'). Empty = all properties. Only for source=local.\"},"
-            + "\"nacos_data_id\":{\"type\":\"string\",\"description\":\"Nacos config data ID (when source=nacos). Required for nacos.\"},"
-            + "\"nacos_group\":{\"type\":\"string\",\"description\":\"Nacos config group. Default 'DEFAULT_GROUP'.\",\"default\":\"DEFAULT_GROUP\"},"
-            + "\"nacos_namespace\":{\"type\":\"string\",\"description\":\"Nacos namespace ID. Optional, uses config default if omitted.\"}"
-            + "},"
-            + "\"required\":[\"source\"]}}";
+    private static final Logger log = LoggerFactory.getLogger(ConfigReadTools.class);
 
     private final SnapAgentProperties.ConfigRead config;
     private final Environment environment;
 
-    public ConfigReadToolProvider(SnapAgentProperties.ConfigRead config, Environment environment) {
+    public ConfigReadTools(SnapAgentProperties.ConfigRead config, Environment environment) {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
@@ -64,39 +60,26 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
         this.environment = environment;
     }
 
-    @Override
-    public String name() {
-        return "config_read";
-    }
+    @Tool(name = "config_read", description = "Read application configuration. Supports local Spring properties (no network) and remote Nacos configs. Use for verifying current config, comparing across environments, and diagnosing config-related issues.")
+    public String configRead(
+            @ToolParam(description = "Config source. 'local' reads Spring Environment; 'nacos' reads from Nacos.", required = false) String source,
+            @ToolParam(description = "Property key prefix to filter local config (e.g. 'spring.datasource'). Empty = all properties. Only for source=local.", required = false) String key_prefix,
+            @ToolParam(description = "Nacos config data ID (when source=nacos). Required for nacos.", required = false) String nacos_data_id,
+            @ToolParam(description = "Nacos config group. Default 'DEFAULT_GROUP'.", required = false) String nacos_group,
+            @ToolParam(description = "Nacos namespace ID. Optional, uses config default if omitted.", required = false) String nacos_namespace) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String source = extractString(args, "source");
-        if (source == null || source.isEmpty()) {
-            source = "local";
+        String src = (source == null || source.isEmpty()) ? "local" : source;
+        if ("local".equalsIgnoreCase(src)) {
+            return executeLocal(key_prefix);
+        } else if ("nacos".equalsIgnoreCase(src)) {
+            return executeNacos(nacos_data_id, nacos_group, nacos_namespace);
         }
-
-        if ("local".equalsIgnoreCase(source)) {
-            return executeLocal(args, start);
-        } else if ("nacos".equalsIgnoreCase(source)) {
-            return executeNacos(args, start);
-        } else {
-            return ToolResult.error("invalid source: " + source + " (expected 'local' or 'nacos')",
-                    elapsed(start));
-        }
+        return "Error: invalid source: " + src + " (expected 'local' or 'nacos')";
     }
 
     // ---- local source ----
 
-    private ToolResult executeLocal(Map<String, Object> args, long start) {
-        String keyPrefix = extractString(args, "key_prefix");
+    private String executeLocal(String keyPrefix) {
         if (keyPrefix == null) {
             keyPrefix = "";
         }
@@ -111,9 +94,7 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
         Map<String, String> collected = new LinkedHashMap<String, String>();
 
         if (!(environment instanceof ConfigurableEnvironment)) {
-            return ToolResult.error(
-                    "Environment is not configurable; local config read not supported",
-                    elapsed(start));
+            return "Error: Environment is not configurable; local config read not supported";
         }
 
         ConfigurableEnvironment ce = (ConfigurableEnvironment) environment;
@@ -171,11 +152,10 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
             sb.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
         }
 
-        long duration = elapsed(start);
         if (truncated) {
-            return ToolResult.truncated(sb.toString(), totalMatching, duration);
+            sb.append("\n# (truncated: result hit max-keys limit)\n");
         }
-        return ToolResult.success(sb.toString(), totalMatching, duration);
+        return sb.toString();
     }
 
     private String maskIfSensitive(String key, String value, List<String> sensitivePatterns) {
@@ -190,17 +170,14 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
 
     // ---- nacos source ----
 
-    private ToolResult executeNacos(Map<String, Object> args, long start) {
-        String dataId = extractString(args, "nacos_data_id");
+    private String executeNacos(String dataId, String group, String namespace) {
         if (dataId == null || dataId.isEmpty()) {
-            return ToolResult.error("missing required parameter: nacos_data_id", elapsed(start));
+            return "Error: missing required parameter: nacos_data_id";
         }
 
-        String group = extractString(args, "nacos_group");
         if (group == null || group.isEmpty()) {
             group = "DEFAULT_GROUP";
         }
-        String namespace = extractString(args, "nacos_namespace");
         if (namespace == null || namespace.isEmpty()) {
             namespace = config.getNacosNamespace();
             if (namespace == null) {
@@ -210,7 +187,7 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
 
         String baseUrl = config.getNacosBaseUrl();
         if (baseUrl == null || baseUrl.isEmpty()) {
-            return ToolResult.error("nacos-base-url is not configured", elapsed(start));
+            return "Error: nacos-base-url is not configured";
         }
 
         String url;
@@ -224,7 +201,7 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
             }
             url = urlBuilder.toString();
         } catch (UnsupportedEncodingException e) {
-            return ToolResult.error("failed to encode parameter: " + e.getMessage(), elapsed(start));
+            return "Error: failed to encode parameter: " + e.getMessage();
         }
 
         Map<String, String> headers = new LinkedHashMap<String, String>();
@@ -249,28 +226,10 @@ public class ConfigReadToolProvider extends ObservabilityHttpClient implements T
             }
             sb.append("\n").append(body);
 
-            int lineCount = body.isEmpty() ? 0 : body.split("\n").length;
-            return ToolResult.success(sb.toString(), lineCount, elapsed(start));
+            return sb.toString();
         } catch (IOException e) {
             log.warn("Nacos config read failed: {}", e.getMessage());
-            return ToolResult.error("Nacos config read failed: " + e.getMessage(), elapsed(start));
+            return "Error: Nacos config read failed: " + e.getMessage();
         }
-    }
-
-    // ---- arg extraction helpers (same pattern as LogReadToolProvider) ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 }

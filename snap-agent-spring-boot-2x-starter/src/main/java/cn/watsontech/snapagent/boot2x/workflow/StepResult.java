@@ -1,4 +1,4 @@
-package cn.watsontech.snapagent.core.workflow;
+package cn.watsontech.snapagent.boot2x.workflow;
 
 /**
  * Result of a single workflow step execution.

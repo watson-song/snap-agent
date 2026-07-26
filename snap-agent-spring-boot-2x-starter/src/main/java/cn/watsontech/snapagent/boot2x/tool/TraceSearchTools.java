@@ -1,9 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
-import cn.watsontech.snapagent.core.tool.ToolResult;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,69 +19,51 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * {@link ToolProvider} implementation for searching distributed traces in Jaeger.
+ * 2.x trace search tools exposed via {@code @Tool} annotation methods.
  *
- * <p>Tool name: {@code trace_search}. Supports searching traces by
+ * <p>Refactored from the 1.x {@code TraceSearchToolProvider} (which implemented the
+ * now-removed {@code ToolProvider} SPI) to a {@code @Tool} method discovered by
+ * {@link cn.watsontech.snapagent.core.tool.ToolCallbacks#from(Object)}.</p>
+ *
+ * <p>Tool name: {@code trace_search}. Supports searching traces in Jaeger by
  * service/operation and fetching a single trace by ID. Note that Jaeger uses
- * <strong>microsecond</strong> timestamps (epoch seconds × 1_000_000).</p>
+ * <strong>microsecond</strong> timestamps (epoch seconds &times; 1_000_000).</p>
  *
- * <p>See design doc §4.3 for the contract.</p>
+ * <p>See design doc &sect;4.3 for the contract.</p>
  */
-public class TraceSearchToolProvider extends ObservabilityHttpClient implements ToolProvider {
+public class TraceSearchTools extends ObservabilityHttpClient {
 
-    private static final Logger log = LoggerFactory.getLogger(TraceSearchToolProvider.class);
+    private static final Logger log = LoggerFactory.getLogger(TraceSearchTools.class);
 
     private static final long SLOW_THRESHOLD_MICROS = 500_000L; // 500ms
 
-    private static final String SCHEMA = "{\"name\":\"trace_search\","
-            + "\"description\":\"Search distributed traces in Jaeger. Find traces by service/operation, analyze call chains, and locate slow spans. Use for diagnosing latency, cascading timeouts, and identifying bottleneck services.\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{"
-            + "\"service\":{\"type\":\"string\",\"description\":\"Service name to search (e.g. 'order-service'). Required unless trace_id is provided.\"},"
-            + "\"operation\":{\"type\":\"string\",\"description\":\"Operation/span name filter (e.g. 'POST /api/orders'). Optional.\"},"
-            + "\"trace_id\":{\"type\":\"string\",\"description\":\"Specific trace ID to fetch. When provided, skips search and fetches a single trace directly.\"},"
-            + "\"start\":{\"type\":\"string\",\"description\":\"Range start. Relative ('1h'), epoch, or ISO-8601. Default '1h'.\",\"default\":\"1h\"},"
-            + "\"end\":{\"type\":\"string\",\"description\":\"Range end. Default 'now'.\",\"default\":\"now\"},"
-            + "\"limit\":{\"type\":\"integer\",\"description\":\"Max traces to return (default 20). Hard cap by config max-traces.\",\"default\":20},"
-            + "\"min_duration\":{\"type\":\"string\",\"description\":\"Minimum trace duration filter (e.g. '500ms', '2s'). Optional.\"}"
-            + "},"
-            + "\"required\":[]}}";
-
     private final SnapAgentProperties.Trace config;
 
-    public TraceSearchToolProvider(SnapAgentProperties.Trace config) {
+    public TraceSearchTools(SnapAgentProperties.Trace config) {
         if (config == null) {
             throw new IllegalArgumentException("config must not be null");
         }
         this.config = config;
     }
 
-    @Override
-    public String name() {
-        return "trace_search";
-    }
+    @Tool(name = "trace_search", description = "Search distributed traces in Jaeger. Find traces by service/operation, analyze call chains, and locate slow spans. Use for diagnosing latency, cascading timeouts, and identifying bottleneck services.")
+    public String search(
+            @ToolParam(description = "Service name to search (e.g. 'order-service'). Required unless trace_id is provided.", required = false) String service,
+            @ToolParam(description = "Operation/span name filter (e.g. 'POST /api/orders'). Optional.", required = false) String operation,
+            @ToolParam(description = "Specific trace ID to fetch. When provided, skips search and fetches a single trace directly.", required = false) String trace_id,
+            @ToolParam(description = "Range start. Relative ('1h'), epoch, or ISO-8601. Default '1h'.", required = false) String start,
+            @ToolParam(description = "Range end. Default 'now'.", required = false) String end,
+            @ToolParam(description = "Max traces to return (default 20). Hard cap by config max-traces.", required = false) Integer limit,
+            @ToolParam(description = "Minimum trace duration filter (e.g. '500ms', '2s'). Optional.", required = false) String min_duration) {
 
-    @Override
-    public String schema() {
-        return SCHEMA;
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        long start = System.currentTimeMillis();
-
-        String traceId = extractString(args, "trace_id");
-        String service = extractString(args, "service");
-        String operation = extractString(args, "operation");
-        String startStr = extractString(args, "start");
-        if (startStr == null || startStr.isEmpty()) {
-            startStr = "1h";
-        }
-        String endStr = extractString(args, "end");
-        String minDuration = extractString(args, "min_duration");
-        int limit = extractInt(args, "limit", config.getMaxTraces());
-        if (limit <= 0 || limit > config.getMaxTraces()) {
-            limit = config.getMaxTraces();
+        String traceId = trace_id;
+        String startStr = (start == null || start.isEmpty()) ? "1h" : start;
+        // null/empty end -> now (TimeRangeParser handles this)
+        String endStr = end;
+        String minDuration = min_duration;
+        int limitVal = limit != null ? limit : config.getMaxTraces();
+        if (limitVal <= 0 || limitVal > config.getMaxTraces()) {
+            limitVal = config.getMaxTraces();
         }
 
         String url;
@@ -102,7 +83,7 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                         .append("/api/traces?service=").append(URLEncoder.encode(service, "UTF-8"))
                         .append("&start=").append(startUs)
                         .append("&end=").append(endUs)
-                        .append("&limit=").append(limit);
+                        .append("&limit=").append(limitVal);
                 if (operation != null && !operation.isEmpty()) {
                     urlBuilder.append("&operation=").append(URLEncoder.encode(operation, "UTF-8"));
                 }
@@ -111,19 +92,18 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                 }
                 url = urlBuilder.toString();
             } else {
-                return ToolResult.error(
-                        "either 'service' or 'trace_id' must be provided", elapsed(start));
+                return "Error: either 'service' or 'trace_id' must be provided";
             }
         } catch (IllegalArgumentException e) {
-            return ToolResult.error("invalid time format: " + e.getMessage(), elapsed(start));
+            return "Error: invalid time format: " + e.getMessage();
         } catch (UnsupportedEncodingException e) {
-            return ToolResult.error("failed to encode parameter: " + e.getMessage(), elapsed(start));
+            return "Error: failed to encode parameter: " + e.getMessage();
         }
 
         Map<String, String> headers = buildAuthHeaders();
         int timeoutMs = config.getTimeoutSeconds() * 1000;
 
-        log.info("Trace search: service={}, trace_id={}, limit={}", service, traceId, limit);
+        log.info("Trace search: service={}, trace_id={}, limit={}", service, traceId, limitVal);
 
         try {
             String body = httpGet(url, headers, timeoutMs, timeoutMs);
@@ -146,17 +126,15 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                 if (traceId != null) {
                     content += "trace_id=" + traceId;
                 } else {
-                    content += "service=" + service + ", limit=" + limit;
+                    content += "service=" + service + ", limit=" + limitVal;
                 }
                 content += "\n# No traces found\n";
-                return ToolResult.success(content, 0, elapsed(start));
+                return content;
             }
 
-            boolean truncated = false;
             int traceCount = dataArray.size();
-            if (traceCount > limit) {
-                truncated = true;
-                traceCount = limit;
+            if (traceCount > limitVal) {
+                traceCount = limitVal;
             }
 
             StringBuilder sb = new StringBuilder();
@@ -168,7 +146,7 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                 if (operation != null) {
                     sb.append(", operation=").append(operation);
                 }
-                sb.append(", limit=").append(limit);
+                sb.append(", limit=").append(limitVal);
             }
             sb.append("\n");
             sb.append("# Traces: ").append(traceCount).append("\n");
@@ -188,9 +166,9 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                     if (spanStart < minStart) {
                         minStart = spanStart;
                     }
-                    long end = spanStart + spanDur;
-                    if (end > maxEnd) {
-                        maxEnd = end;
+                    long spanEnd = spanStart + spanDur;
+                    if (spanEnd > maxEnd) {
+                        maxEnd = spanEnd;
                     }
                 }
                 long totalDurationUs = (minStart == Long.MAX_VALUE) ? 0 : (maxEnd - minStart);
@@ -201,14 +179,10 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                 formatSpanTree(spans, processes, sb);
             }
 
-            long duration = elapsed(start);
-            if (truncated) {
-                return ToolResult.truncated(sb.toString(), traceCount, duration);
-            }
-            return ToolResult.success(sb.toString(), traceCount, duration);
+            return sb.toString();
         } catch (IOException e) {
             log.warn("Trace search failed: {}", e.getMessage());
-            return ToolResult.error("Trace search failed: " + e.getMessage(), elapsed(start));
+            return "Error: Trace search failed: " + e.getMessage();
         }
     }
 
@@ -288,7 +262,7 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
                 .append(serviceName);
 
         if (durationUs > SLOW_THRESHOLD_MICROS) {
-            sb.append("  ⚠ SLOW");
+            sb.append("  \u26A0 SLOW");
         }
         sb.append("\n");
 
@@ -326,40 +300,5 @@ public class TraceSearchToolProvider extends ObservabilityHttpClient implements 
             return headers;
         }
         return null;
-    }
-
-    // ---- arg extraction helpers (same pattern as LogReadToolProvider) ----
-
-    private String extractString(Map<String, Object> args, String key) {
-        if (args == null) {
-            return null;
-        }
-        Object value = args.get(key);
-        if (value instanceof String) {
-            return (String) value;
-        }
-        return value != null ? String.valueOf(value) : null;
-    }
-
-    private int extractInt(Map<String, Object> args, String key, int defaultValue) {
-        if (args == null) {
-            return defaultValue;
-        }
-        Object value = args.get(key);
-        if (value instanceof Number) {
-            return ((Number) value).intValue();
-        }
-        if (value instanceof String) {
-            try {
-                return Integer.parseInt((String) value);
-            } catch (NumberFormatException e) {
-                return defaultValue;
-            }
-        }
-        return defaultValue;
-    }
-
-    private long elapsed(long start) {
-        return System.currentTimeMillis() - start;
     }
 }

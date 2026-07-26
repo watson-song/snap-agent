@@ -46,51 +46,35 @@ public interface PluginRegistry {
      * @param pluginId the plugin ID
      * @return the new enabled state, or null if the plugin doesn't exist
      */
-    /**
-     * Toggles the enabled flag on a plugin.
-     *
-     * @param pluginId the plugin ID
-     * @return the new enabled state, or null if the plugin doesn't exist
-     */
     Boolean toggleEnabled(String pluginId);
 
     /**
-     * Compatibility: alias for {@link #listPlugins()}.
-     * @deprecated use {@link #listPlugins()}
+     * Enables a plugin.
+     *
+     * @param pluginId the plugin ID
      */
-    @Deprecated
-    default List<PluginDescriptor> list() { return listPlugins(); }
+    void enable(String pluginId);
 
     /**
-     * Compatibility: enables a plugin.
-     * @return the new enabled state, or null if not found
+     * Disables a plugin.
+     *
+     * @param pluginId the plugin ID
      */
-    default Boolean enable(String pluginId) {
-        PluginDescriptor desc = getPlugin(pluginId);
-        if (desc == null) return null;
-        desc.setEnabled(true);
-        return true;
-    }
+    void disable(String pluginId);
 
     /**
-     * Compatibility: disables a plugin.
-     * @return the new enabled state, or null if not found
+     * Sets the default plugin for a tool type.
+     *
+     * @param toolType  the tool type
+     * @param pluginId  the plugin ID to set as default
      */
-    default Boolean disable(String pluginId) {
-        PluginDescriptor desc = getPlugin(pluginId);
-        if (desc == null) return null;
-        desc.setEnabled(false);
-        return false;
-    }
+    void setDefault(String toolType, String pluginId);
 
     /**
-     * Compatibility: sets the default plugin for a tool type.
+     * Returns the default plugin for a tool type, or null if none set.
+     *
+     * @param toolType the tool type
+     * @return the default plugin descriptor, or null
      */
-    default void setDefault(String toolType, String pluginId) {
-        for (PluginDescriptor desc : listPlugins()) {
-            if (desc.getToolType() != null && desc.getToolType().equals(toolType)) {
-                desc.setDefault(desc.getPluginId().equals(pluginId));
-            }
-        }
-    }
+    PluginDescriptor getDefault(String toolType);
 }

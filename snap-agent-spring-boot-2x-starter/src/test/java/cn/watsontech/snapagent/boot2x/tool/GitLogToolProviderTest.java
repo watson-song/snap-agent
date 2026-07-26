@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeAll;
@@ -17,19 +19,19 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link GitLogToolProvider}.
+ * Unit tests for {@link GitLogTools}.
  *
  * <p>Tests that require git are conditionally skipped if git is not available
  * on the system path.</p>
  */
-class GitLogToolProviderTest {
+class GitLogToolsTest {
 
     @TempDir
     Path tempDir;
 
     private Path projectRoot;
     private CodePathGuard pathGuard;
-    private GitLogToolProvider provider;
+    private GitLogTools provider;
 
     private static boolean gitAvailable;
 
@@ -75,7 +77,7 @@ class GitLogToolProviderTest {
 
         pathGuard = new CodePathGuard(projectRoot.toString(),
                 Arrays.asList(".java", ".xml", ".yml"), 500, 512L * 1024);
-        provider = new GitLogToolProvider(pathGuard);
+        provider = new GitLogTools(pathGuard);
     }
 
     private void runCommand(String... cmd) throws IOException, InterruptedException {
@@ -88,13 +90,14 @@ class GitLogToolProviderTest {
 
     @Test
     void shouldReturnNameGitLog() {
-        assertThat(provider.name()).isEqualTo("git_log");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("git_log");
     }
 
     @Test
     void shouldReturnSchemaContainingModeEnum() {
-        String schema = provider.schema();
-        assertThat(schema).contains("git_log");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("git_log");
+
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("log");
         assertThat(schema).contains("blame");
         assertThat(schema).contains("show");
@@ -106,10 +109,10 @@ class GitLogToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("mode", "show");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("commit_hash");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("commit_hash");
     }
 
     @Test
@@ -118,10 +121,10 @@ class GitLogToolProviderTest {
         args.put("mode", "show");
         args.put("commit_hash", "not-a-hash; rm -rf /");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("格式无效");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("格式无效");
     }
 
     @Test
@@ -130,10 +133,10 @@ class GitLogToolProviderTest {
         args.put("mode", "show");
         args.put("commit_hash", "abc1234; cat /etc/passwd");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("格式无效");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("格式无效");
     }
 
     @Test
@@ -141,10 +144,10 @@ class GitLogToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("mode", "blame");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("file_path");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("file_path");
     }
 
     @Test
@@ -153,10 +156,9 @@ class GitLogToolProviderTest {
         args.put("mode", "log");
         args.put("file_path", "/etc/passwd");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("不在项目根目录");
+        assertThat(result.getContent()).contains("不在项目根目录");
     }
 
     @Test
@@ -168,7 +170,7 @@ class GitLogToolProviderTest {
         // This would try to run git; if git is not available, the test still
         // verifies that the command was built with the clamped value (20).
         // The important assertion is that it doesn't accept 10000.
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
         // Either git runs and returns limited results, or git is not available.
         // Either way, it should not error on max_entries being too large.
         if (gitAvailable) {
@@ -186,7 +188,7 @@ class GitLogToolProviderTest {
         args.put("mode", "log");
         args.put("max_entries", 10);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("initial commit");
@@ -203,7 +205,7 @@ class GitLogToolProviderTest {
         args.put("file_path", "src/App.java");
         args.put("max_entries", 10);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("# Git Blame");
@@ -230,7 +232,7 @@ class GitLogToolProviderTest {
             args.put("mode", "show");
             args.put("commit_hash", hash);
 
-            ToolResult result = provider.execute(args, ctx());
+            ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
             assertThat(result.isSuccess()).isTrue();
             assertThat(result.getContent()).contains("# Git Show");

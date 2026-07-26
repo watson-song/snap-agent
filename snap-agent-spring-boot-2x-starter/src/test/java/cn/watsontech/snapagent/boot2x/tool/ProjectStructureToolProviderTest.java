@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,15 +18,15 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link ProjectStructureToolProvider}.
+ * Unit tests for {@link ProjectStructureTools}.
  */
-class ProjectStructureToolProviderTest {
+class ProjectStructureToolsTest {
 
     @TempDir
     Path tempDir;
 
     private Path projectRoot;
-    private ProjectStructureToolProvider provider;
+    private ProjectStructureTools provider;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -54,18 +56,19 @@ class ProjectStructureToolProviderTest {
 
         CodePathGuard guard = new CodePathGuard(projectRoot.toString(),
                 Arrays.asList(".java", ".xml", ".dat"), 500, 512L * 1024);
-        provider = new ProjectStructureToolProvider(guard);
+        provider = new ProjectStructureTools(guard);
     }
 
     @Test
     void shouldReturnNameProjectStructure() {
-        assertThat(provider.name()).isEqualTo("project_structure");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("project_structure");
     }
 
     @Test
     void shouldReturnSchemaContainingDepthAndPath() {
-        String schema = provider.schema();
-        assertThat(schema).contains("project_structure");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("project_structure");
+
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("path");
         assertThat(schema).contains("depth");
         assertThat(schema).contains("pattern");
@@ -76,7 +79,7 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("depth", 6);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("Controller.java");
@@ -93,7 +96,7 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("path", "src/main/java/com/example");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("Controller.java");
@@ -106,7 +109,7 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("depth", 1);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         // depth=1 means only top-level: pom.xml, src/
@@ -123,7 +126,7 @@ class ProjectStructureToolProviderTest {
         args.put("pattern", "Service");
         args.put("depth", 6);
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("Service.java");
@@ -139,7 +142,7 @@ class ProjectStructureToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.getContent()).doesNotContain(".git");
         assertThat(result.getContent()).doesNotContain("target");
@@ -150,10 +153,10 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("path", "../other");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("..");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("..");
     }
 
     @Test
@@ -161,17 +164,17 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("path", "nonexistent");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("不存在");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("不存在");
     }
 
     @Test
     void shouldIncludeFileAndDirCountInOutput() {
         Map<String, Object> args = new HashMap<String, Object>();
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.getContent()).contains("files");
         assertThat(result.getContent()).contains("directories");
@@ -182,7 +185,7 @@ class ProjectStructureToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("path", "src/main/java/com/example");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         // Files at indent level 0 (direct children of the scanned path)
         assertThat(result.getContent()).contains("Controller.java");

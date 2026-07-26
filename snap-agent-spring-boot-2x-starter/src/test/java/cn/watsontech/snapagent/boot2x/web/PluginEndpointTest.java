@@ -6,7 +6,7 @@ import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.tool.InMemoryPluginRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -42,11 +42,9 @@ class PluginEndpointTest {
     }
 
     private void registerPlugin(String id, String toolType, boolean system) {
-        ToolProvider provider = Mockito.mock(ToolProvider.class);
-        when(provider.name()).thenReturn(id);
         registry.register(new PluginDescriptor(
-                id, toolType, id, "desc", "1.0",
-                true, true, system, provider, null, null, null));
+                id, toolType, id, "1.0", "desc",
+                true, true, system, new ToolCallback[0], null, null, null));
     }
 
     @Test
@@ -130,11 +128,11 @@ class PluginEndpointTest {
     @Test
     void shouldSetDefaultPlugin() {
         registry.register(new PluginDescriptor(
-                "log1", "log_read", "L1", "", "1.0",
-                true, true, false, Mockito.mock(ToolProvider.class), null, null, null));
+                "log1", "log_read", "L1", "1.0", "",
+                true, true, false, new ToolCallback[0], null, null, null));
         registry.register(new PluginDescriptor(
-                "log2", "log_read", "L2", "", "1.0",
-                false, true, false, Mockito.mock(ToolProvider.class), null, null, null));
+                "log2", "log_read", "L2", "1.0", "",
+                false, true, false, new ToolCallback[0], null, null, null));
 
         ResponseEntity<Object> response = controller.setDefaultPlugin("log2");
 
@@ -155,11 +153,9 @@ class PluginEndpointTest {
     @Test
     void shouldUploadPluginJarSuccessfully() {
         PluginUploader uploader = Mockito.mock(PluginUploader.class);
-        ToolProvider provider = Mockito.mock(ToolProvider.class);
-        when(provider.name()).thenReturn("custom_tool");
         PluginDescriptor desc = new PluginDescriptor(
-                "custom-plugin", "log_read", "Custom", "desc", "1.0.0",
-                false, true, false, provider, null, null, null);
+                "custom-plugin", "log_read", "Custom", "1.0.0", "desc",
+                false, true, false, new ToolCallback[0], null, null, null);
         when(uploader.upload(Mockito.any())).thenReturn(desc);
 
         SnapAgentController uploadController = new SnapAgentController(

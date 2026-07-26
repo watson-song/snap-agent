@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.boot2x.tool.mcp;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -18,7 +19,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link McpToolProvider} — verifies MCP tool name prefixing,
+ * Unit tests for {@link McpTools} — verifies MCP tool name prefixing,
  * delegated execution via {@link McpSseClient}, and error handling.
  */
 class McpToolProviderTest {
@@ -27,14 +28,13 @@ class McpToolProviderTest {
 
     @Test
     void shouldRegisterToolWithMcpPrefix() {
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "order-service", "get_order_status", "查询订单状态",
                 "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}}}",
                 mock(McpSseClient.class));
 
-        assertThat(provider.name()).isEqualTo("mcp__order-service__get_order_status");
-        assertThat(provider.schema()).contains("mcp__order-service__get_order_status");
-        assertThat(provider.schema()).contains("查询订单状态");
+        assertThat(callback.getName()).isEqualTo("mcp__order-service__get_order_status");
+        assertThat(callback.getJsonSchema()).contains("orderId");
     }
 
     @Test
@@ -43,14 +43,14 @@ class McpToolProviderTest {
         when(client.callTool(eq("get_order_status"), anyMap(), anyInt()))
                 .thenReturn("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"订单已发货\"}]}}");
 
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "order-service", "get_order_status", "查询订单状态",
                 "{\"type\":\"object\",\"properties\":{\"orderId\":{\"type\":\"string\"}}}",
                 client);
 
         Map<String, Object> args = new HashMap<>();
         args.put("orderId", "ORD-001");
-        ToolResult result = provider.execute(args, CTX);
+        ToolResult result = callback.execute(args, CTX);
 
         assertThat(result.getError()).isNull();
         assertThat(result.getContent()).contains("订单已发货");
@@ -62,64 +62,54 @@ class McpToolProviderTest {
         when(client.callTool(anyString(), anyMap(), anyInt()))
                 .thenThrow(new RuntimeException("connection refused"));
 
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "order-service", "get_order_status", "查询订单状态", "{}", client);
 
-        ToolResult result = provider.execute(new HashMap<>(), CTX);
+        ToolResult result = callback.execute(new HashMap<>(), CTX);
         assertThat(result.getError()).contains("connection refused");
     }
 
-    // ---- P2: schema() JSON validity ----
+    // ---- P2: getDescription() and getJsonSchema() ----
 
     @Test
     void shouldProduceValidJsonSchemaWithNameDescriptionAndInputSchema() throws Exception {
         String inputSchema = "{\"type\":\"object\",\"properties\":{" +
                 "\"orderId\":{\"type\":\"string\",\"description\":\"Order id\"}" +
                 "},\"required\":[\"orderId\"]}";
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "order-service", "get_order_status", "查询订单状态", inputSchema, mock(McpSseClient.class));
 
-        String schema = provider.schema();
+        assertThat(callback.getName()).isEqualTo("mcp__order-service__get_order_status");
+        assertThat(callback.getDescription()).isEqualTo("查询订单状态");
 
-        // Parse the schema as JSON to assert structural validity
+        // Verify the JSON schema is valid JSON with expected fields
         ObjectMapper mapper = new ObjectMapper();
-        JsonNode node = mapper.readTree(schema);
-
-        assertThat(node.get("name").asText()).isEqualTo("mcp__order-service__get_order_status");
-        assertThat(node.get("description").asText()).isEqualTo("查询订单状态");
-
-        JsonNode inputSchemaNode = node.get("input_schema");
-        assertThat(inputSchemaNode).isNotNull();
-        assertThat(inputSchemaNode.get("type").asText()).isEqualTo("object");
-        assertThat(inputSchemaNode.get("properties").has("orderId")).isTrue();
-        assertThat(inputSchemaNode.get("required").get(0).asText()).isEqualTo("orderId");
+        JsonNode node = mapper.readTree(callback.getJsonSchema());
+        assertThat(node.get("type").asText()).isEqualTo("object");
+        assertThat(node.get("properties").has("orderId")).isTrue();
+        assertThat(node.get("required").get(0).asText()).isEqualTo("orderId");
     }
 
     @Test
     void shouldFallBackToEmptyInputSchemaWhenNull() throws Exception {
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "srv", "tool", "desc", null, mock(McpSseClient.class));
 
-        String schema = provider.schema();
-
-        JsonNode node = new ObjectMapper().readTree(schema);
-        assertThat(node.get("name").asText()).isEqualTo("mcp__srv__tool");
-        assertThat(node.get("description").asText()).isEqualTo("desc");
-        // null inputSchema must be substituted with "{}" so the JSON stays valid
-        assertThat(node.get("input_schema").isObject()).isTrue();
-        assertThat(node.get("input_schema").size()).isZero();
+        assertThat(callback.getName()).isEqualTo("mcp__srv__tool");
+        assertThat(callback.getDescription()).isEqualTo("desc");
+        // null inputSchema must be substituted with "{}"
+        JsonNode node = new ObjectMapper().readTree(callback.getJsonSchema());
+        assertThat(node.isObject()).isTrue();
+        assertThat(node.size()).isZero();
     }
 
     @Test
     void shouldEscapeDescriptionWithSpecialCharacters() throws Exception {
-        // Description containing a double quote and backslash must be JSON-escaped
-        McpToolProvider provider = new McpToolProvider(
+        // Description containing a double quote and backslash must be preserved
+        ToolCallback callback = McpTools.from(
                 "srv", "tool", "he said \"hi\" \\ done", "{}", mock(McpSseClient.class));
 
-        String schema = provider.schema();
-
-        JsonNode node = new ObjectMapper().readTree(schema);
-        assertThat(node.get("description").asText()).isEqualTo("he said \"hi\" \\ done");
+        assertThat(callback.getDescription()).isEqualTo("he said \"hi\" \\ done");
     }
 
     @Test
@@ -133,10 +123,10 @@ class McpToolProviderTest {
                         "{\"type\":\"text\",\"text\":\"beta\"}" +
                         "]}}");
 
-        McpToolProvider provider = new McpToolProvider(
+        ToolCallback callback = McpTools.from(
                 "srv", "multi", "multi-content", "{}", client);
 
-        ToolResult result = provider.execute(new HashMap<>(), CTX);
+        ToolResult result = callback.execute(new HashMap<>(), CTX);
 
         assertThat(result.getError()).isNull();
         // Only type=="text" items are extracted; image items skipped

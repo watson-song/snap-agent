@@ -1,16 +1,16 @@
 package cn.watsontech.snapagent.boot2x.workflow;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.workflow.StepResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
-import cn.watsontech.snapagent.core.workflow.WorkflowResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowStatus;
-import cn.watsontech.snapagent.core.workflow.WorkflowStep;
+import cn.watsontech.snapagent.boot2x.workflow.StepResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowStatus;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowStep;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -33,13 +33,13 @@ import static org.mockito.Mockito.when;
  */
 class SimpleWorkflowEngineTest {
 
-    private AgentExecutor agentExecutor;
+    private AgentService agentExecutor;
     private SkillRegistry skillRegistry;
     private SimpleWorkflowEngine engine;
 
     @BeforeEach
     void setUp() {
-        agentExecutor = mock(AgentExecutor.class);
+        agentExecutor = mock(AgentService.class);
         skillRegistry = mock(SkillRegistry.class);
         engine = new SimpleWorkflowEngine(agentExecutor, skillRegistry, "system-user");
 
@@ -52,7 +52,7 @@ class SimpleWorkflowEngineTest {
     }
 
     /**
-     * Configures the mock AgentExecutor to set the task status to SUCCEEDED
+     * Configures the mock AgentService to set the task status to SUCCEEDED
      * and the report to the given result text.
      */
     private void mockExecuteSuccess(final String reportText) {
@@ -65,7 +65,7 @@ class SimpleWorkflowEngineTest {
     }
 
     /**
-     * Configures the mock AgentExecutor to set the task status to FAILED.
+     * Configures the mock AgentService to set the task status to FAILED.
      */
     private void mockExecuteFailure() {
         doAnswer(invocation -> {
@@ -506,7 +506,7 @@ class SimpleWorkflowEngineTest {
         assertThat(result.getErrorMessage()).contains("nonexistent-skill");
         // s2 should never have been reached
         assertThat(result.getStepResults()).doesNotContainKey("s2");
-        // AgentExecutor must not have been called
+        // AgentService must not have been called
         verify(agentExecutor, never()).execute(any(AgentTask.class), any(SkillMeta.class));
     }
 

@@ -1,6 +1,6 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
  */
 class SimpleVerificationRunnerTest {
 
-    private AgentExecutor agentExecutor;
+    private AgentService agentExecutor;
     private TaskStore taskStore;
     private SkillRegistry skillRegistry;
 
@@ -43,7 +43,7 @@ class SimpleVerificationRunnerTest {
 
     @BeforeEach
     void setUp() {
-        agentExecutor = mock(AgentExecutor.class);
+        agentExecutor = mock(AgentService.class);
         taskStore = mock(TaskStore.class);
         skillRegistry = mock(SkillRegistry.class);
 

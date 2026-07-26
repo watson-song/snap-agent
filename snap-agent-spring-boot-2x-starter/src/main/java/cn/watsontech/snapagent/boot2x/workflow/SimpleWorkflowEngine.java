@@ -1,15 +1,15 @@
 package cn.watsontech.snapagent.boot2x.workflow;
 
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.workflow.StepResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
-import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
-import cn.watsontech.snapagent.core.workflow.WorkflowResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowStep;
+import cn.watsontech.snapagent.boot2x.workflow.StepResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +31,7 @@ import java.util.regex.Pattern;
  *       inputs, {@code ${stepName.result}} / {@code ${stepName.status}} /
  *       {@code ${stepName.taskId}} from prior step results.</li>
  *   <li>Look up the {@link SkillMeta} via {@link SkillRegistry}, construct an
- *       {@link AgentTask}, and call {@link AgentExecutor#execute}
+ *       {@link AgentTask}, and call {@link AgentService#execute}
  *       synchronously.</li>
  *   <li>Build a {@link StepResult} from the resulting {@link AgentTask}
  *       (status = {@link TaskStatus#name()}, report = {@link AgentTask#getReport()}).</li>
@@ -81,22 +81,22 @@ public class SimpleWorkflowEngine implements WorkflowEngine {
             "\\$\\{([^}]+)\\}"
     );
 
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final SkillRegistry skillRegistry;
     private final String systemUserId;
 
     /**
      * Construct the engine.
      *
-     * @param agentExecutor the agent execution loop (synchronous calls)
+     * @param agentService the agent execution loop (synchronous calls)
      * @param skillRegistry the skill registry for looking up {@link SkillMeta}
      *                      by step skill name
      * @param systemUserId  the user identity to attribute workflow runs to
      */
-    public SimpleWorkflowEngine(AgentExecutor agentExecutor,
+    public SimpleWorkflowEngine(AgentService agentService,
                                 SkillRegistry skillRegistry,
                                 String systemUserId) {
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.skillRegistry = skillRegistry;
         this.systemUserId = systemUserId;
     }
@@ -200,7 +200,7 @@ public class SimpleWorkflowEngine implements WorkflowEngine {
                                    SkillMeta skill, Map<String, String> inputs) {
         try {
             AgentTask task = AgentTask.create(systemUserId, step.getSkill(), inputs, null);
-            agentExecutor.execute(task, skill);
+            agentService.execute(task, skill);
 
             String statusName = task.getStatus() != null ? task.getStatus().name() : null;
             if (task.getStatus() == TaskStatus.SUCCEEDED) {

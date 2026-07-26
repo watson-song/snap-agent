@@ -1,4 +1,4 @@
-package cn.watsontech.snapagent.core.conversation;
+package cn.watsontech.snapagent.boot2x.conversation;
 
 /**
  * A single message in a conversation (user or assistant turn).

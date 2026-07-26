@@ -1,13 +1,13 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.tool.SqlGuard;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.security.SecurityGateway;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -38,12 +38,12 @@ class SnapAgentAutoConfigurationTest {
                 .withPropertyValues("snap-agent.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(SkillRegistry.class);
-                    assertThat(context).doesNotHaveBean(AgentExecutor.class);
+                    assertThat(context).doesNotHaveBean(AgentService.class);
                     assertThat(context).doesNotHaveBean(LlmClient.class);
-                    assertThat(context).doesNotHaveBean(ToolDispatcher.class);
+                    assertThat(context).doesNotHaveBean(ToolCallbackRegistry.class);
                     assertThat(context).doesNotHaveBean(TaskStore.class);
                     assertThat(context).doesNotHaveBean(RateLimiter.class);
-                    assertThat(context).doesNotHaveBean("snapAgentExecutor");
+                    assertThat(context).doesNotHaveBean("snapAgentService");
                     assertThat(context).doesNotHaveBean("snapAgentFilter");
                 });
     }
@@ -53,7 +53,7 @@ class SnapAgentAutoConfigurationTest {
         // Default: enabled is not set → defaults to false → no beans
         contextRunner.run(context -> {
             assertThat(context).doesNotHaveBean(SkillRegistry.class);
-            assertThat(context).doesNotHaveBean(AgentExecutor.class);
+            assertThat(context).doesNotHaveBean(AgentService.class);
         });
     }
 
@@ -67,9 +67,9 @@ class SnapAgentAutoConfigurationTest {
                         "snap-agent.llm.api-key=sk-test")
                 .run(context -> {
                     assertThat(context).hasSingleBean(SkillRegistry.class);
-                    assertThat(context).hasSingleBean(AgentExecutor.class);
+                    assertThat(context).hasSingleBean(AgentService.class);
                     assertThat(context).hasSingleBean(LlmClient.class);
-                    assertThat(context).hasSingleBean(ToolDispatcher.class);
+                    assertThat(context).hasSingleBean(ToolCallbackRegistry.class);
                     assertThat(context).hasSingleBean(TaskStore.class);
                     assertThat(context).hasSingleBean(RateLimiter.class);
                     assertThat(context).hasSingleBean(AsyncTaskExecutor.class);
@@ -139,7 +139,7 @@ class SnapAgentAutoConfigurationTest {
                         "snap-agent.jdbc.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.JdbcQueryToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.JdbcQueryTools.class);
                 });
     }
 
@@ -152,7 +152,7 @@ class SnapAgentAutoConfigurationTest {
                         "snap-agent.redis.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.RedisReadToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.RedisReadTools.class);
                 });
     }
 
@@ -258,11 +258,11 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(
                             cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.CodeReaderTools.class);
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureTools.class);
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.GitLogTools.class);
                 });
     }
 
@@ -279,11 +279,11 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).hasSingleBean(
                             cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
                     assertThat(context).hasSingleBean(
-                            cn.watsontech.snapagent.boot2x.tool.CodeReaderToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.CodeReaderTools.class);
                     assertThat(context).hasSingleBean(
-                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.ProjectStructureTools.class);
                     assertThat(context).hasSingleBean(
-                            cn.watsontech.snapagent.boot2x.tool.GitLogToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.tool.GitLogTools.class);
                 });
     }
 
@@ -366,7 +366,7 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(
                             cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder.class);
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools.class);
                 });
     }
 
@@ -385,7 +385,7 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).hasSingleBean(
                             cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder.class);
                     assertThat(context).hasSingleBean(
-                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphToolProvider.class);
+                            cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools.class);
                 });
     }
 
@@ -428,7 +428,7 @@ class SnapAgentAutoConfigurationTest {
                         "snap-agent.workflows.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.core.workflow.WorkflowEngine.class);
+                            cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine.class);
                 });
     }
 }

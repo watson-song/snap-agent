@@ -1,9 +1,9 @@
 package cn.watsontech.snapagent.boot2x.conversation;
 
-import cn.watsontech.snapagent.core.conversation.Conversation;
-import cn.watsontech.snapagent.core.conversation.ConversationMessage;
-import cn.watsontech.snapagent.core.conversation.ConversationStore;
-import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.boot2x.conversation.Conversation;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationMessage;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationSummary;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

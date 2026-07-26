@@ -2,7 +2,7 @@ package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -114,15 +114,15 @@ class PluginUploaderTest {
         when(registry.getPlugin("cleanup-test")).thenReturn(null);
 
         PluginDescriptor descriptor = uploader.upload(jarFile);
-        assertThat(descriptor.getJarPath()).exists();
+        assertThat(Paths.get(descriptor.getJarPath())).exists();
         assertThat(descriptor.getClassLoader()).isNotNull();
 
         // Act: cleanup
         uploader.cleanupPlugin(descriptor);
 
         // Assert: JAR file and parent directory deleted
-        assertThat(descriptor.getJarPath()).doesNotExist();
-        assertThat(descriptor.getJarPath().getParent()).doesNotExist();
+        assertThat(Paths.get(descriptor.getJarPath())).doesNotExist();
+        assertThat(Paths.get(descriptor.getJarPath()).getParent()).doesNotExist();
     }
 
     @Test
@@ -134,8 +134,8 @@ class PluginUploaderTest {
     @Test
     void shouldCleanupPluginWithNullClassLoaderAndJarPath() {
         PluginDescriptor desc = new PluginDescriptor(
-                "no-jar", "log_read", "NoJar", "NoJar", "1.0.0",
-                false, true, false, mock(ToolProvider.class), null, null, null);
+                "no-jar", "log_read", "NoJar", "1.0.0", "NoJar",
+                false, true, false, new ToolCallback[0], null, null, null);
         uploader.cleanupPlugin(desc);
         // No exception thrown
     }
@@ -174,20 +174,20 @@ class PluginUploaderTest {
         assertThat(descriptor.getVersion()).isEqualTo("1.0.0");
         assertThat(descriptor.isEnabled()).isTrue();
         assertThat(descriptor.isSystem()).isFalse();
-        assertThat(descriptor.getProvider()).isNotNull();
-        assertThat(descriptor.getProvider().name()).isEqualTo("simple-test-tool");
-        assertThat(descriptor.getPluginContext().getConfiguration())
+        assertThat(descriptor.getToolCallbacks()).isNotEmpty();
+        assertThat(descriptor.getToolCallbacks()[0].getName()).isEqualTo("simple-test-tool");
+        assertThat(((SimplePluginContext) descriptor.getPluginContext()).getConfiguration())
                 .containsEntry("base-url", "http://test:8080");
 
         ArgumentCaptor<PluginDescriptor> captor = ArgumentCaptor.forClass(PluginDescriptor.class);
         verify(registry).register(captor.capture());
         PluginDescriptor registered = captor.getValue();
         assertThat(registered.getPluginId()).isEqualTo("upload-test-plugin");
-        assertThat(registered.getJarPath()).exists();
-        assertThat(registered.getJarPath().toString()).endsWith("plugin.jar");
+        assertThat(Paths.get(registered.getJarPath())).exists();
+        assertThat(registered.getJarPath()).endsWith("plugin.jar");
 
         Path expectedJarDir = tempDir.resolve("upload-test-plugin");
-        assertThat(registered.getJarPath().getParent()).isEqualTo(expectedJarDir);
+        assertThat(Paths.get(registered.getJarPath()).getParent()).isEqualTo(expectedJarDir);
     }
 
     @Test
@@ -207,8 +207,8 @@ class PluginUploaderTest {
         when(scanner.scan(any())).thenReturn(metadata);
         // PluginDescriptor is final — use a real instance instead of a mock
         PluginDescriptor existing = new PluginDescriptor(
-                "dup-plugin", "log_read", "Dup", "Dup", "1.0.0",
-                true, true, false, mock(ToolProvider.class), null, null, null);
+                "dup-plugin", "log_read", "Dup", "1.0.0", "Dup",
+                true, true, false, new ToolCallback[0], null, null, null);
         when(registry.getPlugin("dup-plugin")).thenReturn(existing);
 
         assertThatThrownBy(() -> uploader.upload(jarFile))

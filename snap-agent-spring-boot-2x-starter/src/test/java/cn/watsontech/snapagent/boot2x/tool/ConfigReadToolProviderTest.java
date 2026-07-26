@@ -1,6 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,14 +17,14 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link ConfigReadToolProvider}.
+ * Unit tests for {@link ConfigReadTools}.
  *
  * <p>Uses the subclass-and-override-httpGet pattern (design doc §8.1) for Nacos
  * mode, and a {@link MockEnvironment} for local mode.</p>
  *
  * <p>See design doc §8.2 for the test matrix.</p>
  */
-class ConfigReadToolProviderTest {
+class ConfigReadToolsTest {
 
     private SnapAgentProperties.ConfigRead config;
     private MockEnvironment env;
@@ -48,17 +50,17 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("name() returns 'config_read'")
     void shouldReturnNameConfigRead() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
-        assertThat(provider.name()).isEqualTo("config_read");
+        ConfigReadTools provider = new ConfigReadTools(config, env);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("config_read");
     }
 
     @Test
     @DisplayName("schema() contains source and key_prefix properties")
     void shouldReturnSchemaWithSourceAndKeyPrefix() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
-        String schema = provider.schema();
+        ConfigReadTools provider = new ConfigReadTools(config, env);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("config_read");
 
-        assertThat(schema).contains("config_read");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("\"source\"");
         assertThat(schema).contains("\"key_prefix\"");
     }
@@ -68,11 +70,11 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("local source reads all properties from Spring Environment")
     void shouldReadLocalConfigSuccessfully() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("spring.datasource.url");
@@ -88,12 +90,12 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("key_prefix filters properties to matching prefix only")
     void shouldFilterByKeyPrefix() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
         args.put("key_prefix", "spring.datasource");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("spring.datasource.url");
@@ -109,11 +111,11 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("sensitive values (password, token, key) are masked to ****")
     void shouldMaskSensitiveValues() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         // password should be masked
@@ -141,12 +143,12 @@ class ConfigReadToolProviderTest {
         env.setProperty("app.connection.string", "amqp://broker:5672");
         env.setProperty("app.database.host", "db-host");
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
         args.put("key_prefix", "app.");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("app.connection.string = ****");
@@ -164,15 +166,15 @@ class ConfigReadToolProviderTest {
     void shouldTruncateToMaxKeys() {
         config.setMaxKeys(2);
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.isTruncated()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("truncated");
+        assertThat(result.getContent()).contains("Properties: 2");
     }
 
     // ---- default source ----
@@ -180,10 +182,10 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("omitted source defaults to 'local'")
     void shouldDefaultToLocalSource() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("local");
@@ -195,11 +197,11 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("active Spring profiles are shown in the output header")
     void shouldShowActiveProfiles() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "local");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("Profiles:");
@@ -214,7 +216,7 @@ class ConfigReadToolProviderTest {
         config.setNacosBaseUrl("http://nacos:8848");
 
         final String mockConfig = "spring:\n  datasource:\n    url: jdbc:mysql://nacos-db:3306/orders\n";
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env) {
+        ConfigReadTools provider = new ConfigReadTools(config, env) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) {
@@ -228,7 +230,7 @@ class ConfigReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "nacos");
         args.put("nacos_data_id", "order-service.yml");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("nacos");
@@ -242,7 +244,7 @@ class ConfigReadToolProviderTest {
         config.setNacosBaseUrl("http://nacos:8848");
         config.setNacosNamespace("prod-ns");
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env) {
+        ConfigReadTools provider = new ConfigReadTools(config, env) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) {
@@ -256,7 +258,7 @@ class ConfigReadToolProviderTest {
         args.put("source", "nacos");
         args.put("nacos_data_id", "app.yml");
         args.put("nacos_group", "PROD_GROUP");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
     }
@@ -268,14 +270,14 @@ class ConfigReadToolProviderTest {
     void shouldReturnErrorWhenNacosDataIdMissing() {
         config.setNacosBaseUrl("http://nacos:8848");
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "nacos");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("nacos_data_id");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("nacos_data_id");
     }
 
     // ---- nacos not configured ----
@@ -284,15 +286,15 @@ class ConfigReadToolProviderTest {
     @DisplayName("nacos source without nacos-base-url configured returns error")
     void shouldReturnErrorWhenNacosBaseUrlNotConfigured() {
         // nacos-base-url is empty by default
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "nacos");
         args.put("nacos_data_id", "test.yml");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("nacos-base-url");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("nacos-base-url");
     }
 
     // ---- nacos auth token ----
@@ -303,7 +305,7 @@ class ConfigReadToolProviderTest {
         config.setNacosBaseUrl("http://nacos:8848");
         config.setNacosAuthToken("nacos-secret-token");
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env) {
+        ConfigReadTools provider = new ConfigReadTools(config, env) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) {
@@ -315,7 +317,7 @@ class ConfigReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "nacos");
         args.put("nacos_data_id", "test.yml");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
     }
@@ -327,7 +329,7 @@ class ConfigReadToolProviderTest {
     void shouldHandleNacosIOException() {
         config.setNacosBaseUrl("http://nacos:8848");
 
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env) {
+        ConfigReadTools provider = new ConfigReadTools(config, env) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) throws IOException {
@@ -338,10 +340,10 @@ class ConfigReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "nacos");
         args.put("nacos_data_id", "test.yml");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("401");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("401");
     }
 
     // ---- invalid source ----
@@ -349,14 +351,14 @@ class ConfigReadToolProviderTest {
     @Test
     @DisplayName("invalid source value returns error")
     void shouldReturnErrorForInvalidSource() {
-        ConfigReadToolProvider provider = new ConfigReadToolProvider(config, env);
+        ConfigReadTools provider = new ConfigReadTools(config, env);
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("source", "redis");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("invalid source");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("invalid source");
     }
 
     // ---- helpers ----

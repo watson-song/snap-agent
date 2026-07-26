@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.anchor.AnchorOrchestrator;
 import cn.watsontech.snapagent.boot2x.security.InMemoryAuditStore;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
@@ -17,8 +17,8 @@ import cn.watsontech.snapagent.core.skill.Shortcut;
 import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -67,9 +67,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SnapAgentControllerTest {
 
     @Mock private SkillRegistry skillRegistry;
-    @Mock private AgentExecutor agentExecutor;
+    @Mock private AgentService agentExecutor;
     @Mock private TaskStore taskStore;
-    @Mock private ToolDispatcher toolDispatcher;
+    @Mock private ToolCallbackRegistry toolDispatcher;
     @Mock private SecurityGateway securityGateway;
     @Mock private AsyncTaskExecutor taskExecutor;
     @Mock private RateLimiter rateLimiter;
@@ -120,14 +120,11 @@ class SnapAgentControllerTest {
 
     @Test
     void shouldReturnToolsWhenGetTools() throws Exception {
-        ToolProvider mockProvider = org.mockito.Mockito.mock(ToolProvider.class);
-        when(mockProvider.name()).thenReturn("mysql_query");
-        when(mockProvider.schema()).thenReturn("{}");
-        PluginDescriptor desc = new PluginDescriptor(
-                "mysql_query", "mysql_query", "MySQL", "", "1.0",
-                true, true, true, mockProvider, null, null, null);
-        when(toolDispatcher.activePlugins())
-                .thenReturn(Collections.singletonList(desc));
+        ToolCallback mockCallback = org.mockito.Mockito.mock(ToolCallback.class);
+        when(mockCallback.getName()).thenReturn("mysql_query");
+        when(mockCallback.getJsonSchema()).thenReturn("{}");
+        when(toolDispatcher.getAll())
+                .thenReturn(Collections.singletonList(mockCallback));
 
         mockMvc.perform(get("/snap-agent/tools"))
                 .andExpect(status().isOk())
@@ -819,7 +816,7 @@ class SnapAgentControllerTest {
                 .andExpect(jsonPath("$.streamUrl").isNotEmpty());
 
         verify(taskStore).save(any(AgentTask.class));
-        // "auto" mode routes through AgentExecutor with full tool access
+        // "auto" mode routes through AgentService with full tool access
         verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
     }
 

@@ -32,11 +32,11 @@ class ToolPluginRegistryTest {
     @Test
     void shouldReturnPluginsWhenProvided() {
         ToolPlugin plugin1 = mock(ToolPlugin.class);
-        when(plugin1.name()).thenReturn("mysql-plugin");
+        when(plugin1.id()).thenReturn("mysql-plugin");
         when(plugin1.version()).thenReturn("1.0.0");
 
         ToolPlugin plugin2 = mock(ToolPlugin.class);
-        when(plugin2.name()).thenReturn("redis-plugin");
+        when(plugin2.id()).thenReturn("redis-plugin");
         when(plugin2.version()).thenReturn("2.0.0");
 
         ToolPluginRegistry registry = new ToolPluginRegistry(
@@ -44,8 +44,8 @@ class ToolPluginRegistryTest {
 
         List<ToolPlugin> plugins = registry.getPlugins();
         assertThat(plugins).hasSize(2);
-        assertThat(plugins.get(0).name()).isEqualTo("mysql-plugin");
-        assertThat(plugins.get(1).name()).isEqualTo("redis-plugin");
+        assertThat(plugins.get(0).id()).isEqualTo("mysql-plugin");
+        assertThat(plugins.get(1).id()).isEqualTo("redis-plugin");
     }
 
     @Test

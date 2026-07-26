@@ -14,16 +14,16 @@ import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
 import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
-import cn.watsontech.snapagent.core.agent.AgentExecutor;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.RateLimiter;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.agent.TranscriptEvent;
-import cn.watsontech.snapagent.core.conversation.Conversation;
-import cn.watsontech.snapagent.core.conversation.ConversationMessage;
-import cn.watsontech.snapagent.core.conversation.ConversationStore;
-import cn.watsontech.snapagent.core.conversation.ConversationSummary;
+import cn.watsontech.snapagent.boot2x.conversation.Conversation;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationMessage;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationSummary;
 import cn.watsontech.snapagent.core.cost.CostRecord;
 import cn.watsontech.snapagent.core.cost.CostSummary;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
@@ -51,15 +51,16 @@ import cn.watsontech.snapagent.core.skill.InputSpec;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
-import cn.watsontech.snapagent.core.tool.ToolDispatcher;
+import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolPlugin;
-import cn.watsontech.snapagent.core.workflow.StepResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowDefinition;
-import cn.watsontech.snapagent.core.workflow.WorkflowEngine;
-import cn.watsontech.snapagent.core.workflow.WorkflowResult;
-import cn.watsontech.snapagent.core.workflow.WorkflowStep;
+import cn.watsontech.snapagent.boot2x.workflow.StepResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowDefinition;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowResult;
+import cn.watsontech.snapagent.boot2x.workflow.WorkflowStep;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
@@ -114,9 +115,9 @@ public class SnapAgentController {
     private static final Logger log = LoggerFactory.getLogger(SnapAgentController.class);
 
     private final SkillRegistry skillRegistry;
-    private final AgentExecutor agentExecutor;
+    private final AgentService agentService;
     private final TaskStore taskStore;
-    private final ToolDispatcher toolDispatcher;
+    private final ToolCallbackRegistry toolCallbackRegistry;
     private final SnapAgentProperties properties;
     private final SecurityGateway securityGateway;
     private final RateLimiter rateLimiter;
@@ -140,48 +141,48 @@ public class SnapAgentController {
     private AnchorInjectionOrchestrator injectionOrchestrator;
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
                                 AsyncTaskExecutor taskExecutor) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
                                 AsyncTaskExecutor taskExecutor,
                                 PeerSseRelay peerSseRelay) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
                                 AsyncTaskExecutor taskExecutor,
                                 PeerSseRelay peerSseRelay,
                                 LlmClient llmClient) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -189,15 +190,15 @@ public class SnapAgentController {
                                 PeerSseRelay peerSseRelay,
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -206,15 +207,15 @@ public class SnapAgentController {
                                 LlmClient llmClient,
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -224,15 +225,15 @@ public class SnapAgentController {
                                 SecurityAuditLogger auditLogger,
                                 ConversationStore conversationStore,
                                 AuditStore auditStore) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, null, null, null, null, null, null, null, null, auditStore, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -244,15 +245,15 @@ public class SnapAgentController {
                                 PatrolScheduler patrolScheduler,
                                 AlertConverger alertConverger,
                                 TemplateBugfixSuggester bugfixSuggester) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -265,16 +266,16 @@ public class SnapAgentController {
                                 AlertConverger alertConverger,
                                 TemplateBugfixSuggester bugfixSuggester,
                                 IssueClosureService issueClosureService) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
                 issueClosureService, null, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -288,16 +289,16 @@ public class SnapAgentController {
                                 TemplateBugfixSuggester bugfixSuggester,
                                 IssueClosureService issueClosureService,
                                 CostSummaryService costSummaryService) {
-        this(skillRegistry, agentExecutor, taskStore, toolDispatcher,
+        this(skillRegistry, agentService, taskStore, toolCallbackRegistry,
                 properties, securityGateway, rateLimiter, taskExecutor, peerSseRelay, llmClient,
                 auditLogger, conversationStore, patrolScheduler, alertConverger, bugfixSuggester,
                 issueClosureService, costSummaryService, null, null, null, null, null, null);
     }
 
     public SnapAgentController(SkillRegistry skillRegistry,
-                                AgentExecutor agentExecutor,
+                                AgentService agentService,
                                 TaskStore taskStore,
-                                ToolDispatcher toolDispatcher,
+                                ToolCallbackRegistry toolCallbackRegistry,
                                 SnapAgentProperties properties,
                                 SecurityGateway securityGateway,
                                 RateLimiter rateLimiter,
@@ -318,9 +319,9 @@ public class SnapAgentController {
                                 PluginRegistry pluginRegistry,
                                 PluginUploader pluginUploader) {
         this.skillRegistry = skillRegistry;
-        this.agentExecutor = agentExecutor;
+        this.agentService = agentService;
         this.taskStore = taskStore;
-        this.toolDispatcher = toolDispatcher;
+        this.toolCallbackRegistry = toolCallbackRegistry;
         this.properties = properties;
         this.securityGateway = securityGateway;
         this.rateLimiter = rateLimiter;
@@ -518,14 +519,11 @@ public class SnapAgentController {
 
         audit(currentUserId(), "GET", "/tools", "LIST_TOOLS", null);
 
-        // Use activePlugins() to iterate over the PluginDescriptor list (v0.5)
         List<Map<String, Object>> toolList = new ArrayList<Map<String, Object>>();
-        for (PluginDescriptor desc : toolDispatcher.activePlugins()) {
-            cn.watsontech.snapagent.core.tool.ToolProvider tp = desc.getProvider();
+        for (ToolCallback cb : toolCallbackRegistry.getAll()) {
             Map<String, Object> tool = new LinkedHashMap<String, Object>();
-            tool.put("name", tp.name());
-            // Parse the JSON schema string to extract description + parameters
-            String schemaJson = tp.schema();
+            tool.put("name", cb.getName());
+            String schemaJson = cb.getJsonSchema();
             tool.put("schemaRaw", schemaJson);
             parseToolSchemaIntoDto(tool, schemaJson);
             toolList.add(tool);
@@ -534,8 +532,8 @@ public class SnapAgentController {
         result.put("tools", toolList);
         result.put("autoDiscovery", true);
         result.put("discoveryHint",
-                "Tool providers are auto-discovered as Spring @Component beans; " +
-                "implement ToolProvider and annotate with @Component to register a new tool.");
+                "Tools are auto-discovered via @Tool annotations; " +
+                "add a @Tool method to a @Component to register a new tool.");
         return ResponseEntity.ok(result);
     }
 
@@ -956,7 +954,7 @@ public class SnapAgentController {
                 @Override
                 public void run() {
                     try {
-                        agentExecutor.execute(finalTask, finalSkill);
+                        agentService.execute(finalTask, finalSkill);
                     } catch (RuntimeException e) {
                         log.error("Agent execution failed for task {}: {}",
                                 finalTask.getTaskId(), e.getMessage());
@@ -1033,7 +1031,7 @@ public class SnapAgentController {
         if (anchorSkillId == null || anchorSkillId.isEmpty()) anchorSkillId = "auto";
         final String finalUserId = userId;
 
-        // "auto" mode: route through AgentExecutor with full tool access (jdbc_query, etc.)
+        // "auto" mode: route through AgentService with full tool access (jdbc_query, etc.)
         // "off" mode: direct LLM call via AnchorOrchestrator (no tools, pure context Q&A)
         AgentTask task;
         if ("auto".equals(anchorSkillId)) {
@@ -1069,7 +1067,7 @@ public class SnapAgentController {
                     @Override
                     public void run() {
                         try {
-                            agentExecutor.execute(finalAutoTask, finalSkill);
+                            agentService.execute(finalAutoTask, finalSkill);
                         } catch (RuntimeException e) {
                             log.error("Anchor auto execution failed for task {}: {}",
                                     finalAutoTask.getTaskId(), e.getMessage());
@@ -2608,7 +2606,7 @@ public class SnapAgentController {
 
         List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
         if (pluginRegistry != null) {
-            for (PluginDescriptor desc : pluginRegistry.list()) {
+            for (PluginDescriptor desc : pluginRegistry.listPlugins()) {
                 result.add(toPluginDto(desc));
             }
         }
@@ -2672,7 +2670,7 @@ public class SnapAgentController {
         }
         try {
             pluginRegistry.unregister(id);
-        } catch (UnsupportedOperationException e) {
+        } catch (IllegalStateException e) {
             return errorResponse(HttpStatus.FORBIDDEN, "SYSTEM_PLUGIN",
                     "cannot unregister system plugin: " + id);
         }

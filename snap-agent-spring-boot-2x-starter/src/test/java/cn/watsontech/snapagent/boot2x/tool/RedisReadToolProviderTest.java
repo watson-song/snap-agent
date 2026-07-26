@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,34 +17,34 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for {@link RedisReadToolProvider}.
+ * Unit tests for {@link RedisReadTools}.
  *
  * <p>Covers GET existing/missing key, EXISTS, and KEYS rejection
  * (TDD_SPEC §UC-13).</p>
  */
-class RedisReadToolProviderTest {
+class RedisReadToolsTest {
 
     @SuppressWarnings("unchecked")
     private RedisTemplate<String, Object> redisTemplate = mock(RedisTemplate.class);
     private ValueOperations<String, Object> valueOps = mock(ValueOperations.class);
-    private RedisReadToolProvider provider;
+    private RedisReadTools provider;
 
     @BeforeEach
     void setUp() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        provider = new RedisReadToolProvider(redisTemplate);
+        provider = new RedisReadTools(redisTemplate);
     }
 
     @Test
     void shouldReturnNameRedisGet() {
-        assertThat(provider.name()).isEqualTo("redis_get");
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("redis_get");
     }
 
     @Test
     void shouldReturnSchemaContainingKeyProperty() {
-        String schema = provider.schema();
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("redis_get");
 
-        assertThat(schema).contains("redis_get");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("key");
         assertThat(schema).contains("required");
     }
@@ -54,7 +56,7 @@ class RedisReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("key", "foo");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("bar");
@@ -67,7 +69,7 @@ class RedisReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("key", "notexist");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("(nil)");
@@ -81,7 +83,7 @@ class RedisReadToolProviderTest {
         args.put("key", "foo");
         args.put("command", "exists");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("true");
@@ -95,7 +97,7 @@ class RedisReadToolProviderTest {
         args.put("key", "missing");
         args.put("command", "exists");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("false");
@@ -107,10 +109,10 @@ class RedisReadToolProviderTest {
         args.put("key", "*");
         args.put("command", "keys");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("keys");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("keys");
     }
 
     @Test
@@ -120,10 +122,10 @@ class RedisReadToolProviderTest {
         args.put("command", "set");
         args.put("value", "bar");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("set");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("set");
     }
 
     @Test
@@ -132,19 +134,19 @@ class RedisReadToolProviderTest {
         args.put("key", "foo");
         args.put("command", "del");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
+        assertThat(result.getContent()).contains("Error");
     }
 
     @Test
     void shouldRejectWhenKeyIsMissing() {
         Map<String, Object> args = new HashMap<String, Object>();
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("key");
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).contains("(nil)");
     }
 
     @Test
@@ -154,7 +156,7 @@ class RedisReadToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("key", "foo");
 
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("bar");

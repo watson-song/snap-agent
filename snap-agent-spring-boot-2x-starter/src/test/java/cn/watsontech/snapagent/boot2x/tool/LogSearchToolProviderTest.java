@@ -1,6 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,14 +16,14 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link LogSearchToolProvider}.
+ * Unit tests for {@link LogSearchTools}.
  *
  * <p>Uses the subclass-and-override-httpGet pattern (design doc §8.1) to inject
  * mock Loki JSON responses without a real HTTP backend.</p>
  *
  * <p>See design doc §8.2 for the test matrix.</p>
  */
-class LogSearchToolProviderTest {
+class LogSearchToolsTest {
 
     private SnapAgentProperties.LogSearch config;
 
@@ -38,17 +40,17 @@ class LogSearchToolProviderTest {
     @Test
     @DisplayName("name() returns 'log_search'")
     void shouldReturnNameLogSearch() {
-        LogSearchToolProvider provider = new LogSearchToolProvider(config);
-        assertThat(provider.name()).isEqualTo("log_search");
+        LogSearchTools provider = new LogSearchTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("log_search");
     }
 
     @Test
     @DisplayName("schema() contains the query property and required field")
     void shouldReturnSchemaContainingQueryProperty() {
-        LogSearchToolProvider provider = new LogSearchToolProvider(config);
-        String schema = provider.schema();
+        LogSearchTools provider = new LogSearchTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("log_search");
 
-        assertThat(schema).contains("log_search");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("\"query\"");
         assertThat(schema).contains("required");
     }
@@ -70,10 +72,10 @@ class LogSearchToolProviderTest {
         args.put("query", "{job=\"orders\"} |= \"error\"");
         args.put("start", "1689700000");
         args.put("end", "1689700060");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("Lines: 2");
         assertThat(result.getContent()).contains("NullPointerException");
         assertThat(result.getContent()).contains("DB connection timeout");
         assertThat(result.getContent()).contains("app=\"order-service\"");
@@ -89,7 +91,7 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         // The URL should have start and end as nanosecond timestamps
         assertThat(provider.capturedUrl).contains("start=");
@@ -111,7 +113,7 @@ class LogSearchToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
         args.put("limit", 1000); // exceeds config max of 100
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("limit=100");
     }
@@ -135,10 +137,10 @@ class LogSearchToolProviderTest {
         args.put("query", "{app=~\"svc-.*\"}");
         args.put("start", "1689700000");
         args.put("end", "1689700060");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("Streams: 2");
         assertThat(result.getContent()).contains("svc-a");
         assertThat(result.getContent()).contains("svc-b");
         assertThat(result.getContent()).contains("line A");
@@ -155,10 +157,9 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"no-match\"}");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(0);
         assertThat(result.getContent()).contains("No log lines");
     }
 
@@ -172,10 +173,10 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "invalid{");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("invalid query syntax");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("invalid query syntax");
     }
 
     // ---- direction parameter ----
@@ -189,7 +190,7 @@ class LogSearchToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
         args.put("direction", "forward");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("direction=forward");
     }
@@ -202,7 +203,7 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("direction=backward");
     }
@@ -219,7 +220,7 @@ class LogSearchToolProviderTest {
         args.put("query", "{job=\"orders\"}");
         args.put("start", "1689700000");
         args.put("end", "1689700060");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         // 1689700000 * 1_000_000_000 = 1689700000000000000
         assertThat(provider.capturedUrl).contains("start=1689700000000000000");
@@ -231,13 +232,13 @@ class LogSearchToolProviderTest {
     @Test
     @DisplayName("missing query parameter returns error")
     void shouldReturnErrorWhenQueryMissing() {
-        LogSearchToolProvider provider = new LogSearchToolProvider(config);
+        LogSearchTools provider = new LogSearchTools(config);
 
         Map<String, Object> args = new HashMap<String, Object>();
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("query");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("query");
     }
 
     // ---- IOException ----
@@ -245,7 +246,7 @@ class LogSearchToolProviderTest {
     @Test
     @DisplayName("IOException from httpGet returns error result")
     void shouldHandleIOExceptionFromBackend() {
-        LogSearchToolProvider provider = new LogSearchToolProvider(config) {
+        LogSearchTools provider = new LogSearchTools(config) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                     int connectMs, int readMs) throws IOException {
@@ -255,10 +256,10 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("502");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("502");
     }
 
     // ---- auth header ----
@@ -274,7 +275,7 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"}");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedHeaders).containsEntry("X-Scope-OrgID", "tenant-1");
     }
@@ -289,7 +290,7 @@ class LogSearchToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "{job=\"orders\"} |= \"error\"");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("query=%7B");
         assertThat(provider.capturedUrl).contains("%22orders%22");
@@ -305,7 +306,7 @@ class LogSearchToolProviderTest {
     /**
      * Subclass that captures httpGet arguments and returns a canned response.
      */
-    static class CapturingProvider extends LogSearchToolProvider {
+    static class CapturingProvider extends LogSearchTools {
         final String mockResponse;
         String capturedUrl;
         Map<String, String> capturedHeaders;

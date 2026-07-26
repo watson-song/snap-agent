@@ -1,6 +1,8 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
+import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import cn.watsontech.snapagent.core.tool.ToolContext;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,14 +16,14 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for {@link MetricsToolProvider}.
+ * Unit tests for {@link MetricsTools}.
  *
  * <p>Uses the subclass-and-override-httpGet pattern (design doc §8.1) to inject
  * mock Prometheus JSON responses without a real HTTP backend.</p>
  *
  * <p>See design doc §8.2 for the test matrix.</p>
  */
-class MetricsToolProviderTest {
+class MetricsToolsTest {
 
     private SnapAgentProperties.Metrics config;
 
@@ -38,17 +40,17 @@ class MetricsToolProviderTest {
     @Test
     @DisplayName("name() returns 'metrics_query'")
     void shouldReturnNameMetricsQuery() {
-        MetricsToolProvider provider = new MetricsToolProvider(config);
-        assertThat(provider.name()).isEqualTo("metrics_query");
+        MetricsTools provider = new MetricsTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("metrics_query");
     }
 
     @Test
     @DisplayName("schema() contains the query property and required field")
     void shouldReturnSchemaContainingQueryProperty() {
-        MetricsToolProvider provider = new MetricsToolProvider(config);
-        String schema = provider.schema();
+        MetricsTools provider = new MetricsTools(config);
+        assertThat(ToolCallbacks.from(provider)[0].getName()).isEqualTo("metrics_query");
 
-        assertThat(schema).contains("metrics_query");
+        String schema = ToolCallbacks.from(provider)[0].getJsonSchema();
         assertThat(schema).contains("\"query\"");
         assertThat(schema).contains("required");
     }
@@ -65,10 +67,10 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "up");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(1);
+        assertThat(result.getContent()).contains("Points: 1");
         assertThat(result.getContent()).contains("42.5");
         assertThat(result.getContent()).contains("job=\"orders\"");
         assertThat(provider.capturedUrl).contains("/api/v1/query");
@@ -89,10 +91,10 @@ class MetricsToolProviderTest {
         args.put("start", "1689700000");
         args.put("end", "1689700060");
         args.put("step", "1m");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("Points: 2");
         assertThat(result.getContent()).contains("42.5");
         assertThat(result.getContent()).contains("45.1");
         assertThat(provider.capturedUrl).contains("/api/v1/query_range");
@@ -116,10 +118,10 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "rate(http_requests_total[5m])");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("Series: 2");
         assertThat(result.getContent()).contains("Series 1");
         assertThat(result.getContent()).contains("Series 2");
         assertThat(result.getContent()).contains("status=\"200\"");
@@ -138,10 +140,9 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "nonexistent_metric");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(0);
         assertThat(result.getContent()).contains("No data points");
     }
 
@@ -157,11 +158,11 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "invalid_query(");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("bad_data");
-        assertThat(result.getError()).contains("unknown function");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("bad_data");
+        assertThat(result.getContent()).contains("unknown function");
     }
 
     // ---- max_points truncation ----
@@ -189,12 +190,11 @@ class MetricsToolProviderTest {
         args.put("query", "rate(test[5m])");
         args.put("start", "1689700000");
         args.put("end", "1689700600");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.isTruncated()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(3);
         assertThat(result.getContent()).contains("truncated");
+        assertThat(result.getContent()).contains("Points: 3");
     }
 
     @Test
@@ -220,11 +220,11 @@ class MetricsToolProviderTest {
         args.put("query", "rate(test[5m])");
         args.put("start", "1689700000");
         args.put("max_points", 1000); // exceeds config max of 2
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(result.isSuccess()).isTrue();
-        assertThat(result.isTruncated()).isTrue();
-        assertThat(result.getRowCount()).isEqualTo(2);
+        assertThat(result.getContent()).contains("truncated");
+        assertThat(result.getContent()).contains("Points: 2");
     }
 
     // ---- URL encoding ----
@@ -237,7 +237,7 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "rate(http_requests_total{job=\"orders\"}[5m])");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         // The raw query has special chars; URL should contain encoded form
         assertThat(provider.capturedUrl).contains("query=rate%28");
@@ -258,7 +258,7 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "up");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedHeaders).containsEntry("Authorization", "Bearer secret-token");
     }
@@ -271,7 +271,7 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "up");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedHeaders).isNull();
     }
@@ -281,13 +281,13 @@ class MetricsToolProviderTest {
     @Test
     @DisplayName("missing query parameter returns error")
     void shouldReturnErrorWhenQueryMissing() {
-        MetricsToolProvider provider = new MetricsToolProvider(config);
+        MetricsTools provider = new MetricsTools(config);
 
         Map<String, Object> args = new HashMap<String, Object>();
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("query");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("query");
     }
 
     // ---- IOException ----
@@ -295,7 +295,7 @@ class MetricsToolProviderTest {
     @Test
     @DisplayName("IOException from httpGet returns error result")
     void shouldHandleIOExceptionFromBackend() {
-        MetricsToolProvider provider = new MetricsToolProvider(config) {
+        MetricsTools provider = new MetricsTools(config) {
             @Override
             protected String httpGet(String url, Map<String, String> headers,
                                      int connectMs, int readMs) throws IOException {
@@ -305,10 +305,10 @@ class MetricsToolProviderTest {
 
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "up");
-        ToolResult result = provider.execute(args, ctx());
+        ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
 
-        assertThat(result.isError()).isTrue();
-        assertThat(result.getError()).contains("503");
+        assertThat(result.getContent()).contains("Error");
+        assertThat(result.getContent()).contains("503");
     }
 
     // ---- default step ----
@@ -322,7 +322,7 @@ class MetricsToolProviderTest {
         Map<String, Object> args = new HashMap<String, Object>();
         args.put("query", "up");
         args.put("start", "1689700000");
-        provider.execute(args, ctx());
+        ToolCallbacks.from(provider)[0].execute(args, ctx());
 
         assertThat(provider.capturedUrl).contains("step=1m");
     }
@@ -336,7 +336,7 @@ class MetricsToolProviderTest {
     /**
      * Subclass that captures httpGet arguments and returns a canned response.
      */
-    static class CapturingProvider extends MetricsToolProvider {
+    static class CapturingProvider extends MetricsTools {
         final String mockResponse;
         String capturedUrl;
         Map<String, String> capturedHeaders;

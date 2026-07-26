@@ -3,7 +3,7 @@ package cn.watsontech.snapagent.boot2x.tool;
 import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallbacks;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.ToolCallback;
 import org.springframework.core.env.Environment;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,7 +27,7 @@ import java.util.regex.Pattern;
  *   <li>Reject if plugin ID is already registered.</li>
  *   <li>Move JAR to final path: {@code <uploadDir>/<pluginId>/plugin.jar}.</li>
  *   <li>Create a new URLClassLoader from the final JAR path.</li>
- *   <li>Load and instantiate the ToolProvider class reflectively.</li>
+ *   <li>Load and instantiate the plugin class reflectively.</li>
  *   <li>Extract plugin-specific config via PluginConfigExtractor.</li>
  *   <li>Build SimplePluginContext and PluginDescriptor, then register.</li>
  * </ol>
@@ -131,14 +131,18 @@ public class PluginUploader {
             throw new RuntimeException("failed to load provider class: " + metadata.getProviderClassName(), e);
         }
 
-        // Step 8: Instantiate provider (Java 8 reflective style)
-        ToolProvider provider;
+        // Step 8: Instantiate provider and extract @Tool callbacks
+        ToolCallback[] callbacks;
         try {
             Object instance = providerClass.newInstance();
-            provider = (ToolProvider) instance;
-        } catch (InstantiationException | IllegalAccessException | ClassCastException e) {
+            callbacks = ToolCallbacks.from(instance);
+        } catch (InstantiationException | IllegalAccessException e) {
             closeQuietly(pluginClassLoader);
             throw new RuntimeException("failed to instantiate provider: " + metadata.getProviderClassName(), e);
+        }
+        if (callbacks.length == 0) {
+            closeQuietly(pluginClassLoader);
+            throw new RuntimeException("no @Tool methods found on class: " + metadata.getProviderClassName());
         }
 
         // Step 9: Extract config from environment
@@ -152,12 +156,12 @@ public class PluginUploader {
                 metadata.getPluginId(),
                 metadata.getToolType(),
                 metadata.getDisplayName() != null ? metadata.getDisplayName() : "",
-                metadata.getDescription() != null ? metadata.getDescription() : "",
                 metadata.getVersion() != null ? metadata.getVersion() : "1.0.0",
+                metadata.getDescription() != null ? metadata.getDescription() : "",
                 metadata.isDefault(),   // isDefault
                 true,                   // enabled
                 false,                  // system
-                ToolCallbacks.from(provider),
+                callbacks,
                 pluginClassLoader,
                 finalJarPath != null ? finalJarPath.toString() : null,
                 pluginContext
