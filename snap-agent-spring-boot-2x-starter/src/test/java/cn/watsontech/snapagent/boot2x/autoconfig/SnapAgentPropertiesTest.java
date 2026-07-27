@@ -433,4 +433,63 @@ class SnapAgentPropertiesTest {
         assertThat(cost.isEnabled()).isTrue();
         assertThat(cost.getMaxTokensPerRun()).isEqualTo(50000);
     }
+
+    // ---- Vcs config (v1.1 auto-fix) ----
+
+    @Test
+    void shouldDefaultVcsSettings() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Vcs vcs = props.getVcs();
+
+        assertThat(vcs.isEnabled()).isFalse();
+        assertThat(vcs.getType()).isEqualTo("gitlab");
+        assertThat(vcs.getDefaultBranch()).isEqualTo("main");
+        assertThat(vcs.getGitlab().getBaseUrl()).isEmpty();
+        assertThat(vcs.getGitlab().getToken()).isEmpty();
+        assertThat(vcs.getGitlab().getProjectId()).isZero();
+        assertThat(vcs.getBitbucket().getBaseUrl()).isEmpty();
+        assertThat(vcs.getBitbucket().getProjectKey()).isEmpty();
+        assertThat(vcs.getBitbucket().getRepoSlug()).isEmpty();
+    }
+
+    // ---- Fix config (v1.1 auto-fix) ----
+
+    @Test
+    void shouldDefaultFixSettings() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        SnapAgentProperties.Fix fix = props.getFix();
+
+        assertThat(fix.isEnabled()).isFalse();
+        assertThat(fix.getMaxTurns()).isEqualTo(20);
+        assertThat(fix.getTimeoutMinutes()).isEqualTo(10);
+        assertThat(fix.getProjectRoot()).isEmpty();
+
+        SnapAgentProperties.Fix.Guard guard = fix.getGuard();
+        assertThat(guard.getIncludePaths()).hasSize(3);
+        assertThat(guard.getExcludePaths()).hasSize(5);
+        assertThat(guard.getAllowedExtensions()).contains(".java", ".xml", ".yml");
+        assertThat(guard.getMaxFileCount()).isEqualTo(20);
+        assertThat(guard.getMaxFileSize()).isEqualTo(512000L);
+
+        SnapAgentProperties.Fix.Webhook webhook = fix.getWebhook();
+        assertThat(webhook.getSecret()).isEmpty();
+    }
+
+    @Test
+    void shouldSetVcsEnabled() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        props.getVcs().setEnabled(true);
+        props.getVcs().setType("bitbucket");
+
+        assertThat(props.getVcs().isEnabled()).isTrue();
+        assertThat(props.getVcs().getType()).isEqualTo("bitbucket");
+    }
+
+    @Test
+    void shouldSetFixEnabled() {
+        SnapAgentProperties props = new SnapAgentProperties();
+        props.getFix().setEnabled(true);
+
+        assertThat(props.getFix().isEnabled()).isTrue();
+    }
 }

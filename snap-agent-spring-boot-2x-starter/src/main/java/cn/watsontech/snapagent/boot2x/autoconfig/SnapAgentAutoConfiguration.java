@@ -17,6 +17,14 @@ import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
 import cn.watsontech.snapagent.boot2x.issue.SimpleVerificationRunner;
 import cn.watsontech.snapagent.boot2x.issue.TemplateSolutionSuggester;
 import cn.watsontech.snapagent.boot2x.issue.ZentaoIssueTracker;
+import cn.watsontech.snapagent.boot2x.fix.FixContextHolder;
+import cn.watsontech.snapagent.boot2x.fix.FixExecutionService;
+import cn.watsontech.snapagent.boot2x.fix.FixGuard;
+import cn.watsontech.snapagent.boot2x.fix.FileWriteTool;
+import cn.watsontech.snapagent.boot2x.fix.FileEditTool;
+import cn.watsontech.snapagent.boot2x.vcs.GitLabVcsClient;
+import cn.watsontech.snapagent.boot2x.vcs.BitbucketVcsClient;
+import cn.watsontech.snapagent.core.vcs.VcsClient;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import cn.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -1143,6 +1151,89 @@ public class SnapAgentAutoConfiguration {
         log.info("JiraIssueTracker assembled (base-url={}, project-key={})",
                 jr.getBaseUrl(), jr.getProjectKey());
         return new JiraIssueTracker(jr);
+    }
+
+    // ---- VCS Client (v1.1 auto-fix) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.vcs", name = "type", havingValue = "gitlab", matchIfMissing = true)
+    @ConditionalOnMissingBean(VcsClient.class)
+    public GitLabVcsClient gitLabVcsClient(SnapAgentProperties props) {
+        SnapAgentProperties.Vcs.GitLab gl = props.getVcs().getGitlab();
+        log.info("GitLabVcsClient assembled (base-url={}, project-id={})",
+                gl.getBaseUrl(), gl.getProjectId());
+        return new GitLabVcsClient(gl);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.vcs", name = "type", havingValue = "bitbucket")
+    @ConditionalOnMissingBean(VcsClient.class)
+    public BitbucketVcsClient bitbucketVcsClient(SnapAgentProperties props) {
+        SnapAgentProperties.Vcs.Bitbucket bb = props.getVcs().getBitbucket();
+        log.info("BitbucketVcsClient assembled (base-url={}, project={}, repo={})",
+                bb.getBaseUrl(), bb.getProjectKey(), bb.getRepoSlug());
+        return new BitbucketVcsClient(bb);
+    }
+
+    // ---- Fix infrastructure (v1.1 auto-fix) ----
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.fix", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public FixContextHolder fixContextHolder() {
+        log.info("FixContextHolder assembled");
+        return new FixContextHolder();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.fix", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public FixGuard fixGuard(SnapAgentProperties props) {
+        log.info("FixGuard assembled (include-paths={}, exclude-paths={})",
+                props.getFix().getGuard().getIncludePaths().size(),
+                props.getFix().getGuard().getExcludePaths().size());
+        return new FixGuard(props.getFix().getGuard());
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.fix", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public FileWriteTool fileWriteTool(FixContextHolder holder, FixGuard guard) {
+        log.info("FileWriteTool assembled");
+        return new FileWriteTool(holder, guard);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.fix", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public FileEditTool fileEditTool(FixContextHolder holder, FixGuard guard) {
+        log.info("FileEditTool assembled");
+        return new FileEditTool(holder, guard);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.fix", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public FixExecutionService fixExecutionService(
+            AgentService agentService,
+            IssueStore issueStore,
+            SkillRegistry skillRegistry,
+            ObjectProvider<VcsClient> vcsClientProvider,
+            FixContextHolder fixContextHolder,
+            SnapAgentProperties props) {
+        log.info("FixExecutionService assembled (max-turns={})", props.getFix().getMaxTurns());
+        return new FixExecutionService(agentService, issueStore, skillRegistry,
+                vcsClientProvider.getIfAvailable(), fixContextHolder,
+                props.getFix().getProjectRoot(),
+                props.getIssueClosure().getSystemUserId(),
+                props.getVcs().getDefaultBranch());
     }
 
     @Bean
