@@ -325,6 +325,19 @@ public class IssueClosureService {
             return null;
         }
 
+        // Update external tracker status when an external issue exists.
+        // Wrapped in try/catch — external tracker failures should not block close.
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            try {
+                issueTracker.updateStatus(issue.getExternalIssueId(), "resolved");
+                log.info("External issue {} status updated to resolved via {}",
+                        issue.getExternalIssueId(), issueTracker.type());
+            } catch (RuntimeException e) {
+                log.warn("Failed to update external issue {} status: {}",
+                        issue.getExternalIssueId(), e.getMessage());
+            }
+        }
+
         if (sedimentationService != null) {
             try {
                 sedimentationService.sediment(issue);

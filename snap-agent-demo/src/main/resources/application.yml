@@ -5,24 +5,99 @@ snap-agent:
   enabled: true
   base-path: /snap-agent
   builtin-skills-dir: classpath:/docs/skills/
-  upload-skills-dir: /tmp/snap-agent-skills
+  upload-skills-dir: /Users/HuaSheng.Song/IdeaProjects/skills-agent/snap-agent-demo/src/main/resources/skills
   llm:
-    api-key: dummy-key-for-e2e
-    model: claude-sonnet-4-6
-    timeout-seconds: 10
+    api-type: anthropic
+    base-url: https://claudecode.sf-express.com/ccr
+    auth-token: 01414185
+    model: aliyun/glm-5.2
+    api-key: ""
+    max-tokens: 8192
+    timeout-seconds: 120
+    streaming: true
   agent:
     max-turns: 20
-    task-timeout-minutes: 10
+    task-timeout-minutes: 30
+    max-concurrent-runs-per-user: 1
+    max-runs-per-hour: 50
+    max-result-rows: 1000
   jdbc:
     enabled: true
+    datasource-bean-name: dataSource
+    url: jdbc:mysql://scpdrpcore-m.dbsit.sfcloud.local:3306/scpdrp_saas?allowMultiQueries=true&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=CONVERT_TO_NULL&serverTimezone=GMT%2b8&useSSL=false&allowPublicKeyRetrieval=true
+    username: scpdrpsaas
+    password: D@ohaode74
   routing:
-    mode: static
-    internal-token: e2e-internal-secret
-    internal-path: /snap-agent-internal
-    static-peers:
-      - http://127.0.0.1:8080
+    mode: none
   security:
-    required-permission: ""
+    framework: auto
+    audit-log: true
+    required-permission: snap-agent:access
+    plugin-read-permission: ""
+    plugin-manage-permission: ""
+    auth-token-header: ""
+    auth-token-cookie: ""
+    auth-token-local-storage-key: ""
+  code:
+    enabled: true
+    project-root: ${user.dir}
+  knowledge:
+    enabled: true
+    sources:
+      - type: markdown
+        dir: classpath:/docs/knowledge/
+  code-graph:
+    enabled: true
+    scan-packages:
+      - cn.watsontech.snapagent
+  issue-closure:
+    enabled: true
+    system-user-id: system
+    tracker-type: noop
+    # --- Zentao (禅道) ---
+    # zentao:
+    #   base-url: https://zentao.example.com
+    #   token: your-zentao-pat
+    #   product-id: 1
+    #   project-id: 0
+    # --- GitHub Issues ---
+    # github:
+    #   api-base-url: https://api.github.com
+    #   token: ghp_your_github_token
+    #   owner: your-org
+    #   repo: your-repo
+    # --- Jira ---
+    # jira:
+    #   base-url: https://yourteam.atlassian.net
+    #   username: your-email@example.com
+    #   api-token: your-jira-api-token
+    #   project-key: PROJ
+    #   issue-type: Bug
+  cost:
+    enabled: true
+  workflows:
+    enabled: true
+  patrol:
+    enabled: true
+    scheduler-pool-size: 2
+    report-buffer-size: 500
+  alert:
+    enabled: true
+    buffer-size: 1000
+    auto-resolve-minutes: 30
+  anchor:
+    enabled: true
+    max-context-chars: 8000
+    preprocess-enabled: true
+    preprocess-timeout-ms: 5000
+    summary-threshold-chars: 4000
+    classifier-confidence-threshold: 0.5
+    summary-cache-ttl-seconds: 600
+    injection-cache-max-size: 512
+    injection-cache-min-ttl-seconds: 60
+    injection-cache-max-ttl-seconds: 604800
+    injection-max-tokens: 4096
+    injection-default-cache-ttl: 3600
 
 logging:
   level:

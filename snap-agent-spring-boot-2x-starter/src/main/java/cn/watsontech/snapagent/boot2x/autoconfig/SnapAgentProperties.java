@@ -1458,8 +1458,12 @@ public class SnapAgentProperties {
         /** Storage directory for issue JSON files. Empty = default to {upload-skills-dir}/issues/. */
         private String storageDir = "";
 
-        /** IssueTracker type identifier (noop/jira/github). */
+        /** IssueTracker type identifier (noop/jira/github/zentao). */
         private String trackerType = "noop";
+
+        private ZentaoTracker zentao = new ZentaoTracker();
+        private GitHubTracker github = new GitHubTracker();
+        private JiraTracker jira = new JiraTracker();
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -1469,6 +1473,82 @@ public class SnapAgentProperties {
         public void setStorageDir(String storageDir) { this.storageDir = storageDir; }
         public String getTrackerType() { return trackerType; }
         public void setTrackerType(String trackerType) { this.trackerType = trackerType; }
+        public ZentaoTracker getZentao() { return zentao; }
+        public void setZentao(ZentaoTracker zentao) { this.zentao = zentao; }
+        public GitHubTracker getGithub() { return github; }
+        public void setGithub(GitHubTracker github) { this.github = github; }
+        public JiraTracker getJira() { return jira; }
+        public void setJira(JiraTracker jira) { this.jira = jira; }
+
+        /**
+         * Zentao (禅道) issue tracker configuration.
+         *
+         * <p>Used when {@code tracker-type=zentao}. Connects to Zentao REST API v1
+         * to create bugs, resolve/close them, and provide web URLs.</p>
+         */
+        public static class ZentaoTracker {
+            private String baseUrl = "";
+            private String token = "";
+            private int productId = 0;
+            private int projectId = 0;
+
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+            public String getToken() { return token; }
+            public void setToken(String token) { this.token = token; }
+            public int getProductId() { return productId; }
+            public void setProductId(int productId) { this.productId = productId; }
+            public int getProjectId() { return projectId; }
+            public void setProjectId(int projectId) { this.projectId = projectId; }
+        }
+
+        /**
+         * GitHub Issues tracker configuration.
+         *
+         * <p>Used when {@code tracker-type=github}. Connects to GitHub REST API v3
+         * to create issues, change state (open/closed), and provide web URLs.</p>
+         */
+        public static class GitHubTracker {
+            private String apiBaseUrl = "https://api.github.com";
+            private String token = "";
+            private String owner = "";
+            private String repo = "";
+
+            public String getApiBaseUrl() { return apiBaseUrl; }
+            public void setApiBaseUrl(String apiBaseUrl) { this.apiBaseUrl = apiBaseUrl; }
+            public String getToken() { return token; }
+            public void setToken(String token) { this.token = token; }
+            public String getOwner() { return owner; }
+            public void setOwner(String owner) { this.owner = owner; }
+            public String getRepo() { return repo; }
+            public void setRepo(String repo) { this.repo = repo; }
+        }
+
+        /**
+         * Jira issue tracker configuration.
+         *
+         * <p>Used when {@code tracker-type=jira}. Connects to Jira REST API v2
+         * to create issues, transition status, and provide web URLs. Supports
+         * both Jira Cloud (email + API token) and Jira Server (personal token).</p>
+         */
+        public static class JiraTracker {
+            private String baseUrl = "";
+            private String username = "";
+            private String apiToken = "";
+            private String projectKey = "";
+            private String issueType = "Bug";
+
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+            public String getUsername() { return username; }
+            public void setUsername(String username) { this.username = username; }
+            public String getApiToken() { return apiToken; }
+            public void setApiToken(String apiToken) { this.apiToken = apiToken; }
+            public String getProjectKey() { return projectKey; }
+            public void setProjectKey(String projectKey) { this.projectKey = projectKey; }
+            public String getIssueType() { return issueType; }
+            public void setIssueType(String issueType) { this.issueType = issueType; }
+        }
     }
 
     /**

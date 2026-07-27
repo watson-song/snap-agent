@@ -10,10 +10,13 @@ import cn.watsontech.snapagent.boot2x.cost.CostTrackingLlmClient;
 import cn.watsontech.snapagent.boot2x.cost.DefaultCostTracker;
 import cn.watsontech.snapagent.boot2x.cost.FileCostStore;
 import cn.watsontech.snapagent.boot2x.issue.FileIssueStore;
+import cn.watsontech.snapagent.boot2x.issue.GitHubIssueTracker;
 import cn.watsontech.snapagent.boot2x.issue.IssueClosureService;
+import cn.watsontech.snapagent.boot2x.issue.JiraIssueTracker;
 import cn.watsontech.snapagent.boot2x.issue.NoopIssueTracker;
 import cn.watsontech.snapagent.boot2x.issue.SimpleVerificationRunner;
 import cn.watsontech.snapagent.boot2x.issue.TemplateSolutionSuggester;
+import cn.watsontech.snapagent.boot2x.issue.ZentaoIssueTracker;
 import cn.watsontech.snapagent.boot2x.llm.AnthropicLlmClient;
 import cn.watsontech.snapagent.boot2x.routing.HeadlessDnsPeerRouter;
 import cn.watsontech.snapagent.boot2x.routing.K8sApiPeerRouter;
@@ -1110,6 +1113,36 @@ public class SnapAgentAutoConfiguration {
     public NoopIssueTracker noopIssueTracker() {
         log.info("NoopIssueTracker assembled (tracker-type=noop)");
         return new NoopIssueTracker();
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "tracker-type", havingValue = "zentao")
+    public ZentaoIssueTracker zentaoIssueTracker(SnapAgentProperties props) {
+        SnapAgentProperties.IssueClosure.ZentaoTracker zt = props.getIssueClosure().getZentao();
+        log.info("ZentaoIssueTracker assembled (base-url={}, product-id={})",
+                zt.getBaseUrl(), zt.getProductId());
+        return new ZentaoIssueTracker(zt);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "tracker-type", havingValue = "github")
+    public GitHubIssueTracker gitHubIssueTracker(SnapAgentProperties props) {
+        SnapAgentProperties.IssueClosure.GitHubTracker gh = props.getIssueClosure().getGithub();
+        log.info("GitHubIssueTracker assembled (owner={}, repo={})",
+                gh.getOwner(), gh.getRepo());
+        return new GitHubIssueTracker(gh);
+    }
+
+    @Bean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            prefix = "snap-agent.issue-closure", name = "tracker-type", havingValue = "jira")
+    public JiraIssueTracker jiraIssueTracker(SnapAgentProperties props) {
+        SnapAgentProperties.IssueClosure.JiraTracker jr = props.getIssueClosure().getJira();
+        log.info("JiraIssueTracker assembled (base-url={}, project-key={})",
+                jr.getBaseUrl(), jr.getProjectKey());
+        return new JiraIssueTracker(jr);
     }
 
     @Bean

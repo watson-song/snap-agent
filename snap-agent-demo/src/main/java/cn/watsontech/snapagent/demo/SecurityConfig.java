@@ -26,8 +26,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
     protected void configure(HttpSecurity http) throws Exception {
         http.csrf().disable()
                 .authorizeRequests()
-                // Public: auth config (tells frontend how to authenticate — no sensitive info)
-                .antMatchers("/snap-agent/auth-config").permitAll()
+                // Public: auth config + anchor config (tells frontend how to authenticate — no sensitive info)
+                .antMatchers("/snap-agent/auth-config", "/snap-agent/anchor/config").permitAll()
                 // Public: static resources (SPA shell + anchor showcase)
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                         "/snap-agent/*.css", "/*.html").permitAll()
