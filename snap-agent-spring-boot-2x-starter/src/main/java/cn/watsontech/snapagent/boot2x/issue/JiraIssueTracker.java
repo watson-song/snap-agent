@@ -142,6 +142,19 @@ public class JiraIssueTracker extends AbstractHttpIssueTracker implements IssueT
         return "jira";
     }
 
+    @Override
+    public void addComment(String externalIssueId, String comment) {
+        if (externalIssueId == null || externalIssueId.isEmpty()) {
+            return;
+        }
+
+        String url = baseUrl + "/rest/api/2/issue/" + externalIssueId + "/comment";
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("body", comment != null ? comment : "");
+
+        jsonRequest(url, "POST", authHeaders(), body);
+    }
+
     /**
      * Returns the appropriate Authorization header value.
      *

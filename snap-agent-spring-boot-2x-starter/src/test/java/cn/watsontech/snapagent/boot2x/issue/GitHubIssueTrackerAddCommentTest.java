@@ -1,0 +1,38 @@
+package cn.watsontech.snapagent.boot2x.issue;
+
+import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class GitHubIssueTrackerAddCommentTest {
+
+    private GitHubIssueTracker createTracker() {
+        SnapAgentProperties.IssueClosure.GitHubTracker config =
+                new SnapAgentProperties.IssueClosure.GitHubTracker();
+        config.setApiBaseUrl("http://localhost:39999");
+        config.setToken("ghp_testtoken");
+        config.setOwner("myorg");
+        config.setRepo("myrepo");
+        return new GitHubIssueTracker(config);
+    }
+
+    @Test
+    void addComment_emptyIdDoesNothing() {
+        assertThatCode(() -> createTracker().addComment("", "comment"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void addComment_nullIdDoesNothing() {
+        assertThatCode(() -> createTracker().addComment(null, "comment"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void addComment_throwsWhenServerUnreachable() {
+        assertThatThrownBy(() -> createTracker().addComment("42", "test comment"))
+                .isInstanceOf(RuntimeException.class);
+    }
+}

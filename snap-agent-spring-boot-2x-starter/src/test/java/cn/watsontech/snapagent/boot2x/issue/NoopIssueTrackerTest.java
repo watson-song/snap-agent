@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.issue;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Unit tests for {@link NoopIssueTracker}.
@@ -75,5 +76,13 @@ class NoopIssueTrackerTest {
         // Multiple calls should consistently return null.
         assertThat(tracker.createIssue("t1", "d1", "a1")).isNull();
         assertThat(tracker.createIssue("t2", "d2", null)).isNull();
+    }
+
+    @Test
+    void addComment_doesNotThrow() {
+        NoopIssueTracker tracker = new NoopIssueTracker();
+        // The noop tracker should silently accept addComment calls
+        assertThatCode(() -> tracker.addComment("EXT-1", "test comment"))
+                .doesNotThrowAnyException();
     }
 }

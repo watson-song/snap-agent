@@ -115,6 +115,20 @@ public class GitHubIssueTracker extends AbstractHttpIssueTracker implements Issu
         return "github";
     }
 
+    @Override
+    public void addComment(String externalIssueId, String comment) {
+        if (externalIssueId == null || externalIssueId.isEmpty()) {
+            return;
+        }
+
+        String url = apiBaseUrl + "/repos/" + owner + "/" + repo
+                + "/issues/" + externalIssueId + "/comments";
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("body", comment != null ? comment : "");
+
+        jsonRequest(url, "POST", authHeader("Bearer " + token), body);
+    }
+
     /**
      * Maps a SnapAgent status string to a GitHub issue state.
      */

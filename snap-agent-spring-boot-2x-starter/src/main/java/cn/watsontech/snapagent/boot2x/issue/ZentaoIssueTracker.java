@@ -101,6 +101,19 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
         return "zentao";
     }
 
+    @Override
+    public void addComment(String externalIssueId, String comment) {
+        if (externalIssueId == null || externalIssueId.isEmpty()) {
+            return;
+        }
+
+        String url = baseUrl + "/api.php/v1/bugs/" + externalIssueId + "/comments";
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("comment", comment != null ? comment : "");
+
+        jsonRequest(url, "POST", authHeader("Token " + token), body);
+    }
+
     /**
      * Maps a SnapAgent status string to a Zentao bug action.
      *
