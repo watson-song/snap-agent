@@ -75,6 +75,50 @@ snap-agent:
     #   issue-type: Bug
   cost:
     enabled: true
+  # ---- VCS Client (auto-fix) ----
+  vcs:
+    enabled: false
+    type: gitlab              # gitlab | bitbucket
+    default-branch: main
+    # GitLab configuration
+    gitlab:
+      base-url: https://gitlab.example.com
+      token: ${GITLAB_TOKEN:}
+      project-id: 0
+    # Bitbucket Server / Data Center configuration
+    bitbucket:
+      base-url: https://bitbucket.example.com
+      token: ${BITBUCKET_TOKEN:}
+      project-key: ""
+      repo-slug: ""
+  # ---- Fix infrastructure (auto-fix) ----
+  fix:
+    enabled: false
+    max-turns: 20
+    timeout-minutes: 10
+    project-root: ""          # absolute path to host project root
+    guard:
+      include-paths:
+        - "src/main/java/**"
+        - "src/main/resources/**"
+        - "src/test/java/**"
+      exclude-paths:
+        - "**/SecurityConfig.java"
+        - "**/application*.yml"
+        - "**/application*.properties"
+        - "**/*Config.java"
+        - "**/DataSource*.java"
+      allowed-extensions:
+        - .java
+        - .xml
+        - .yml
+        - .properties
+        - .sql
+        - .md
+      max-file-count: 20
+      max-file-size: 512000
+    webhook:
+      secret: ${VCS_WEBHOOK_SECRET:}
   workflows:
     enabled: true
   patrol:
