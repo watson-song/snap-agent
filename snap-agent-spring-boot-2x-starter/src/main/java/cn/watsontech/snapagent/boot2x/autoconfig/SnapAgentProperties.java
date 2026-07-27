@@ -73,6 +73,8 @@ public class SnapAgentProperties {
     private Embedding embedding = new Embedding();
     private Rag rag = new Rag();
     private Memory memory = new Memory();
+    private Vcs vcs = new Vcs();
+    private Fix fix = new Fix();
 
     // ---- getters / setters ----
 
@@ -332,6 +334,22 @@ public class SnapAgentProperties {
 
     public void setMemory(Memory memory) {
         this.memory = memory;
+    }
+
+    public Vcs getVcs() {
+        return vcs;
+    }
+
+    public void setVcs(Vcs vcs) {
+        this.vcs = vcs;
+    }
+
+    public Fix getFix() {
+        return fix;
+    }
+
+    public void setFix(Fix fix) {
+        this.fix = fix;
     }
 
     // ---- nested classes ----
@@ -2058,6 +2076,111 @@ public class SnapAgentProperties {
             public void setDatasourceBeanName(String v) { this.datasourceBeanName = v; }
             public String getTableName() { return tableName; }
             public void setTableName(String v) { this.tableName = v; }
+        }
+    }
+
+    // ---- VCS Client config (v1.1 auto-fix) ----
+
+    public static class Vcs {
+        private boolean enabled = false;
+        private String type = "gitlab";
+        private String defaultBranch = "main";
+        private GitLab gitlab = new GitLab();
+        private Bitbucket bitbucket = new Bitbucket();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public String getDefaultBranch() { return defaultBranch; }
+        public void setDefaultBranch(String defaultBranch) { this.defaultBranch = defaultBranch; }
+        public GitLab getGitlab() { return gitlab; }
+        public void setGitlab(GitLab gitlab) { this.gitlab = gitlab; }
+        public Bitbucket getBitbucket() { return bitbucket; }
+        public void setBitbucket(Bitbucket bitbucket) { this.bitbucket = bitbucket; }
+
+        public static class GitLab {
+            private String baseUrl = "";
+            private String token = "";
+            private int projectId = 0;
+
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+            public String getToken() { return token; }
+            public void setToken(String token) { this.token = token; }
+            public int getProjectId() { return projectId; }
+            public void setProjectId(int projectId) { this.projectId = projectId; }
+        }
+
+        public static class Bitbucket {
+            private String baseUrl = "";
+            private String token = "";
+            private String projectKey = "";
+            private String repoSlug = "";
+
+            public String getBaseUrl() { return baseUrl; }
+            public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+            public String getToken() { return token; }
+            public void setToken(String token) { this.token = token; }
+            public String getProjectKey() { return projectKey; }
+            public void setProjectKey(String projectKey) { this.projectKey = projectKey; }
+            public String getRepoSlug() { return repoSlug; }
+            public void setRepoSlug(String repoSlug) { this.repoSlug = repoSlug; }
+        }
+    }
+
+    // ---- Fix infrastructure config (v1.1 auto-fix) ----
+
+    public static class Fix {
+        private boolean enabled = false;
+        private int maxTurns = 20;
+        private int timeoutMinutes = 10;
+        private String projectRoot = "";
+        private Guard guard = new Guard();
+        private Webhook webhook = new Webhook();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getMaxTurns() { return maxTurns; }
+        public void setMaxTurns(int maxTurns) { this.maxTurns = maxTurns; }
+        public int getTimeoutMinutes() { return timeoutMinutes; }
+        public void setTimeoutMinutes(int timeoutMinutes) { this.timeoutMinutes = timeoutMinutes; }
+        public String getProjectRoot() { return projectRoot; }
+        public void setProjectRoot(String projectRoot) { this.projectRoot = projectRoot; }
+        public Guard getGuard() { return guard; }
+        public void setGuard(Guard guard) { this.guard = guard; }
+        public Webhook getWebhook() { return webhook; }
+        public void setWebhook(Webhook webhook) { this.webhook = webhook; }
+
+        public static class Guard {
+            private List<String> includePaths = new ArrayList<String>(java.util.Arrays.asList(
+                    "src/main/java/**", "src/main/resources/**", "src/test/java/**"));
+            private List<String> excludePaths = new ArrayList<String>(java.util.Arrays.asList(
+                    "**/SecurityConfig.java", "**/application*.yml",
+                    "**/application*.properties", "**/*Config.java",
+                    "**/DataSource*.java"));
+            private List<String> allowedExtensions = new ArrayList<String>(java.util.Arrays.asList(
+                    ".java", ".xml", ".yml", ".properties", ".sql", ".md"));
+            private int maxFileCount = 20;
+            private long maxFileSize = 512000L;
+
+            public List<String> getIncludePaths() { return includePaths; }
+            public void setIncludePaths(List<String> includePaths) { this.includePaths = includePaths; }
+            public List<String> getExcludePaths() { return excludePaths; }
+            public void setExcludePaths(List<String> excludePaths) { this.excludePaths = excludePaths; }
+            public List<String> getAllowedExtensions() { return allowedExtensions; }
+            public void setAllowedExtensions(List<String> allowedExtensions) { this.allowedExtensions = allowedExtensions; }
+            public int getMaxFileCount() { return maxFileCount; }
+            public void setMaxFileCount(int maxFileCount) { this.maxFileCount = maxFileCount; }
+            public long getMaxFileSize() { return maxFileSize; }
+            public void setMaxFileSize(long maxFileSize) { this.maxFileSize = maxFileSize; }
+        }
+
+        public static class Webhook {
+            private String secret = "";
+
+            public String getSecret() { return secret; }
+            public void setSecret(String secret) { this.secret = secret; }
         }
     }
 }
