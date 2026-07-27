@@ -146,7 +146,8 @@ class InternalTaskControllerTest {
         lenient().doAnswer(invocation -> null).when(taskExecutor).execute(any(Runnable.class));
         SseEmitter emitter = controller.stream("task-2",
                 "secret-token");
-        assertThat(emitter).isNotNull();
+        assertThat(emitter).as("emitter should be created for running task").isNotNull();
+        assertThat(emitter.getTimeout()).isEqualTo(30L * 60L * 1000L);
     }
 
     @Test

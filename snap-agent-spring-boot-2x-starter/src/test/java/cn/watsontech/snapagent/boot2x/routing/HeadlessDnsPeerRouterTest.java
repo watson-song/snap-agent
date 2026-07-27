@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.boot2x.routing;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -170,15 +171,20 @@ class HeadlessDnsPeerRouterTest {
 
     @Test
     void shouldIgnoreAddressesWithEmptyIp() throws Exception {
+        // Mock an InetAddress whose getHostAddress() returns "" — should be filtered out
+        InetAddress emptyIpAddr = Mockito.mock(InetAddress.class);
+        Mockito.when(emptyIpAddr.getHostAddress()).thenReturn("");
+
         HeadlessDnsPeerRouter router = new HeadlessDnsPeerRouter(
                 "svc.ns.svc.cluster.local", 8080, 10, null,
                 new HeadlessDnsPeerRouter.DnsResolver() {
                     @Override
                     public InetAddress[] resolveAll(String host) throws UnknownHostException {
-                        return new InetAddress[]{addr("10.0.0.2")};
+                        return new InetAddress[]{emptyIpAddr, addr("10.0.0.2")};
                     }
                 });
         List<String> peers = router.discoverPeers();
-        assertThat(peers).hasSize(1);
+        // The empty-IP address is filtered out, leaving only 10.0.0.2
+        assertThat(peers).containsExactly("http://10.0.0.2:8080");
     }
 }

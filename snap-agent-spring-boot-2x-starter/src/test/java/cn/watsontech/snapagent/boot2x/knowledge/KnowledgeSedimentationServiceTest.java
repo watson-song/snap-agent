@@ -74,18 +74,23 @@ class KnowledgeSedimentationServiceTest {
     @Test
     @DisplayName("userQuery > 60 字符 → title 截断至 60 + '...'")
     void shouldTruncateLongUserQuery() {
-        String longQuery = "这是一个非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常非常长的查询字符串超过60字符";
+        StringBuilder longQueryBuilder = new StringBuilder();
+        for (int i = 0; i < 80; i++) {
+            longQueryBuilder.append("测");
+        }
+        String longQuery = longQueryBuilder.toString(); // 80 chars > 60
         IssueClosure issue = createIssue("issue-003", longQuery, "root cause", "solution");
 
         Document doc = service.extract(issue);
 
         assertThat(doc).isNotNull();
-        String title = doc.getContent().substring(0, doc.getContent().indexOf("\n"));
-        // The title is the first line of the document content
-        // But actually the title is stored as the Document's "title" field
-        // which is the first line. Let's check the content starts with the truncated version
-        // Actually the Document content starts with ## 问题, the title is separate
-        // The extract method creates Document(title, content, ...) where title = "问题: " + truncate(query)
+        // UC-22: title (stored as Document id) is truncated to "问题: " + 60 chars + "..."
+        assertThat(doc.getId()).startsWith("问题: ");
+        assertThat(doc.getId()).endsWith("...");
+        assertThat(doc.getId()).isEqualTo("问题: " + longQuery.substring(0, 60) + "...");
+        // Content keeps the FULL (untruncated) userQuery
+        assertThat(doc.getContent()).contains(longQuery);
+        assertThat(doc.getContent()).contains("## 问题");
     }
 
     // UC-23: selectedSolution 优先

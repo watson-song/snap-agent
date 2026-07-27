@@ -21,7 +21,8 @@ class NoopIssueTrackerTest {
     void shouldNoOpUpdateStatus() {
         NoopIssueTracker tracker = new NoopIssueTracker();
         // Should not throw
-        tracker.updateStatus("EXT-1", "in_progress");
+        assertThatCode(() -> tracker.updateStatus("EXT-1", "in_progress"))
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -49,9 +50,11 @@ class NoopIssueTrackerTest {
     void shouldNoOpUpdateStatusWithNullArgs() {
         NoopIssueTracker tracker = new NoopIssueTracker();
         // Should not throw for any combination of null/empty arguments.
-        tracker.updateStatus(null, null);
-        tracker.updateStatus(null, "");
-        tracker.updateStatus("", null);
+        assertThatCode(() -> {
+            tracker.updateStatus(null, null);
+            tracker.updateStatus(null, "");
+            tracker.updateStatus("", null);
+        }).doesNotThrowAnyException();
     }
 
     @Test
@@ -65,9 +68,11 @@ class NoopIssueTrackerTest {
     void shouldBeIdempotentUpdateStatus() {
         NoopIssueTracker tracker = new NoopIssueTracker();
         // Updating the same issue multiple times should not throw.
-        tracker.updateStatus("EXT-1", "open");
-        tracker.updateStatus("EXT-1", "in_progress");
-        tracker.updateStatus("EXT-1", "closed");
+        assertThatCode(() -> {
+            tracker.updateStatus("EXT-1", "open");
+            tracker.updateStatus("EXT-1", "in_progress");
+            tracker.updateStatus("EXT-1", "closed");
+        }).doesNotThrowAnyException();
     }
 
     @Test

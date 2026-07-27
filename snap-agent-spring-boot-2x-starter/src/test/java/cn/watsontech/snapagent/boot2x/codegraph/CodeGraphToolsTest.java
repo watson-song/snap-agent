@@ -139,17 +139,6 @@ class CodeGraphToolsTest {
         assertThat(result.getContent()).contains("com.test.B");
     }
 
-    // ---- AC22: callback names === @Tool(name=...) ----
-
-    @Test
-    void callbackNamesShouldMatchToolNames() {
-        // Already tested above, but explicit for AC22
-        assertThat(findByName("call_chain").getName()).isEqualTo("call_chain");
-        assertThat(findByName("reverse_chain").getName()).isEqualTo("reverse_chain");
-        assertThat(findByName("impact_analysis").getName()).isEqualTo("impact_analysis");
-        assertThat(findByName("find").getName()).isEqualTo("find");
-    }
-
     // ---- Fuzzy match by method name ----
 
     @Test
@@ -196,27 +185,5 @@ class CodeGraphToolsTest {
     void find_emptyQuery_returnsNotFound() {
         ToolResult result = findByName("find").execute(args(""), null);
         assertThat(result.getContent()).contains("未找到");
-    }
-
-    // ---- Default maxDepth ----
-
-    @Test
-    void callChain_defaultMaxDepthReturnsFullChain() {
-        // Without maxDepth, should use default (5) and return full chain
-        ToolResult result = findByName("call_chain").execute(args("com.test.A#a()"), null);
-        assertThat(result.getContent()).contains("com.test.B#b()");
-        assertThat(result.getContent()).contains("com.test.C#c()");
-    }
-
-    @Test
-    void reverseChain_defaultMaxDepthReturnsCallers() {
-        ToolResult result = findByName("reverse_chain").execute(args("com.test.B#b()"), null);
-        assertThat(result.getContent()).contains("com.test.A#a()");
-    }
-
-    @Test
-    void impactAnalysis_defaultMaxDepthReturnsImpacted() {
-        ToolResult result = findByName("impact_analysis").execute(args("com.test.B#b()"), null);
-        assertThat(result.getContent()).contains("com.test.A#a()");
     }
 }

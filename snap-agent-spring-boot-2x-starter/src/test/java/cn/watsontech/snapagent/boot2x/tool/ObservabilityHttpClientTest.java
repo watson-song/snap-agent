@@ -132,12 +132,11 @@ class ObservabilityHttpClientTest {
     // ---- readAll (exercised indirectly via a subclass that feeds it bytes) ----
 
     @Test
-    @DisplayName("readAll returns empty string for null InputStream")
-    void readAllShouldReturnEmptyForNullStream() throws IOException {
+    @DisplayName("parseJson parses a simple boolean object")
+    void parseJsonShouldParseSimpleBooleanObject() throws IOException {
         // readAll is private; we exercise it via parseJson which reads from a string,
-        // and via httpGet override returning a body. Here we verify the null-input
-        // path indirectly by confirming the no-override client compiles and the
-        // parseJson path works on a simple string.
+        // and via httpGet override returning a body. Here we verify the parseJson
+        // path works on a simple boolean object.
         ObservabilityHttpClient client = new ObservabilityHttpClient();
         // If parseJson can handle a single-line JSON, readAll-style logic is sound.
         JsonNode node = client.parseJson("{\"ok\":true}");

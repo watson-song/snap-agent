@@ -140,7 +140,7 @@ class RedisReadToolsTest {
     }
 
     @Test
-    void shouldRejectWhenKeyIsMissing() {
+    void shouldReturnNilWhenKeyIsMissing() {
         Map<String, Object> args = new HashMap<String, Object>();
 
         ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());

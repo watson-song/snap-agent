@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Collections;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -195,16 +196,17 @@ class SnapAgentControllerSecurityTest {
     @Test
     void loggingSecurityAuditLoggerShouldNotThrow() {
         LoggingSecurityAuditLogger logger = new LoggingSecurityAuditLogger();
-        // Should not throw any exception
-        logger.onApiAccess("user001", "GET", "/snap-agent/models",
-                "LIST_MODELS", Collections.<String, Object>singletonMap("key", "value"));
+        assertThatCode(() -> logger.onApiAccess("user001", "GET", "/snap-agent/models",
+                "LIST_MODELS", Collections.<String, Object>singletonMap("key", "value")))
+                .doesNotThrowAnyException();
     }
 
     @Test
     void loggingSecurityAuditLoggerShouldHandleNullDetails() {
         LoggingSecurityAuditLogger logger = new LoggingSecurityAuditLogger();
-        logger.onApiAccess("user001", "POST", "/snap-agent/runs",
-                "RUN_SKILL", null);
+        assertThatCode(() -> logger.onApiAccess("user001", "POST", "/snap-agent/runs",
+                "RUN_SKILL", null))
+                .doesNotThrowAnyException();
     }
 
     // ---- /user-info endpoint ----

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.nio.file.Files;
 
@@ -126,7 +127,9 @@ class SnapAgentAutoConfigurationTest {
                         "snap-agent.llm.api-key=sk-test")
                 .run(context -> {
                     AsyncTaskExecutor executor = context.getBean(AsyncTaskExecutor.class);
-                    assertThat(executor).isNotNull();
+                    assertThat(executor).isInstanceOf(ThreadPoolTaskExecutor.class);
+                    ThreadPoolTaskExecutor threadPool = (ThreadPoolTaskExecutor) executor;
+                    assertThat(threadPool.getThreadNamePrefix()).isEqualTo("snap-agent-");
                 });
     }
 

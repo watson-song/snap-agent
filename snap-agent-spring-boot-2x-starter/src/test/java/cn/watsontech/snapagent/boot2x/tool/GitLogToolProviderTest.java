@@ -167,14 +167,16 @@ class GitLogToolsTest {
         args.put("mode", "log");
         args.put("max_entries", 10000);
 
-        // This would try to run git; if git is not available, the test still
-        // verifies that the command was built with the clamped value (20).
-        // The important assertion is that it doesn't accept 10000.
+        // max_entries=10000 exceeds the limit (MAX_ENTRIES_LIMIT=100), so it is
+        // clamped to 20. The output header should contain "max 20", not "max 10000".
         ToolResult result = ToolCallbacks.from(provider)[0].execute(args, ctx());
-        // Either git runs and returns limited results, or git is not available.
-        // Either way, it should not error on max_entries being too large.
         if (gitAvailable) {
-            assertThat(result.isSuccess() || result.isError()).isTrue();
+            assertThat(result.isSuccess()).isTrue();
+            assertThat(result.getContent()).contains("max 20");
+            assertThat(result.getContent()).doesNotContain("max 10000");
+        } else {
+            // git not available — gitLog() returns an error message string
+            assertThat(result.getContent()).contains("Error");
         }
     }
 

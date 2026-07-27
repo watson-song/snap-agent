@@ -29,6 +29,7 @@ import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.ArrayList;
@@ -308,17 +309,20 @@ class SnapAgentControllerTest {
         org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
                 controller.streamRun("sa_123", null);
 
-        assertThat(emitter).isNotNull();
+        assertThat(emitter).as("emitter should be created for streaming").isNotNull();
+        assertThat(emitter.getTimeout()).isEqualTo(30L * 60L * 1000L);
     }
 
     @Test
     void shouldReturnErrorEmitterWhenTaskNotFoundForStream() throws Exception {
         when(taskStore.get("notexist")).thenReturn(null);
 
-        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
-                controller.streamRun("notexist", null);
-
-        assertThat(emitter).isNotNull();
+        MvcResult result = mockMvc.perform(get("/snap-agent/runs/notexist/stream"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("event:error");
+        assertThat(body).contains("TASK_NOT_FOUND");
     }
 
     @Test
@@ -405,12 +409,13 @@ class SnapAgentControllerTest {
     }
 
     @Test
-    void shouldEmitTaskNotFoundWhenRelayReturnsFalse() {
+    void shouldEmitTaskNotFoundWhenRelayReturnsFalse() throws Exception {
         cn.watsontech.snapagent.boot2x.routing.PeerSseRelay relay =
                 org.mockito.Mockito.mock(cn.watsontech.snapagent.boot2x.routing.PeerSseRelay.class);
         SnapAgentController relayController = new SnapAgentController(
                 skillRegistry, agentExecutor, taskStore, toolDispatcher,
                 properties, securityGateway, rateLimiter, taskExecutor, relay);
+        MockMvc relayMockMvc = MockMvcBuilders.standaloneSetup(relayController).build();
 
         when(taskStore.get("notexist")).thenReturn(null);
         doAnswer(invocation -> {
@@ -419,10 +424,12 @@ class SnapAgentControllerTest {
         }).when(taskExecutor).execute(any(Runnable.class));
         when(relay.tryRelay(any(), anyString())).thenReturn(false);
 
-        // Should not throw — relay returned false, error event is sent to emitter
-        org.springframework.web.servlet.mvc.method.annotation.SseEmitter emitter =
-                relayController.streamRun("notexist", null);
-        assertThat(emitter).isNotNull();
+        MvcResult result = relayMockMvc.perform(get("/snap-agent/runs/notexist/stream"))
+                .andExpect(status().isOk())
+                .andReturn();
+        String body = result.getResponse().getContentAsString();
+        assertThat(body).contains("event:error");
+        assertThat(body).contains("TASK_NOT_FOUND");
         verify(relay).tryRelay(any(), org.mockito.Mockito.eq("notexist"));
     }
 

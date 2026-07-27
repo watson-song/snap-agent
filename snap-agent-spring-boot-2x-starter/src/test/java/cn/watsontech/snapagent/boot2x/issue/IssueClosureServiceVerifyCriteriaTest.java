@@ -25,7 +25,7 @@ class IssueClosureServiceVerifyCriteriaTest {
     }
 
     @Test
-    void verify_fallsBackToSkillWhenNoCriteria() {
+    void verify_returnsNullWhenNoCriteriaNoRunnerAndNoSkillRegistry() {
         SolutionSuggestion sol = new SolutionSuggestion(
                 java.util.Collections.emptyList(), null, null, null, null);
         IssueClosure issue = new IssueClosure(

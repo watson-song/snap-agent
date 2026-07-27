@@ -584,7 +584,7 @@ class ScheduledPatrolSchedulerTest {
     // ── constructors coverage ──────────────────────────────────────
 
     @Test
-    void fourArgConstructorShouldUseDefaults() {
+    void shouldNotThrowWithMinimalConstructor() {
         ScheduledPatrolScheduler s = new ScheduledPatrolScheduler(
                 taskScheduler, agentExecutor, skillRegistry, reportStore);
         // Should work for basic operations
@@ -594,7 +594,7 @@ class ScheduledPatrolSchedulerTest {
     }
 
     @Test
-    void sixArgConstructorShouldUseDefaultChannels() {
+    void sixArgConstructorShouldNotThrow() {
         ScheduledPatrolScheduler s = new ScheduledPatrolScheduler(
                 taskScheduler, agentExecutor, skillRegistry, reportStore,
                 lockProvider, 300L);
@@ -602,7 +602,7 @@ class ScheduledPatrolSchedulerTest {
     }
 
     @Test
-    void sevenArgConstructorShouldUseNullConverger() {
+    void sevenArgConstructorShouldNotThrow() {
         ScheduledPatrolScheduler s = new ScheduledPatrolScheduler(
                 taskScheduler, agentExecutor, skillRegistry, reportStore,
                 lockProvider, 300L,
@@ -611,12 +611,37 @@ class ScheduledPatrolSchedulerTest {
     }
 
     @Test
-    void fullConstructorShouldHandleNullPushChannels() {
+    void fullConstructorShouldNotThrowWithNullPushChannels() {
         ScheduledPatrolScheduler s = new ScheduledPatrolScheduler(
                 taskScheduler, agentExecutor, skillRegistry, reportStore,
                 lockProvider, 300L,
                 null, // null push channels
                 null);
-        assertThat(s.listTasks()).isEmpty();
+
+        // Run a patrol that produces an anomaly (FAILED) — this exercises
+        // pushToChannels with the empty list derived from null, proving no NPE.
+        when(taskScheduler.schedule(any(Runnable.class), any(Trigger.class)))
+                .thenAnswer(invocation -> {
+                    invocation.getArgument(0, Runnable.class).run();
+                    return mock(ScheduledFuture.class);
+                });
+        SkillMeta skill = new SkillMeta("health-patrol", "desc",
+                null, null, "body", null, null);
+        when(skillRegistry.get("health-patrol")).thenReturn(skill);
+        doAnswer(invocation -> {
+            AgentTask task = invocation.getArgument(0);
+            task.setStatus(TaskStatus.FAILED);
+            task.setReport("Error occurred");
+            return null;
+        }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+
+        PatrolTask task = new PatrolTask("p-null-ch", "health-patrol",
+                "0 */5 * * * ?", "user-1", null);
+        s.schedule(task);
+
+        // Patrol completed without NPE despite null push channels
+        verify(reportStore).save(any(PatrolReport.class));
+        // The null push channels became an empty list — no channel was invoked
+        verify(pushChannel, never()).push(any(), any());
     }
 }

@@ -107,9 +107,18 @@ class KnowledgeETLPipelineTest {
 
         assertThat(written).isGreaterThan(0);
         List<Document> docs = store.listAll();
+        assertThat(docs).isNotEmpty();
         for (Document doc : docs) {
             assertThat(doc.getContent()).isNotEmpty();
         }
+        // UC-10: Chinese characters and emoji survive the pipeline intact
+        String allContent = docs.stream()
+                .map(Document::getContent)
+                .reduce("", String::concat);
+        assertThat(allContent).contains("连接池配置");
+        assertThat(allContent).contains("😀");
+        assertThat(allContent).contains("超时处理");
+        assertThat(allContent).contains("🔧");
     }
 
     @Test

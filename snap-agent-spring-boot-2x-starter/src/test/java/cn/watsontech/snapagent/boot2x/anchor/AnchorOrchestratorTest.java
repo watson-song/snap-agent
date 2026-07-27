@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
@@ -264,11 +265,14 @@ class AnchorOrchestratorTest {
         for (int i = 0; i < 20; i++) sb.append("long content");
         AnchorContext anchor = new AnchorContext("test", sb.toString(), "/p");
         PreprocessResult result = orchestrator.preprocess(anchor, "q");
+        assertThat(result.getPreprocessId()).isNotBlank();
 
         orchestrator.awaitPreprocess(result.getPreprocessId(), 100);
 
         RecordingSink sink = new RecordingSink();
-        orchestrator.executeWithAnchor(anchor, "q", null, sink);
+        assertThatCode(() -> orchestrator.executeWithAnchor(anchor, "q", null, sink))
+                .as("executeWithAnchor should degrade gracefully after preprocess timeout")
+                .doesNotThrowAnyException();
     }
 
     @Test
@@ -367,15 +371,17 @@ class AnchorOrchestratorTest {
     @Test
     @DisplayName("G-416: awaitPreprocess should not throw on unknown preprocessId")
     void shouldNotThrowOnUnknownPreprocessIdInAwait() {
-        orchestrator.awaitPreprocess("nonexistent-preprocess-id", 1000);
-        // Should return without error
+        assertThatCode(() -> orchestrator.awaitPreprocess("nonexistent-preprocess-id", 1000))
+                .as("awaitPreprocess should not throw on unknown preprocessId")
+                .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("G-416: awaitPreprocess should not throw on null preprocessId")
     void shouldNotThrowOnNullPreprocessIdInAwait() {
-        orchestrator.awaitPreprocess(null, 1000);
-        // Should return without error
+        assertThatCode(() -> orchestrator.awaitPreprocess(null, 1000))
+                .as("awaitPreprocess should not throw on null preprocessId")
+                .doesNotThrowAnyException();
     }
 
     // ---- G-416: execute with valid preprocessId uses classify result ----

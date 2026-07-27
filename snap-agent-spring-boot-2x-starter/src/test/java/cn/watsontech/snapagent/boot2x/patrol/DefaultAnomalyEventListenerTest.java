@@ -13,6 +13,7 @@ import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -261,7 +262,15 @@ class DefaultAnomalyEventListenerTest {
         AnomalyEvent ev = event("ERR", "svc", "boom", null, inputs);
         listener.onEvent(ev);
 
-        verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
+        ArgumentCaptor<AgentTask> captor = ArgumentCaptor.forClass(AgentTask.class);
+        verify(agentExecutor).execute(captor.capture(), any(SkillMeta.class));
+
+        // Event inputs must be merged with the event-derived metadata keys
+        Map<String, String> taskInputs = captor.getValue().getInputs();
+        assertThat(taskInputs).containsEntry("service", "order-svc");
+        assertThat(taskInputs).containsEntry("_event_type", "ERR");
+        assertThat(taskInputs).containsEntry("_event_source", "svc");
+        assertThat(taskInputs).containsEntry("_event_message", "boom");
     }
 
     // ── pushChannels exception handling ─────────────────────────────
@@ -403,5 +412,7 @@ class DefaultAnomalyEventListenerTest {
         listener.onEvent(event("ERR", "svc", "boom", null, null));
 
         verify(reportStore).save(argThat(r -> "FAILED".equals(r.getStatus())));
+        // four-arg constructor uses an empty push channels list — no push must occur
+        verify(pushChannel, never()).push(any(), any());
     }
 }
