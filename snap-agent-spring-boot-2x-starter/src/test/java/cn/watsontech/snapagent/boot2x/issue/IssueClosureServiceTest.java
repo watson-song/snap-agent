@@ -85,7 +85,7 @@ class IssueClosureServiceTest {
             index++;
         }
         String recommended = options.isEmpty() ? null : "opt-1";
-        return new SolutionSuggestion(options, recommended, null, null);
+        return new SolutionSuggestion(options, recommended, null, null, null);
     }
 
     private VerificationResult verificationOf(boolean passed, String summary) {
@@ -169,6 +169,7 @@ class IssueClosureServiceTest {
                 suggestionOf("solution A", "solution B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-100")).thenReturn(existing);
         when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
@@ -203,6 +204,7 @@ class IssueClosureServiceTest {
                 suggestionOf("sol"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-200")).thenReturn(existing);
         when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
@@ -232,6 +234,7 @@ class IssueClosureServiceTest {
                 null, null, "query", "root cause text",
                 suggestionOf("fix pool"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
+                null, null,
                 null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-noop")).thenReturn(existing);
@@ -263,6 +266,7 @@ class IssueClosureServiceTest {
                 suggestionOf("solution A"), null,
                 IssueStatus.CLOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-closed")).thenReturn(existing);
 
@@ -285,6 +289,7 @@ class IssueClosureServiceTest {
                 suggestionOf("solution A"), "solution A",
                 IssueStatus.VERIFIED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-verified")).thenReturn(existing);
 
@@ -303,6 +308,7 @@ class IssueClosureServiceTest {
                 null, null, "query", "root cause text",
                 suggestionOf("solution A"), null,
                 IssueStatus.FAILED, null,
+                null, null,
                 null, null,
                 1_000L, 2_000L);
         when(issueStore.findByTaskId("task-failed")).thenReturn(existing);
@@ -323,6 +329,7 @@ class IssueClosureServiceTest {
                 null, null, "order timeout", "connection pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
+                null, null,
                 null, null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-003")).thenReturn(existing);
@@ -367,6 +374,7 @@ class IssueClosureServiceTest {
                 suggestionOf("sol"), null,
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-004")).thenReturn(existing);
         when(skillRegistry.get("verify-fix")).thenReturn(null);
@@ -386,6 +394,7 @@ class IssueClosureServiceTest {
                 null, null, "order timeout", "pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.VERIFIED, null,
+                null, null,
                 verificationOf(true, "verification passed"), null,
                 1_000L, 3_000L);
         when(issueStore.load("issue-005")).thenReturn(existing);
@@ -424,6 +433,7 @@ class IssueClosureServiceTest {
                 null, null, "query", "root cause",
                 suggestionOf("sol"), "sol",
                 IssueStatus.VERIFIED, null,
+                null, null,
                 verificationOf(true, "verified"), null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-006")).thenReturn(existing);
@@ -515,6 +525,7 @@ class IssueClosureServiceTest {
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-spi")).thenReturn(existing);
 
@@ -545,6 +556,7 @@ class IssueClosureServiceTest {
                 null, null, "order timeout", "pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
+                null, null,
                 null, null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-orphan")).thenReturn(existing);
@@ -586,12 +598,14 @@ class IssueClosureServiceTest {
                 suggestionOf("sol1"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         IssueClosure issue2 = new IssueClosure(
                 "issue-list-2", "EXT-2", "task-2",
                 null, null, "query2", "root2",
                 suggestionOf("sol2"), "sol2",
                 IssueStatus.CLOSED, null,
+                null, null,
                 verificationOf(true, "ok"), "sedimentation:issue-list-2",
                 3_000L, 4_000L);
         when(issueStore.list()).thenReturn(Arrays.asList(issue1, issue2));
@@ -621,6 +635,7 @@ class IssueClosureServiceTest {
                 null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.VERIFIED, null,
+                null, null,
                 verificationOf(true, "passed"), null,
                 1_000L, 2_000L);
         when(issueStore.load("issue-load-1")).thenReturn(existing);

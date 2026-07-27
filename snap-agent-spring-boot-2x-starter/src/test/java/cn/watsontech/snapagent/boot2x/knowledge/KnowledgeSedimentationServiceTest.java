@@ -36,7 +36,7 @@ class KnowledgeSedimentationServiceTest {
                                       String selectedSolution) {
         return new IssueClosure(issueId, null, null, null, "u1",
                 userQuery, rootCause, null, selectedSolution,
-                IssueStatus.CLOSED, null, null, null,
+                IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
     }
 
@@ -95,11 +95,11 @@ class KnowledgeSedimentationServiceTest {
         SolutionOption opt1 = new SolutionOption("opt-1", "方案1", "描述1", "medium", false);
         SolutionOption opt2 = new SolutionOption("opt-2", "方案2: 加索引", "描述2", "low", false);
         SolutionSuggestion suggestion = new SolutionSuggestion(
-                Arrays.asList(opt1, opt2), "opt-2", null, null);
+                Arrays.asList(opt1, opt2), "opt-2", null, null, null);
 
         IssueClosure issue = new IssueClosure("issue-004", null, null, null, "u1",
                 "查询慢", "缺索引", suggestion, "方案2: 加索引",
-                IssueStatus.CLOSED, null, null, null,
+                IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
 
         Document doc = service.extract(issue);
@@ -116,7 +116,7 @@ class KnowledgeSedimentationServiceTest {
     void shouldSkipWhenRootCauseMissing() {
         IssueClosure issue = new IssueClosure("issue-005", null, null, null, "u1",
                 "query", null, null, null,
-                IssueStatus.CLOSED, null, null, null,
+                IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
 
         Document doc = service.extract(issue);

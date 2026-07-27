@@ -124,6 +124,8 @@ public class IssueClosureService {
                 null,
                 null,
                 null,
+                null,
+                null,
                 now,
                 now
         );
@@ -134,7 +136,7 @@ public class IssueClosureService {
             suggestion = solutionSuggester.suggest(issue, rootCause);
             if (suggestion == null) {
                 suggestion = new SolutionSuggestion(
-                        new ArrayList<SolutionOption>(), null, null, null);
+                        new ArrayList<SolutionOption>(), null, null, null, null);
             }
         } else {
             suggestion = suggestViaSkill(taskId, rootCause, userQuery);
@@ -188,7 +190,7 @@ public class IssueClosureService {
         }
         String recommended = options.isEmpty() ? null : "opt-1";
         return new SolutionSuggestion(options, recommended,
-                "Generated from solution-suggest skill output.", null);
+                "Generated from solution-suggest skill output.", null, null);
     }
 
     /**

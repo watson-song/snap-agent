@@ -25,6 +25,8 @@ public final class IssueClosure {
     private final String selectedSolution;
     private final IssueStatus status;
     private final String fixCommitId;
+    private final String fixPrUrl;
+    private final String fixPrNumber;
     private final VerificationResult verificationResult;
     private final String knowledgeEntryId;
     private final long createdAt;
@@ -44,6 +46,8 @@ public final class IssueClosure {
      * @param selectedSolution  用户选择的方案 ID (可空)
      * @param status             当前状态
      * @param fixCommitId        修复 commit (可空)
+     * @param fixPrUrl           修复 PR 的 Web URL (可空)
+     * @param fixPrNumber        修复 PR 的编号 (可空)
      * @param verificationResult 验证结果 (可空)
      * @param knowledgeEntryId   沉淀到知识库的条目 ID (可空)
      * @param createdAt          创建时间 (epoch millis)
@@ -54,6 +58,7 @@ public final class IssueClosure {
                         String rootCause,
                         SolutionSuggestion solution, String selectedSolution,
                         IssueStatus status, String fixCommitId,
+                        String fixPrUrl, String fixPrNumber,
                         VerificationResult verificationResult, String knowledgeEntryId,
                         long createdAt, long updatedAt) {
         this.issueId = issueId;
@@ -67,6 +72,8 @@ public final class IssueClosure {
         this.selectedSolution = selectedSolution;
         this.status = status;
         this.fixCommitId = fixCommitId;
+        this.fixPrUrl = fixPrUrl;
+        this.fixPrNumber = fixPrNumber;
         this.verificationResult = verificationResult;
         this.knowledgeEntryId = knowledgeEntryId;
         this.createdAt = createdAt;
@@ -132,6 +139,16 @@ public final class IssueClosure {
         return fixCommitId;
     }
 
+    /** 修复 PR 的 Web URL (可空)。 */
+    public String getFixPrUrl() {
+        return fixPrUrl;
+    }
+
+    /** 修复 PR 的编号 (可空)。 */
+    public String getFixPrNumber() {
+        return fixPrNumber;
+    }
+
     /**
      * 验证结果 (可空)。
      *
@@ -169,6 +186,7 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -187,6 +205,7 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -210,6 +229,7 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, selectedSolution,
                 status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -227,6 +247,7 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 solution, this.selectedSolution,
                 this.status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -244,6 +265,7 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
@@ -261,7 +283,30 @@ public final class IssueClosure {
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
                 this.verificationResult, knowledgeEntryId,
+                this.createdAt, updatedAt);
+    }
+
+    /**
+     * 返回一个包含修复信息的新实例。
+     *
+     * @param commitId  修复 commit SHA
+     * @param prUrl     修复 PR 的 Web URL
+     * @param prNumber  修复 PR 的编号
+     * @param status    新状态
+     * @param updatedAt 新的更新时间 (epoch millis)
+     * @return new {@link IssueClosure} with updated fix info and status
+     */
+    public IssueClosure withFix(String commitId, String prUrl, String prNumber,
+                               IssueStatus status, long updatedAt) {
+        return new IssueClosure(
+                this.issueId, this.externalIssueId, this.taskId,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
+                this.solution, this.selectedSolution,
+                status, commitId,
+                prUrl, prNumber,
+                this.verificationResult, this.knowledgeEntryId,
                 this.createdAt, updatedAt);
     }
 

@@ -32,4 +32,9 @@ public class NoopIssueTracker implements IssueTracker {
     public String type() {
         return "noop";
     }
+
+    @Override
+    public void addComment(String externalIssueId, String comment) {
+        // no-op: noop tracker does not interact with external systems
+    }
 }

@@ -94,7 +94,7 @@ public class TemplateSolutionSuggester implements SolutionSuggester {
                 "medium", false));
         return new SolutionSuggestion(options, "opt-1",
                 "根因指向参数缺失, 优先手动补齐恢复, 再修复生成逻辑.",
-                null);
+                null, null);
     }
 
     private SolutionSuggestion buildConnectionTemplate() {
@@ -113,7 +113,7 @@ public class TemplateSolutionSuggester implements SolutionSuggester {
                 "high", false));
         return new SolutionSuggestion(options, "opt-1",
                 "根因指向连接异常, 优先调连接池, 再排查慢查询.",
-                null);
+                null, null);
     }
 
     private SolutionSuggestion buildDataTemplate() {
@@ -128,7 +128,7 @@ public class TemplateSolutionSuggester implements SolutionSuggester {
                 "low", true));
         return new SolutionSuggestion(options, "opt-1",
                 "根因指向数据缺失, 优先修复上游, 再补齐历史数据.",
-                null);
+                null, null);
     }
 
     private SolutionSuggestion buildPermissionTemplate() {
@@ -143,7 +143,7 @@ public class TemplateSolutionSuggester implements SolutionSuggester {
                 "low", false));
         return new SolutionSuggestion(options, "opt-1",
                 "根因指向权限/鉴权问题, 优先自检权限配置.",
-                null);
+                null, null);
     }
 
     private SolutionSuggestion buildFallbackTemplate() {
@@ -158,6 +158,6 @@ public class TemplateSolutionSuggester implements SolutionSuggester {
                 "low", false));
         return new SolutionSuggestion(options, "opt-1",
                 "未命中已知模板, 建议先通过代码图谱定位, 再寻求人工支持.",
-                null);
+                null, null);
     }
 }

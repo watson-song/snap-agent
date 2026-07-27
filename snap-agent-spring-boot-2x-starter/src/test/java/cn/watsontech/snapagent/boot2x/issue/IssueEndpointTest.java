@@ -73,7 +73,7 @@ class IssueEndpointTest {
         return new IssueClosure(issueId, "EXT-" + issueId, "task-1",
                 null, "test-user", "why QPS drop?",
                 "NPE at line 87", null, null,
-                status, null, null, null,
+                status, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
     }
 

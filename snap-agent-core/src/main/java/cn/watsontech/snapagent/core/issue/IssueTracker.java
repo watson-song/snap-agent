@@ -45,4 +45,17 @@ public interface IssueTracker {
      * @return the tracker type identifier
      */
     String type();
+
+    /**
+     * Adds a comment/note to an external issue.
+     *
+     * <p>Default implementation is a no-op. Implementations that support
+     * commenting should override this method.</p>
+     *
+     * @param externalIssueId the external issue ID
+     * @param comment         the comment text (markdown supported)
+     */
+    default void addComment(String externalIssueId, String comment) {
+        // no-op by default
+    }
 }

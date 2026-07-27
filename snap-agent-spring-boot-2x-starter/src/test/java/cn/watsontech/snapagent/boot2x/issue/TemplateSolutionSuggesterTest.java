@@ -32,6 +32,7 @@ class TemplateSolutionSuggesterTest {
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
     }
 
@@ -41,6 +42,7 @@ class TemplateSolutionSuggesterTest {
                 null, null, "为什么订单服务超时?", rootCause,
                 null, null,
                 IssueStatus.DIAGNOSED, null,
+                null, null,
                 null, null,
                 1_000L, 2_000L);
     }

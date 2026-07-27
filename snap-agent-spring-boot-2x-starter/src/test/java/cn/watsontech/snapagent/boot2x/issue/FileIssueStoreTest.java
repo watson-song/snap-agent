@@ -39,6 +39,7 @@ class FileIssueStoreTest {
                 sampleSuggestion(), null,
                 status, null,
                 null, null,
+                null, null,
                 createdAt, updatedAt);
     }
 
@@ -46,7 +47,7 @@ class FileIssueStoreTest {
         List<SolutionOption> options = new ArrayList<SolutionOption>();
         options.add(new SolutionOption("opt-1", "方案1: 重启服务", "方案1: 重启服务", "medium", false));
         options.add(new SolutionOption("opt-2", "方案2: 扩容连接池", "方案2: 扩容连接池", "medium", false));
-        return new SolutionSuggestion(options, "opt-1", null, null);
+        return new SolutionSuggestion(options, "opt-1", null, null, null);
     }
 
     private SolutionSuggestion suggestionOf(String... titles) {
@@ -57,7 +58,7 @@ class FileIssueStoreTest {
             index++;
         }
         String recommended = options.isEmpty() ? null : "opt-1";
-        return new SolutionSuggestion(options, recommended, null, null);
+        return new SolutionSuggestion(options, recommended, null, null, null);
     }
 
     private VerificationResult verificationOf(boolean passed, String summary) {
@@ -105,6 +106,7 @@ class FileIssueStoreTest {
                 null, null, "updated query", "updated root cause",
                 suggestionOf("new solution"), "selected",
                 IssueStatus.FIX_IN_PROGRESS, "commit-abc",
+                null, null,
                 verificationOf(true, "verified ok"), "kb-1",
                 1_000L, 3_000L);
         store.save(updated);
@@ -228,6 +230,7 @@ class FileIssueStoreTest {
                 null, null,
                 IssueStatus.DIAGNOSED, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
         store.save(issue);
 
@@ -243,6 +246,7 @@ class FileIssueStoreTest {
                 "conv-42", "user1", "full query", "full root cause",
                 suggestionOf("sol1", "sol2"), "sol1",
                 IssueStatus.FIX_IN_PROGRESS, "commit-xyz",
+                null, null,
                 verificationOf(true, "verification summary"), "kb-entry-1",
                 1_000L, 5_000L);
         store.save(issue);

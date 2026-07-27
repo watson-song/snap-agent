@@ -23,7 +23,7 @@ class IssueClosureTest {
         List<SolutionOption> options = Arrays.asList(
                 new SolutionOption("opt-1", "重启服务", "通过滚动重启释放连接", "low", true),
                 new SolutionOption("opt-2", "扩容连接池", "永久修复, 提升容量", "high", false));
-        return new SolutionSuggestion(options, "opt-2", "永久方案优先", "com.example.OrderService");
+        return new SolutionSuggestion(options, "opt-2", "永久方案优先", "com.example.OrderService", null);
     }
 
     private IssueClosure newSample() {
@@ -32,6 +32,7 @@ class IssueClosureTest {
                 "conv-100", "user1", "为什么订单服务超时?", "连接池打满",
                 sampleSuggestion(), null,
                 IssueStatus.DIAGNOSED, null,
+                null, null,
                 null, null,
                 CREATED_AT, UPDATED_AT);
     }
@@ -68,7 +69,7 @@ class IssueClosureTest {
         // New behavior: null SolutionSuggestion → getter returns null, does not crash
         IssueClosure issue = new IssueClosure(
                 "id", null, "task", null, null, "q", "rc",
-                null, null, IssueStatus.DIAGNOSED, null, null, null,
+                null, null, IssueStatus.DIAGNOSED, null, null, null, null, null,
                 CREATED_AT, UPDATED_AT);
 
         assertThat(issue.getSolution()).isNull();
@@ -83,7 +84,7 @@ class IssueClosureTest {
         SolutionSuggestion suggestion = sampleSuggestion();
         IssueClosure issue = new IssueClosure(
                 "id", null, "task", null, null, "q", "rc",
-                suggestion, null, IssueStatus.DIAGNOSED, null, null, null,
+                suggestion, null, IssueStatus.DIAGNOSED, null, null, null, null, null,
                 CREATED_AT, UPDATED_AT);
 
         assertThat(issue.getSolution()).isSameAs(suggestion);
@@ -170,7 +171,7 @@ class IssueClosureTest {
     void withSolutionShouldReturnNewInstanceWithSolutionSuggestion() {
         IssueClosure original = new IssueClosure(
                 "id", null, "task", null, null, "q", "rc",
-                null, null, IssueStatus.DIAGNOSED, null, null, null,
+                null, null, IssueStatus.DIAGNOSED, null, null, null, null, null,
                 CREATED_AT, UPDATED_AT);
         long newUpdatedAt = UPDATED_AT + 6_000L;
         SolutionSuggestion suggestion = sampleSuggestion();
@@ -289,6 +290,7 @@ class IssueClosureTest {
                 IssueStatus.SOLUTION_PROPOSED,
                 IssueStatus.ISSUE_CREATED,
                 IssueStatus.FIX_IN_PROGRESS,
+                IssueStatus.FIX_SUBMITTED,
                 IssueStatus.VERIFIED,
                 IssueStatus.CLOSED,
                 IssueStatus.FAILED);

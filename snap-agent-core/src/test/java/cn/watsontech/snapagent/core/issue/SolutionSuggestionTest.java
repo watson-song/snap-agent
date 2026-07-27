@@ -24,7 +24,7 @@ class SolutionSuggestionTest {
                 opt("a", "low", false),
                 opt("b", "medium", true));
         SolutionSuggestion suggestion = new SolutionSuggestion(
-                options, "a", "推荐低成本方案", "com.example.Foo");
+                options, "a", "推荐低成本方案", "com.example.Foo", null);
 
         assertThat(suggestion.getOptions()).hasSize(2);
         assertThat(suggestion.getOptions().get(0).getId()).isEqualTo("a");
@@ -41,7 +41,7 @@ class SolutionSuggestionTest {
         original.add(opt("b", "high", false));
 
         SolutionSuggestion suggestion = new SolutionSuggestion(
-                original, "a", null, null);
+                original, "a", null, null, null);
 
         // Mutate the original list — suggestion's internal copy should be unaffected
         original.add(opt("c", "low", true));
@@ -56,7 +56,7 @@ class SolutionSuggestionTest {
     @Test
     void shouldReturnUnmodifiableOptionsFromGetter() {
         SolutionSuggestion suggestion = new SolutionSuggestion(
-                Arrays.asList(opt("a", "low", false)), "a", null, null);
+                Arrays.asList(opt("a", "low", false)), "a", null, null, null);
 
         assertThatThrownBy(() -> suggestion.getOptions().add(opt("b", "low", false)))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -67,7 +67,7 @@ class SolutionSuggestionTest {
     @Test
     void shouldHaveEmptyOptionsWhenNullPassed() {
         SolutionSuggestion suggestion = new SolutionSuggestion(
-                null, null, null, null);
+                null, null, null, null, null);
 
         assertThat(suggestion.getOptions()).isNotNull();
         assertThat(suggestion.getOptions()).isEmpty();
@@ -80,7 +80,7 @@ class SolutionSuggestionTest {
     void toStringShouldContainOptionsCountAndRecommendedId() {
         SolutionSuggestion suggestion = new SolutionSuggestion(
                 Arrays.asList(opt("a", "low", false), opt("b", "high", false)),
-                "a", "成本最低", null);
+                "a", "成本最低", null, null);
 
         String str = suggestion.toString();
         assertThat(str).contains("SolutionSuggestion");

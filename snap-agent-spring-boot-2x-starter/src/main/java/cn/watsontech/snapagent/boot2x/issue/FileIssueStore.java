@@ -137,6 +137,19 @@ public class FileIssueStore implements IssueStore {
     }
 
     @Override
+    public IssueClosure findByPrNumber(String prNumber) {
+        if (prNumber == null || prNumber.isEmpty()) {
+            return null;
+        }
+        for (IssueClosure issue : list()) {
+            if (prNumber.equals(issue.getFixPrNumber())) {
+                return issue;
+            }
+        }
+        return null;
+    }
+
+    @Override
     public List<IssueClosure> list() {
         if (storageDir == null || !Files.isDirectory(storageDir)) {
             return Collections.emptyList();
@@ -211,6 +224,8 @@ public class FileIssueStore implements IssueStore {
         map.put("selectedSolution", issue.getSelectedSolution());
         map.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
         map.put("fixCommitId", issue.getFixCommitId());
+        map.put("fixPrUrl", issue.getFixPrUrl());
+        map.put("fixPrNumber", issue.getFixPrNumber());
         map.put("verificationResult", verificationToMap(issue.getVerificationResult()));
         map.put("knowledgeEntryId", issue.getKnowledgeEntryId());
         map.put("createdAt", issue.getCreatedAt());
@@ -293,6 +308,8 @@ public class FileIssueStore implements IssueStore {
                 nullableStr(data.get("selectedSolution")),
                 status,
                 nullableStr(data.get("fixCommitId")),
+                nullableStr(data.get("fixPrUrl")),
+                nullableStr(data.get("fixPrNumber")),
                 verificationResult,
                 nullableStr(data.get("knowledgeEntryId")),
                 longVal(data.get("createdAt")),
@@ -325,7 +342,8 @@ public class FileIssueStore implements IssueStore {
         return new SolutionSuggestion(options,
                 nullableStr(map.get("recommendedOptionId")),
                 nullableStr(map.get("rationale")),
-                nullableStr(map.get("relatedCode")));
+                nullableStr(map.get("relatedCode")),
+                null);
     }
 
     /** Builds a {@link SolutionSuggestion} from a legacy {@code List<String>}. */
@@ -344,7 +362,7 @@ public class FileIssueStore implements IssueStore {
             }
         }
         String recommended = options.isEmpty() ? null : "opt-1";
-        return new SolutionSuggestion(options, recommended, null, null);
+        return new SolutionSuggestion(options, recommended, null, null, null);
     }
 
     /** Reconstructs a {@link VerificationResult} from a nested map. */

@@ -57,6 +57,7 @@ class SimpleVerificationRunnerTest {
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS, null,
                 null, null,
+                null, null,
                 1_000L, 2_000L);
     }
 

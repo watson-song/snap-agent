@@ -36,6 +36,14 @@ public interface IssueStore {
     IssueClosure findByTaskId(String taskId);
 
     /**
+     * Finds an issue closure by its fix PR number.
+     *
+     * @param prNumber the PR/MR number
+     * @return the issue closure, or {@code null} if not found
+     */
+    IssueClosure findByPrNumber(String prNumber);
+
+    /**
      * Lists all issue closures sorted by {@code updatedAt} descending
      * (newest first).
      *
