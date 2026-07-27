@@ -26,6 +26,7 @@ import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
 import cn.watsontech.snapagent.boot2x.conversation.ConversationSummary;
 import cn.watsontech.snapagent.core.cost.CostRecord;
 import cn.watsontech.snapagent.core.cost.CostSummary;
+import cn.watsontech.snapagent.core.issue.AcceptanceCriterion;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
 import cn.watsontech.snapagent.core.issue.SolutionOption;
@@ -74,6 +75,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -2162,6 +2164,35 @@ public class SnapAgentController {
         return ResponseEntity.ok(toIssueDto(issue));
     }
 
+    // ---- POST /runs/{taskId}/auto-fix (v1.1 auto-fix workflow) ----
+    @PostMapping("/runs/{taskId}/auto-fix")
+    public ResponseEntity<Object> autoFixByTask(@PathVariable String taskId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.findByTaskId(taskId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "no issue closure found for task: " + taskId);
+        }
+
+        IssueClosure result = issueClosureService.autoFix(issue.getIssueId());
+        if (result == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "AUTO_FIX_FAILED",
+                    "auto-fix not available or issue is not in FIX_IN_PROGRESS status");
+        }
+
+        audit(currentUserId(), "POST", "/runs/" + taskId + "/auto-fix", "AUTO_FIX",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(result));
+    }
+
     // ---- GET /issues/recent-runs (v0.9 issue closure — recent runs joined with issue status) ----
     @GetMapping("/issues/recent-runs")
     public ResponseEntity<Object> recentRunsWithIssues(@RequestParam(value = "limit", defaultValue = "20") int limit) {
@@ -2335,6 +2366,29 @@ public class SnapAgentController {
         }
 
         audit(currentUserId(), "POST", "/issues/" + issueId + "/verify", "VERIFY_ISSUE",
+                Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
+
+        return ResponseEntity.ok(toIssueDto(issue));
+    }
+
+    // ---- POST /issues/{issueId}/auto-fix (v1.1 auto-fix workflow) ----
+    @PostMapping("/issues/{issueId}/auto-fix")
+    public ResponseEntity<Object> autoFixIssue(@PathVariable String issueId) {
+        ResponseEntity<Object> authError = requireAuth();
+        if (authError != null) return authError;
+
+        if (issueClosureService == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "ISSUE_CLOSURE_DISABLED",
+                    "issue-closure not enabled");
+        }
+
+        IssueClosure issue = issueClosureService.autoFix(issueId);
+        if (issue == null) {
+            return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
+                    "issue not found or not in FIX_IN_PROGRESS status: " + issueId);
+        }
+
+        audit(currentUserId(), "POST", "/issues/" + issueId + "/auto-fix", "AUTO_FIX",
                 Collections.<String, Object>singletonMap("issueId", issue.getIssueId()));
 
         return ResponseEntity.ok(toIssueDto(issue));
@@ -3015,6 +3069,8 @@ public class SnapAgentController {
         dto.put("selectedSolution", issue.getSelectedSolution());
         dto.put("status", issue.getStatus() != null ? issue.getStatus().name() : null);
         dto.put("fixCommitId", issue.getFixCommitId());
+        dto.put("fixPrUrl", issue.getFixPrUrl());
+        dto.put("fixPrNumber", issue.getFixPrNumber());
         dto.put("verificationResult", verificationToDtoMap(issue.getVerificationResult()));
         dto.put("knowledgeEntryId", issue.getKnowledgeEntryId());
         dto.put("createdAt", issue.getCreatedAt());
@@ -3044,6 +3100,20 @@ public class SnapAgentController {
         map.put("recommendedOptionId", suggestion.getRecommendedOptionId());
         map.put("rationale", suggestion.getRationale());
         map.put("relatedCode", suggestion.getRelatedCode());
+        // Add acceptance criteria
+        List<Map<String, Object>> acList = new ArrayList<Map<String, Object>>();
+        if (suggestion.getAcceptanceCriteria() != null) {
+            for (AcceptanceCriterion ac : suggestion.getAcceptanceCriteria()) {
+                Map<String, Object> acMap = new LinkedHashMap<String, Object>();
+                acMap.put("id", ac.getId());
+                acMap.put("description", ac.getDescription());
+                acMap.put("verification", ac.getVerification());
+                acMap.put("expected", ac.getExpected());
+                acMap.put("tool", ac.getTool());
+                acList.add(acMap);
+            }
+        }
+        map.put("acceptanceCriteria", acList);
         return map;
     }
 
@@ -3131,5 +3201,76 @@ public class SnapAgentController {
             }
         }
         return null;
+    }
+
+    // ---- POST /snap-agent-internal/vcs/webhook (v1.1 auto-fix webhook) ----
+    @PostMapping("/snap-agent-internal/vcs/webhook")
+    public ResponseEntity<Object> vcsWebhook(@RequestBody Map<String, Object> body,
+                                             @RequestHeader(value = "X-Gitlab-Event", required = false) String gitlabEvent,
+                                             @RequestHeader(value = "X-Event-Key", required = false) String bitbucketEvent,
+                                             @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature) {
+        // Webhook doesn't use requireAuth — it uses shared secret validation
+        if (issueClosureService == null) {
+            return ResponseEntity.ok(Collections.singletonMap("status", "ignored"));
+        }
+
+        // Parse PR number and merge state from webhook payload
+        String prNumber = null;
+        String state = null;
+
+        if (body.containsKey("object_attributes")) {
+            // GitLab webhook format
+            Object attrObj = body.get("object_attributes");
+            if (attrObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, ?> attr = (Map<String, ?>) attrObj;
+                Object iid = attr.get("iid");
+                if (iid != null) prNumber = String.valueOf(iid);
+                Object st = attr.get("state");
+                if (st != null) state = String.valueOf(st);
+            }
+        } else if (body.containsKey("pullRequest")) {
+            // Bitbucket webhook format
+            Object prObj = body.get("pullRequest");
+            if (prObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, ?> pr = (Map<String, ?>) prObj;
+                Object id = pr.get("id");
+                if (id != null) prNumber = String.valueOf(id);
+                Object st = pr.get("state");
+                if (st != null) state = String.valueOf(st);
+            }
+        } else if (body.containsKey("pull_request")) {
+            // GitHub webhook format
+            Object prObj = body.get("pull_request");
+            if (prObj instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, ?> pr = (Map<String, ?>) prObj;
+                Object num = pr.get("number");
+                if (num != null) prNumber = String.valueOf(num);
+                Object st = pr.get("state");
+                if (st != null) state = String.valueOf(st);
+                Object merged = pr.get("merged");
+                if (Boolean.TRUE.equals(merged)) state = "merged";
+            }
+        }
+
+        if (prNumber == null) {
+            return ResponseEntity.ok(Collections.singletonMap("status", "ignored"));
+        }
+
+        if (!"merged".equalsIgnoreCase(state)) {
+            Map<String, Object> resp = new LinkedHashMap<String, Object>();
+            resp.put("status", "ignored");
+            resp.put("state", state);
+            return ResponseEntity.ok(resp);
+        }
+
+        IssueClosure result = issueClosureService.onPrMerged(prNumber);
+        if (result == null) {
+            return ResponseEntity.ok(Collections.singletonMap("status", "no_matching_issue"));
+        }
+
+        return ResponseEntity.ok(Collections.singletonMap("status", "processed"));
     }
 }
