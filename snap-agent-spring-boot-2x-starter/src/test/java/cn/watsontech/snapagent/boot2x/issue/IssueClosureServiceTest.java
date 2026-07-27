@@ -74,7 +74,7 @@ class IssueClosureServiceTest {
             SolutionSuggester suggester, VerificationRunner runner) {
         return new IssueClosureService(agentExecutor, taskStore, skillRegistry,
                 issueStore, issueTracker, sedimentationService,
-                suggester, runner, "system");
+                suggester, runner, "system", null);
     }
 
     private SolutionSuggestion suggestionOf(String... titles) {
@@ -426,7 +426,7 @@ class IssueClosureServiceTest {
         IssueClosureService serviceNoSed = new IssueClosureService(
                 agentExecutor, taskStore, skillRegistry,
                 issueStore, issueTracker, null,
-                null, null, "system");
+                null, null, "system", null);
 
         IssueClosure existing = new IssueClosure(
                 "issue-006", null, "task-600",

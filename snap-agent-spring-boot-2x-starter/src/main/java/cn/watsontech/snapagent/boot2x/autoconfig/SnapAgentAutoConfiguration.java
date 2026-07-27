@@ -1195,6 +1195,7 @@ public class SnapAgentAutoConfiguration {
             ObjectProvider<cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService> sedimentationServiceProvider,
             ObjectProvider<cn.watsontech.snapagent.core.issue.SolutionSuggester> solutionSuggesterProvider,
             ObjectProvider<cn.watsontech.snapagent.core.issue.VerificationRunner> verificationRunnerProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.fix.FixExecutionService> fixExecutionServiceProvider,
             SnapAgentProperties properties) {
         log.info("IssueClosureService assembled (system-user-id={})",
                 properties.getIssueClosure().getSystemUserId());
@@ -1203,7 +1204,8 @@ public class SnapAgentAutoConfiguration {
                 sedimentationServiceProvider.getIfAvailable(),
                 solutionSuggesterProvider.getIfAvailable(),
                 verificationRunnerProvider.getIfAvailable(),
-                properties.getIssueClosure().getSystemUserId());
+                properties.getIssueClosure().getSystemUserId(),
+                fixExecutionServiceProvider.getIfAvailable());
     }
 
     // ---- Cost Accounting (v1.0) ----
