@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": { "title": "Knowledge & Experience Sedimentation", "subtitle": "Issue closures → knowledge fragments → auto-reload → diagnosis context", "output": "p10-knowledge.html", "viewBox": [1080, 520] },
+  "stages": [
+    { "label": "Sources" },
+    { "label": "Extract" },
+    { "label": "Store" },
+    { "label": "Search" },
+    { "label": "Consume" }
+  ],
+  "nodes": [
+    { "id": "issue", "type": "frontend", "label": "Issue Closure", "sublabel": "resolved tickets", "stage": 0, "row": 1, "tag": "raw data" },
+    { "id": "extractor", "type": "backend", "label": "SedimentExtract", "sublabel": "LLM extract", "stage": 1, "row": 1, "tag": "AI", "width": 130 },
+    { "id": "fragment", "type": "database", "label": "KnowledgeFragment", "sublabel": "structured", "stage": 2, "row": 0, "tag": "key points" },
+    { "id": "markdown", "type": "database", "label": "MarkdownSource", "sublabel": "knowledge files", "stage": 2, "row": 2, "tag": "reload" },
+    { "id": "searcher", "type": "security", "label": "KeywordSearcher", "sublabel": "CJK bigram", "stage": 3, "row": 1, "tag": "SPI" },
+    { "id": "agent", "type": "backend", "label": "AgentExecutor", "sublabel": "diagnosis context", "stage": 4, "row": 1, "tag": "consumer" }
+  ],
+  "flows": [
+    { "from": "issue", "to": "extractor", "label": "closure data", "classification": "raw experience", "variant": "emphasis" },
+    { "from": "extractor", "to": "fragment", "label": "key points", "classification": "structured knowledge", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelDy": 82 },
+    { "from": "fragment", "to": "markdown", "label": "persist", "classification": "file write", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [530, 200] },
+    { "from": "markdown", "to": "searcher", "label": "reload index", "classification": "auto-reload", "variant": "dashed" },
+    { "from": "searcher", "to": "agent", "label": "context", "classification": "knowledge injection", "variant": "emphasis" },
+    { "from": "issue", "to": "agent", "label": "diagnosis trace", "classification": "non-PII", "variant": "dashed", "fromSide": "bottom", "toSide": "bottom", "route": "bottom-channel" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Sedimentation Pipeline", "items": ["Issue closures feed LLM extraction", "Extracted fragments become Markdown knowledge", "KnowledgeBase auto-reloads on new fragments"] },
+    { "dot": "amber", "title": "Closed Loop", "items": ["Past diagnosis experience → reusable knowledge", "AgentExecutor gets better context over time", "System learns from every resolved issue"] }
+  ]
+}

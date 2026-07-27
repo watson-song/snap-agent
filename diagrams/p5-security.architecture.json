@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": { "title": "SnapAgent Security Layers", "subtitle": "9 code-level security measures across 3 layers", "output": "p5-security.html", "viewBox": [820, 600] },
+  "components": [
+    { "id": "gateway", "type": "security", "label": "SecurityGateway", "sublabel": "Auth SPI", "tag": "Entry", "pos": [340, 80], "size": [140, 60] },
+    { "id": "rateLimit", "type": "security", "label": "RateLimiter", "sublabel": "Concurrency + Hourly", "pos": [100, 200], "size": [140, 60] },
+    { "id": "budget", "type": "security", "label": "BudgetEnforcer", "sublabel": "Token Budget", "pos": [340, 200], "size": [140, 60] },
+    { "id": "readOnly", "type": "security", "label": "Read-Only Mode", "sublabel": "READ_ONLY_PREFIX", "pos": [580, 200], "size": [140, 60] },
+    { "id": "sqlGuard", "type": "security", "label": "SqlGuard", "sublabel": "Whitelist + Blacklist", "pos": [40, 340], "size": [140, 60] },
+    { "id": "pathGuard", "type": "security", "label": "CodePathGuard", "sublabel": "Path Traversal Prevention", "pos": [220, 340], "size": [150, 60] },
+    { "id": "logGuard", "type": "security", "label": "LogPathGuard", "sublabel": "Directory Whitelist", "pos": [410, 340], "size": [140, 60] },
+    { "id": "redisGuard", "type": "security", "label": "RedisGuard", "sublabel": "get / exists only", "pos": [40, 450], "size": [140, 60] },
+    { "id": "configMask", "type": "security", "label": "ConfigMask", "sublabel": "Sensitive ****", "pos": [220, 450], "size": [150, 60] },
+    { "id": "gitGuard", "type": "security", "label": "GitGuard", "sublabel": "Hash Regex + ProcessBuilder", "pos": [410, 450], "size": [150, 60] }
+  ],
+  "boundaries": [
+    { "kind": "security-group", "label": "Access Control", "wraps": ["gateway", "rateLimit", "budget", "readOnly"] },
+    { "kind": "security-group", "label": "Tool-level Guards (6 measures)", "wraps": ["sqlGuard", "pathGuard", "logGuard", "redisGuard", "configMask", "gitGuard"] }
+  ],
+  "connections": [
+    { "from": "gateway", "to": "rateLimit", "fromSide": "bottom", "toSide": "top" },
+    { "from": "gateway", "to": "budget", "fromSide": "bottom", "toSide": "top" },
+    { "from": "gateway", "to": "readOnly", "fromSide": "bottom", "toSide": "top" },
+    { "from": "rateLimit", "to": "sqlGuard", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "from": "budget", "to": "pathGuard", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "from": "readOnly", "to": "logGuard", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "from": "sqlGuard", "to": "redisGuard", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "from": "pathGuard", "to": "configMask", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "from": "logGuard", "to": "gitGuard", "variant": "dashed", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    { "dot": "rose", "title": "Access Control", "items": ["SecurityGateway SPI: auth, rate limit, budget", "Per-user concurrency + hourly request cap", "Three-dimensional budget enforcement"] },
+    { "dot": "amber", "title": "Tool-level Guards", "items": ["SqlGuard: SELECT-only whitelist, DDL/DML blacklist", "CodePathGuard: path traversal prevention", "RedisGuard: command whitelist (get/exists)"] },
+    { "dot": "orange", "title": "Data Protection", "items": ["ConfigRead: sensitive value masking (****)", "GitLog: commit hash regex + ProcessBuilder", "All tools read-only, no write/delete/modify"] }
+  ]
+}

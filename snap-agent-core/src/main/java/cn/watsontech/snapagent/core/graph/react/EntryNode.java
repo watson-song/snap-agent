@@ -9,14 +9,32 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * EntryNode builds system prompt + user message from skill body + task inputs.
- * Read-only prefix is always first. Skill body is wrapped in <skill_body> tags
- * for prompt injection defense.
+ * EntryNode builds the system prompt and user message from skill body + task inputs.
+ *
+ * <p>The system prompt follows a layered structure aligned with the 7-layer
+ * Context Stack pattern:</p>
+ * <ol>
+ *   <li><b>Instructions</b> — read-only guardrail + skill body (wrapped in
+ *       {@code <skill_body>} tags for prompt injection defense)</li>
+ *   <li><b>Output Format</b> — if the skill declares an {@code output-format}
+ *       in frontmatter, it is appended as an explicit output schema section</li>
+ * </ol>
+ *
+ * <p>The user message is built from task inputs wrapped in {@code <user_inputs>}
+ * tags. Retrieved facts (RAG) and conversation history are injected by
+ * advisors and the AgentNode respectively, keeping each concern separated.</p>
  */
 public class EntryNode implements Node {
+
     private static final String READ_ONLY_PREFIX =
         "你是只读诊断 agent。你只能执行只读查询，不能修改任何数据。\n" +
         "请基于以下 skill 指令进行诊断分析。\n\n";
+
+    private static final String OUTPUT_FORMAT_HEADER =
+        "\n\n<output_format>\n";
+
+    private static final String OUTPUT_FORMAT_FOOTER =
+        "\n</output_format>\n";
 
     private final SkillMeta skill;
     private final Map<String, Object> inputs;
@@ -31,12 +49,30 @@ public class EntryNode implements Node {
 
     @Override
     public GraphState execute(GraphState state, ExecutionContext ctx) throws InterruptException {
-        String systemPrompt = READ_ONLY_PREFIX + buildSkillSection(skill);
+        String systemPrompt = buildSystemPrompt(skill);
         String userMessage = buildUserMessage(inputs);
 
         return state
             .with("system.prompt", systemPrompt)
             .with("user.message", userMessage);
+    }
+
+    /**
+     * Build the system prompt: read-only guardrail (if applicable) +
+     * skill body + output format directive (if declared).
+     */
+    private String buildSystemPrompt(SkillMeta skill) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(READ_ONLY_PREFIX);
+        sb.append(buildSkillSection(skill));
+        // Layer 7: Output Format — lock the answer structure
+        String fmt = skill.getOutputFormat();
+        if (fmt != null && !fmt.isEmpty()) {
+            sb.append(OUTPUT_FORMAT_HEADER);
+            sb.append(fmt);
+            sb.append(OUTPUT_FORMAT_FOOTER);
+        }
+        return sb.toString();
     }
 
     private String buildSkillSection(SkillMeta skill) {

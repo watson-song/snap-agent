@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": { "title": "Agent Multi-turn Diagnosis Loop", "subtitle": "ReAct: Observe → Think → Act → Loop", "output": "p8-agent-loop.html", "viewBox": [980, 660] },
+  "lanes": [
+    { "id": "main", "label": "Diagnosis phases" },
+    { "id": "exceptions", "label": "Recovery loop" },
+    { "id": "terminal", "label": "Terminal exits" }
+  ],
+  "states": [
+    { "id": "queued", "type": "start", "label": "Queued", "sublabel": "user question", "lane": "main", "col": 0, "step": "01" },
+    { "id": "thinking", "type": "active", "label": "Thinking", "sublabel": "LLM call", "lane": "main", "col": 1, "step": "02", "tag": "ReAct" },
+    { "id": "acting", "type": "active", "label": "Acting", "sublabel": "tool exec", "lane": "main", "col": 2, "step": "03", "tag": "dispatch" },
+    { "id": "observing", "type": "decision", "label": "Observing", "sublabel": "done?", "lane": "main", "col": 3, "step": "04", "tag": "context" },
+    { "id": "completed", "type": "success", "label": "Completed", "sublabel": "final answer", "lane": "main", "col": 4 },
+    { "id": "budgetExceeded", "type": "failure", "label": "Budget Exceeded", "sublabel": "token limit", "lane": "exceptions", "col": 0, "tag": "retryable" },
+    { "id": "toolError", "type": "failure", "label": "Tool Error", "sublabel": "execution failed", "lane": "exceptions", "col": 2, "tag": "retryable" },
+    { "id": "cancelled", "type": "failure", "label": "Cancelled", "sublabel": "user stopped", "lane": "terminal", "col": 0 },
+    { "id": "maxRounds", "type": "failure", "label": "Max Rounds", "sublabel": "loop limit", "lane": "terminal", "col": 2 }
+  ],
+  "transitions": [
+    { "from": "queued", "to": "thinking", "variant": "emphasis" },
+    { "from": "thinking", "to": "acting", "label": "tool call", "labelDy": -25 },
+    { "from": "acting", "to": "observing" },
+    { "from": "observing", "to": "thinking", "label": "loop", "variant": "emphasis", "fromSide": "top", "toSide": "top", "route": "top-channel" },
+    { "from": "observing", "to": "completed", "label": "done", "variant": "emphasis" },
+    { "from": "thinking", "to": "budgetExceeded", "label": "budget", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "from": "acting", "to": "toolError", "label": "error", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "from": "budgetExceeded", "to": "cancelled", "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "from": "toolError", "to": "maxRounds", "variant": "security", "fromSide": "bottom", "toSide": "top" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "ReAct Loop", "items": ["Think → Act → Observe → Think (multi-turn)", "AgentExecutor drives the loop", "KnowledgeBase provides context each turn"] },
+    { "dot": "rose", "title": "Recovery + Terminal", "items": ["Budget exceeded and tool errors are recoverable", "Max rounds and user cancel are terminal exits", "Failure policies: STOP / SKIP / RETRY"] }
+  ]
+}

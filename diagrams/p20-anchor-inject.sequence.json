@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": { "title": "Anchor Inject Mode", "subtitle": "Transparent LLM enhancement via system prompt injection", "output": "p20-anchor-inject.html", "viewBox": [820, 720] },
+  "participants": [
+    { "id": "user", "type": "external", "label": "User", "sublabel": "HTTP request" },
+    { "id": "intercept", "type": "backend", "label": "Interceptor", "sublabel": "Spring AOP" },
+    { "id": "bizSvc", "type": "backend", "label": "BizService", "sublabel": "existing code" },
+    { "id": "injector", "type": "security", "label": "KInjector", "sublabel": "prompt extend" },
+    { "id": "llm", "type": "external", "label": "LLM Provider", "sublabel": "OpenAI/Claude" }
+  ],
+  "segments": [
+    { "from": 150, "to": 310, "label": "Intercept + Context" },
+    { "from": 330, "to": 520, "label": "Enhanced LLM Call" },
+    { "from": 540, "to": 637, "label": "Response" }
+  ],
+  "messages": [
+    { "from": "user", "to": "intercept", "y": 185, "label": "HTTP request", "variant": "emphasis" },
+    { "from": "intercept", "to": "bizSvc", "y": 235, "label": "get context", "variant": "dashed" },
+    { "from": "bizSvc", "to": "intercept", "y": 280, "label": "context data", "variant": "return" },
+    { "from": "intercept", "to": "injector", "y": 335, "label": "extend prompt" },
+    { "from": "injector", "to": "llm", "y": 390, "label": "system prompt + context", "variant": "emphasis" },
+    { "from": "llm", "to": "injector", "y": 450, "label": "enhanced response", "variant": "return" },
+    { "from": "injector", "to": "user", "y": 520, "label": "AI-enhanced result", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "intercept", "from": 180, "to": 530, "type": "backend" },
+    { "participant": "bizSvc", "from": 230, "to": 285, "type": "backend" },
+    { "participant": "injector", "from": 330, "to": 525, "type": "security" },
+    { "participant": "llm", "from": 385, "to": 455, "type": "external" }
+  ],
+  "cards": [
+    { "dot": "violet", "title": "Transparent Injection", "items": ["Spring AOP intercepts existing business calls", "KnowledgeInjector extends system prompt", "LLM gets domain context without code changes"] },
+    { "dot": "emerald", "title": "Non-invasive", "items": ["Business services unchanged — no refactoring", "Interceptor manages prompt extension lifecycle", "AI enhancement is opt-in per anchor configuration"] }
+  ]
+}

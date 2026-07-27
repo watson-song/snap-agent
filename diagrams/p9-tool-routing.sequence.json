@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": { "title": "Tool Routing Sequence", "subtitle": "AgentExecutor → ToolDispatcher → Tool execution flow", "output": "p9-tool-routing.html", "viewBox": [820, 680] },
+  "participants": [
+    { "id": "agent", "type": "backend", "label": "AgentExecutor", "sublabel": "multi-turn loop" },
+    { "id": "dispatcher", "type": "backend", "label": "Dispatcher", "sublabel": "ToolDispatcher" },
+    { "id": "guard", "type": "security", "label": "SecurityGuard", "sublabel": "validate" },
+    { "id": "tool", "type": "messagebus", "label": "ToolProvider", "sublabel": "built-in / plugin" },
+    { "id": "external", "type": "external", "label": "External", "sublabel": "Loki/Redis/Nacos" }
+  ],
+  "segments": [
+    { "from": 150, "to": 290, "label": "Route" },
+    { "from": 310, "to": 470, "label": "Execute" },
+    { "from": 490, "to": 620, "label": "Return" }
+  ],
+  "messages": [
+    { "from": "agent", "to": "dispatcher", "y": 185, "label": "tool_call(name, args)", "variant": "emphasis" },
+    { "from": "dispatcher", "to": "guard", "y": 230, "label": "validate args", "variant": "security" },
+    { "from": "guard", "to": "dispatcher", "y": 270, "label": "ok / reject", "variant": "return" },
+    { "from": "dispatcher", "to": "tool", "y": 320, "label": "execute(args)", "variant": "emphasis" },
+    { "from": "tool", "to": "external", "y": 370, "label": "read data", "variant": "dashed" },
+    { "from": "external", "to": "tool", "y": 415, "label": "data", "variant": "return" },
+    { "from": "tool", "to": "dispatcher", "y": 465, "label": "ToolResult", "variant": "return" },
+    { "from": "dispatcher", "to": "agent", "y": 530, "label": "result + duration", "variant": "return" },
+    { "from": "agent", "to": "dispatcher", "y": 580, "label": "observe + think", "note": "ReAct loop continues", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "dispatcher", "from": 180, "to": 535, "type": "backend" },
+    { "participant": "guard", "from": 225, "to": 275, "type": "security" },
+    { "participant": "tool", "from": 315, "to": 470, "type": "messagebus" }
+  ],
+  "cards": [
+    { "dot": "emerald", "title": "Routing Flow", "items": ["AgentExecutor calls ToolDispatcher with tool name + args", "SecurityGuard validates before execution", "ToolProvider returns ToolResult with duration"] },
+    { "dot": "rose", "title": "Security Check", "items": ["All args validated before tool execution", "Path guards, SQL guards, command guards", "Read-only enforcement on all tools"] }
+  ]
+}

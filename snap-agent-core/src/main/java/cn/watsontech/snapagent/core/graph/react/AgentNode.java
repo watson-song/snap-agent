@@ -25,13 +25,23 @@ import java.util.Map;
  * AgentNode: LLM streaming call with tool definitions + RAG context.
  * Parses structured output. Sets stop_reason in state.
  *
- * <p>Phase 2: tool defs built from ToolCallbackRegistry.getAll().</p>
- * <p>Phase 5 (UC-20): tool defs filtered by skill.getTools() — only declared
- * tools appear in the LLM request.</p>
+ * <p>Prompt assembly follows the 7-layer Context Stack pattern:</p>
+ * <ul>
+ *   <li><b>Instructions</b> — from {@code system.prompt} (EntryNode + advisors)</li>
+ *   <li><b>Retrieved Facts</b> — RAG context injected into system prompt as a
+ *       separate {@code <retrieved_facts>} block (not mixed into user message)</li>
+ *   <li><b>Tools</b> — filtered by skill's declared tool list (UC-20)</li>
+ *   <li><b>Short-term Notes</b> — conversation history from
+ *       {@code memory.messages} prepended to the messages list</li>
+ *   <li><b>User Input</b> — the user message from {@code user.message}</li>
+ * </ul>
  */
 public class AgentNode implements Node {
     private static final Logger log = LoggerFactory.getLogger(AgentNode.class);
     private static final int DEFAULT_MAX_TOKENS = 4096;
+
+    private static final String RAG_OPEN = "\n\n<retrieved_facts>\n";
+    private static final String RAG_CLOSE = "\n</retrieved_facts>\n";
 
     private final SkillMeta skill;
     private final AgentTask task;
@@ -45,28 +55,38 @@ public class AgentNode implements Node {
     public String getName() { return "agent"; }
 
     @Override
+    @SuppressWarnings("unchecked")
     public GraphState execute(GraphState state, ExecutionContext ctx) throws InterruptException {
         LlmClient llmClient = ctx.getLlmClient();
         ToolCallbackRegistry toolRegistry = ctx.getTools();
 
-        // Build user message with optional RAG context
+        // --- Layer 1 + 3: System prompt + Retrieved Facts ---
+        // RAG context goes into the system prompt as a separate block,
+        // NOT mixed into the user message. This keeps Retrieved Facts
+        // (layer 3) independent from User Input (layer 2).
         String systemPrompt = state.get("system.prompt");
-        String userMessage = state.get("user.message");
         String ragContext = state.get("rag.context");
         if (ragContext != null && !ragContext.isEmpty()) {
-            userMessage = "<knowledge>\n" + ragContext + "\n</knowledge>\n\n" + userMessage;
+            systemPrompt = systemPrompt + RAG_OPEN + ragContext + RAG_CLOSE;
         }
 
-        // Build messages list
+        // --- Layer 2: User Input ---
+        String userMessage = state.get("user.message");
+
+        // --- Build messages list ---
+        // Layer 5: Short-term Notes — prepend conversation history
         List<Message> messages = new ArrayList<>();
+        List<Message> history = state.get("memory.messages");
+        if (history != null && !history.isEmpty()) {
+            messages.addAll(history);
+        }
         messages.add(Message.user(userMessage));
 
-        // Build tool defs from registry, filtered by skill.tools (UC-20)
+        // --- Layer 4: Tools (filtered by skill declaration) ---
         List<ToolDef> toolDefs = new ArrayList<>();
         if (toolRegistry != null) {
             List<String> skillTools = skill.getTools();
             for (ToolCallback callback : toolRegistry.getAll()) {
-                // When skill declares a tool list, only include matching tools
                 if (skillTools == null || skillTools.isEmpty()
                         || skillTools.contains(callback.getName())) {
                     toolDefs.add(new ToolDef(
@@ -78,7 +98,7 @@ public class AgentNode implements Node {
             }
         }
 
-        // Build LlmRequest (immutable constructor)
+        // --- Assemble immutable LlmRequest ---
         LlmRequest request = new LlmRequest(
             systemPrompt,
             messages,

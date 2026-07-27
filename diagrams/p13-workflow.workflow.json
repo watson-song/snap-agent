@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": { "title": "Workflow Engine", "subtitle": "YAML-defined multi-step automation with condition DSL", "output": "p13-workflow.html", "viewBox": [720, 520] },
+  "lanes": [
+    { "id": "def", "label": "Definition" },
+    { "id": "exec", "label": "Execution" },
+    { "id": "exc", "label": "Exception Handling", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "load", "label": "Load", "fromCol": 0, "toCol": 1 },
+    { "id": "run", "label": "Execute Loop", "fromCol": 2, "toCol": 4, "variant": "emphasis" },
+    { "id": "done", "label": "Complete", "fromCol": 5, "toCol": 5 }
+  ],
+  "mainPath": ["load", "parse", "execute", "condition", "complete"],
+  "nodes": [
+    { "id": "load", "lane": "def", "col": 0, "type": "database", "label": "Load YAML", "sublabel": "workflow definition" },
+    { "id": "parse", "lane": "def", "col": 1, "type": "backend", "label": "Parse Steps", "sublabel": "step list + conditions" },
+    { "id": "execute", "lane": "exec", "col": 2, "type": "backend", "label": "Execute Step", "sublabel": "tool call", "tag": "current" },
+    { "id": "condition", "lane": "exec", "col": 3, "type": "security", "label": "Evaluate", "sublabel": "condition DSL", "tag": "branch" },
+    { "id": "complete", "lane": "exec", "col": 5, "type": "backend", "label": "Complete", "sublabel": "all steps done", "tag": "done" },
+    { "id": "retry", "lane": "exc", "col": 2, "type": "messagebus", "label": "RETRY", "sublabel": "redo step", "tag": "failure policy" },
+    { "id": "skip", "lane": "exc", "col": 4, "type": "messagebus", "label": "SKIP", "sublabel": "skip step", "tag": "failure policy" },
+    { "id": "stop", "lane": "exc", "col": 5, "type": "security", "label": "STOP", "sublabel": "abort", "tag": "failure policy" }
+  ],
+  "edges": [
+    { "from": "load", "to": "parse" },
+    { "from": "parse", "to": "execute", "label": "start", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop" },
+    { "from": "execute", "to": "condition" },
+    { "from": "condition", "to": "complete", "label": "pass", "labelDy": -28 },
+    { "from": "condition", "to": "execute", "label": "loop", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "up-channel" },
+    { "from": "condition", "to": "retry", "label": "fail", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelDy": 11 },
+    { "from": "condition", "to": "skip", "label": "skip", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelDy": 11 },
+    { "from": "condition", "to": "stop", "label": "abort", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "YAML Workflow", "items": ["Steps defined in YAML with condition DSL", "SimpleWorkflowEngine executes step by step", "Condition evaluation determines branch"] },
+    { "dot": "rose", "title": "Failure Policies", "items": ["STOP: abort entire workflow", "SKIP: skip failed step, continue", "RETRY: re-execute failed step"] }
+  ]
+}

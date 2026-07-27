@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": { "title": "Patrol & Alert System", "subtitle": "Cron-scheduled patrol with alert convergence and push", "output": "p15-patrol.html", "viewBox": [720, 520] },
+  "lanes": [
+    { "id": "sched", "label": "Scheduler" },
+    { "id": "patrol", "label": "Patrol Execution" },
+    { "id": "alert", "label": "Alert Pipeline" }
+  ],
+  "phases": [
+    { "id": "trigger", "label": "Trigger", "fromCol": 0, "toCol": 1 },
+    { "id": "run", "label": "Patrol Run", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "push", "label": "Alert Push", "fromCol": 4, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["cron", "lock", "run", "detect", "converge", "push"],
+  "nodes": [
+    { "id": "cron", "lane": "sched", "col": 0, "type": "backend", "label": "Cron Trigger", "sublabel": "scheduled" },
+    { "id": "lock", "lane": "sched", "col": 1, "type": "security", "label": "Acquire Lock", "sublabel": "PatrolLockProvider", "tag": "SPI" },
+    { "id": "run", "lane": "patrol", "col": 2, "type": "backend", "label": "Run Patrol", "sublabel": "execute steps", "tag": "workflow" },
+    { "id": "detect", "lane": "patrol", "col": 3, "type": "security", "label": "Detect Issue", "sublabel": "ALERT_SUMMARY", "tag": "check" },
+    { "id": "converge", "lane": "alert", "col": 4, "type": "backend", "label": "AlertConverger", "sublabel": "SHA-256 dedup", "tag": "fingerprint" },
+    { "id": "push", "lane": "alert", "col": 5, "type": "messagebus", "label": "Push Channel", "sublabel": "Webhook/飞书", "tag": "notify" }
+  ],
+  "edges": [
+    { "from": "cron", "to": "lock" },
+    { "from": "lock", "to": "run", "label": "acquired", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelDy": 11 },
+    { "from": "run", "to": "detect" },
+    { "from": "detect", "to": "converge", "label": "alert found", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "drop", "labelDy": 11 },
+    { "from": "converge", "to": "push", "label": "deduplicated", "labelDy": -28 },
+    { "from": "detect", "to": "run", "label": "no issue", "variant": "dashed", "fromSide": "top", "toSide": "bottom", "route": "up-channel" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Scheduling", "items": ["Cron-based scheduled patrol execution", "PatrolLockProvider prevents concurrent runs", "SPI for distributed lock implementation"] },
+    { "dot": "rose", "title": "Alert Pipeline", "items": ["ALERT_SUMMARY detection in patrol results", "SHA-256 fingerprint deduplication", "Multi-channel push: Webhook, Email, DingTalk, Feishu"] }
+  ]
+}

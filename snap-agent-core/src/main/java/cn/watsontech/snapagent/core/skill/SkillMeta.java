@@ -19,6 +19,7 @@ public final class SkillMeta {
     private final List<InputSpec> inputs;
     private final List<Shortcut> shortcuts;
     private final String body;
+    private final String outputFormat;
     private final SkillAvailability availability;
     private final String unavailableReason;
     private final String source;
@@ -29,19 +30,29 @@ public final class SkillMeta {
                      List<InputSpec> inputs, String body,
                      SkillAvailability availability, String unavailableReason) {
         this(name, description, tools, inputs, Collections.<Shortcut>emptyList(), body,
-                availability, unavailableReason, "custom", false, "");
+                "", availability, unavailableReason, "custom", false, "");
     }
 
     public SkillMeta(String name, String description, List<String> tools,
                      List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
                      SkillAvailability availability, String unavailableReason,
                      String source, boolean overridesBuiltin) {
-        this(name, description, tools, inputs, shortcuts, body,
+        this(name, description, tools, inputs, shortcuts, body, "",
                 availability, unavailableReason, source, overridesBuiltin, "");
     }
 
     public SkillMeta(String name, String description, List<String> tools,
                      List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
+                     SkillAvailability availability, String unavailableReason,
+                     String source, boolean overridesBuiltin,
+                     String requiredPermission) {
+        this(name, description, tools, inputs, shortcuts, body, "",
+                availability, unavailableReason, source, overridesBuiltin, requiredPermission);
+    }
+
+    public SkillMeta(String name, String description, List<String> tools,
+                     List<InputSpec> inputs, List<Shortcut> shortcuts, String body,
+                     String outputFormat,
                      SkillAvailability availability, String unavailableReason,
                      String source, boolean overridesBuiltin,
                      String requiredPermission) {
@@ -51,6 +62,7 @@ public final class SkillMeta {
         this.inputs = inputs == null ? Collections.<InputSpec>emptyList() : inputs;
         this.shortcuts = shortcuts == null ? Collections.<Shortcut>emptyList() : shortcuts;
         this.body = body;
+        this.outputFormat = outputFormat != null ? outputFormat : "";
         this.availability = availability;
         this.unavailableReason = unavailableReason;
         this.source = source;
@@ -82,6 +94,15 @@ public final class SkillMeta {
         return body;
     }
 
+    /**
+     * Returns the output format directive for this skill, or empty string
+     * if none is declared. When non-empty, the prompt builder appends it
+     * to the system prompt as an output schema/example section.
+     */
+    public String getOutputFormat() {
+        return outputFormat;
+    }
+
     public SkillAvailability getAvailability() {
         return availability;
     }
@@ -110,19 +131,19 @@ public final class SkillMeta {
     /** Returns a copy with the given source. */
     public SkillMeta withSource(String source) {
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                availability, unavailableReason, source, overridesBuiltin, requiredPermission);
+                outputFormat, availability, unavailableReason, source, overridesBuiltin, requiredPermission);
     }
 
     /** Returns a copy with overridesBuiltin set. */
     public SkillMeta withOverridesBuiltin(boolean overrides) {
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                availability, unavailableReason, source, overrides, requiredPermission);
+                outputFormat, availability, unavailableReason, source, overrides, requiredPermission);
     }
 
     /** Returns a copy with the given required permission. */
     public SkillMeta withRequiredPermission(String requiredPermission) {
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
-                availability, unavailableReason, source, overridesBuiltin, requiredPermission);
+                outputFormat, availability, unavailableReason, source, overridesBuiltin, requiredPermission);
     }
 
     @Override

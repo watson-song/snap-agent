@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": { "title": "Plugin System Architecture", "subtitle": "Hot-deploy JAR plugins + MCP integration", "output": "p17-plugin.html", "viewBox": [860, 500] },
+  "components": [
+    { "id": "uploader", "type": "backend", "label": "PluginUploader", "sublabel": "JAR Upload + Verify", "tag": "Hot Deploy", "pos": [40, 100], "size": [140, 60] },
+    { "id": "classloader", "type": "backend", "label": "URLClassLoader", "sublabel": "Isolated ClassLoader", "pos": [280, 100], "size": [140, 60] },
+    { "id": "scanner", "type": "backend", "label": "MetadataScanner", "sublabel": "Scan @ToolPlugin", "pos": [520, 100], "size": [140, 60] },
+    { "id": "registry", "type": "database", "label": "PluginRegistry", "sublabel": "Register Tools", "pos": [520, 220], "size": [140, 60] },
+    { "id": "dispatcher", "type": "backend", "label": "ToolDispatcher", "sublabel": "Route Calls", "pos": [280, 220], "size": [140, 60] },
+    { "id": "mcpClient", "type": "messagebus", "label": "McpSseClient", "sublabel": "SSE + JSON-RPC", "tag": "MCP", "pos": [40, 340], "size": [140, 60] },
+    { "id": "mcpProvider", "type": "messagebus", "label": "McpToolProvider", "sublabel": "MCP → ToolProvider", "pos": [280, 340], "size": [150, 60] },
+    { "id": "externalMcp", "type": "external", "label": "External MCP", "sublabel": "SSO / Log Viewer", "pos": [40, 440], "size": [140, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Plugin Lifecycle", "wraps": ["uploader", "classloader", "scanner", "registry"] },
+    { "kind": "region", "label": "MCP Integration", "wraps": ["mcpClient", "mcpProvider"] }
+  ],
+  "connections": [
+    { "from": "uploader", "to": "classloader", "label": "load JAR", "variant": "emphasis" },
+    { "from": "classloader", "to": "scanner", "label": "scan" },
+    { "from": "scanner", "to": "registry", "label": "register", "fromSide": "bottom", "toSide": "top", "labelDy": -54 },
+    { "from": "registry", "to": "dispatcher", "label": "available", "fromSide": "left", "toSide": "right" },
+    { "from": "externalMcp", "to": "mcpClient", "label": "SSE", "variant": "dashed", "fromSide": "top", "toSide": "bottom" },
+    { "from": "mcpClient", "to": "mcpProvider", "label": "adapt" },
+    { "from": "mcpProvider", "to": "dispatcher", "label": "register", "variant": "dashed", "fromSide": "top", "toSide": "bottom" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Plugin Lifecycle", "items": ["Upload JAR → URLClassLoader → scan annotations", "@ToolPluginAnnotation marks tool classes", "PluginMetadataScanner discovers and registers tools"] },
+    { "dot": "violet", "title": "MCP Integration", "items": ["McpSseClient: SSE transport + JSON-RPC protocol", "McpToolProvider adapts MCP to ToolProvider SPI", "External MCP servers: SSO, log viewers, custom tools"] }
+  ]
+}

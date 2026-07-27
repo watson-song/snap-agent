@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": { "title": "Knowledge Base Architecture", "subtitle": "SPI design for knowledge injection and experience sedimentation", "output": "p11-knowledge.html", "viewBox": [860, 500] },
+  "components": [
+    { "id": "injector", "type": "backend", "label": "KnowledgeInjector", "sublabel": "SystemPromptExtender", "tag": "SPI", "pos": [40, 100], "size": [140, 60] },
+    { "id": "base", "type": "backend", "label": "KnowledgeBase", "sublabel": "Orchestrator", "tag": "Core", "pos": [280, 100], "size": [140, 60] },
+    { "id": "searcher", "type": "security", "label": "KnowledgeSearcher", "sublabel": "SimpleKeywordSearcher", "tag": "SPI", "pos": [280, 220], "size": [150, 60] },
+    { "id": "source", "type": "database", "label": "KnowledgeSource", "sublabel": "MarkdownKnowledgeSource", "tag": "SPI", "pos": [280, 340], "size": [160, 60] },
+    { "id": "extractor", "type": "backend", "label": "SedimentationExtractor", "sublabel": "Issue → Knowledge", "tag": "LLM", "pos": [520, 220], "size": [160, 60] },
+    { "id": "fragment", "type": "database", "label": "KnowledgeFragment", "sublabel": "Structured", "pos": [520, 340], "size": [140, 60] },
+    { "id": "agent", "type": "backend", "label": "AgentExecutor", "sublabel": "Multi-turn Loop", "pos": [40, 340], "size": [140, 60] },
+    { "id": "llm", "type": "external", "label": "LLM Provider", "sublabel": "OpenAI / Claude", "pos": [720, 100], "size": [130, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Knowledge SPI", "wraps": ["base", "searcher", "source"] },
+    { "kind": "region", "label": "Experience Sedimentation", "wraps": ["extractor", "fragment"] }
+  ],
+  "connections": [
+    { "from": "agent", "to": "injector", "label": "context", "variant": "emphasis" },
+    { "from": "injector", "to": "base", "label": "extend prompt" },
+    { "from": "base", "to": "searcher", "fromSide": "bottom", "toSide": "top", "label": "search" },
+    { "from": "base", "to": "source", "fromSide": "bottom", "toSide": "top", "label": "load", "variant": "dashed", "labelDy": -24 },
+    { "from": "extractor", "to": "fragment", "label": "extract", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "from": "fragment", "to": "source", "label": "reload", "variant": "dashed", "fromSide": "left", "toSide": "right" },
+    { "from": "injector", "to": "llm", "label": "prompt + context", "variant": "dashed", "labelDy": -24 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Knowledge SPI", "items": ["KnowledgeSource: Markdown files, extensible", "KnowledgeSearcher: CJK bigram keyword matching", "KnowledgeBase orchestrates search + injection"] },
+    { "dot": "amber", "title": "Experience Sedimentation", "items": ["Issue closures → LLM extraction → fragments", "Fragments auto-reload into KnowledgeSource", "Past diagnosis experience becomes reusable knowledge"] }
+  ]
+}

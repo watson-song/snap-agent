@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": { "title": "Anchor Q&A Mode", "subtitle": "User question → knowledge context → LLM → streamed answer", "output": "p19-anchor-qa.html", "viewBox": [820, 720] },
+  "participants": [
+    { "id": "user", "type": "external", "label": "User", "sublabel": "browser" },
+    { "id": "api", "type": "backend", "label": "Anchor API", "sublabel": "REST + SSE" },
+    { "id": "orch", "type": "backend", "label": "Orchestrator", "sublabel": "Anchor Q&A" },
+    { "id": "kb", "type": "database", "label": "KnowledgeBase", "sublabel": "search" },
+    { "id": "llm", "type": "external", "label": "LLM Provider", "sublabel": "OpenAI/Claude" }
+  ],
+  "segments": [
+    { "from": 150, "to": 320, "label": "Question + Context" },
+    { "from": 340, "to": 520, "label": "LLM Generation" },
+    { "from": 540, "to": 637, "label": "Stream Response" }
+  ],
+  "messages": [
+    { "from": "user", "to": "api", "y": 185, "label": "POST /ask", "variant": "emphasis" },
+    { "from": "api", "to": "orch", "y": 230, "label": "route question" },
+    { "from": "orch", "to": "kb", "y": 280, "label": "search keywords", "variant": "dashed" },
+    { "from": "kb", "to": "orch", "y": 325, "label": "context fragments", "variant": "return" },
+    { "from": "orch", "to": "llm", "y": 380, "label": "prompt + context", "variant": "emphasis" },
+    { "from": "llm", "to": "orch", "y": 440, "label": "stream tokens", "variant": "dashed" },
+    { "from": "orch", "to": "api", "y": 510, "label": "SSE stream", "variant": "return" },
+    { "from": "api", "to": "user", "y": 570, "label": "answer", "variant": "return" }
+  ],
+  "activations": [
+    { "participant": "api", "from": 180, "to": 580, "type": "backend" },
+    { "participant": "orch", "from": 225, "to": 520, "type": "backend" },
+    { "participant": "kb", "from": 275, "to": 330, "type": "database" },
+    { "participant": "llm", "from": 375, "to": 445, "type": "external" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Q&A Flow", "items": ["User asks via REST API", "KnowledgeBase provides relevant context", "LLM generates answer with context injection"] },
+    { "dot": "emerald", "title": "Streaming", "items": ["SSE streaming for real-time response", "AnchorOrchestrator manages session", "Knowledge context improves answer quality"] }
+  ]
+}

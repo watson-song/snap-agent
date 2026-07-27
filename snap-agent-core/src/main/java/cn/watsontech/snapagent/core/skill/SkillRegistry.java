@@ -320,6 +320,7 @@ public class SkillRegistry {
         if (toolRegistry == null) {
             return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
                     meta.getInputs(), meta.getShortcuts(), meta.getBody(),
+                    meta.getOutputFormat(),
                     SkillAvailability.UNAVAILABLE,
                     "tool registry not configured", meta.getSource(),
                     meta.isOverridesBuiltin(), meta.getRequiredPermission());
@@ -335,6 +336,7 @@ public class SkillRegistry {
         }
         return new SkillMeta(meta.getName(), meta.getDescription(), meta.getTools(),
                 meta.getInputs(), meta.getShortcuts(), meta.getBody(),
+                meta.getOutputFormat(),
                 SkillAvailability.UNAVAILABLE,
                 "tool(s) not available: " + missing, meta.getSource(),
                 meta.isOverridesBuiltin(), meta.getRequiredPermission());

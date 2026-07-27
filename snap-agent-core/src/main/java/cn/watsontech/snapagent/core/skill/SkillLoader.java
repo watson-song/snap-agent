@@ -161,7 +161,15 @@ public class SkillLoader {
             requiredPermission = ((String) permObj).trim();
         }
 
+        // Parse output-format (optional) — locks the LLM output structure
+        String outputFormat = "";
+        Object fmtObj = map.get("output-format");
+        if (fmtObj instanceof String) {
+            outputFormat = ((String) fmtObj).trim();
+        }
+
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
+                outputFormat,
                 SkillAvailability.AVAILABLE, null, "custom", false, requiredPermission);
     }
 
@@ -285,6 +293,7 @@ public class SkillLoader {
     private SkillMeta invalid(String name, String reason) {
         return new SkillMeta(name, null, Collections.<String>emptyList(),
                 Collections.<InputSpec>emptyList(), Collections.<Shortcut>emptyList(),
-                null, SkillAvailability.INVALID, reason, "custom", false, "");
+                null, "",
+                SkillAvailability.INVALID, reason, "custom", false, "");
     }
 }

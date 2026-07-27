@@ -538,27 +538,36 @@
                 <div class="feature-icon">🧠</div>
                 <h3 data-lang="zh">多 LLM 对接</h3>
                 <h3 data-lang="en" style="display:none">Multi-LLM Support</h3>
-                <p data-lang="zh">Anthropic Claude 原生支持；通义千问、文心一言、智谱清言通过 OpenAI 兼容 base-url 接入。一套 API，自由切换。</p>
-                <p data-lang="en" style="display:none">Anthropic Claude native; Tongyi, Wenxin, Zhipu via OpenAI-compatible base-url. One API, switch freely.</p>
-                <div class="feature-meta">v0.2 · LlmClient SPI</div>
+                <p data-lang="zh">Anthropic Claude 原生支持；通义千问、文心一言、智谱清言通过 OpenAI 兼容 base-url 接入。统一 LlmRequest DTO（systemPrompt + messages + tools），Anthropic 序列化为顶层 system 字段，OpenAI 序列化为首条 role=system 消息。</p>
+                <p data-lang="en" style="display:none">Anthropic Claude native; Tongyi, Wenxin, Zhipu via OpenAI-compatible base-url. Unified LlmRequest DTO (systemPrompt + messages + tools); Anthropic serializes as top-level system field, OpenAI as first role=system message.</p>
+                <div class="feature-meta">v0.2 · LlmClient SPI · AnthropicLlmClient / OpenAiLlmClient</div>
+            </div>
+
+            <div class="feature-card c-cyan">
+                <div class="feature-icon">📚</div>
+                <h3 data-lang="zh">7-Layer Context Stack</h3>
+                <h3 data-lang="en" style="display:none">7-Layer Context Stack</h3>
+                <p data-lang="zh">分层 prompt 架构，每层独立构建、独立注入：L1 Instructions（READ_ONLY_PREFIX + &lt;skill_body&gt; + 项目结构）/ L2 User Input（&lt;user_inputs&gt; key=value）/ L3 Retrieved Facts（&lt;retrieved_facts&gt; RAG 注入 system prompt）/ L4 Tools（@Tool 反射 + skill.tools 过滤）/ L5 Short-term Notes（memory.messages 滑窗 20 条）/ L6 Long-term Memory（ChatMemoryRepository SPI）/ L7 Output Format（frontmatter output-format → &lt;output_format&gt; 块）。Advisor 链按 order 排序横切注入。</p>
+                <p data-lang="en" style="display:none">Layered prompt architecture, each layer built and injected independently: L1 Instructions (READ_ONLY_PREFIX + &lt;skill_body&gt; + project structure) / L2 User Input (&lt;user_inputs&gt; key=value) / L3 Retrieved Facts (&lt;retrieved_facts&gt; RAG in system prompt) / L4 Tools (@Tool reflection + skill.tools filter) / L5 Short-term Notes (memory.messages sliding window 20) / L6 Long-term Memory (ChatMemoryRepository SPI) / L7 Output Format (frontmatter output-format → &lt;output_format&gt; block). Advisor chain injected in order.</p>
+                <div class="feature-meta">v2.0 · EntryNode + Advisor Chain + AgentNode</div>
             </div>
 
             <div class="feature-card c-cyan">
                 <div class="feature-icon">🔧</div>
                 <h3 data-lang="zh">工具插件生态</h3>
                 <h3 data-lang="en" style="display:none">Tool Plugin Ecosystem</h3>
-                <p data-lang="zh">12 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp。v0.5 新增热插拔插件：JAR 上传、运行时注册/卸载/启停/设默认、pluginOverrides 路由。</p>
-                <p data-lang="en" style="display:none">12 built-in read-only tools: jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp. v0.5 adds hot-pluggable plugins: JAR upload, runtime register/unregister/enable/disable/set-default, pluginOverrides routing.</p>
-                <div class="feature-meta">v0.1-v0.5 · ToolProvider SPI + PluginRegistry</div>
+                <p data-lang="zh">12 内置只读工具：jdbc_query / redis_get / code_read / log_read / metrics_query / log_search / trace_search / config_read / git_log / project_structure / code_graph / mcp。@Tool/@ToolParam 反射自动生成 JSON Schema，按 skill.tools 声明过滤（UC-20），v0.5 新增热插拔插件。</p>
+                <p data-lang="en" style="display:none">12 built-in read-only tools. @Tool/@ToolParam reflection auto-generates JSON Schema, filtered by skill.tools declaration (UC-20). v0.5 adds hot-pluggable plugins.</p>
+                <div class="feature-meta">v0.1-v0.5 · ToolProvider SPI + PluginRegistry + ToolCallbackRegistry</div>
             </div>
 
             <div class="feature-card c-orange">
                 <div class="feature-icon">📖</div>
                 <h3 data-lang="zh">业务知识库</h3>
                 <h3 data-lang="en" style="display:none">Business Knowledge Base</h3>
-                <p data-lang="zh">Markdown 文件按 ## 标题分段，混合中英文分词（Latin + CJK 2-gram），相关度评分 + minScore 阈值，自动注入到 LLM system prompt。</p>
-                <p data-lang="en" style="display:none">Markdown files split by ## headings, hybrid tokenization (Latin + CJK 2-gram), relevance scoring + minScore threshold, auto-injected into LLM system prompt.</p>
-                <div class="feature-meta">v0.7 · KnowledgeBase SPI</div>
+                <p data-lang="zh">Markdown 文件按 ## 标题分段，混合中英文分词（Latin + CJK 2-gram），相关度评分 + minScore 阈值。RetrievalAugmentationAdvisor (order=200) 编排 3 阶段 RAG 管线：QueryTransformer 改写查询 → DocumentRetriever 向量检索 topK → QueryAugmenter 格式化为 Markdown。检索结果注入 system prompt 的 &lt;retrieved_facts&gt; 块（Layer 3），与 user message（Layer 2）独立分离。</p>
+                <p data-lang="en" style="display:none">Markdown files split by ## headings, hybrid tokenization (Latin + CJK 2-gram), relevance scoring + minScore threshold. RetrievalAugmentationAdvisor (order=200) orchestrates a 3-stage RAG pipeline: QueryTransformer rewrites query → DocumentRetriever vector search topK → QueryAugmenter formats as Markdown. Results injected into system prompt's &lt;retrieved_facts&gt; block (Layer 3), separated from user message (Layer 2).</p>
+                <div class="feature-meta">v0.7 · KnowledgeBase SPI + RAG Advisor (order=200)</div>
             </div>
 
             <div class="feature-card c-blue">
@@ -619,18 +628,18 @@
                 <div class="feature-icon">🔐</div>
                 <h3 data-lang="zh">只读安全模型</h3>
                 <h3 data-lang="en" style="display:none">Read-Only Security Model</h3>
-                <p data-lang="zh">所有工具只读：SQL 强制 SELECT、Redis 禁写、代码 / 日志路径白名单、配置脱敏。Skill 级权限校验，复用宿主 Spring Security。</p>
-                <p data-lang="en" style="display:none">Every tool is read-only: SQL forced SELECT, Redis read-only, code/log path whitelisting, config masking. Skill-level permission checks reuse host Spring Security.</p>
-                <div class="feature-meta">v0.1 · SecurityGateway SPI</div>
+                <p data-lang="zh">所有工具只读：SQL 强制 SELECT、Redis 禁写、代码 / 日志路径白名单、配置脱敏。system prompt 首部注入 READ_ONLY_PREFIX 安全护栏（Layer 1）；skill 指令体用 &lt;skill_body&gt; XML 标签包裹防注入；SafeGuardAdvisor (order=50) 前置过滤敏感词、后置过滤 LLM 输出。Skill 级权限校验复用宿主 Spring Security。</p>
+                <p data-lang="en" style="display:none">Every tool is read-only: SQL forced SELECT, Redis read-only, code/log path whitelisting, config masking. READ_ONLY_PREFIX guardrail injected at system prompt head (Layer 1); skill body wrapped in &lt;skill_body&gt; XML tags for injection defense; SafeGuardAdvisor (order=50) pre-filters sensitive input and post-filters LLM output. Skill-level permission checks reuse host Spring Security.</p>
+                <div class="feature-meta">v0.1 · SecurityGateway SPI + SafeGuardAdvisor (order=50)</div>
             </div>
 
             <div class="feature-card c-purple">
                 <div class="feature-icon">💬</div>
                 <h3 data-lang="zh">会话历史 + SSE 流式</h3>
                 <h3 data-lang="en" style="display:none">Conversation History + SSE Streaming</h3>
-                <p data-lang="zh">每条诊断对话自动保存为可下载的 Markdown；切换 skill 不丢失上下文；多 skill 并行流式输出思考过程、工具调用与最终结论。</p>
-                <p data-lang="en" style="display:none">Each diagnostic chat auto-saved as downloadable Markdown; switching skills keeps context; multi-skill parallel streaming of thoughts, tool calls, and final answer.</p>
-                <div class="feature-meta">v0.1 · ConversationStore</div>
+                <p data-lang="zh">每条诊断对话自动保存为可下载的 Markdown；切换 skill 不丢失上下文。MessageChatMemoryAdvisor (order=100) 管理对话历史：MessageWindowChatMemory 滑窗策略（默认 20 条/会话，system 消息永不淘汰，以完整 turn 为单位淘汰）；ChatMemoryRepository SPI 支持内存 / Redis / 文件持久化。memory.messages 注入 messages 列表前部（Layer 5），多 skill 并行 SSE 流式输出。</p>
+                <p data-lang="en" style="display:none">Each diagnostic chat auto-saved as downloadable Markdown; switching skills keeps context. MessageChatMemoryAdvisor (order=100) manages conversation history: MessageWindowChatMemory sliding window (default 20 msgs/session, system messages never evicted, eviction by complete turns); ChatMemoryRepository SPI supports in-memory / Redis / file persistence. memory.messages injected into messages list (Layer 5), multi-skill parallel SSE streaming.</p>
+                <div class="feature-meta">v0.1 · ConversationStore + MessageChatMemoryAdvisor (order=100)</div>
             </div>
 
         </div>

@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "SnapAgent Prompt 数据流",
+    "subtitle": "7-Layer Context Stack → LlmRequest 组装管线",
+    "output": "prompt-dataflow.html",
+    "viewBox": [1080, 720]
+  },
+  "stages": [
+    { "label": "Sources" },
+    { "label": "Entry + Advisors" },
+    { "label": "AgentNode" },
+    { "label": "LlmRequest" },
+    { "label": "Provider" }
+  ],
+  "nodes": [
+    { "id": "skill", "type": "external", "label": "Skill", "sublabel": "frontmatter + body", "stage": 0, "row": 0, "tag": "output-format" },
+    { "id": "inputs", "type": "frontend", "label": "User Inputs", "sublabel": "key=value", "stage": 0, "row": 1, "tag": "Layer 2" },
+    { "id": "vstore", "type": "database", "label": "VectorStore", "sublabel": "similaritySearch", "stage": 0, "row": 2, "tag": "topK docs" },
+    { "id": "memrepo", "type": "database", "label": "MemoryRepo", "sublabel": "conversation history", "stage": 0, "row": 3, "tag": "sliding window" },
+
+    { "id": "entry", "type": "backend", "label": "EntryNode", "sublabel": "build prompt", "stage": 1, "row": 0, "tag": "Layer 1+7+2" },
+    { "id": "pcx", "type": "backend", "label": "ProjCtxAdv", "sublabel": "order=10", "stage": 1, "row": 1, "tag": "project structure" },
+    { "id": "ragadv", "type": "backend", "label": "RAG Advisor", "sublabel": "order=200", "stage": 1, "row": 2, "tag": "Layer 3" },
+    { "id": "memadv", "type": "backend", "label": "MemAdvisor", "sublabel": "order=100", "stage": 1, "row": 3, "tag": "Layer 5+6" },
+
+    { "id": "tools", "type": "security", "label": "ToolRegistry", "sublabel": "@Tool reflection", "stage": 2, "row": 0, "tag": "Layer 4" },
+    { "id": "agent", "type": "backend", "label": "AgentNode", "sublabel": "assemble", "stage": 2, "row": 2, "tag": "Layer 1+3+4+5" },
+
+    { "id": "sysprompt", "type": "database", "label": "systemPrompt", "sublabel": "L1 + L3 + L7", "stage": 3, "row": 0, "tag": "string" },
+    { "id": "messages", "type": "database", "label": "messages[]", "sublabel": "L5 history + L2 user", "stage": 3, "row": 2, "tag": "List<Message>" },
+    { "id": "tooldefs", "type": "database", "label": "tools[]", "sublabel": "L4 filtered", "stage": 3, "row": 4, "tag": "List<ToolDef>" },
+
+    { "id": "llm", "type": "cloud", "label": "LlmClient", "sublabel": "stream() SSE", "stage": 4, "row": 2, "tag": "Anthropic / OpenAI" }
+  ],
+  "flows": [
+    { "from": "skill", "to": "entry", "label": "body + fmt", "classification": "Layer 1+7", "variant": "emphasis", "route": "straight", "labelAt": [200, 170] },
+    { "from": "inputs", "to": "entry", "label": "<user_inputs>", "classification": "Layer 2", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[278, 242], [278, 186]], "labelAt": [360, 314] },
+    { "from": "vstore", "to": "ragadv", "label": "documents", "classification": "retrieved", "variant": "dashed", "route": "straight", "labelAt": [278, 428] },
+    { "from": "memrepo", "to": "memadv", "label": "history", "classification": "memory", "variant": "dashed", "route": "straight", "labelAt": [278, 542] },
+
+    { "from": "entry", "to": "agent", "label": "system.prompt", "classification": "L1+L7+L2", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [493, 260] },
+    { "from": "pcx", "to": "agent", "label": "append ctx", "classification": "L1 project", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [493, 452] },
+    { "from": "ragadv", "to": "agent", "label": "rag.context", "classification": "Layer 3", "variant": "emphasis", "fromSide": "bottom", "toSide": "left", "via": [[493, 356], [493, 400], [474, 400]], "labelAt": [560, 428] },
+    { "from": "memadv", "to": "agent", "label": "memory.messages", "classification": "Layer 5", "variant": "default", "fromSide": "top", "toSide": "bottom", "via": [[493, 470], [493, 414], [474, 414]], "labelAt": [510, 500] },
+    { "from": "tools", "to": "agent", "label": "toolDefs", "classification": "Layer 4", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [708, 260] },
+
+    { "from": "agent", "to": "sysprompt", "label": "+ <retrieved_facts>", "classification": "L1+L3+L7", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [708, 200] },
+    { "from": "agent", "to": "messages", "label": "history + user", "classification": "L5+L2", "variant": "default", "route": "straight", "labelAt": [708, 428] },
+    { "from": "agent", "to": "tooldefs", "label": "filtered", "classification": "L4", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [708, 542] },
+
+    { "from": "sysprompt", "to": "llm", "label": "system", "classification": "string", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [923, 200] },
+    { "from": "messages", "to": "llm", "label": "messages", "classification": "List<Message>", "variant": "default", "route": "straight", "labelAt": [923, 428] },
+    { "from": "tooldefs", "to": "llm", "label": "tools", "classification": "List<ToolDef>", "variant": "security", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [923, 542] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Layer 1 — Instructions",
+      "items": ["READ_ONLY_PREFIX 安全护栏", "<skill_body> XML 标签防注入", "ProjCtxAdv 追加项目结构 (max 1500 chars)"]
+    },
+    {
+      "dot": "amber",
+      "title": "Layer 3 — Retrieved Facts",
+      "items": ["RAG Advisor (order=200) 执行 3 阶段管线", "QueryTransformer → Retriever → Augmenter", "<retrieved_facts> 注入 system prompt"]
+    },
+    {
+      "dot": "violet",
+      "title": "Layer 4 — Tools",
+      "items": ["@Tool/@ToolParam 反射生成 JSON Schema", "按 skill.tools 过滤 (UC-20)", "组装为 List<ToolDef>"]
+    },
+    {
+      "dot": "rose",
+      "title": "Layer 5+6 — Memory",
+      "items": ["滑窗 20 条，system 消息不淘汰", "MemoryRepo SPI 持久化", "memory.messages 注入 messages 列表前部"]
+    },
+    {
+      "dot": "orange",
+      "title": "Layer 7 — Output Format",
+      "items": ["frontmatter output-format 字段", "<output_format> 块追加到 system prompt", "锁定 LLM 输出结构"]
+    }
+  ]
+}
