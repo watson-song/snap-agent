@@ -5,6 +5,7 @@ import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.skill.SkillMode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 import java.util.*;
@@ -37,6 +38,18 @@ class EntryNodeTest {
         assertThat(prompt).contains("## Phase 1");
         assertThat(prompt).doesNotContain("A001");
         assertThat(prompt).contains("{skuCode}");
+    }
+
+    @Test
+    @DisplayName("READ_WRITE 模式不包含只读前缀")
+    void readWriteModeSkipsReadOnlyPrefix() throws InterruptException {
+        SkillMeta writeSkill = testSkill().withMode(SkillMode.READ_WRITE);
+        EntryNode node = new EntryNode(writeSkill, testInputs());
+        GraphState result = node.execute(GraphState.empty("t1"), null);
+        String prompt = result.get("system.prompt");
+        assertThat(prompt).doesNotStartWith("你是只读诊断 agent");
+        assertThat(prompt).startsWith("Skill: test-skill");
+        assertThat(prompt).contains("<skill_body>");
     }
 
     @Test

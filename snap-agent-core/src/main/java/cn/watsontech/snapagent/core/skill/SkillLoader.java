@@ -168,9 +168,19 @@ public class SkillLoader {
             outputFormat = ((String) fmtObj).trim();
         }
 
+        // Parse mode (optional, default READ_ONLY)
+        SkillMode mode = SkillMode.READ_ONLY;
+        Object modeObj = map.get("mode");
+        if (modeObj instanceof String) {
+            String modeStr = ((String) modeObj).trim().toLowerCase();
+            if ("read-write".equals(modeStr) || "readwrite".equals(modeStr)) {
+                mode = SkillMode.READ_WRITE;
+            }
+        }
+
         return new SkillMeta(name, description, tools, inputs, shortcuts, body,
                 outputFormat,
-                SkillAvailability.AVAILABLE, null, "custom", false, requiredPermission);
+                SkillAvailability.AVAILABLE, null, "custom", false, requiredPermission, mode);
     }
 
     @SuppressWarnings("unchecked")

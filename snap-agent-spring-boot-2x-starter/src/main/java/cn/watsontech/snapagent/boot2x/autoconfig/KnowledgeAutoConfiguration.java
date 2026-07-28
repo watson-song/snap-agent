@@ -6,13 +6,13 @@ import cn.watsontech.snapagent.core.codegraph.CodeGraphIndex;
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor;
 import cn.watsontech.snapagent.core.vectorstore.VectorStore;
-import cn.watsontech.snapagent.core.vectorstore.SearchRequest;
+import cn.watsontech.snapagent.boot2x.knowledge.IdentityQueryTransformer;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeETLPipeline;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
+import cn.watsontech.snapagent.boot2x.knowledge.VectorStoreDocumentRetriever;
 import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools;
 import cn.watsontech.snapagent.boot2x.codegraph.InMemoryCodeGraphIndex;
 import cn.watsontech.snapagent.boot2x.codegraph.SimpleCodeGraphBuilder;
-import cn.watsontech.snapagent.core.rag.DocumentRetriever;
 import cn.watsontech.snapagent.core.rag.DefaultQueryAugmenter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,12 +58,9 @@ public class KnowledgeAutoConfiguration {
             VectorStore vectorStore,
             EmbeddingModel embeddingModel) {
         log.info("RetrievalAugmentationAdvisor assembled");
-        DocumentRetriever retriever = (query, topK) ->
-                vectorStore.similaritySearch(
-                        new SearchRequest(query, topK, 0.75, null));
         return new RetrievalAugmentationAdvisor(
-                (q, ctx) -> q,
-                retriever,
+                new IdentityQueryTransformer(),
+                new VectorStoreDocumentRetriever(vectorStore),
                 new DefaultQueryAugmenter(false));
     }
 

@@ -6,6 +6,7 @@ import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.skill.SkillMode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.Map;
@@ -62,12 +63,14 @@ public class EntryNode implements Node {
     }
 
     /**
-     * Build the system prompt: read-only guardrail (if applicable) +
+     * Build the system prompt: read-only guardrail (when mode=READ_ONLY) +
      * skill body + output format directive (if declared).
      */
     private String buildSystemPrompt(SkillMeta skill) {
         StringBuilder sb = new StringBuilder();
-        sb.append(READ_ONLY_PREFIX);
+        if (skill.getMode() != SkillMode.READ_WRITE) {
+            sb.append(READ_ONLY_PREFIX);
+        }
         sb.append(buildSkillSection(skill));
         // Layer 7: Output Format — lock the answer structure
         String fmt = skill.getOutputFormat();

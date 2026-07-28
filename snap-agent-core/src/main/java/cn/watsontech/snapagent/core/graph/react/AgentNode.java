@@ -13,6 +13,8 @@ import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
+import cn.watsontech.snapagent.core.memory.LastNMessagePartitioner;
+import cn.watsontech.snapagent.core.memory.MessagePartitioner;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
@@ -46,10 +48,16 @@ public class AgentNode implements Node {
 
     private final SkillMeta skill;
     private final AgentTask task;
+    private final MessagePartitioner messagePartitioner;
 
     public AgentNode(SkillMeta skill, AgentTask task) {
+        this(skill, task, new LastNMessagePartitioner());
+    }
+
+    public AgentNode(SkillMeta skill, AgentTask task, MessagePartitioner messagePartitioner) {
         this.skill = skill;
         this.task = task;
+        this.messagePartitioner = messagePartitioner != null ? messagePartitioner : new LastNMessagePartitioner();
     }
 
     @Override
@@ -75,13 +83,9 @@ public class AgentNode implements Node {
         String userMessage = state.get(StateKeys.USER_MESSAGE);
 
         // --- Build messages list ---
-        // Layer 5: Short-term Notes — prepend conversation history
-        List<Message> messages = new ArrayList<>();
+        // Layer 5: Short-term Notes — partition conversation history + user message
         List<Message> history = state.get(StateKeys.MEMORY_MESSAGES);
-        if (history != null && !history.isEmpty()) {
-            messages.addAll(history);
-        }
-        messages.add(Message.user(userMessage));
+        List<Message> messages = messagePartitioner.partition(history, userMessage);
 
         // --- Layer 4: Tools (filtered by skill declaration) ---
         List<ToolDef> toolDefs = new ArrayList<>();

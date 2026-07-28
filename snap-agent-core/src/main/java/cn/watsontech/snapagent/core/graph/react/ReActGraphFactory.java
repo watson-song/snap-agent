@@ -8,6 +8,7 @@ import cn.watsontech.snapagent.core.graph.StateGraph;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.advisor.AdvisorNode;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
+import cn.watsontech.snapagent.core.memory.MessagePartitioner;
 import cn.watsontech.snapagent.core.skill.SkillAvailability;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillUnavailableException;
@@ -24,6 +25,17 @@ import java.util.Map;
  * not construct the graph.</p>
  */
 public class ReActGraphFactory {
+
+    private MessagePartitioner messagePartitioner;
+
+    /**
+     * Set a custom message partitioner for the agent node.
+     * When not set, {@link cn.watsontech.snapagent.core.memory.LastNMessagePartitioner}
+     * is used (keeps all history).
+     */
+    public void setMessagePartitioner(MessagePartitioner messagePartitioner) {
+        this.messagePartitioner = messagePartitioner;
+    }
 
     @SuppressWarnings("unchecked")
     public CompiledGraph build(SkillMeta skill, AgentTask task, List<Advisor> advisors) {
@@ -43,7 +55,9 @@ public class ReActGraphFactory {
 
         // Create nodes
         EntryNode entryNode = new EntryNode(skill, inputs);
-        AgentNode agentNode = new AgentNode(skill, task);
+        AgentNode agentNode = messagePartitioner != null
+                ? new AgentNode(skill, task, messagePartitioner)
+                : new AgentNode(skill, task);
         ToolsNode toolsNode = new ToolsNode(4000);
         ShouldContinue shouldContinue = new ShouldContinue();
 
