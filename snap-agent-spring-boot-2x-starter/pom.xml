@@ -134,6 +134,17 @@
             <artifactId>caffeine</artifactId>
         </dependency>
 
+        <!-- springdoc-openapi-ui (optional): auto-generate OpenAPI 3 / Swagger UI
+             for SnapAgentController REST endpoints. Host apps get /swagger-ui.html
+             and /v3/api-docs out of the box when this dependency is on the classpath.
+             Version 1.7.0 is the last release compatible with Spring Boot 2.x. -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-ui</artifactId>
+            <version>1.7.0</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

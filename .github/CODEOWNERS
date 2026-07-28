@@ -1,0 +1,25 @@
+# CODEOWNERS — SnapAgent
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# Reviewers are auto-requested based on file paths below.
+
+# Default: all repositories route to the maintainer
+*                           @watson-song
+
+# Documentation: require review for doc-heavy changes
+/docs/                      @watson-song
+/docs/site/                 @watson-song
+/docs/embeed-skills-agent/ @watson-song
+/README.md                  @watson-song
+/AGENTS.md                  @watson-song
+/CHANGELOG.md               @watson-song
+
+# Core SPI: architecture-sensitive changes need review
+/snap-agent-core/           @watson-song
+
+# Starter: auto-config + controller changes need review
+/snap-agent-spring-boot-2x-starter/ @watson-song
+
+# Build & CI: release pipeline, hooks, workflows
+/pom.xml                    @watson-song
+/.github/workflows/         @watson-song
+/scripts/git-hooks/         @watson-song

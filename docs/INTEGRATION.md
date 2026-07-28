@@ -126,6 +126,24 @@ Starter 会自动引入 `snap-agent-core`。以下依赖如果宿主项目已有
 - `spring-boot-starter-security`（可选，用于鉴权适配）
 - `mysql-connector-java`（可选，JDBC 工具需要）
 - `spring-boot-starter-data-redis`（可选，Redis 工具需要）
+- `springdoc-openapi-ui`（可选，自动生成 Swagger UI / OpenAPI 3 文档，见下方）
+
+### 可选：启用 Swagger UI / OpenAPI 3
+
+Starter 已声明 `springdoc-openapi-ui` 为 `optional` 依赖。宿主项目在 `pom.xml` 中添加以下依赖即可获得：
+
+- `GET /swagger-ui.html` — 可视化 API 文档
+- `GET /v3/api-docs` — OpenAPI 3 JSON
+
+```xml
+<dependency>
+    <groupId>org.springdoc</groupId>
+    <artifactId>springdoc-openapi-ui</artifactId>
+    <version>1.7.0</version>
+</dependency>
+```
+
+> 版本 1.7.0 是最后兼容 Spring Boot 2.x 的版本。Spring Boot 3.x 请用 `springdoc-openapi-starter-webmvc-ui`。
 
 ## 第三步：配置 application.yml
 

@@ -1,0 +1,138 @@
+name: Doc Sync Check
+
+# Runs on PRs to check whether code changes have corresponding documentation changes.
+# Non-blocking: posts a warning comment on the PR if docs appear out of sync.
+#
+# This is the CI-level counterpart to the pre-commit hook's Rule 5 warn.
+# The pre-commit hook covers individual commits; this covers the full PR diff.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.java'
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  doc-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for diff
+
+      - name: Check doc sync
+        id: check
+        run: |
+          BASE="${{ github.base_ref }}"
+          if [ -z "$BASE" ]; then
+            echo "Not a PR, skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Get the diff between the base branch and the PR head
+          git fetch origin "$BASE" --depth=1 2>/dev/null || true
+          BASE_SHA="origin/$BASE"
+
+          # Count changed files by type
+          JAVA_CHANGES=$(git diff "$BASE_SHA" HEAD --name-only --diff-filter=ACMR -- '*.java' | grep -v '/src/test/' | wc -l | tr -d ' ')
+          DOC_CHANGES=$(git diff "$BASE_SHA" HEAD --name-only --diff-filter=ACMR -- '*.md' 'docs/*' | wc -l | tr -d ' ')
+
+          echo "Java source files changed: $JAVA_CHANGES"
+          echo "Doc files changed: $DOC_CHANGES"
+
+          echo "java_changes=$JAVA_CHANGES" >> "$GITHUB_OUTPUT"
+          echo "doc_changes=$DOC_CHANGES" >> "$GITHUB_OUTPUT"
+
+          if [ "$JAVA_CHANGES" -gt 0 ] && [ "$DOC_CHANGES" -eq 0 ]; then
+            echo "needs_doc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_doc=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Find existing comment
+        if: steps.check.outputs.skip != 'true' && steps.check.outputs.needs_doc == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+            const marker = '<!-- doc-sync-check -->';
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              core.setOutput('comment-id', existing.id);
+            }
+
+      - name: Post doc sync warning
+        if: steps.check.outputs.skip != 'true' && steps.check.outputs.needs_doc == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const javaCount = '${{ steps.check.outputs.java_changes }}';
+            const marker = '<!-- doc-sync-check -->';
+            const body = `${marker}
+            ## 📄 Documentation Sync Check
+
+            This PR has **${javaCount} Java source file(s) changed** but **no documentation file(s) changed**.
+
+            Please verify whether documentation needs updating:
+
+            | Area | File(s) to check |
+            |------|-----------------|
+            | Architecture | \`docs/embeed-skills-agent/01-architecture.md\` |
+            | API & UI | \`docs/embeed-skills-agent/06-api-and-ui.md\` |
+            | Configuration | \`docs/embeed-skills-agent/04-configuration.md\` |
+            | Host Integration | \`docs/INTEGRATION.md\` |
+            | Public Site | \`docs/site/\` |
+
+            If no doc changes are needed, you can ignore this comment.
+            To dismiss it permanently, add \`--no-docs\` to the PR description.
+            `;
+
+            const existingId = '${{ steps.find-existing-comment.outputs.comment-id }}';
+            if (existingId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(existingId),
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body,
+              });
+            }
+
+      - name: Resolve existing comment (docs in sync)
+        if: steps.check.outputs.skip != 'true' && steps.check.outputs.needs_doc == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+            const marker = '<!-- doc-sync-check -->';
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: `${marker}\n✅ Documentation is in sync — doc changes detected in this PR.`,
+              });
+            }

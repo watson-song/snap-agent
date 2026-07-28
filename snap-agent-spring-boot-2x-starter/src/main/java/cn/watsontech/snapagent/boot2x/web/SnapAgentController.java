@@ -67,6 +67,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -112,6 +113,7 @@ import java.util.zip.ZipFile;
  */
 @RestController
 @RequestMapping("${snap-agent.base-path:/snap-agent}")
+@Tag(name = "SnapAgent", description = "Embedded AI agent skill framework — skills, runs, tools, patrol, issues, cost, workflows")
 public class SnapAgentController {
 
     private static final Logger log = LoggerFactory.getLogger(SnapAgentController.class);

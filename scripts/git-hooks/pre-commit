@@ -7,6 +7,7 @@
 #   2. Feature/new-code commits MUST include test changes
 #   3. No --no-verify bypass (the hook itself is the guard)
 #   4. Staged Java source files must have corresponding test files (heuristic)
+#   5. Warn (not block) when fix/feat/refactor commits have code changes but no doc changes
 #
 set -eo pipefail
 
@@ -17,10 +18,13 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 STAGED_JAVA_SRC=()
 STAGED_JAVA_TEST=()
 STAGED_OTHER=()
+STAGED_DOCS=()
 HAS_BUGFIX=false
 HAS_FEATURE=false
+HAS_REFACTOR=false
 HAS_TEST_CHANGE=false
 HAS_SRC_CHANGE=false
+HAS_DOC_CHANGE=false
 
 # --- Collect staged files ---
 while IFS= read -r file; do
@@ -46,8 +50,13 @@ while IFS= read -r file; do
         HAS_SRC_CHANGE=true
       fi
       ;;
-    docs/*|*.md|*.yml|*.yaml|*.xml|*.properties|*.conf|.gitignore|*.sh|*.json)
-      # Config/docs — no test requirement, but track for context
+    docs/*|*.md)
+      # Docs — track for doc-sync warning
+      STAGED_DOCS+=("$file")
+      HAS_DOC_CHANGE=true
+      ;;
+    *.yml|*.yaml|*.xml|*.properties|*.conf|.gitignore|*.sh|*.json)
+      # Config — no test requirement, no doc requirement
       ;;
     *)
       STAGED_OTHER+=("$file")
@@ -80,6 +89,9 @@ if echo "$MSG_LOWER" | grep -qE '^(fix|修复)(\(.+\))?:|fixup!'; then
 fi
 if echo "$MSG_LOWER" | grep -qE '^(feat|feature|新增)(\(.+\))?:'; then
   HAS_FEATURE=true
+fi
+if echo "$MSG_LOWER" | grep -qE '^(refactor|重构)(\(.+\))?:'; then
+  HAS_REFACTOR=true
 fi
 
 # --- Rule 1: Bugfix must have tests ---
@@ -162,6 +174,31 @@ if [ "$BRANCH" = "main" ] && echo "$MSG_LOWER" | grep -qE '\bwip\b|\btodo\b|\btm
   echo "   Use a feature branch for work-in-progress commits."
   echo ""
   exit 1
+fi
+
+# --- Rule 5: Warn when fix/feat/refactor commits have code changes but no doc changes ---
+# Non-blocking: reminds developers to update docs when changing code.
+# Override: add --no-docs flag to commit message body, or set SNAPAGENT_SKIP_DOC_WARN=1
+if [ "$HAS_SRC_CHANGE" = true ] && [ "$HAS_DOC_CHANGE" = false ]; then
+  if [ "$HAS_BUGFIX" = true ] || [ "$HAS_FEATURE" = true ] || [ "$HAS_REFACTOR" = true ]; then
+    # Allow explicit opt-out
+    if ! echo "$MSG_LOWER" | grep -q '\-\-no-docs' && [ "${SNAPAGENT_SKIP_DOC_WARN:-}" != "1" ]; then
+      echo ""
+      echo "💡 TIP: Code changes detected without documentation changes"
+      echo ""
+      echo "   This commit modifies source code but has no .md or docs/ changes."
+      echo "   Consider updating relevant documentation:"
+      echo "     - docs/embeed-skills-agent/  (architecture, API, config)"
+      echo "     - docs/site/                (public site content)"
+      echo "     - docs/INTEGRATION.md       (host integration guide)"
+      echo "     - README.md / AGENTS.md      (if surface-level changes)"
+      echo ""
+      echo "   To suppress this warning:"
+      echo "     - Add '--no-docs' to the commit message body, or"
+      echo "     - Set SNAPAGENT_SKIP_DOC_WARN=1 environment variable"
+      echo ""
+    fi
+  fi
 fi
 
 exit 0
