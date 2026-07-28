@@ -301,6 +301,19 @@ class XxxTest { ... }
 3. **源码无测试时警告** — staged 有 .java 源码但无 .java 测试 → 警告（不阻止，适合重构）
 4. **main 分支禁止 WIP** — main 上提交 WIP/tmp → 阻止
 
+**文件分类规则**:
+- `.java` → 源码（src/）或测试（src/test/ + *Test.java/*Spec.java）
+- `.js` → 源码或测试（test/tests 目录 + *.test.js/*.spec.js）
+- `.html`/`.css` → 文档/生成文件，不触发测试要求
+- `docs/`/`*.md`/`*.yml`/`*.json` 等 → 配置/文档，不触发测试要求
+- 其他 → 视为源码
+
+**Commit message 检测**:
+- pre-commit hook 无法直接获取正在创建的 commit message
+- 不读取 `COMMIT_EDITMSG`（该文件保存的是上一次 commit 的消息，会误判）
+- 仅从 `MERGE_MSG`/`SQUASH_MSG` 读取（合并/压缩场景）
+- 如果无法确定 commit type，跳过 bugfix/feature 检查（放行）
+
 ### 9.3 Commit-msg 检查项
 
 1. **必须使用 Conventional Commits** — `type(scope): description` 格式

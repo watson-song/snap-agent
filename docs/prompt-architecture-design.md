@@ -198,8 +198,8 @@ output-format: |
 │     [200] RetrievalAugmentationAdvisor → RAG → rag.context     │
 │                                                                  │
 │  3. AgentNode                                                   │
-│     systemPrompt += <user_profile>    (from long-term memory)  │
-│     systemPrompt += <project_facts>   (from long-term memory) │
+│     systemPrompt = state["system.prompt"]  (already includes    │
+│                    <user_profile> + <project_facts> from LTM)  │
 │     systemPrompt += <retrieved_facts>  (from rag.context)      │
 │     messages = memory.messages + [userMessage]                │
 │     toolDefs = registry filtered by skill.tools                │
