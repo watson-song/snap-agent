@@ -62,6 +62,12 @@
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
         </dependency>
+        <!-- springdoc-openapi-ui: Swagger UI / OpenAPI 3 for SnapAgentController endpoints -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-ui</artifactId>
+            <version>1.7.0</version>
+        </dependency>
     </dependencies>
 
     <build>
