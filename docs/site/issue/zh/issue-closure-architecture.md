@@ -264,7 +264,7 @@ public interface VerificationRunner {
 | `ISSUE_CREATED` | 外部 Issue 已创建 (枚举定义, 当前 Service 未使用) | 预留给自定义 IssueTracker |
 | `FIX_IN_PROGRESS` | 修复进行中 | `createExternalIssue()` 调 `IssueTracker.createIssue()` 后 |
 | `VERIFIED` | 修复已验证生效 | `verify()` 运行验证后 |
-| `CLOSED` | 已关闭, 经验已沉淀到 KnowledgeBase | `close()` 抽取知识后 |
+| `CLOSED` | 已关闭, 经验已沉淀到 VectorStore | `close()` 抽取知识后 |
 | `FAILED` | 失败终态 (枚举定义, 当前 Service 未使用) | 预留给自定义 VerificationRunner |
 
 ### 3.3 流转特性
@@ -281,7 +281,7 @@ Starter 模块 (`snap-agent-spring-boot-2x-starter`) 的 `cn.watsontech.snapagen
 
 ### 4.1 FileIssueStore (默认存储)
 
-JSON 文件存储, 与 `FileConversationStore` 同模式:
+JSON 文件存储, 与 `FileChatMemoryRepository` 同模式:
 
 - **文件路径**: `{storageDir}/{issueId}.json`
 - **默认目录**: `snap-agent.issue-closure.storage-dir` 为空时使用 `{upload-skills-dir}/issues/`
@@ -363,7 +363,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 4.5 IssueClosureService (编排服务)
 
-核心编排器, 连接 `GraphExecutor`、`IssueStore`、`IssueTracker`、`KnowledgeBase`:
+核心编排器, 连接 `GraphExecutor`、`IssueStore`、`IssueTracker`、`VectorStore`:
 
 #### `proposeSolution(taskId)` — 方案建议
 
@@ -437,7 +437,7 @@ public VerificationResult verify(IssueClosure issue) {
 2. KnowledgeFragment fragment = sedimentationExtractor.extract(issue)
    // 抽取知识片段 (见第 5 节)
 
-3. knowledgeBase != null → knowledgeBase.reload()
+3. vectorStore != null → vectorStore.reload()
    // 重载知识库, 使新片段可被检索
 
 4. issue.withKnowledgeEntry("sedimentation:" + issueId, now)
@@ -446,7 +446,7 @@ public VerificationResult verify(IssueClosure issue) {
 6. 返回 updated
 ```
 
-> **注**: `knowledgeBase` 可为 `null` (当 `snap-agent.knowledge.enabled=false` 时)。此时 `close()` 仍记录 `knowledgeEntryId` 但不重载知识库——知识片段不会立即可检索, 但 `IssueStore` 中保留了完整记录。
+> **注**: `vectorStore` 可为 `null` (当 `snap-agent.knowledge.enabled=false` 时)。此时 `close()` 仍记录 `knowledgeEntryId` 但不重载知识库——知识片段不会立即可检索, 但 `IssueStore` 中保留了完整记录。
 
 ---
 
@@ -454,7 +454,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 5.1 沉淀机制
 
-当 issue 关闭时, `KnowledgeSedimentationExtractor.extract()` 从 `IssueClosure` 抽取一个 `KnowledgeFragment`, 经验以结构化 Markdown 形式沉淀回 v0.7 的 `KnowledgeBase`:
+当 issue 关闭时, `KnowledgeSedimentationExtractor.extract()` 从 `IssueClosure` 抽取一个 `KnowledgeFragment`, 经验以结构化 Markdown 形式沉淀回 `VectorStore`:
 
 ```
 IssueClosure (CLOSED)
@@ -468,11 +468,11 @@ KnowledgeSedimentationExtractor.extract(issue)
     └─ metadata = {category: "经验沉淀"}
     │
     ▼
-KnowledgeBase.reload()
+VectorStore.reload()
     │
     ▼
-未来诊断时 KnowledgeInjector 检索到该片段
-    → 注入 system prompt → LLM 可参考历史经验
+未来诊断时 VectorStoreDocumentRetriever 检索到该片段
+    → 通过 Advisor 注入 system prompt → LLM 可参考历史经验
 ```
 
 ### 5.2 抽取的知识片段格式
@@ -527,7 +527,7 @@ passed: true
 补货策略已生成, 验证通过
 ```
 
-未来用户提问类似问题时, `KnowledgeInjector` 检索到此片段, 注入 system prompt, LLM 可直接参考"参数缺失 → 补齐 → 验证"的历史经验, 形成学习闭环。
+未来用户提问类似问题时, `VectorStoreDocumentRetriever` 检索到此片段, 通过 `Advisor` 注入 system prompt, LLM 可直接参考"参数缺失 → 补齐 → 验证"的历史经验, 形成学习闭环。
 
 ---
 
@@ -759,9 +759,9 @@ snap-agent:
 | `KnowledgeSedimentationExtractor` | — | `@ConditionalOnMissingBean` | 声明自定义 bean |
 | `TemplateSolutionSuggester` | `SolutionSuggester` | `@ConditionalOnMissingBean(SolutionSuggester.class)` | 声明自定义 `SolutionSuggester` bean |
 | `SimpleVerificationRunner` | `VerificationRunner` | `@ConditionalOnMissingBean(VerificationRunner.class)` | 声明自定义 `VerificationRunner` bean |
-| `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<KnowledgeBase>` 可空 | — |
+| `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` 可空 | — |
 
-`IssueClosureService` 通过 `ObjectProvider` 注入 `KnowledgeBase` (可空)、`SolutionSuggester` (可空, 回退到 skill)、`VerificationRunner` (可空, 回退到 skill)。
+`IssueClosureService` 通过 `ObjectProvider` 注入 `VectorStore` (可空)、`SolutionSuggester` (可空, 回退到 skill)、`VerificationRunner` (可空, 回退到 skill)。
 
 ### 8.3 自定义 IssueTracker (Jira/GitHub)
 
