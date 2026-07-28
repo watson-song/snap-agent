@@ -55,6 +55,7 @@ public class SimpleExecutionContext implements ExecutionContext {
     public void emit(TranscriptEvent event) {
         if (event == null) return;
         log.debug("transcript event: type={} task={}", event.getType(), task.getTaskId());
+        task.addTranscriptEvent(event);
     }
 
     @Override
