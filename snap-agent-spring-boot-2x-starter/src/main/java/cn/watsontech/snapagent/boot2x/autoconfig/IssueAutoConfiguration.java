@@ -68,8 +68,8 @@ public class IssueAutoConfiguration {
 
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
-            prefix = "snap-agent.issue-closure", name = "enabled", havingValue = "true")
-    @ConditionalOnMissingBean(IssueTracker.class)
+            prefix = "snap-agent.issue-closure", name = "tracker-type",
+            havingValue = "noop", matchIfMissing = true)
     public NoopIssueTracker noopIssueTracker() {
         log.info("NoopIssueTracker assembled (tracker-type=noop)");
         return new NoopIssueTracker();
