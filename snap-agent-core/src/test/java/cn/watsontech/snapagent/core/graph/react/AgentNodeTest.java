@@ -68,7 +68,7 @@ class AgentNodeTest {
     }
 
     @Test
-    @DisplayName("RAG 上下文注入 — state[rag.context] 出现在 LLM user message")
+    @DisplayName("RAG 上下文注入 — state[rag.context] 出现在 system prompt 的 <retrieved_facts> 块")
     void ragContextInjected() throws InterruptException {
         LlmClient llmClient = mock(LlmClient.class);
         LlmRequest[] capturedReq = new LlmRequest[1];
@@ -89,11 +89,15 @@ class AgentNodeTest {
 
         node.execute(state, ctx);
 
-        // Verify RAG context was injected into user message
+        // RAG context injected into system prompt as <retrieved_facts> block (Layer 3)
+        String systemPrompt = capturedReq[0].getSystemPrompt();
+        assertThat(systemPrompt).contains("<retrieved_facts>");
+        assertThat(systemPrompt).contains("连接池 max=20");
+        assertThat(systemPrompt).contains("</retrieved_facts>");
+
+        // User message stays pure (Layer 2 — no RAG mixed in)
         String userMsg = capturedReq[0].getMessages().get(0).getContent();
-        assertThat(userMsg).contains("<knowledge>");
-        assertThat(userMsg).contains("连接池 max=20");
-        assertThat(userMsg).contains("分析问题");
+        assertThat(userMsg).isEqualTo("分析问题");
     }
 
     @Test
@@ -152,7 +156,7 @@ class AgentNodeTest {
     }
 
     @Test
-    @DisplayName("无 RAG 上下文时 user message 不包含 <knowledge> 标签")
+    @DisplayName("无 RAG 上下文时 system prompt 不包含 <retrieved_facts> 标签")
     void noRagContextNoKnowledgeTag() throws InterruptException {
         LlmClient llmClient = mock(LlmClient.class);
         LlmRequest[] capturedReq = new LlmRequest[1];
@@ -172,8 +176,13 @@ class AgentNodeTest {
 
         node.execute(state, ctx);
 
+        // No <retrieved_facts> in system prompt
+        String systemPrompt = capturedReq[0].getSystemPrompt();
+        assertThat(systemPrompt).doesNotContain("<retrieved_facts>");
+        assertThat(systemPrompt).isEqualTo("你是诊断 agent");
+
+        // User message is pure
         String userMsg = capturedReq[0].getMessages().get(0).getContent();
-        assertThat(userMsg).doesNotContain("<knowledge>");
         assertThat(userMsg).isEqualTo("分析问题");
     }
 

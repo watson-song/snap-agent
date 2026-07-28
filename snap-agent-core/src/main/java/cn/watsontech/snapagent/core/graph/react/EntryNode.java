@@ -5,6 +5,7 @@ import cn.watsontech.snapagent.core.graph.Node;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -25,6 +26,8 @@ import java.util.Map;
  * advisors and the AgentNode respectively, keeping each concern separated.</p>
  */
 public class EntryNode implements Node {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static final String READ_ONLY_PREFIX =
         "你是只读诊断 agent。你只能执行只读查询，不能修改任何数据。\n" +
@@ -84,11 +87,21 @@ public class EntryNode implements Node {
         return sb.toString();
     }
 
+    /**
+     * Build the user message from task inputs as JSON inside
+     * {@code <user_inputs>} tags. JSON format supports nested objects,
+     * lists, and typed values (Layer 2 — User Input).
+     */
     private String buildUserMessage(Map<String, Object> inputs) {
         StringBuilder sb = new StringBuilder();
         sb.append("<user_inputs>\n");
-        inputs.forEach((k, v) -> sb.append(k).append("=").append(v).append("\n"));
-        sb.append("</user_inputs>");
+        try {
+            sb.append(MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(inputs));
+        } catch (Exception e) {
+            // Fallback: simple key=value format if JSON serialization fails
+            inputs.forEach((k, v) -> sb.append(k).append("=").append(v).append("\n"));
+        }
+        sb.append("\n</user_inputs>");
         return sb.toString();
     }
 }

@@ -1,0 +1,21 @@
+package cn.watsontech.snapagent.core.memory;
+
+/**
+ * Immutable key-value fact about a project (Layer 6 — Long-term Memory).
+ *
+ * <p>Examples: tech-stack, coding-convention, architecture-decision,
+ * known-constraint.</p>
+ */
+public final class ProjectFact {
+
+    private final String key;
+    private final String value;
+
+    public ProjectFact(String key, String value) {
+        this.key = key;
+        this.value = value;
+    }
+
+    public String getKey() { return key; }
+    public String getValue() { return value; }
+}
