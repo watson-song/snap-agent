@@ -17,7 +17,7 @@ public record LlmRequest(
 ) {}
 ```
 
-实现：`AnthropicLlmClient`（2x-starter，OkHttp 流式）。Phase 3 加 `OpenAiLlmClient`。
+实现：`AnthropicLlmClient` 和 `OpenAiLlmClient`（均位于 2x-starter，继承 `AbstractStreamingLlmClient` 基类）。基类封装 OkHttp 代理、流式 SSE 解析、取消、`listModels` 等共享逻辑，子类仅实现 provider 差异（请求构建、认证头、SSE 事件解析）。
 
 ## 2. Anthropic Messages 流式客户端（OkHttp）
 
@@ -91,12 +91,12 @@ LlmRequest.model = task.model
 ```
 前端用此渲染下拉，并清理过期 localStorage 缓存（决策风险 #localStorage 模型缓存失效）。
 
-## 6. OpenAI 适配器（Phase 3）
+## 6. OpenAI 适配器（已实现）
 
-- `OpenAiLlmClient` 实现 `LlmClient`，调 `{base-url}/v1/chat/completions`（stream=true）。
+- `OpenAiLlmClient` 继承 `AbstractStreamingLlmClient`，调 `{base-url}/v1/chat/completions`（stream=true）。
 - 工具协议映射：Anthropic `tool_use` ↔ OpenAI `tool_calls`；`tool_result` ↔ `role:tool` 消息。
-- 配置：`snap-agent.llm.provider: anthropic|openai`（Phase 3 加）。
-- Phase 1 不做，仅留 SPI 扩展点。
+- 配置：`snap-agent.llm.api-type: anthropic|openai`（默认 anthropic）。
+- 非 SSE 响应处理：重写 `handleNonStreamingResponse` 解析 JSON 响应。
 
 ## 7. 风险
 

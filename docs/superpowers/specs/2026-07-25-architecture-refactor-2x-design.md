@@ -466,6 +466,18 @@ PeerSseRelay, PeerRouter, RateLimiter, SecurityGateway, CodeGraph, LlmClient, Sk
 7 个模块重写: 01-agent-engine, 03-tool-dispatcher, 06-knowledge, 07-workflow, 10-cost-security, 04-anchor-qa (partial), 11-host-integration (partial)
 5 个微调: 02-skill-system, 05-anchor-inject, 08-patrol-alert, 09-plugin-mcp, 12-codegraph
 
+## Architecture Deepening (Implemented 2026-07-28)
+
+### Strong candidates (completed)
+1. **Type-Safe GraphState Keys** — `StateKey<T>` typed constants replace raw string keys; compile-time type safety across all advisors and nodes.
+2. **Extract AbstractStreamingLlmClient** — Template method pattern; shared OkHttp infrastructure in base class. `AnthropicLlmClient` and `OpenAiLlmClient` reduced to hook implementations.
+3. **Decompose SnapAgentAutoConfiguration** — 1443-line god-class → 8 domain-specific `@Configuration` classes + thin main class (~210 lines, 83% reduction).
+
+### Worth exploring candidates (completed)
+4. **Consolidate RAG Pipeline** — Extracted `VectorStoreDocumentRetriever` and `IdentityQueryTransformer` named classes replacing inline lambdas. Similarity threshold now configurable.
+5. **Extract MessagePartitioner** — `MessagePartitioner` interface in `core.memory`; `LastNMessagePartitioner` default (current behavior). `AgentNode` uses partitioner instead of inline assembly. `ReActGraphFactory` accepts optional custom partitioner.
+7. **Move READ_ONLY_PREFIX Out of Core** — `SkillMode` enum (`READ_ONLY` / `READ_WRITE`); `SkillMeta.mode` field parsed from frontmatter. `EntryNode` only prepends guardrail when `mode=READ_ONLY`. Enables write-capable skills (auto-fix) without contradiction.
+
 ## References
 
 - LangGraph vs SnapAgent comparison: `docs/research/langgraph-vs-snapagent-comparison.md`

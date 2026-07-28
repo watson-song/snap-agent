@@ -9,18 +9,35 @@ SnapAgent 是一个**嵌入式 AI 技能框架** — 一键为 Spring Boot 应�
 ## 模块结构
 
 ```
-snap-agent-core/                    # SPI 层：纯接口 + 执行循环（无 Spring 依赖）
-  ├── agent/                          # AgentExecutor, AgentTask, TaskStore, RateLimiter
-  ├── llm/                            # LlmClient SPI, Message, ToolDef, LlmEventSink
-  ├── skill/                          # SkillRegistry, SkillLoader, SkillMeta, InputSpec
-  ├── tool/                           # ToolDispatcher, ToolProvider SPI, ToolResult
+snap-agent-core/                    # SPI 层：纯接口 + 图执行引擎（无 Spring 依赖）
+  ├── agent/                          # AgentTask, TaskStore, RateLimiter
+  ├── graph/                          # StateGraph, GraphState, StateKey<T>, Node, CompiledGraph
+  │   ├── react/                      # EntryNode, AgentNode, ToolsNode, ShouldContinue, ReActGraphFactory
+  │   ├── advisor/                    # Advisor SPI, AdvisorNode
+  │   └── execution/                  # GraphExecutor, ExecutionContext
+  ├── llm/                            # LlmClient SPI, Message, ToolDef, LlmEventSink, LlmRequest
+  ├── memory/                         # ChatMemory, MessagePartitioner, ChatMemoryRepository
+  ├── rag/                            # QueryTransformer, DocumentRetriever, QueryAugmenter SPI
+  ├── skill/                          # SkillRegistry, SkillLoader, SkillMeta, SkillMode, InputSpec
+  ├── tool/                           # @Tool, @ToolParam, ToolCallback, ToolCallbackRegistry
+  ├── vectorstore/                    # VectorStore SPI, Document, SearchRequest
   └── security/                       # SecurityGateway, PrincipalResolver SPI
 
 snap-agent-spring-boot-2x-starter/  # Spring Boot 2.x 自动装配
-  ├── autoconfig/                     # SnapAgentAutoConfiguration, SnapAgentProperties
-  ├── llm/                            # AnthropicLlmClient (OkHttp + SSE streaming)
+  ├── autoconfig/                     # SnapAgentAutoConfiguration (thin) + 8 domain @Configuration:
+  │   ├── SecurityAutoConfiguration   # SqlGuard, PrincipalResolver, AuditStore
+  │   ├── ToolAutoConfiguration       # JdbcQueryTools, RedisReadTools, LogReadTools, CodeReaderTools...
+  │   ├── WebAutoConfiguration        # SnapAgentController, SnapAgentFilter, PeerRouter
+  │   ├── PatrolAutoConfiguration     # PatrolScheduler, AlertConverger, PushChannels
+  │   ├── KnowledgeAutoConfiguration  # RAG pipeline, CodeGraph
+  │   ├── IssueAutoConfiguration      # IssueTracker, VcsClient, FixExecution, KnowledgeSedimentation
+  │   ├── CostAutoConfiguration       # CostStore, BudgetEnforcer, CostTracker
+  │   └── WorkflowAutoConfiguration   # YamlWorkflowLoader, SimpleWorkflowEngine
+  ├── llm/                            # AbstractStreamingLlmClient, AnthropicLlmClient, OpenAiLlmClient
+  ├── knowledge/                      # VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeETLPipeline
+  ├── memory/                         # MessagePartitioner implementations
   ├── web/                            # SnapAgentController, SnapAgentFilter, InternalTaskController
-  ├── tool/                           # JdbcQueryToolProvider, RedisReadToolProvider, SqlGuard
+  ├── tool/                           # JdbcQueryTools, RedisReadTools, SqlGuard, CodeReaderTools
   ├── security/                       # SpringSecurityAdapter, ShiroAdapter, DefaultPrincipalResolver
   ├── routing/                        # PeerRouter, K8sApiPeerRouter, StaticPeerRouter, PeerSseRelay
   └── resources/static/snap-agent/  # SPA UI (index.html, app.js, md.js, style.css)
@@ -34,7 +51,7 @@ snap-agent-demo/                    # 独立演示模块（不在父 pom 中）
 
 1. **构建顺序**：先 `mvn clean install` 父项目（core + starter），再 `cd snap-agent-demo && mvn clean package`
 2. **Java 8**：源码必须兼容 Java 8（无 `var`、无 `Stream.toList()`、无 `Text Blocks`）
-3. **测试基线**：1253+ tests（core 254 + starter 1253），jacoco 行覆盖率门槛为 **ratchet 模式**（core ≥ 0.72 / starter ≥ 0.73，即当前实测值向下取整，只许升不许降）。目标：随新测试补齐逐步升回 0.85。注意门槛在 `verify` 阶段才检查，日常 `mvn test` 不会触发，发版前必须跑 `mvn clean verify`
+3. **测试基线**：1907 tests（core 546 + starter 1361），jacoco 行覆盖率门槛为 **ratchet 模式**（core ≥ 0.72 / starter ≥ 0.73，即当前实测值向下取整，只许升不许降）。目标：随新测试补齐逐步升回 0.85。注意门槛在 `verify` 阶段才检查，日常 `mvn test` 不会触发，发版前必须跑 `mvn clean verify`
 4. **Stale JAR 问题**：Spring Boot fat JAR 嵌套 starter JAR，改了 starter 代码后必须 `mvn clean install` starter 再重新 `mvn clean package` demo
 
 ## 代码约定
@@ -126,7 +143,10 @@ Refactor: 重构 → 运行 → 仍通过
 
 - **仅内存状态**：TaskStore 是 ConcurrentHashMap，无持久化，重启即丢失
 - **线程池共享**：`snapAgentExecutor`（core=2, max=4, queue=10）同时用于 Agent 执行和 SSE 流推送
-- **ToolProvider 自动发现**：所有 `ToolProvider` bean 被 `ToolDispatcher` 收集，自定义工具加 `@Component` 即可
+- **ToolProvider 自动发现**：所有 `@Tool` 注解方法被 `ToolCallbackRegistry` 收集，自定义工具加 `@Component` 即可
+- **SkillMode 区分读写**：skill frontmatter 声明 `mode: read-only`（默认）或 `mode: read-write`，EntryNode 仅对 READ_ONLY 模式注入只读护栏
+- **消息分区策略**：`MessagePartitioner` 控制对话历史注入，默认 `LastNMessagePartitioner` 保留全部历史，可替换为 token 预算感知实现
+- **LLM 客户端基类**：`AbstractStreamingLlmClient` 模板方法封装 OkHttp 基础设施，`AnthropicLlmClient` 和 `OpenAiLlmClient` 仅实现 provider 差异
 - **跨 Pod 路由**：降级链 k8s-api → headless-dns → static → none，peer URL 为 `http://{ip}:{port}`（根路径，不含 basePath）
 
 ## 调试技巧

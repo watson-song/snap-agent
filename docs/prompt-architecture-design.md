@@ -15,7 +15,7 @@
 
 | 层 | 名称 | SnapAgent 实现 | 构建位置 |
 |----|------|---------------|----------|
-| 1 | **Instructions** | 只读护栏 + `<skill_body>` + 项目结构摘要 | `EntryNode` + `ProjectContextAdvisor` |
+| 1 | **Instructions** | 只读护栏（条件性）+ `<skill_body>` + 项目结构摘要 | `EntryNode` (SkillMode 条件注入) + `ProjectContextAdvisor` |
 | 2 | **User Input** | `<user_inputs>` 标签包裹的 JSON 键值对 | `EntryNode` |
 | 3 | **Retrieved Facts** | RAG 检索结果 → `<retrieved_facts>` 块注入 system prompt | `RetrievalAugmentationAdvisor` → `AgentNode` |
 | 4 | **Tools** | 按 skill 声明的 tools 过滤，`@Tool/@ToolParam` 反射生成 JSON Schema | `AgentNode` |
@@ -31,10 +31,12 @@
 
 **system prompt 组装顺序**:
 ```
-READ_ONLY_PREFIX          ← Layer 1: 安全护栏（只读模式）
+READ_ONLY_PREFIX          ← Layer 1: 安全护栏（仅 mode=read-only 时注入，READ_WRITE 跳过）
 + <skill_body>            ← Layer 1: skill 指令体（XML 标签防注入）
 + <output_format>         ← Layer 7: 输出格式约束（可选，来自 skill frontmatter）
 ```
+
+**SkillMode 条件注入**: skill frontmatter 声明 `mode: read-only`（默认）或 `mode: read-write`。只读诊断 skill 注入只读护栏；写入修复 skill（如 auto-fix）跳过护栏，允许文件修改。
 
 **user message 格式** (P4 优化 — JSON 结构化):
 ```
@@ -73,12 +75,12 @@ Layer 1+3+6: systemPrompt = state["system.prompt"]
                                  + <project_facts>     ← Layer 6
                                  + <retrieved_facts>   ← Layer 3
 Layer 2:      userMessage  = state["user.message"]
-Layer 5:      messages     = memory.messages + [userMessage]
+Layer 5:      messages     = messagePartitioner.partition(memory.messages, userMessage)
 Layer 4:      toolDefs     = registry.getAll() filtered by skill.tools
               → LlmRequest(systemPrompt, messages, toolDefs, model, maxTokens, streaming)
 ```
 
-**关键改进**: RAG context 从 user message 移到 system prompt 的 `<retrieved_facts>` 块，保持 Layer 2 和 Layer 3 独立。
+**关键改进**: RAG context 从 user message 移到 system prompt 的 `<retrieved_facts>` 块，保持 Layer 2 和 Layer 3 独立。消息组装通过 `MessagePartitioner` 策略接口，支持未来 token 预算感知实现。
 
 ### 3.4 RAG 管线
 
@@ -89,8 +91,8 @@ QueryTransformer → DocumentRetriever → QueryAugmenter
      (改写查询)        (向量检索)        (格式化)
 ```
 
-- `QueryTransformer`: 支持查询改写（如 HyDE、扩展）
-- `DocumentRetriever`: 调用 `VectorStore.similaritySearch()` topK
+- `QueryTransformer`: 支持查询改写（如 HyDE、扩展）。默认实现: `IdentityQueryTransformer`（pass-through）
+- `DocumentRetriever`: 调用 `VectorStore.similaritySearch()` topK。默认实现: `VectorStoreDocumentRetriever`（可配置相似度阈值）
 - `DefaultQueryAugmenter`: 格式化为 Markdown，`## 相关知识` + `### 知识片段 N`
 
 ### 3.5 ChatMemory — 对话历史管理
@@ -183,7 +185,7 @@ output-format: |
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  1. EntryNode                                                   │
-│     system.prompt = READ_ONLY_PREFIX                            │
+│     system.prompt = [READ_ONLY_PREFIX]  (仅 mode=read-only)    │
 │                      + <skill_body>                             │
 │                      + <output_format>  (optional)             │
 │     user.message  = <user_inputs> (JSON)                       │
@@ -201,7 +203,7 @@ output-format: |
 │     systemPrompt = state["system.prompt"]  (already includes    │
 │                    <user_profile> + <project_facts> from LTM)  │
 │     systemPrompt += <retrieved_facts>  (from rag.context)      │
-│     messages = memory.messages + [userMessage]                │
+│     messages = messagePartitioner.partition(memory.messages, userMessage) │
 │     toolDefs = registry filtered by skill.tools                │
 │     → LlmRequest(systemPrompt, messages, toolDefs, ...)        │
 │                                                                  │
@@ -219,13 +221,18 @@ output-format: |
 
 | 文件 | 模块 | 职责 |
 |------|------|------|
-| `EntryNode.java` | core/graph/react | Layer 1+7+2 构建 (JSON 结构化输入) |
-| `AgentNode.java` | core/graph/react | Layer 1+3+4+5+6 组装 |
+| `EntryNode.java` | core/graph/react | Layer 1+7+2 构建 (SkillMode 条件注入只读护栏) |
+| `AgentNode.java` | core/graph/react | Layer 1+3+4+5+6 组装 (使用 MessagePartitioner) |
 | `LlmRequest.java` | core/llm | 不可变请求 DTO |
-| `SkillMeta.java` | core/skill | Skill 元数据（含 outputFormat） |
-| `SkillLoader.java` | core/skill | YAML frontmatter 解析 |
+| `SkillMeta.java` | core/skill | Skill 元数据（含 outputFormat, mode） |
+| `SkillMode.java` | core/skill | READ_ONLY / READ_WRITE 枚举 |
+| `SkillLoader.java` | core/skill | YAML frontmatter 解析（含 mode 字段） |
 | `DefaultQueryAugmenter.java` | core/rag | RAG 结果格式化 |
 | `RetrievalAugmentationAdvisor.java` | core/rag | RAG 管线编排 (order=200) |
+| `VectorStoreDocumentRetriever.java` | boot2x/knowledge | VectorStore → DocumentRetriever 适配器 |
+| `IdentityQueryTransformer.java` | boot2x/knowledge | Pass-through 查询转换器 |
+| `MessagePartitioner.java` | core/memory | 消息分区策略接口 |
+| `LastNMessagePartitioner.java` | core/memory | 默认实现（保留全部历史） |
 | `MessageChatMemoryAdvisor.java` | core/memory | 对话历史注入 (order=100) |
 | `MessageWindowChatMemory.java` | core/memory | 滑窗策略 |
 | `SummarizingChatMemory.java` | core/memory | 摘要压缩策略 (P3) |
@@ -234,5 +241,6 @@ output-format: |
 | `ProjectFactsStore.java` | core/memory | 项目事实存储 SPI (P2) |
 | `LongTermMemoryAdvisor.java` | core/memory | 稳定事实注入 (order=150, P2) |
 | `ProjectContextAdvisor.java` | boot2x/context | 项目结构注入 (order=10) |
-| `AnthropicLlmClient.java` | boot2x/llm | Anthropic API 序列化 |
-| `OpenAiLlmClient.java` | boot2x/llm | OpenAI API 序列化 |
+| `AbstractStreamingLlmClient.java` | boot2x/llm | OkHttp 流式基类（模板方法） |
+| `AnthropicLlmClient.java` | boot2x/llm | Anthropic API 实现 |
+| `OpenAiLlmClient.java` | boot2x/llm | OpenAI API 实现 |

@@ -4,18 +4,29 @@
 
 ```
 snap-agent-core/                       cn.watsontech.snapagent.core
-  ├─ skill/        SkillRegistry, SkillMeta, frontmatter 解析
-  ├─ agent/        AgentExecutor, TaskStore, AgentTask, 限流
-  ├─ llm/          LlmClient (OkHttp 流式), LlmRequest/Response
-  ├─ tool/         ToolProvider SPI, ToolDispatcher, ToolResult
+  ├─ skill/        SkillRegistry, SkillMeta, SkillMode, frontmatter 解析
+  ├─ agent/        TaskStore, AgentTask, RateLimiter
+  ├─ graph/        StateGraph, GraphState, StateKey<T>, Node, ReActGraphFactory
+  │   ├─ react/    EntryNode, AgentNode, ToolsNode, ShouldContinue
+  │   ├─ advisor/  Advisor SPI, AdvisorNode
+  │   └─ execution/ GraphExecutor, ExecutionContext
+  ├─ llm/          LlmClient SPI, LlmRequest, Message, ToolDef, LlmEventSink
+  ├─ memory/       ChatMemory, MessagePartitioner, ChatMemoryRepository
+  ├─ rag/          QueryTransformer, DocumentRetriever, QueryAugmenter, RetrievalAugmentationAdvisor
+  ├─ tool/         @Tool, @ToolParam, ToolCallback, ToolCallbackRegistry
+  ├─ vectorstore/  VectorStore SPI, Document, SearchRequest
   └─ security/     SecurityGateway SPI (接口定义, 实现在 starter)
 
 snap-agent-spring-boot-2x-starter/     cn.watsontech.snapagent.boot2x
-  ├─ autoconfig/   SnapAgentAutoConfiguration (条件装配)
+  ├─ autoconfig/   SnapAgentAutoConfiguration (thin) + 8 domain @Configuration:
+  │                Security, Tool, Web, Patrol, Knowledge, Issue, Cost, Workflow
+  ├─ knowledge/    VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeETLPipeline
+  ├─ llm/          AbstractStreamingLlmClient, AnthropicLlmClient, OpenAiLlmClient
   ├─ web/          SnapAgentController (REST+SSE), SnapAgentFilter (javax.servlet)
   ├─ security/     SpringSecurityAdapter, ShiroAdapter, DefaultPrincipalResolver
-  ├─ tool/         JdbcQueryToolProvider, RedisReadToolProvider (bean 装配)
-  ├─ llm/          AnthropicLlmClient (LlmClient 实现)
+  ├─ tool/         JdbcQueryTools, RedisReadTools, SqlGuard, CodeReaderTools (bean 装配)
+  ├─ fix/          FileWriteTool, FileEditTool, FixExecutionService (auto-fix 工作流)
+  ├─ routing/      PeerRouter, K8sApiPeerRouter, PeerSseRelay
   └─ resources/
        ├─ static/snap-agent/   index.html / app.js / style.css (单页, 无构建)
        └─ META-INF/spring.factories   注册 AutoConfiguration
