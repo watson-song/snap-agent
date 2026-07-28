@@ -68,12 +68,12 @@ SnapAgent v0.9 issue closure system connects diagnosis, solution proposal, exter
               ▼
       ┌───────────────┐
       │ 4. Close +    │  Close: extract knowledge fragment →
-      │   Sediment    │  sediment back to KnowledgeBase
+      │   Sediment    │  sediment back to VectorStore
       └───────┬───────┘
               │
               ▼
       ┌───────────────┐
-      │  KnowledgeBase│  Future diagnoses can retrieve this
+      │  VectorStore  │  Future diagnoses can retrieve this
       │  (feedback)   │  ← loop complete, learning cycle formed
       └───────────────┘
 ```
@@ -268,7 +268,7 @@ public interface VerificationRunner {
 | `ISSUE_CREATED` | External Issue created (enum-defined, Service does not use) | Reserved for custom IssueTracker |
 | `FIX_IN_PROGRESS` | Fix in progress | `createExternalIssue()` after `IssueTracker.createIssue()` |
 | `VERIFIED` | Fix verified as effective | `verify()` after running verification |
-| `CLOSED` | Closed, knowledge sedimented to KnowledgeBase | `close()` after extracting knowledge |
+| `CLOSED` | Closed, knowledge sedimented to VectorStore | `close()` after extracting knowledge |
 | `FAILED` | Failure terminal state (enum-defined, Service does not use) | Reserved for custom VerificationRunner |
 
 ### 3.3 Transition Characteristics
@@ -285,7 +285,7 @@ The starter module (`snap-agent-spring-boot-2x-starter`) provides default implem
 
 ### 4.1 FileIssueStore (Default Storage)
 
-JSON file storage, same pattern as `FileConversationStore`:
+JSON file storage, same pattern as `FileChatMemoryRepository`:
 
 - **File path**: `{storageDir}/{issueId}.json`
 - **Default directory**: Falls back to `{upload-skills-dir}/issues/` when `snap-agent.issue-closure.storage-dir` is empty
@@ -367,7 +367,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 4.5 IssueClosureService (Orchestration Service)
 
-The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`, and `KnowledgeBase`:
+The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`, and `VectorStore`:
 
 #### `proposeSolution(taskId)` — Propose Solutions
 
@@ -458,7 +458,7 @@ The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`,
 
 ### 5.1 Sedimentation Mechanism
 
-When an issue is closed, `KnowledgeSedimentationExtractor.extract()` extracts a `KnowledgeFragment` from the `IssueClosure`. The experience is sedimented back into the v0.7 `KnowledgeBase` as structured Markdown:
+When an issue is closed, `KnowledgeSedimentationExtractor.extract()` extracts a `KnowledgeFragment` from the `IssueClosure`. The experience is sedimented back into the v0.7 `VectorStore` as structured Markdown:
 
 ```
 IssueClosure (CLOSED)
@@ -472,10 +472,10 @@ KnowledgeSedimentationExtractor.extract(issue)
     └─ metadata = {category: "经验沉淀"}
     │
     ▼
-KnowledgeBase.reload()
+VectorStore.reload()
     │
     ▼
-Future diagnoses: KnowledgeInjector retrieves this fragment
+Future diagnoses: VectorStoreDocumentRetriever retrieves this fragment
     → injects into system prompt → LLM can reference historical experience
 ```
 
@@ -531,7 +531,7 @@ passed: true
 Replenishment strategy generated, verification passed
 ```
 
-When a user asks a similar question in the future, `KnowledgeInjector` retrieves this fragment, injects it into the system prompt, and the LLM can directly reference the historical experience of "parameter missing → fill → verify", forming a learning loop.
+When a user asks a similar question in the future, `VectorStoreDocumentRetriever` retrieves this fragment, injects it into the system prompt via `Advisor`, and the LLM can directly reference the historical experience of "parameter missing → fill → verify", forming a learning loop.
 
 ---
 
@@ -763,9 +763,9 @@ All issue beans are assembled when `snap-agent.issue-closure.enabled=true` (`@Co
 | `KnowledgeSedimentationExtractor` | — | `@ConditionalOnMissingBean` | Declare custom bean |
 | `TemplateSolutionSuggester` | `SolutionSuggester` | `@ConditionalOnMissingBean(SolutionSuggester.class)` | Declare custom `SolutionSuggester` bean |
 | `SimpleVerificationRunner` | `VerificationRunner` | `@ConditionalOnMissingBean(VerificationRunner.class)` | Declare custom `VerificationRunner` bean |
-| `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<KnowledgeBase>` nullable | — |
+| `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` nullable | — |
 
-`IssueClosureService` injects `KnowledgeBase` (nullable), `SolutionSuggester` (nullable, falls back to skill), and `VerificationRunner` (nullable, falls back to skill) via `ObjectProvider`.
+`IssueClosureService` injects `VectorStore` (nullable), `SolutionSuggester` (nullable, falls back to skill), and `VerificationRunner` (nullable, falls back to skill) via `ObjectProvider`.
 
 ### 8.3 Custom IssueTracker (Jira/GitHub)
 
