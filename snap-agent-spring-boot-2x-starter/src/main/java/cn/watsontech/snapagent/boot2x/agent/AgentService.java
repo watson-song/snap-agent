@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.agent;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.agent.TaskStore;
+import cn.watsontech.snapagent.core.agent.TranscriptEvent;
 import cn.watsontech.snapagent.core.graph.CompiledGraph;
 import cn.watsontech.snapagent.core.graph.GraphState;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
@@ -90,7 +91,7 @@ public class AgentService {
             // Map graph TaskResult to AgentTask status
             TaskStatus finalStatus = mapStatus(result.getStatus());
             task.setStatus(finalStatus);
-            task.setReport(result.getReport());
+            task.setReport(extractReport(task, result));
             taskStore.update(task);
 
             log.info("Task {} completed with status {}", task.getTaskId(), finalStatus);
@@ -106,5 +107,24 @@ public class AgentService {
     private TaskStatus mapStatus(cn.watsontech.snapagent.core.agent.TaskStatus graphStatus) {
         // GraphExecutor already returns TaskStatus, but let's be explicit
         return graphStatus;
+    }
+
+    /**
+     * Extracts the LLM response from the task's transcript thought events.
+     * Falls back to {@link TaskResult#getReport()} for non-success statuses
+     * where the report contains error details (e.g., "max-turns exceeded").
+     */
+    private String extractReport(AgentTask task, TaskResult result) {
+        if (result.getStatus() != TaskStatus.SUCCEEDED) {
+            return result.getReport();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (TranscriptEvent event : task.getTranscript()) {
+            if (TranscriptEvent.TYPE_THOUGHT.equals(event.getType()) && event.getText() != null) {
+                sb.append(event.getText());
+            }
+        }
+        String report = sb.toString().trim();
+        return report.isEmpty() ? result.getReport() : report;
     }
 }
