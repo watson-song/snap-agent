@@ -16,19 +16,21 @@
   ],
   "nodes": [
     { "id": "skill", "type": "external", "label": "Skill", "sublabel": "frontmatter + body", "stage": 0, "row": 0, "tag": "output-format" },
-    { "id": "inputs", "type": "frontend", "label": "User Inputs", "sublabel": "key=value", "stage": 0, "row": 1, "tag": "Layer 2" },
+    { "id": "inputs", "type": "frontend", "label": "User Inputs", "sublabel": "JSON", "stage": 0, "row": 1, "tag": "Layer 2" },
     { "id": "vstore", "type": "database", "label": "VectorStore", "sublabel": "similaritySearch", "stage": 0, "row": 2, "tag": "topK docs" },
-    { "id": "memrepo", "type": "database", "label": "MemoryRepo", "sublabel": "conversation history", "stage": 0, "row": 3, "tag": "sliding window" },
+    { "id": "memrepo", "type": "database", "label": "MemoryRepo", "sublabel": "history + summary", "stage": 0, "row": 3, "tag": "window 20 / summarize" },
+    { "id": "userstore", "type": "database", "label": "UserProfile", "sublabel": "Store SPI", "stage": 0, "row": 4, "tag": "Layer 6 prefs" },
 
     { "id": "entry", "type": "backend", "label": "EntryNode", "sublabel": "build prompt", "stage": 1, "row": 0, "tag": "Layer 1+7+2" },
     { "id": "pcx", "type": "backend", "label": "ProjCtxAdv", "sublabel": "order=10", "stage": 1, "row": 1, "tag": "project structure" },
-    { "id": "ragadv", "type": "backend", "label": "RAG Advisor", "sublabel": "order=200", "stage": 1, "row": 2, "tag": "Layer 3" },
-    { "id": "memadv", "type": "backend", "label": "MemAdvisor", "sublabel": "order=100", "stage": 1, "row": 3, "tag": "Layer 5+6" },
+    { "id": "memadv", "type": "backend", "label": "MemAdvisor", "sublabel": "order=100", "stage": 1, "row": 2, "tag": "Layer 5" },
+    { "id": "ltmadv", "type": "backend", "label": "LTMemoryAdv", "sublabel": "order=150", "stage": 1, "row": 3, "tag": "Layer 6" },
+    { "id": "ragadv", "type": "backend", "label": "RAG Advisor", "sublabel": "order=200", "stage": 1, "row": 4, "tag": "Layer 3" },
 
     { "id": "tools", "type": "security", "label": "ToolRegistry", "sublabel": "@Tool reflection", "stage": 2, "row": 0, "tag": "Layer 4" },
-    { "id": "agent", "type": "backend", "label": "AgentNode", "sublabel": "assemble", "stage": 2, "row": 2, "tag": "Layer 1+3+4+5" },
+    { "id": "agent", "type": "backend", "label": "AgentNode", "sublabel": "assemble", "stage": 2, "row": 2, "tag": "Layer 1+3+4+5+6" },
 
-    { "id": "sysprompt", "type": "database", "label": "systemPrompt", "sublabel": "L1 + L3 + L7", "stage": 3, "row": 0, "tag": "string" },
+    { "id": "sysprompt", "type": "database", "label": "systemPrompt", "sublabel": "L1 + L3 + L6 + L7", "stage": 3, "row": 0, "tag": "string" },
     { "id": "messages", "type": "database", "label": "messages[]", "sublabel": "L5 history + L2 user", "stage": 3, "row": 2, "tag": "List<Message>" },
     { "id": "tooldefs", "type": "database", "label": "tools[]", "sublabel": "L4 filtered", "stage": 3, "row": 4, "tag": "List<ToolDef>" },
 
@@ -36,17 +38,19 @@
   ],
   "flows": [
     { "from": "skill", "to": "entry", "label": "body + fmt", "classification": "Layer 1+7", "variant": "emphasis", "route": "straight", "labelAt": [200, 170] },
-    { "from": "inputs", "to": "entry", "label": "<user_inputs>", "classification": "Layer 2", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[278, 242], [278, 186]], "labelAt": [360, 314] },
+    { "from": "inputs", "to": "entry", "label": "<user_inputs>", "classification": "Layer 2 JSON", "variant": "default", "fromSide": "right", "toSide": "bottom", "via": [[278, 242], [278, 186]], "labelAt": [360, 314] },
     { "from": "vstore", "to": "ragadv", "label": "documents", "classification": "retrieved", "variant": "dashed", "route": "straight", "labelAt": [278, 428] },
-    { "from": "memrepo", "to": "memadv", "label": "history", "classification": "memory", "variant": "dashed", "route": "straight", "labelAt": [278, 542] },
+    { "from": "memrepo", "to": "memadv", "label": "history", "classification": "memory", "variant": "dashed", "route": "straight", "labelAt": [278, 314] },
+    { "from": "userstore", "to": "ltmadv", "label": "profile", "classification": "user prefs", "variant": "dashed", "route": "straight", "labelAt": [278, 542] },
 
     { "from": "entry", "to": "agent", "label": "system.prompt", "classification": "L1+L7+L2", "variant": "emphasis", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [493, 260] },
-    { "from": "pcx", "to": "agent", "label": "append ctx", "classification": "L1 project", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [493, 452] },
-    { "from": "ragadv", "to": "agent", "label": "rag.context", "classification": "Layer 3", "variant": "emphasis", "fromSide": "bottom", "toSide": "left", "via": [[493, 356], [493, 400], [474, 400]], "labelAt": [560, 428] },
-    { "from": "memadv", "to": "agent", "label": "memory.messages", "classification": "Layer 5", "variant": "default", "fromSide": "top", "toSide": "bottom", "via": [[493, 470], [493, 414], [474, 414]], "labelAt": [510, 500] },
+    { "from": "pcx", "to": "agent", "label": "append ctx", "classification": "L1 project", "variant": "default", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [493, 314] },
+    { "from": "memadv", "to": "agent", "label": "memory.messages", "classification": "Layer 5", "variant": "default", "fromSide": "bottom", "toSide": "left", "via": [[493, 356], [493, 400], [474, 400]], "labelAt": [560, 428] },
+    { "from": "ltmadv", "to": "agent", "label": "<user_profile>", "classification": "Layer 6", "variant": "emphasis", "fromSide": "bottom", "toSide": "left", "via": [[493, 428], [493, 414], [474, 414]], "labelAt": [510, 500] },
+    { "from": "ragadv", "to": "agent", "label": "rag.context", "classification": "Layer 3", "variant": "emphasis", "fromSide": "bottom", "toSide": "left", "via": [[493, 500], [493, 428], [474, 428]], "labelAt": [560, 542] },
     { "from": "tools", "to": "agent", "label": "toolDefs", "classification": "Layer 4", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [708, 260] },
 
-    { "from": "agent", "to": "sysprompt", "label": "+ <retrieved_facts>", "classification": "L1+L3+L7", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [708, 200] },
+    { "from": "agent", "to": "sysprompt", "label": "+ <retrieved_facts>", "classification": "L1+L3+L6+L7", "variant": "emphasis", "fromSide": "top", "toSide": "bottom", "route": "straight", "labelAt": [708, 200] },
     { "from": "agent", "to": "messages", "label": "history + user", "classification": "L5+L2", "variant": "default", "route": "straight", "labelAt": [708, 428] },
     { "from": "agent", "to": "tooldefs", "label": "filtered", "classification": "L4", "variant": "security", "fromSide": "bottom", "toSide": "top", "route": "straight", "labelAt": [708, 542] },
 
@@ -61,6 +65,11 @@
       "items": ["READ_ONLY_PREFIX 安全护栏", "<skill_body> XML 标签防注入", "ProjCtxAdv 追加项目结构 (max 1500 chars)"]
     },
     {
+      "dot": "emerald",
+      "title": "Layer 2 — User Input",
+      "items": ["<user_inputs> JSON 结构化 (P4)", "支持嵌套对象和列表", "EntryNode 构建，纯净不混入 RAG"]
+    },
+    {
       "dot": "amber",
       "title": "Layer 3 — Retrieved Facts",
       "items": ["RAG Advisor (order=200) 执行 3 阶段管线", "QueryTransformer → Retriever → Augmenter", "<retrieved_facts> 注入 system prompt"]
@@ -72,8 +81,13 @@
     },
     {
       "dot": "rose",
-      "title": "Layer 5+6 — Memory",
-      "items": ["滑窗 20 条，system 消息不淘汰", "MemoryRepo SPI 持久化", "memory.messages 注入 messages 列表前部"]
+      "title": "Layer 5 — Short-term Notes",
+      "items": ["MessageWindowChatMemory 滑窗 20 条", "SummarizingChatMemory 摘要压缩 (P3)", "memory.messages 注入 messages 列表前部"]
+    },
+    {
+      "dot": "slate",
+      "title": "Layer 6 — Long-term Memory",
+      "items": ["UserProfileStore + ProjectFactsStore SPI (P2)", "LongTermMemoryAdvisor (order=150)", "<user_profile> + <project_facts> 注入 system prompt"]
     },
     {
       "dot": "orange",
