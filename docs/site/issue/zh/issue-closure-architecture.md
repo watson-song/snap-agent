@@ -4,7 +4,7 @@
 
 ## 1. 架构概览
 
-SnapAgent v0.9 问题闭环系统将诊断、方案建议、外部 Issue 创建、修复验证、经验沉淀串联为一个完整闭环。诊断结束后, 根因与方案被记录; 用户选定方案后创建外部 Issue (Jira/GitHub); 修复完成后通过验证 skill 复查; 验证通过后, 经验被抽取为知识片段沉淀回 KnowledgeBase, 供未来诊断复用。
+SnapAgent v0.9 问题闭环系统将诊断、方案建议、外部 Issue 创建、修复验证、经验沉淀串联为一个完整闭环。诊断结束后, 根因与方案被记录; 用户选定方案后创建外部 Issue (Jira/GitHub); 修复完成后通过验证 skill 复查; 验证通过后, 经验被抽取为知识片段沉淀回 VectorStore, 供未来诊断复用。
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -21,7 +21,7 @@ SnapAgent v0.9 问题闭环系统将诊断、方案建议、外部 Issue 创建�
        │               │                 │                      │
        ▼               ▼                 ▼                      ▼
 ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────────┐
-│ solution-   │ │ Jira/GitHub  │ │ verify-fix   │ │   KnowledgeBase  │
+│ solution-   │ │ Jira/GitHub  │ │ verify-fix   │ │   VectorStore    │
 │ suggest     │ │ /NoopIssue   │ │ skill /      │ │   (知识库, 供未来 │
 │ skill /     │ │ Tracker      │ │ SimpleVerifi │ │   诊断检索)       │
 │ Template    │ │              │ │ cationRunner │ │                  │
@@ -66,12 +66,12 @@ SnapAgent v0.9 问题闭环系统将诊断、方案建议、外部 Issue 创建�
               ▼
       ┌───────────────┐
       │ 4. Close +    │  关闭: 抽取知识片段 →
-      │   Sediment    │  沉淀回 KnowledgeBase
+      │   Sediment    │  沉淀回 VectorStore
       └───────┬───────┘
               │
               ▼
       ┌───────────────┐
-      │  KnowledgeBase│  未来诊断可检索到本次经验
+      │  VectorStore  │  未来诊断可检索到本次经验
       │  (反哺)       │  ← 闭环完成, 形成学习循环
       └───────────────┘
 ```
