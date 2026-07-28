@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.memory;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.Message;
@@ -71,15 +72,15 @@ public class MessageChatMemoryAdvisor implements Advisor {
         String conversationId = resolveConversationId(state);
         if (conversationId == null) {
             // No conversation ID in state — skip memory loading
-            return state.with("memory.messages", new ArrayList<Message>());
+            return state.with(StateKeys.MEMORY_MESSAGES, new ArrayList<Message>());
         }
 
         try {
             List<Message> history = chatMemory.get(conversationId, retrieveLastN);
-            return state.with("memory.messages", history);
+            return state.with(StateKeys.MEMORY_MESSAGES, history);
         } catch (RuntimeException e) {
             log.warn("Failed to load chat memory for conversation {}: {}", conversationId, e.getMessage());
-            return state.with("memory.messages", new ArrayList<Message>());
+            return state.with(StateKeys.MEMORY_MESSAGES, new ArrayList<Message>());
         }
     }
 
@@ -97,25 +98,24 @@ public class MessageChatMemoryAdvisor implements Advisor {
 
         try {
             // Save the user message if present
-            String userMessage = state.get("user.message");
+            String userMessage = state.get(StateKeys.USER_MESSAGE);
             if (userMessage != null && !userMessage.isEmpty()) {
                 chatMemory.add(conversationId, Message.user(userMessage));
             }
 
             // Save the assistant response (thought)
-            String thought = state.get("thought");
-            String stopReason = state.get("stop_reason");
+            String thought = state.get(StateKeys.THOUGHT);
+            String stopReason = state.get(StateKeys.STOP_REASON);
             if (thought != null && !thought.isEmpty()) {
                 chatMemory.add(conversationId, Message.assistant(thought));
             }
 
             // Save tool results if present
-            @SuppressWarnings("unchecked")
-            List<Object> toolResults = state.get("tool_results");
+            List<cn.watsontech.snapagent.core.tool.ToolResult> toolResults = state.get(StateKeys.TOOL_RESULTS);
             if (toolResults != null && !toolResults.isEmpty()) {
-                for (Object result : toolResults) {
+                for (cn.watsontech.snapagent.core.tool.ToolResult result : toolResults) {
                     if (result != null) {
-                        chatMemory.add(conversationId, Message.toolResult(null, result.toString()));
+                        chatMemory.add(conversationId, Message.toolResult(null, result.getContent()));
                     }
                 }
             }

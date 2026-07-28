@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.core.graph.react;
 
 import cn.watsontech.snapagent.core.graph.EdgeCondition;
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 
 /**
  * ReAct loop condition: routes based on stop_reason.
@@ -13,7 +14,7 @@ import cn.watsontech.snapagent.core.graph.GraphState;
 public class ShouldContinue implements EdgeCondition {
     @Override
     public String route(GraphState state) {
-        String stopReason = state.get("stop_reason");
+        String stopReason = state.get(StateKeys.STOP_REASON);
         if (stopReason == null) return "end";
         switch (stopReason) {
             case "end_turn": return "end";

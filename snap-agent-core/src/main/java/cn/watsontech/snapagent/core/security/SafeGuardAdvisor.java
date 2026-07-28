@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.security;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +43,7 @@ public class SafeGuardAdvisor implements Advisor {
 
     @Override
     public GraphState beforeNode(String nodeName, GraphState state, Object ctx) {
-        String query = state.get("user.query");
+        String query = state.get(StateKeys.USER_QUERY);
         if (query == null) {
             return state;
         }
@@ -50,7 +51,7 @@ public class SafeGuardAdvisor implements Advisor {
             String sanitized = sanitize(query);
             if (!sanitized.equals(query)) {
                 log.warn("SafeGuard replaced sensitive word in prompt");
-                return state.with("user.query", sanitized);
+                return state.with(StateKeys.USER_QUERY, sanitized);
             }
         } catch (RuntimeException e) {
             log.warn("SafeGuard beforeNode failed", e);
@@ -60,7 +61,7 @@ public class SafeGuardAdvisor implements Advisor {
 
     @Override
     public GraphState afterNode(String nodeName, GraphState state, Object ctx) {
-        String thought = state.get("thought");
+        String thought = state.get(StateKeys.THOUGHT);
         if (thought == null) {
             return state;
         }
@@ -68,7 +69,7 @@ public class SafeGuardAdvisor implements Advisor {
             String sanitized = sanitize(thought);
             if (!sanitized.equals(thought)) {
                 log.warn("SafeGuard replaced sensitive content in LLM output");
-                return state.with("thought", sanitized);
+                return state.with(StateKeys.THOUGHT, sanitized);
             }
         } catch (RuntimeException e) {
             log.warn("SafeGuard afterNode failed", e);

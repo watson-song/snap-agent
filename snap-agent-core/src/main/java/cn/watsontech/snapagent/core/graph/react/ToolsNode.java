@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.core.graph.react;
 import cn.watsontech.snapagent.core.agent.TranscriptEvent;
 import cn.watsontech.snapagent.core.graph.GraphState;
 import cn.watsontech.snapagent.core.graph.Node;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
@@ -37,9 +38,9 @@ public class ToolsNode implements Node {
     @Override
     @SuppressWarnings("unchecked")
     public GraphState execute(GraphState state, ExecutionContext ctx) throws InterruptException {
-        List<ToolUseBlock> toolUses = state.get("tool_use_blocks");
+        List<ToolUseBlock> toolUses = state.get(StateKeys.TOOL_USE_BLOCKS);
         if (toolUses == null || toolUses.isEmpty()) {
-            return state.with("tool_results", new ArrayList<ToolResult>());
+            return state.with(StateKeys.TOOL_RESULTS, new ArrayList<ToolResult>());
         }
 
         ToolCallbackRegistry registry = ctx.getTools();
@@ -81,7 +82,7 @@ public class ToolsNode implements Node {
             emitToolResult(ctx, toolUse, results.get(results.size() - 1));
         }
 
-        return state.with("tool_results", results);
+        return state.with(StateKeys.TOOL_RESULTS, results);
     }
 
     private void emitToolResult(ExecutionContext ctx, ToolUseBlock toolUse, ToolResult result) {

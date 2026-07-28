@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.cost;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
@@ -112,8 +113,8 @@ public class CostBudgetAdvisor implements Advisor {
             return state;
         }
 
-        Integer inputTokens = state.get("llm.input_tokens");
-        Integer outputTokens = state.get("llm.output_tokens");
+        Integer inputTokens = state.get(StateKeys.LLM_INPUT_TOKENS);
+        Integer outputTokens = state.get(StateKeys.LLM_OUTPUT_TOKENS);
         if (inputTokens == null && outputTokens == null) {
             return state;
         }
@@ -121,9 +122,9 @@ public class CostBudgetAdvisor implements Advisor {
         ExecutionContext ctx = (ExecutionContext) ctxObj;
         int input = inputTokens != null ? inputTokens : 0;
         int output = outputTokens != null ? outputTokens : 0;
-        Integer cacheRead = state.get("llm.cache_read_tokens");
+        Integer cacheRead = state.get(StateKeys.LLM_CACHE_READ_TOKENS);
         int cache = cacheRead != null ? cacheRead : 0;
-        String model = state.get("llm.model");
+        String model = state.get(StateKeys.LLM_MODEL);
 
         BigDecimal cost = costCalculator.computeCost(input, output, cache);
 

@@ -1,14 +1,11 @@
 package cn.watsontech.snapagent.boot2x.llm;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import cn.watsontech.snapagent.core.llm.LlmClient;
 import cn.watsontech.snapagent.core.llm.LlmEventSink;
 import cn.watsontech.snapagent.core.llm.LlmRequest;
 import cn.watsontech.snapagent.core.llm.Message;
 import cn.watsontech.snapagent.core.llm.ToolDef;
 import cn.watsontech.snapagent.core.llm.ToolUseBlock;
-import okhttp3.Call;
+import com.fasterxml.jackson.databind.JsonNode;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -20,17 +17,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.net.Proxy;
-import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 
 /**
  * {@link LlmClient} implementation for the Anthropic Messages API (streaming).
@@ -38,23 +29,15 @@ import java.util.concurrent.TimeUnit;
  * <p>Uses OkHttp to POST to {@code {base-url}/v1/messages} with SSE streaming.
  * Parses the Anthropic streaming event protocol and dispatches to
  * {@link LlmEventSink} (design doc 05 §2).</p>
+ *
+ * <p>Extends {@link AbstractStreamingLlmClient} for shared infrastructure
+ * (proxy setup, call tracking, cancellation, SSE loop skeleton, listModels).</p>
  */
-public class AnthropicLlmClient implements LlmClient {
+public class AnthropicLlmClient extends AbstractStreamingLlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(AnthropicLlmClient.class);
     private static final MediaType JSON = MediaType.parse("application/json");
-    private static final MediaType SSE = MediaType.parse("text/event-stream");
     private static final String ANTHROPIC_VERSION = "2023-06-01";
-
-    private final String baseUrl;
-    private final String apiKey;
-    private final String authToken;
-    private final String defaultModel;
-    private final OkHttpClient httpClient;
-    private final ObjectMapper objectMapper;
-
-    final ConcurrentHashMap<String, Call> activeCalls = new ConcurrentHashMap<String, Call>();
-    private final ThreadLocal<String> currentTaskId = new ThreadLocal<String>();
 
     public AnthropicLlmClient(String baseUrl, String apiKey, int timeoutSeconds) {
         this(baseUrl, apiKey, null, null, timeoutSeconds);
@@ -68,102 +51,36 @@ public class AnthropicLlmClient implements LlmClient {
     /** Constructor with default model name (used when LlmRequest.model is null). */
     public AnthropicLlmClient(String baseUrl, String apiKey, String authToken, String proxyUrl,
                               int timeoutSeconds, String defaultModel) {
-        this.baseUrl = baseUrl;
-        this.apiKey = apiKey;
-        this.authToken = authToken;
-        this.defaultModel = defaultModel;
-        this.objectMapper = new ObjectMapper();
-        OkHttpClient.Builder clientBuilder = new OkHttpClient.Builder()
-                .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
-                .readTimeout(timeoutSeconds, TimeUnit.SECONDS);
-        if (proxyUrl != null && !proxyUrl.isEmpty()) {
-            try {
-                URL url = new URL(proxyUrl);
-                int port = url.getPort() > 0 ? url.getPort() : 80;
-                clientBuilder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(url.getHost(), port)));
-                log.info("LLM client using HTTP proxy: {}", proxyUrl);
-            } catch (Exception e) {
-                log.warn("Invalid proxy-url '{}', ignoring: {}", proxyUrl, e.getMessage());
-            }
-        }
-        this.httpClient = clientBuilder.build();
+        super(baseUrl, apiKey, authToken, proxyUrl, timeoutSeconds, defaultModel, null);
     }
 
     /** Testable constructor — allows injecting a custom OkHttpClient. */
     protected AnthropicLlmClient(String baseUrl, String apiKey, OkHttpClient httpClient) {
-        this.baseUrl = baseUrl;
-        this.apiKey = apiKey;
-        this.authToken = null;
-        this.defaultModel = null;
-        this.objectMapper = new ObjectMapper();
-        this.httpClient = httpClient;
+        super(baseUrl, apiKey, null, null, 0, null, httpClient);
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // Provider-specific hooks
+    // ════════════════════════════════════════════════════════════════
 
     @Override
-    public void stream(LlmRequest req, LlmEventSink events, String taskId) {
-        currentTaskId.set(taskId);
-        try {
-            streamInternal(req, events);
-        } finally {
-            if (taskId != null) {
-                activeCalls.remove(taskId);
-            }
-            currentTaskId.remove();
-        }
-    }
-
-    private void streamInternal(LlmRequest req, LlmEventSink events) {
-        try {
-            Request httpRequest = buildHttpRequest(req);
-            try (Response response = executeCall(httpRequest)) {
-                if (!response.isSuccessful()) {
-                    events.onError("HTTP error: " + response.code());
-                    return;
-                }
-                // Verify response is SSE before parsing
-                String contentType = response.header("content-type");
-                if (contentType == null || !contentType.contains("text/event-stream")) {
-                    events.onError("Unexpected content-type: " + contentType);
-                    return;
-                }
-                parseSseStream(response, events, req);
-            }
-        } catch (IOException e) {
-            log.error("LLM streaming failed: {}", e.getMessage());
-            events.onError("LLM streaming failed: " + e.getMessage());
-        }
-    }
-
-    /** Testable seam — registers the Call for cancellation tracking, then executes.
-     *  Override in tests to inject canned responses (note: overrides skip registration). */
-    protected Response executeCall(Request request) throws IOException {
-        Call call = httpClient.newCall(request);
-        String tid = currentTaskId.get();
-        if (tid != null) {
-            activeCalls.put(tid, call);
-        }
-        return call.execute();
-        // NOT removed here — stream() finally cleans up after SSE consumption
-    }
-
-    @Override
-    public void cancel(String taskId) {
-        if (taskId == null) return;
-        Call call = activeCalls.get(taskId);
-        if (call != null) {
-            log.info("Cancelling LLM call for task {}", taskId);
-            call.cancel();
-        }
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public List<String> listModels() {
+    protected Request buildHttpRequest(LlmRequest req) throws IOException {
+        String json = buildRequestBody(req);
+        RequestBody body = RequestBody.create(JSON, json);
         Request.Builder builder = new Request.Builder()
-                .url(baseUrl + "/v1/models")
-                .header("anthropic-version", ANTHROPIC_VERSION)
+                .url(baseUrl + "/v1/messages")
                 .header("content-type", "application/json")
-                .get();
+                .header("accept", "text/event-stream")
+                .post(body);
+        addAuthHeader(builder);
+        return builder.build();
+    }
+
+    @Override
+    protected void addAuthHeader(Request.Builder builder) {
+        builder.header("anthropic-version", ANTHROPIC_VERSION);
+        // Use Bearer auth if authToken is set (for proxy gateways like cc-switch);
+        // otherwise fall back to x-api-key (native Anthropic API)
         if (authToken != null && !authToken.isEmpty()) {
             String headerValue = authToken.toLowerCase().startsWith("bearer ")
                     ? authToken
@@ -172,51 +89,70 @@ public class AnthropicLlmClient implements LlmClient {
         } else if (apiKey != null && !apiKey.isEmpty()) {
             builder.header("x-api-key", apiKey);
         }
-        try (Response response = executeCall(builder.build())) {
-            if (!response.isSuccessful()) {
-                log.warn("listModels returned HTTP {}", response.code());
-                return Collections.emptyList();
+    }
+
+    @Override
+    protected String getModelsUrl() {
+        return baseUrl + "/v1/models";
+    }
+
+    @Override
+    protected void parseSseResponse(Response response, LlmEventSink events, LlmRequest req) throws IOException {
+        ResponseBody responseBody = response.body();
+        if (responseBody == null) {
+            events.onError("empty response body");
+            return;
+        }
+
+        BufferedSource source = responseBody.source();
+
+        // Parser state
+        String eventType = null;
+        StringBuilder dataBuilder = new StringBuilder();
+
+        // Content block state (held in a mutable holder to pass to helper)
+        SseState state = new SseState();
+        // Skip thinking deltas when no tools are requested (e.g. inject mode)
+        state.skipThinking = req.getTools() == null || req.getTools().isEmpty();
+
+        while (true) {
+            String line = source.readUtf8Line();
+            if (line == null) {
+                break;
             }
-            ResponseBody body = response.body();
-            if (body == null) return Collections.emptyList();
-            JsonNode root = objectMapper.readTree(body.string());
-            JsonNode data = root.get("data");
-            if (data == null || !data.isArray()) return Collections.emptyList();
-            List<String> models = new ArrayList<String>();
-            for (JsonNode node : data) {
-                String id = node.path("id").asText();
-                if (id != null && !id.isEmpty()) {
-                    models.add(id);
+
+            if (line.startsWith("event:")) {
+                eventType = line.substring(6).trim();
+            } else if (line.startsWith("data:")) {
+                if (dataBuilder.length() > 0) {
+                    dataBuilder.append("\n");
                 }
+                dataBuilder.append(line.substring(5).trim());
+            } else if (line.isEmpty()) {
+                // End of event — process it
+                processSseEvent(eventType, dataBuilder.toString(), events, state);
+                eventType = null;
+                dataBuilder.setLength(0);
             }
-            return models;
-        } catch (Exception e) {
-            log.warn("listModels failed: {}", e.getMessage());
-            return Collections.emptyList();
+        }
+
+        // Process any pending event that wasn't terminated by a blank line
+        if (eventType != null && dataBuilder.length() > 0) {
+            processSseEvent(eventType, dataBuilder.toString(), events, state);
+        }
+
+        // Ensure onStop is called if message_stop was never received
+        if (!state.stopCalled) {
+            if (state.usageReported) {
+                events.onUsage(state.inputTokens, state.outputTokens, state.cacheReadTokens);
+            }
+            events.onStop(state.stopReason != null ? state.stopReason : "end_turn");
         }
     }
 
-    private Request buildHttpRequest(LlmRequest req) throws IOException {
-        String json = buildRequestBody(req);
-        RequestBody body = RequestBody.create(JSON, json);
-        Request.Builder builder = new Request.Builder()
-                .url(baseUrl + "/v1/messages")
-                .header("anthropic-version", ANTHROPIC_VERSION)
-                .header("content-type", "application/json")
-                .header("accept", "text/event-stream")
-                .post(body);
-        // Use Bearer auth if authToken is set (for proxy gateways like cc-switch);
-        // otherwise fall back to x-api-key (native Anthropic API)
-        if (authToken != null && !authToken.isEmpty()) {
-            String headerValue = authToken.toLowerCase().startsWith("bearer ")
-                    ? authToken
-                    : "Bearer " + authToken;
-            builder.header("Authorization", headerValue);
-        } else {
-            builder.header("x-api-key", apiKey);
-        }
-        return builder.build();
-    }
+    // ════════════════════════════════════════════════════════════════
+    // Request body building
+    // ════════════════════════════════════════════════════════════════
 
     @SuppressWarnings("unchecked")
     private String buildRequestBody(LlmRequest req) throws IOException {
@@ -316,61 +252,9 @@ public class AnthropicLlmClient implements LlmClient {
         return messageMap;
     }
 
-    @SuppressWarnings("unchecked")
-    private void parseSseStream(Response response, LlmEventSink events, LlmRequest req) throws IOException {
-        ResponseBody responseBody = response.body();
-        if (responseBody == null) {
-            events.onError("empty response body");
-            return;
-        }
-
-        BufferedSource source = responseBody.source();
-
-        // Parser state
-        String eventType = null;
-        StringBuilder dataBuilder = new StringBuilder();
-
-        // Content block state (held in a mutable holder to pass to helper)
-        SseState state = new SseState();
-        // Skip thinking deltas when no tools are requested (e.g. inject mode)
-        state.skipThinking = req.getTools() == null || req.getTools().isEmpty();
-
-        String stopReason = null;
-
-        while (true) {
-            String line = source.readUtf8Line();
-            if (line == null) {
-                break;
-            }
-
-            if (line.startsWith("event:")) {
-                eventType = line.substring(6).trim();
-            } else if (line.startsWith("data:")) {
-                if (dataBuilder.length() > 0) {
-                    dataBuilder.append("\n");
-                }
-                dataBuilder.append(line.substring(5).trim());
-            } else if (line.isEmpty()) {
-                // End of event — process it
-                processSseEvent(eventType, dataBuilder.toString(), events, state);
-                eventType = null;
-                dataBuilder.setLength(0);
-            }
-        }
-
-        // Process any pending event that wasn't terminated by a blank line
-        if (eventType != null && dataBuilder.length() > 0) {
-            processSseEvent(eventType, dataBuilder.toString(), events, state);
-        }
-
-        // Ensure onStop is called if message_stop was never received
-        if (!state.stopCalled) {
-            if (state.usageReported) {
-                events.onUsage(state.inputTokens, state.outputTokens, state.cacheReadTokens);
-            }
-            events.onStop(state.stopReason != null ? state.stopReason : "end_turn");
-        }
-    }
+    // ════════════════════════════════════════════════════════════════
+    // SSE event processing
+    // ════════════════════════════════════════════════════════════════
 
     @SuppressWarnings("unchecked")
     private void processSseEvent(String eventType, String data,
@@ -467,7 +351,7 @@ public class AnthropicLlmClient implements LlmClient {
         }
     }
 
-    /** Mutable state shared between parseSseStream and processSseEvent. */
+    /** Mutable state shared between parseSseResponse and processSseEvent. */
     private static class SseState {
         boolean inToolUse = false;
         boolean skipThinking = false;

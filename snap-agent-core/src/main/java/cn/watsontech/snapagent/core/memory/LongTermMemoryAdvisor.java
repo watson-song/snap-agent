@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.memory;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import org.slf4j.Logger;
@@ -83,7 +84,7 @@ public class LongTermMemoryAdvisor implements Advisor {
             return state;
         }
 
-        String systemPrompt = state.get("system.prompt");
+        String systemPrompt = state.get(StateKeys.SYSTEM_PROMPT);
         if (systemPrompt == null) {
             systemPrompt = "";
         }
@@ -116,7 +117,7 @@ public class LongTermMemoryAdvisor implements Advisor {
             }
         }
 
-        return state.with("system.prompt", sb.toString());
+        return state.with(StateKeys.SYSTEM_PROMPT, sb.toString());
     }
 
     @Override

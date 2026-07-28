@@ -38,9 +38,50 @@ public class GraphState {
         return (T) values.getOrDefault(key, defaultValue);
     }
 
+    /**
+     * Type-safe get using a {@link StateKey}. Eliminates unchecked casts
+     * and string-typed key typos.
+     *
+     * @param key the typed state key
+     * @param <T> the value type
+     * @return the value, or null if absent
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T get(StateKey<T> key) {
+        return (T) values.get(key.name());
+    }
+
+    /**
+     * Type-safe get with default value using a {@link StateKey}.
+     *
+     * @param key the typed state key
+     * @param defaultValue fallback if key is absent
+     * @param <T> the value type
+     * @return the value, or defaultValue if absent
+     */
+    @SuppressWarnings("unchecked")
+    public <T> T get(StateKey<T> key, T defaultValue) {
+        return (T) values.getOrDefault(key.name(), defaultValue);
+    }
+
     public GraphState with(String key, Object value) {
         Map<String, Object> copy = new HashMap<>(this.values);
         copy.put(key, value);
+        return new GraphState(copy, this.threadId, this.checkpointId, this.turn);
+    }
+
+    /**
+     * Type-safe with using a {@link StateKey}. Returns a new GraphState
+     * with the key set to the value.
+     *
+     * @param key the typed state key
+     * @param value the value to set
+     * @param <T> the value type
+     * @return a new GraphState with the key set
+     */
+    public <T> GraphState with(StateKey<T> key, T value) {
+        Map<String, Object> copy = new HashMap<>(this.values);
+        copy.put(key.name(), value);
         return new GraphState(copy, this.threadId, this.checkpointId, this.turn);
     }
 

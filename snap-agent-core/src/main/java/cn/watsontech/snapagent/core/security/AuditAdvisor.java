@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.core.security;
 
 import cn.watsontech.snapagent.core.agent.AuditRecord;
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import org.slf4j.Logger;
@@ -61,9 +62,9 @@ public class AuditAdvisor implements Advisor {
     }
 
     private AuditRecord buildLlmRecord(GraphState state, ExecutionContext ctx, String nodeName) {
-        Integer inputTokens = state.get("llm.input_tokens");
-        Integer outputTokens = state.get("llm.output_tokens");
-        String model = state.get("llm.model");
+        Integer inputTokens = state.get(StateKeys.LLM_INPUT_TOKENS);
+        Integer outputTokens = state.get(StateKeys.LLM_OUTPUT_TOKENS);
+        String model = state.get(StateKeys.LLM_MODEL);
 
         return new AuditRecord(
                 ctx.getTaskId(),
@@ -84,9 +85,9 @@ public class AuditAdvisor implements Advisor {
 
     @SuppressWarnings("unchecked")
     private AuditRecord buildToolRecord(GraphState state, ExecutionContext ctx, String nodeName) {
-        java.util.List<cn.watsontech.snapagent.core.tool.ToolResult> results = state.get("tool_results");
-        String toolName = state.get("tool.name");
-        java.util.Map<String, Object> args = state.get("tool.args");
+        java.util.List<cn.watsontech.snapagent.core.tool.ToolResult> results = state.get(StateKeys.TOOL_RESULTS);
+        String toolName = state.get(StateKeys.TOOL_NAME);
+        java.util.Map<String, Object> args = state.get(StateKeys.TOOL_ARGS);
 
         int rowCount = 0;
         boolean truncated = false;

@@ -1,9 +1,11 @@
 package cn.watsontech.snapagent.core.memory;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -241,12 +243,15 @@ class MessageChatMemoryAdvisorTest {
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
-        List<Object> toolResults = new ArrayList<>(Arrays.<Object>asList("result-1", "result-2"));
+        List<ToolResult> toolResults = new ArrayList<>(Arrays.asList(
+            new ToolResult("result-1", 0, false, 0, null),
+            new ToolResult("result-2", 0, false, 0, null)
+        ));
         GraphState state = GraphState.empty("thread-1")
             .with("conversation.id", "conv-1")
-            .with("user.message", "run query")
-            .with("thought", "executing query")
-            .with("tool_results", toolResults);
+            .with(StateKeys.USER_MESSAGE, "run query")
+            .with(StateKeys.THOUGHT, "executing query")
+            .with(StateKeys.TOOL_RESULTS, toolResults);
 
         advisor.afterNode("agent", state, null);
 

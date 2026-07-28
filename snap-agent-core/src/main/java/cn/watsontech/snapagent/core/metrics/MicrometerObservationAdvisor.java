@@ -1,6 +1,7 @@
 package cn.watsontech.snapagent.core.metrics;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import org.slf4j.Logger;
@@ -44,7 +45,7 @@ public class MicrometerObservationAdvisor implements Advisor {
         long startTime = System.currentTimeMillis();
         Map<String, String> tags = new HashMap<>();
         tags.put("nodeName", nodeName);
-        return state.with("__metrics_start_time", startTime);
+        return state.with(StateKeys.METRICS_START_TIME, startTime);
     }
 
     @Override
@@ -53,15 +54,15 @@ public class MicrometerObservationAdvisor implements Advisor {
             return state;
         }
 
-        Long startTime = state.get("__metrics_start_time");
+        Long startTime = state.get(StateKeys.METRICS_START_TIME);
         long duration = startTime != null ? System.currentTimeMillis() - startTime : 0;
 
         Map<String, String> nodeTags = new HashMap<>();
         nodeTags.put("nodeName", nodeName);
         metricsCollector.recordTimer("snap-agent.graph.node.duration", duration, nodeTags);
 
-        Integer inputTokens = state.get("llm.input_tokens");
-        Integer outputTokens = state.get("llm.output_tokens");
+        Integer inputTokens = state.get(StateKeys.LLM_INPUT_TOKENS);
+        Integer outputTokens = state.get(StateKeys.LLM_OUTPUT_TOKENS);
         if (inputTokens != null) {
             Map<String, String> tokenTags = new HashMap<>();
             tokenTags.put("type", "input");
@@ -73,14 +74,14 @@ public class MicrometerObservationAdvisor implements Advisor {
             metricsCollector.incrementCounter("snap-agent.llm.tokens", outputTokens, tokenTags);
         }
 
-        String stopReason = state.get("stop_reason");
+        String stopReason = state.get(StateKeys.STOP_REASON);
         if ("error".equals(stopReason)) {
             Map<String, String> errorTags = new HashMap<>();
             errorTags.put("errorType", "RuntimeException");
             metricsCollector.recordError("RuntimeException", errorTags);
         }
 
-        java.util.List<?> toolResults = state.get("tool_results");
+        java.util.List<?> toolResults = state.get(StateKeys.TOOL_RESULTS);
         if (toolResults != null && !toolResults.isEmpty()) {
             metricsCollector.incrementCounter("snap-agent.tool.calls", toolResults.size(), new HashMap<>());
         }

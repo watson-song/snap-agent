@@ -4,6 +4,7 @@ import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TranscriptEvent;
 import cn.watsontech.snapagent.core.graph.GraphState;
 import cn.watsontech.snapagent.core.graph.Node;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.LlmClient;
@@ -64,19 +65,19 @@ public class AgentNode implements Node {
         // RAG context goes into the system prompt as a separate block,
         // NOT mixed into the user message. This keeps Retrieved Facts
         // (layer 3) independent from User Input (layer 2).
-        String systemPrompt = state.get("system.prompt");
-        String ragContext = state.get("rag.context");
+        String systemPrompt = state.get(StateKeys.SYSTEM_PROMPT);
+        String ragContext = state.get(StateKeys.RAG_CONTEXT);
         if (ragContext != null && !ragContext.isEmpty()) {
             systemPrompt = systemPrompt + RAG_OPEN + ragContext + RAG_CLOSE;
         }
 
         // --- Layer 2: User Input ---
-        String userMessage = state.get("user.message");
+        String userMessage = state.get(StateKeys.USER_MESSAGE);
 
         // --- Build messages list ---
         // Layer 5: Short-term Notes — prepend conversation history
         List<Message> messages = new ArrayList<>();
-        List<Message> history = state.get("memory.messages");
+        List<Message> history = state.get(StateKeys.MEMORY_MESSAGES);
         if (history != null && !history.isEmpty()) {
             messages.addAll(history);
         }
@@ -145,15 +146,15 @@ public class AgentNode implements Node {
 
         // Build new state
         GraphState result = state
-            .with("stop_reason", stopReason[0])
-            .with("thought", thoughtBuilder.toString());
+            .with(StateKeys.STOP_REASON, stopReason[0])
+            .with(StateKeys.THOUGHT, thoughtBuilder.toString());
 
         if (!toolUseBlocks.isEmpty()) {
-            result = result.with("tool_use_blocks", toolUseBlocks);
+            result = result.with(StateKeys.TOOL_USE_BLOCKS, toolUseBlocks);
         }
 
         if ("max_tokens".equals(stopReason[0])) {
-            result = result.with("truncated", true);
+            result = result.with(StateKeys.TRUNCATED, true);
         }
 
         return result;

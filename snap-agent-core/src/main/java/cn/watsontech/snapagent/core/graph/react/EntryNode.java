@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.core.graph.react;
 
 import cn.watsontech.snapagent.core.graph.GraphState;
 import cn.watsontech.snapagent.core.graph.Node;
+import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.execution.ExecutionContext;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
@@ -56,8 +57,8 @@ public class EntryNode implements Node {
         String userMessage = buildUserMessage(inputs);
 
         return state
-            .with("system.prompt", systemPrompt)
-            .with("user.message", userMessage);
+            .with(StateKeys.SYSTEM_PROMPT, systemPrompt)
+            .with(StateKeys.USER_MESSAGE, userMessage);
     }
 
     /**

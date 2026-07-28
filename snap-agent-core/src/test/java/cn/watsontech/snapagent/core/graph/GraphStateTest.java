@@ -69,4 +69,61 @@ class GraphStateTest {
         assertThat((Integer) state0.get("counter")).isEqualTo(0);
         assertThat(results).allSatisfy(s -> assertThat((Integer) s.get("counter")).isNotNull());
     }
+
+    // ════════════════════════════════════════════════════════════════
+    // Type-safe StateKey tests
+    // ════════════════════════════════════════════════════════════════
+
+    @Test
+    @DisplayName("StateKey get/with 类型安全 — 无 unchecked cast")
+    void stateKeyGetAndWithTypeSafety() {
+        StateKey<String> key = StateKey.of("my.key", String.class);
+        GraphState state = GraphState.empty("t1").with(key, "hello");
+        assertThat(state.get(key)).isEqualTo("hello");
+    }
+
+    @Test
+    @DisplayName("StateKey 与 String key 互通 — 同一底层 key name")
+    void stateKeyInteroperableWithStringKey() {
+        StateKey<String> key = StateKey.of("shared.key", String.class);
+        GraphState state = GraphState.empty("t1").with(key, "typed-value");
+        // String-based get reads the same value
+        assertThat((String) state.get("shared.key")).isEqualTo("typed-value");
+        // String-based with is readable via StateKey
+        state = state.with("shared.key", "string-value");
+        assertThat(state.get(key)).isEqualTo("string-value");
+    }
+
+    @Test
+    @DisplayName("StateKey get(key, defaultValue) 兜底")
+    void stateKeyGetWithDefaultValue() {
+        StateKey<Integer> key = StateKey.of("absent", Integer.class);
+        GraphState state = GraphState.empty("t1");
+        assertThat(state.get(key, 42)).isEqualTo(42);
+        assertThat(state.get(key)).isNull();
+    }
+
+    @Test
+    @DisplayName("StateKey with 返回新实例，原实例不变")
+    void stateKeyWithReturnsNewInstance() {
+        StateKey<String> key = StateKey.of("k", String.class);
+        GraphState s1 = GraphState.empty("t1").with(key, "v1");
+        GraphState s2 = s1.with(key, "v2");
+        assertThat(s1.get(key)).isEqualTo("v1");
+        assertThat(s2.get(key)).isEqualTo("v2");
+        assertThat(s1).isNotSameAs(s2);
+    }
+
+    @Test
+    @DisplayName("StateKeys 常量 — 实际 graph 运行键可用")
+    void stateKeysConstantsWork() {
+        GraphState state = GraphState.empty("t1")
+            .with(StateKeys.SYSTEM_PROMPT, "你是诊断 agent")
+            .with(StateKeys.USER_MESSAGE, "分析问题")
+            .with(StateKeys.STOP_REASON, "end_turn");
+
+        assertThat(state.get(StateKeys.SYSTEM_PROMPT)).isEqualTo("你是诊断 agent");
+        assertThat(state.get(StateKeys.USER_MESSAGE)).isEqualTo("分析问题");
+        assertThat(state.get(StateKeys.STOP_REASON)).isEqualTo("end_turn");
+    }
 }
