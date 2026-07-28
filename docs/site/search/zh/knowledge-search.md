@@ -8,8 +8,8 @@ SnapAgent 知识库采用三层 SPI 架构，实现知识源的加载、评分�
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    KnowledgeBase                         │
-│   (管理所有 KnowledgeSource, 委托 KnowledgeSearcher 检索) │
+│                    VectorStore                           │
+│   (管理所有 KnowledgeSource, 委托 VectorStoreDocumentRetriever 检索)│
 │   - search(query, topK, minScore) → List<KnowledgeFragment>     │
 │   - searchWithScores(query, topK, minScore) → List<SearchResult>│
 │   - reload() / size()                                   │
@@ -63,7 +63,7 @@ public final class SearchResult {
 }
 ```
 
-### KnowledgeBase 检索流程
+### VectorStore 检索流程
 
 ```java
 public List<SearchResult> searchWithScores(String query, int topK, double minScore) {
@@ -258,7 +258,7 @@ snap-agent:
 
 ### 4.2 过滤机制
 
-`KnowledgeBase.searchWithScores()` 在评分后执行 `score >= minScore` 过滤：
+`VectorStore.searchWithScores()` 在评分后执行 `score >= minScore` 过滤：
 - score=0.0 的片段（无任何匹配）被排除
 - 只有分数达到阈值的片段才出现在结果中
 - 结果按分数降序排列
@@ -271,9 +271,9 @@ snap-agent:
 
 ```java
 // Bug: 硬编码 0.0
-List<KnowledgeFragment> fragments = knowledgeBase.search(q, searchTopK, 0.0);
+List<KnowledgeFragment> fragments = vectorStore.search(q, searchTopK, 0.0);
 // Fix: 使用配置的 minScore
-List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minScore);
+List<SearchResult> results = vectorStore.searchWithScores(q, searchTopK, minScore);
 ```
 
 这导致所有片段（包括 score=0 无匹配的）都被返回，任何查询都返回全部 5 个片段。
@@ -286,20 +286,20 @@ List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minSc
 
 ---
 
-## 5. KnowledgeInjector 自动注入
+## 5. VectorStoreDocumentRetriever + Advisor 自动注入
 
 ### 5.1 注入机制
 
-`KnowledgeInjector` 实现 `Advisor` SPI，在 LLM 开始思考前自动注入业务知识：
+`VectorStoreDocumentRetriever` 通过 `VectorStore` 检索相关知识，经 `Advisor` SPI 在 LLM 开始思考前自动注入业务知识：
 
 ```
 用户输入 "SKU-001 为什么没生成补货策略？"
     │
     ▼
-KnowledgeInjector.extend(skillMeta, agentTask)
+VectorStoreDocumentRetriever.retrieve(query)
     │
     ├─ 从 task.inputs 提取用户查询文本
-    ├─ 调用 knowledgeBase.search(query, maxFragments, minScore)
+    ├─ 调用 vectorStore.search(query, maxFragments, minScore)
     ├─ 格式化匹配的知识片段为上下文段落
     └─ 返回注入到 system prompt 的知识文本
     │
@@ -332,7 +332,7 @@ snap-agent:
 `GraphExecutor` 支持 `List<Advisor>`（v0.7 改造），按 Spring `@Order` 排序：
 
 1. `ProjectContextExtender`（v0.3）：注入项目结构摘要
-2. `KnowledgeInjector`（v0.7）：注入业务知识片段
+2. `VectorStoreDocumentRetriever + Advisor`（v0.7）：注入业务知识片段
 
 两者独立工作，各自检索和注入，最后拼接为完整的 system prompt 上下文。
 
@@ -410,7 +410,7 @@ snap-agent:
 | `GET /knowledge/search` | 按查询关键词检索 | 是（`score` 字段） | `q`（query） |
 | `GET /knowledge/fragments` | 列出所有片段供浏览 | 否 | 无 |
 
-底层实现：`KnowledgeBase.listAll()` 返回 `Collections.unmodifiableList(allFragments)`，
+底层实现：`VectorStore.listAll()` 返回 `Collections.unmodifiableList(allFragments)`，
 保持片段加载顺序。
 
 ---
@@ -482,7 +482,7 @@ public class SemanticSearcher implements KnowledgeSearcher {
 }
 ```
 
-注册为 Spring Bean 后，`KnowledgeBase` 会自动使用它替代默认实现（`@ConditionalOnMissingBean`）。
+注册为 Spring Bean 后，`VectorStore` 会自动使用它替代默认实现（`@ConditionalOnMissingBean`）。
 
 ### 自定义知识源
 
