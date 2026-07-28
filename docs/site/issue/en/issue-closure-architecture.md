@@ -4,7 +4,7 @@
 
 ## 1. Architecture Overview
 
-SnapAgent v0.9 issue closure system connects diagnosis, solution proposal, external issue creation, fix verification, and knowledge sedimentation into a complete loop. After diagnosis completes, root cause and solutions are recorded; once the user selects a solution, an external issue (Jira/GitHub) is created; after the fix is applied, a verification skill re-checks; when verification passes, the experience is extracted as a knowledge fragment and sedimented back into the KnowledgeBase for future diagnoses to reuse.
+SnapAgent v0.9 issue closure system connects diagnosis, solution proposal, external issue creation, fix verification, and knowledge sedimentation into a complete loop. After diagnosis completes, root cause and solutions are recorded; once the user selects a solution, an external issue (Jira/GitHub) is created; after the fix is applied, a verification skill re-checks; when verification passes, the experience is extracted as a knowledge fragment and sedimented back into the VectorStore for future diagnoses to reuse.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
