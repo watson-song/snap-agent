@@ -1,6 +1,13 @@
 # SnapAgent Custom Plugin Development Guide
 
 > Version: v0.5 | Updated: 2026-07-22
+>
+> **Architecture Note:** The tool registration model has evolved. Tools are now
+> declared via `@Tool` annotated methods in `@Component` classes (with `@ToolParam`
+> for parameters), and `ToolCallbackRegistry` replaces `ToolDispatcher`. The
+> `AgentExecutor` is replaced by `GraphExecutor`. The legacy `ToolProvider` SPI
+> code examples below are retained for backward compatibility; new integrations
+> should use the `@Tool`/`@ToolParam` annotation model.
 
 This guide covers the full lifecycle of developing a custom Plugin for SnapAgent — from project generation through packaging, upload, configuration, and testing.
 
@@ -8,11 +15,11 @@ This guide covers the full lifecycle of developing a custom Plugin for SnapAgent
 
 ## 1. Core Concepts
 
-### Plugin = 1 ToolProvider + Metadata Declaration
+### Plugin = 1 @Tool + Metadata Declaration
 
 A SnapAgent Plugin is a hot-pluggable tool unit. Each Plugin contains:
 
-- **1 `ToolProvider` implementation** — provides `name()`, `schema()`, `execute()`
+- **1 `@Tool` annotated method** in a `@Component` class (legacy: `ToolProvider` implementation providing `name()`, `schema()`, `execute()`)
 - **Metadata declaration** — via `@ToolPluginAnnotation` annotation (preferred) or `plugin-info.yml` (fallback)
 
 ### toolType vs pluginId
@@ -22,7 +29,7 @@ A SnapAgent Plugin is a hot-pluggable tool unit. Each Plugin contains:
 | `toolType` | Tool name the LLM sees when calling. One toolType can have multiple Plugins | `log_read` |
 | `pluginId` | Unique identifier for the Plugin | `remote-log`, `local-log` |
 
-The LLM does not perceive plugins — it only sees `toolType`. `ToolDispatcher` routes to the specific implementation via `pluginOverrides` or the default Plugin.
+The LLM does not perceive plugins — it only sees `toolType`. `ToolCallbackRegistry` routes to the specific implementation via `pluginOverrides` or the default Plugin.
 
 ### 1 plugin = 1 tool
 
@@ -32,10 +39,10 @@ One Plugin corresponds to one LLM-callable tool. A tool can have multiple operat
 
 | Type | Source | Removable |
 |------|--------|-----------|
-| system plugin | Built-in `@Component ToolProvider` beans, auto-wrapped at startup | No |
+| system plugin | Built-in `@Component` beans with `@Tool` methods, auto-wrapped at startup | No |
 | custom plugin | JAR uploaded via `POST /tools/plugins/upload` | Yes |
 
-Backward compatibility: existing `@Component ToolProvider` beans require no modification — auto-wrapped as system plugins at startup.
+Backward compatibility: existing `@Component` beans with `@Tool` methods (or legacy `ToolProvider` beans) require no modification — auto-wrapped as system plugins at startup.
 
 ---
 
@@ -73,9 +80,9 @@ my-remote-log-plugin/
 │   └── RemoteLogToolProviderTest.java
 ```
 
-### 2.2 Implement ToolProvider
+### 2.2 Implement ToolProvider (Legacy SPI — new integrations should use @Tool/@ToolParam)
 
-The generated `RemoteLogToolProvider.java` contains a basic skeleton. The core is three methods:
+The generated `RemoteLogToolProvider.java` contains a basic skeleton. The core is three methods (legacy SPI; new code should use `@Tool`/`@ToolParam` annotations instead):
 
 ```java
 @ToolPluginAnnotation(
@@ -179,7 +186,7 @@ Upload flow:
 1. JAR saved to `${upload-skills-dir}/plugins/{pluginId}/plugin.jar`
 2. `URLClassLoader` created (parent = main application ClassLoader)
 3. Metadata scanned (`@ToolPluginAnnotation` preferred, `plugin-info.yml` fallback)
-4. `ToolProvider` instantiated (requires no-arg constructor)
+4. `ToolProvider` instantiated (legacy SPI; `@Tool` methods are auto-discovered via `@Component`)
 5. `PluginDescriptor` constructed + registered in `PluginRegistry`
 6. `isDefault` defaults to `false` — call `PUT /tools/plugins/{id}/default` to set as default
 
@@ -267,7 +274,7 @@ curl -X POST http://localhost:8080/skills-agent/runs \
 
 ```
 LLM -> tool_use(log_read, args)
-    -> ToolDispatcher.dispatch("log_read", args, ctx)
+    -> ToolCallbackRegistry.dispatch("log_read", args, ctx)
     -> ctx.pluginOverrides["log_read"] = "remote-log"
     -> registry.getPlugin("remote-log")
     -> plugin.provider.execute(args, ctx)
@@ -275,7 +282,7 @@ LLM -> tool_use(log_read, args)
 ```
 
 - The LLM only sees `toolType` (e.g., `log_read`), not the plugin
-- `ToolDispatcher` first checks `ctx.pluginOverrides[toolType]`, then `registry.getDefault(toolType)`
+- `ToolCallbackRegistry` first checks `ctx.pluginOverrides[toolType]`, then `registry.getDefault(toolType)`
 - Without `pluginOverrides`, the default plugin is used — backward compatible
 
 ---

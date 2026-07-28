@@ -15,7 +15,7 @@
 ### 目标
 - **完全独立**：库不依赖宿主业务 jar，仅依赖标准 Spring Boot bean。集成 = 加 pom + 配 yml，默认关闭，对宿主零影响。
 - **执行任意标准格式 skill**：不局限本项目 3 个；加载用户编写的、frontmatter 合规的 skill。
-- **严格只读**：JDBC 仅 `SELECT/SHOW/DESCRIBE/EXPLAIN`；Redis 仅 `get/keys/exists`。无写工具。
+- **严格只读（默认）**：`SkillMode.READ_ONLY` 模式下 JDBC 仅 `SELECT/SHOW/DESCRIBE/EXPLAIN`；Redis 仅 `get/keys/exists`。`READ_WRITE` 模式仅用于 auto-fix 工作流。
 - **权限在 yml，兼容 Spring Security 与 Shiro**：默认复用宿主已分配权限；Phase 1 两种框架都支持。
 - **模型页面临时修改 + 本地缓存**：运维页面切模型，浏览器 localStorage 缓存，覆盖 yml；服务端强制 `allowed-models` 白名单。
 - **SSE 流式推送**：agent 思考 / 工具调用 / 最终报告实时推到运维 SPA。
@@ -37,7 +37,7 @@
 | **frontmatter** | skill 顶部的 YAML 块，声明 `name` / `description` / `tools` / `inputs` |
 | **inputs** | skill 声明的入参契约（如 `skuCode` / `warehouseCode` / `env`），用于渲染表单 |
 | **tool_use** | LLM 输出的「调用某工具」结构化指令（Anthropic Messages 协议） |
-| **ToolProvider** | 工具后端 SPI，实现某工具名的实际执行（如 JDBC 查询） |
+| **ToolProvider** | 工具后端 SPI，实现某工具名的实际执行（如 JDBC 查询）。现由 `@Tool` 注解 + `ToolCallback` / `ToolCallbackRegistry` 体系取代 |
 | **transcript** | 一次 run 的完整过程记录（思考 + 工具调用 + 参数 + 结果 + 审计） |
 | **principal** | 当前已认证用户标识，由宿主安全框架提供 |
 | **只读 DSN** | 独立的只读 DB 账号 DataSource，本库所有 SQL 走它，不走宿主业务 DataSource |
@@ -49,17 +49,21 @@
                             │
   ┌─────────────────────────┼──────────────────────────┐
   ▼                         ▼                          ▼
-SkillRegistry            AgentExecutor             ToolDispatcher
-(启动扫 *.md,            (LLM流式循环:             (分发 tool_use)
- 手动刷新)                system=只读前缀+
-  │                       skill正文+工具清单;       ├─► JdbcQueryToolProvider(只读DSN, SQL guard)
-  │                       tool_use→dispatch→        ├─► RedisReadToolProvider(只读)
-  │                       回填→直到end_turn)        └─► McpToolProvider(Phase2, SSE)
+SkillRegistry            GraphExecutor             ToolCallbackRegistry
+(启动扫 *.md,            (StateGraph ReAct 循环:    (路由 tool_use 到
+ 手动刷新)                EntryNode→AgentNode→       注册的 ToolCallback)
+  │                       ToolsNode→ShouldContinue;
+  │                       system=SkillMode前缀+     ├─► JdbcQueryTools(只读DSN, SQL guard)
+  │                       skill正文+工具清单;       ├─► RedisReadTools(只读)
+  │                       tool_use→ToolsNode→       └─► McpToolProvider(Phase2, SSE)
+  │                       回填→直到end_turn)
   │                         │
   ▼                         ▼
 SkillMeta/frontmatter    LlmClient(OkHttp流式,
-  + tools 契约校验        Anthropic Messages,
-  + inputs 表单           model per-run覆盖)
+  + tools 契约校验        AbstractStreamingLlmClient
+  + inputs 表单           →AnthropicLlmClient/
+  │                       OpenAiLlmClient,
+  └─▶ unavailable 灰显     model per-run覆盖)
   │                         │
   └─▶ unavailable 灰显     ▼
                        TaskStore ── AgentTask(status+transcript+审计)
@@ -75,8 +79,8 @@ SkillMeta/frontmatter    LlmClient(OkHttp流式,
 
 | 模块 | 包名 | 职责 | 阶段 |
 |------|------|------|------|
-| `snap-agent-core` | `cn.watsontech.snapagent.core` | skill 解析 / agent 循环 / LLM 客户端 / tool SPI，**无 servlet 依赖** | Phase 1 |
-| `snap-agent-spring-boot-2x-starter` | `cn.watsontech.snapagent.boot2x` | `javax.servlet` Filter + AutoConfig + `spring.factories` + 静态 UI 资源 | Phase 1 |
+| `snap-agent-core` | `cn.watsontech.snapagent.core` | skill 解析 / graph 运行时（`graph/`, `memory/`, `rag/`, `vectorstore/`, `execution/`, `advisor/`） / LLM 客户端 / `@Tool` + `ToolCallback` SPI，**无 servlet 依赖** | Phase 1 |
+| `snap-agent-spring-boot-2x-starter` | `cn.watsontech.snapagent.boot2x` | `javax.servlet` Filter + AutoConfig (thin) + 8 domain `@Configuration` + `spring.factories` + 静态 UI 资源 | Phase 1 |
 | `snap-agent-spring-boot-3x-starter` | `cn.watsontech.snapagent.boot3x` | `jakarta.servlet` 版本 | Phase 3 |
 
 理由：`javax.servlet` 与 `jakarta.servlet` 二进制不兼容，单 artifact 不能同时服务 2.x 与 3.x 宿主。core 模块保持 servlet 无关，两个 starter 各自做容器适配。
@@ -97,9 +101,9 @@ SkillMeta/frontmatter    LlmClient(OkHttp流式,
 |------|------|
 | [01-architecture.md](01-architecture.md) | 模块拆分、组件、依赖、AutoConfig 默认关闭零影响证明 |
 | [02-skill-loading.md](02-skill-loading.md) | 标准 skill 格式、frontmatter 解析、`tools`/`inputs` 契约、缓存与刷新、unavailable 标记 |
-| [03-agent-engine.md](03-agent-engine.md) | LLM 流式循环、system prompt、tool_use 分发、停止条件、TaskStore、限流、线程池 |
-| [04-tools-and-mcp.md](04-tools-and-mcp.md) | ToolProvider SPI、JDBC（只读 DSN + SQL guard + LIMIT + 审计）、Redis（KEYS* 拒绝）、MCP Phase2 |
-| [05-llm-client.md](05-llm-client.md) | Anthropic Messages 流式客户端、per-run model 覆盖、服务端白名单、localStorage UX、OpenAI 适配器(Phase3) |
+| [03-agent-engine.md](03-agent-engine.md) | Graph ReAct 循环（StateGraph/GraphExecutor）、system prompt、tool_use 分发、停止条件、TaskStore、限流、线程池 |
+| [04-tools-and-mcp.md](04-tools-and-mcp.md) | `@Tool`/`@ToolParam` 注解、`ToolCallback`/`ToolCallbackRegistry`、JDBC（只读 DSN + SQL guard + LIMIT + 审计）、Redis（KEYS* 拒绝）、MCP Phase2 |
+| [05-llm-client.md](05-llm-client.md) | `AbstractStreamingLlmClient` 基类、Anthropic/OpenAI 流式客户端、per-run model 覆盖、服务端白名单、localStorage UX |
 | [06-api-and-ui.md](06-api-and-ui.md) | REST 与 SSE 接口、单页 SPA、localStorage 缓存、实时渲染 |
 | [07-config-security.md](07-config-security.md) | 完整 `snap-agent.*` 配置树、SecurityGateway 双 Adapter、PrincipalResolver SPI、Filter 可配序、只读 DSN、审计、限流、租户绕过风险 |
 | [08-roadmap.md](08-roadmap.md) | MVP → Phase2（MCP SSE）→ Phase3（3.x / OpenAI / 热重载 / 报告渲染） |
@@ -110,7 +114,7 @@ SkillMeta/frontmatter    LlmClient(OkHttp流式,
 设计文档完成后，按以下 5 项自检（详见各文档末尾的「验证」小节与 [08-roadmap.md](08-roadmap.md)）：
 
 1. **文档自检**：交叉引用一致；配置树每个字段在组件里有落点；架构图与组件描述吻合。
-2. **可行性走查**：以 `sep-wh-replenish-diagnose` 为样本，模拟 frontmatter 解析 → tools 契约校验 → system prompt → LLM 流式 → JdbcQueryToolProvider 执行 Layer 0 SQL → SQL guard 拒一条 UPDATE → SSE 推 transcript → 出报告。
+2. **可行性走查**：以 `sep-wh-replenish-diagnose` 为样本，模拟 frontmatter 解析 → tools 契约校验 → system prompt → LLM 流式 → JdbcQueryTools（`@Tool`）执行 Layer 0 SQL → SQL guard 拒一条 UPDATE → SSE 推 transcript → 出报告。
 3. **只读强制证明**：SQL guard 正则 + 拒绝用例 + 独立只读 DB 用户授权示例。
 4. **零影响证明**：`enabled=false` 时无 bean 装配、无 Filter 注册、无线程池。
 5. **双框架鉴权走查**：Spring Security 与 Shiro 两条路径分别模拟 principal 解析 + hasPermission。

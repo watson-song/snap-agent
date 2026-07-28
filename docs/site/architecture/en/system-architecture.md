@@ -25,16 +25,18 @@ SnapAgent is an **embeddable LLM diagnostic Agent library** that gives Spring Bo
 ┌─────────────────────────────────────────────────────────────────────┐
 │              snap-agent-spring-boot-2x-starter                       │
 │  ┌───────────────────────────────────────────────────────────────┐   │
-│  │  SnapAgentAutoConfiguration (conditional assembly entry)     │   │
+│  │  8 Domain @Configuration Classes (conditional assembly)      │   │
+│  │  Security / Tool / Web / Patrol / Knowledge /                │   │
+│  │  Issue / Cost / Workflow                                       │   │
 │  │  - @ConditionalOnProperty / @ConditionalOnClass              │   │
 │  │  - @ConditionalOnMissingBean (SPI replacement point)          │   │
 │  └───────────────────────────┬───────────────────────────────────┘   │
 │                              │                                        │
 │  ┌───────────┐  ┌───────────┐  │  ┌────────────┐  ┌──────────────┐  │
 │  │ Web Layer  │  │ LLM Impl  │  │  │ Built-in    │  │ Routing      │  │
-│  │ Controller │  │ Anthropic │  │  │ Tools       │  │ Subsystem    │  │
-│  │ Filter     │  │ OpenAI    │  │  │ Jdbc/Redis  │  │ PeerRouter   │  │
-│  │ SSE        │  │ LlmClient │  │  │ Code/Metrics│  │ PeerSseRelay │  │
+│  │ Controller │  │ AbstractSt │  │  │ @Tool       │  │ Subsystem    │  │
+│  │ Filter     │  │ reaming   │  │  │ ToolCallbac │  │ PeerRouter   │  │
+│  │ SSE        │  │ LlmClient  │  │  │ kRegistry   │  │ PeerSseRelay │  │
 │  └─────┬─────┘  └─────┬─────┘  │  └──────┬─────┘  └──────┬───────┘  │
 │        │              │        │         │               │           │
 │        └──────────────┴────────┴─────────┴───────────────┘           │
@@ -45,24 +47,28 @@ SnapAgent is an **embeddable LLM diagnostic Agent library** that gives Spring Bo
 │                     snap-agent-core (Pure SPI Layer)                 │
 │                                                                     │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Agent       │ │ LLM SPI      │ │ Skill SPI    │ │ Tool SPI    │ │
-│  │ Executor    │ │ LlmClient    │ │ SkillRegistry│ │ ToolDispatch│ │
-│  │ TaskStore   │ │ LlmEventSink │ │ SkillLoader  │ │ ToolProvider│ │
-│  │ RateLimiter │ │ LlmRequest   │ │ SkillMeta    │ │ ToolPlugin  │ │
+│  │ Graph       │ │ LLM SPI      │ │ Skill SPI    │ │ Tool SPI    │ │
+│  │ Runtime     │ │ LlmClient    │ │ SkillRegistry│ │ @Tool       │ │
+│  │ GraphExecut │ │ LlmEventSink │ │ SkillLoader  │ │ @ToolParam  │ │
+│  │ StateGraph  │ │ LlmRequest   │ │ SkillMeta    │ │ ToolCallback│ │
+│  │ ReActGraph  │ │ Message      │ │              │ │ ToolCallback│ │
+│  │ Factory     │ │ Partitioner  │ │              │ │ Registry    │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Security    │ │ Knowledge   │ │ CodeGraph    │ │ Issue       │ │
-│  │ Gateway     │ │ KnowledgeBase│ │ CodeGraph    │ │ IssueStore  │ │
-│  │ Principal   │ │ KnowledgeSrc │ │ Builder/Index│ │ IssueTracker│ │
-│  │ Resolver    │ │ Searcher     │ │              │ │             │ │
+│  │ Security    │ │ RAG /        │ │ CodeGraph    │ │ Issue       │ │
+│  │ Gateway     │ │ VectorStore  │ │ CodeGraph    │ │ IssueStore  │ │
+│  │ Principal   │ │ VectorStoreD │ │ Builder/Index│ │ IssueTracker│ │
+│  │ Resolver    │ │ ocRetriever  │ │              │ │             │ │
+│  │             │ │ IdentityQry  │ │              │ │             │ │
+│  │             │ │ Transformer  │ │              │ │             │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Cost        │ │ Workflow     │ │ Conversation │ │ Patrol      │ │
-│  │ CostTracker │ │ WorkflowEng │ │ ConversationSt│ │ AlertConverg│ │
-│  │ CostStore   │ │ WorkflowDef │ │              │ │ PatrolSched │ │
+│  │ Cost        │ │ Workflow     │ │ Memory       │ │ Patrol      │ │
+│  │ CostTracker │ │ WorkflowEng  │ │ ChatMemory   │ │ AlertConverg│ │
+│  │ CostStore   │ │ WorkflowDef  │ │ ChatMemoryRep│ │ PatrolSched │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌──────────────────────────────────────────────────────────────────┐│
-│  │ SystemPromptExtender (Context Injection SPI)                     ││
+│  │ Advisor SPI (context injection + interception, replaces SystemP.  ││
 │  └──────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -87,17 +93,20 @@ Pure logic layer containing all SPI interface definitions and core execution log
 
 ```
 cn.watsontech.snapagent.core/
-├── agent/        AgentExecutor, AgentTask, TaskStore, RateLimiter, SystemPromptExtender, TranscriptEvent
-├── llm/          LlmClient, LlmEventSink, LlmRequest, Message, ToolDef, ToolUseBlock
-├── skill/        SkillRegistry, SkillLoader, SkillMeta, InputSpec, SkillAvailability, Shortcut
-├── tool/         ToolDispatcher, ToolProvider, ToolContext, ToolResult, ToolPlugin, AuditCallback
+├── graph/        GraphExecutor, StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys
+├── execution/    AgentTask, TaskStore, RateLimiter, TranscriptEvent
+├── llm/          LlmClient, LlmEventSink, LlmRequest, Message, ToolDef, ToolUseBlock, MessagePartitioner
+├── skill/        SkillRegistry, SkillLoader, SkillMeta, InputSpec, SkillAvailability, Shortcut, SkillMode
+├── tool/         @Tool, @ToolParam, ToolCallback, ToolCallbackRegistry, ToolContext, ToolResult, AuditCallback
 ├── security/     SecurityGateway, PrincipalResolver, UserInfo, AuditStore, SecurityAuditLogger
-├── knowledge/     KnowledgeBase, KnowledgeSource, KnowledgeSearcher, KnowledgeFragment, SearchResult
+├── advisor/      Advisor (replaces SystemPromptExtender, provides context injection + interception)
+├── memory/       ChatMemory, ChatMemoryRepository (session history SPI)
+├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer (named RAG pipeline classes)
+├── vectorstore/  VectorStore, EmbeddingModel (vector store SPI)
 ├── codegraph/    CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphNode, CodeGraphEdge
 ├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner
 ├── cost/         CostTracker, CostStore, CostRecord, CostSummary
-├── workflow/     WorkflowEngine, WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus
-├── conversation/ ConversationStore, Conversation, ConversationMessage, ConversationSummary
+├── workflow/     WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus (engine impl pluggable)
 └── patrol/       AlertConverger, AnomalyEvent, AnomalyEventListener, PatrolScheduler, PatrolTask, BugfixSuggester
 ```
 
@@ -109,34 +118,42 @@ Spring Boot 2.x auto-configuration layer providing all built-in implementations:
 
 ```
 cn.watsontech.snapagent.boot2x/
-├── autoconfig/   SnapAgentAutoConfiguration, SnapAgentProperties
+├── autoconfig/   8 domain @Configuration: SecurityConfig, ToolConfig, WebConfig, PatrolConfig,
+│                 KnowledgeConfig, IssueConfig, CostConfig, WorkflowConfig + SnapAgentProperties
 ├── web/          SnapAgentController, SnapAgentFilter, AgentRequestContext, KnowledgeController, InternalTaskController
-├── llm/          AnthropicLlmClient, OpenAiLlmClient
+├── llm/          AnthropicLlmClient, OpenAiLlmClient (both extend AbstractStreamingLlmClient template method)
 ├── security/     SpringSecurityAdapter, ShiroAdapter, DefaultPrincipalResolver, InMemoryAuditStore
 ├── skill/        ClasspathSkillScanner, SkillHotReloader
-├── tool/         JdbcQueryToolProvider, RedisReadToolProvider, CodeReaderToolProvider, ProjectStructureToolProvider,
-│                 GitLogToolProvider, MetricsToolProvider, LogSearchToolProvider, TraceSearchToolProvider,
-│                 ConfigReadToolProvider, CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
-│                 TimeRangeParser, ToolPluginRegistry, mcp/McpBootstrap, mcp/McpToolProvider
-├── context/      ProjectContextExtender
-├── knowledge/    MarkdownKnowledgeSource, SimpleKeywordSearcher, KnowledgeInjector
-├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphToolProvider
+├── tool/         @Tool-annotated built-in tools: JdbcQueryTool, RedisReadTool, CodeReaderTool, ProjectStructureTool,
+│                 GitLogTool, MetricsTool, LogSearchTool, TraceSearchTool, ConfigReadTool,
+│                 CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
+│                 TimeRangeParser, ToolCallbackRegistry, mcp/McpBootstrap, mcp/McpToolCallback
+├── advisor/      ProjectContextAdvisor, KnowledgeAdvisor (replacing ProjectContextExtender / KnowledgeInjector)
+├── knowledge/    MarkdownKnowledgeSource, VectorStoreDocumentRetriever, IdentityQueryTransformer
+├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphTool
 ├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationExtractor,
 │                 TemplateSolutionSuggester, SimpleVerificationRunner
 ├── cost/         FileCostStore, BudgetEnforcer, DefaultCostTracker, CostTrackingLlmClient, CostSummaryService, CostCalculator
 ├── workflow/     YamlWorkflowLoader, SimpleWorkflowEngine
-├── conversation/ FileConversationStore
+├── memory/       FileChatMemoryRepository (ChatMemory default implementation)
 ├── patrol/       DefaultAnomalyEventListener, InMemoryAlertConverger, ScheduledPatrolScheduler, TemplateBugfixSuggester,
 │                 InMemoryPatrolReportStore, NoopPatrolLockProvider, WebhookAlertPushChannel, EmailAlertPushChannel
 ├── anchor/       AnchorOrchestrator, AnchorContext, AnchorContextSummarizer, AnchorSkillClassifier, AnchorSummaryCache
 └── routing/      PeerRouter, NoopPeerRouter, StaticPeerRouter, K8sApiPeerRouter, HeadlessDnsPeerRouter, PeerSseRelay
 ```
 
-Registered via `META-INF/spring.factories`:
+Registered via `META-INF/spring.factories` (8 domain `@Configuration` classes):
 
 ```properties
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentAutoConfiguration
+  cn.watsontech.snapagent.boot2x.autoconfig.SecurityConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.ToolConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.WebConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.PatrolConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.KnowledgeConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.IssueConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.CostConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.WorkflowConfig
 ```
 
 ### snap-agent-client
@@ -145,7 +162,7 @@ Standalone REST API client SDK based on JDK HttpURLConnection, with no Spring de
 
 ### snap-agent-demo
 
-Standalone Spring Boot demo application containing `DemoApplication`, `SecurityConfig`, and `EchoToolProvider`, used for E2E testing (`e2e-local.sh` host-direct, `e2e-docker.sh` containerized).
+Standalone Spring Boot demo application containing `DemoApplication`, `SecurityConfig`, and `EchoTool` (using `@Tool` annotation), used for E2E testing (`e2e-local.sh` host-direct, `e2e-docker.sh` containerized).
 
 ---
 
@@ -168,7 +185,7 @@ public interface LlmClient {
 }
 ```
 
-`LlmEventSink` is the event callback interface through which AgentExecutor receives LLM streaming output:
+`LlmEventSink` is the event callback interface through which `GraphExecutor` receives LLM streaming output:
 
 ```java
 public interface LlmEventSink {
@@ -181,8 +198,8 @@ public interface LlmEventSink {
 }
 ```
 
-- **Default implementations**: `AnthropicLlmClient` (Anthropic Messages API + SSE parsing), `OpenAiLlmClient` (OpenAI-compatible API)
-- **Extension point**: Implement `LlmClient` + register as a Bean to integrate Tongyi/Wenxin/Zhipu and other compatible APIs
+- **Default implementations**: `AnthropicLlmClient` (Anthropic Messages API + SSE parsing), `OpenAiLlmClient` (OpenAI-compatible API) — both extend `AbstractStreamingLlmClient`, reusing the template method for streaming connect, retry, and cancel
+- **Extension point**: Extend `AbstractStreamingLlmClient` + register as a Bean to integrate Tongyi/Wenxin/Zhipu and other compatible APIs
 
 ### 3.2 SkillRegistry / SkillLoader — Two-Layer Skill System
 
@@ -190,7 +207,7 @@ public interface LlmEventSink {
 
 ```java
 public class SkillRegistry {
-    SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills, ToolDispatcher dispatcher);
+    SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills, ToolCallbackRegistry registry);
 
     List<SkillMeta> all();           // All merged skills (custom overrides same-name builtin)
     SkillMeta get(String name);      // Lookup by name
@@ -226,23 +243,32 @@ public final class SkillMeta {
 
 - **Merge logic**: Custom skills override built-in by name; deleting a custom skill automatically restores the builtin
 - **Directory skills**: A subdirectory containing `SKILL.md` → the entire directory is one skill, only `SKILL.md` is parsed
-- **Contract validation**: `SkillRegistry` validates at startup whether the tools declared by a skill are registered in `ToolDispatcher`; missing tools degrade the skill to UNAVAILABLE
+- **Contract validation**: `SkillRegistry` validates at startup whether the tools declared by a skill are registered in `ToolCallbackRegistry`; missing tools degrade the skill to UNAVAILABLE
 
-### 3.3 ToolDispatcher / ToolProvider — Tool Plugin Architecture
+### 3.3 @Tool / @ToolParam + ToolCallback — Tool Plugin Architecture
+
+Tools are declared via the `@Tool` annotation; parameters are described via `@ToolParam`. `ToolCallback` encapsulates tool metadata and execution logic; `ToolCallbackRegistry` handles registration and routing:
 
 ```java
-public interface ToolProvider {
-    String name();                                         // Unique tool name
-    String schema();                                       // JSON Schema (Anthropic tool format)
-    ToolResult execute(Map<String, Object> args, ToolContext ctx); // Execute tool call
+@Target(ElementType.METHOD)
+public @interface Tool {
+    String name();                  // Unique tool name
+    String description() default ""; // Description (for LLM to decide when to call)
+}
+
+@Target(ElementType.PARAMETER)
+public @interface ToolParam {
+    String value();                 // Parameter name
+    String description() default "";
+    boolean required() default true;
 }
 ```
 
-`ToolDispatcher` routes tool calls by name, collecting all `ToolProvider` Beans:
+`ToolCallbackRegistry` routes tool calls by name, scanning all methods annotated with `@Tool` and constructing `ToolCallback` instances:
 
 ```java
-public class ToolDispatcher {
-    ToolDispatcher(Collection<ToolProvider> providerList, int maxToolResultChars);
+public class ToolCallbackRegistry {
+    ToolCallbackRegistry(List<ToolCallback> callbacks, int maxToolResultChars);
 
     Set<String> availableToolNames();               // Registered tool names
     ToolResult dispatch(String name, Map<String, Object> args, ToolContext ctx); // Route execution
@@ -250,10 +276,10 @@ public class ToolDispatcher {
 }
 ```
 
-- **Auto-discovery**: Any `ToolProvider` + `@Component` Bean is automatically collected by `ToolDispatcher`
+- **Auto-discovery**: Any Bean method annotated with `@Tool` is automatically scanned and registered by `ToolCallbackRegistry`
 - **Truncation protection**: Results exceeding `maxToolResultChars` are auto-truncated with a `[truncated, total N rows]` annotation
 - **Audit callback**: `ToolContext` carries an `AuditCallback`; audit records are written asynchronously after each tool execution
-- **ToolPlugin metadata SPI** (v1.0): Provides name/version/description/toolNames metadata, exposed via `GET /tools/plugins`, does not affect tool discovery
+- **StructuredOutputConverter** (new SPI): Used to convert tool return values into structured JSON Schema
 
 ### 3.4 SecurityGateway / PrincipalResolver — Permission Model
 
@@ -273,31 +299,26 @@ public interface PrincipalResolver {
 - **Permission check**: `hasPermission` iterates `GrantedAuthority` for exact matching (no wildcards)
 - **Extension point**: Host declares a custom `SecurityGateway` Bean to replace (`@ConditionalOnMissingBean`)
 
-### 3.5 KnowledgeBase / KnowledgeSource / KnowledgeSearcher — Business Knowledge
+### 3.5 RAG Pipeline — VectorStore / VectorStoreDocumentRetriever / IdentityQueryTransformer
+
+Knowledge retrieval is composed of two SPIs (`VectorStore`, `EmbeddingModel`) plus two named classes (`VectorStoreDocumentRetriever`, `IdentityQueryTransformer`) forming the RAG pipeline:
 
 ```java
-public interface KnowledgeSource {
-    List<KnowledgeFragment> load();  // Load knowledge fragments
-    void reload();                    // Hot reload
-    String type();                    // Source type identifier
+public interface VectorStore {
+    List<KnowledgeFragment> search(String query, int topK);  // Vector similarity search
+    void add(List<KnowledgeFragment> fragments);             // Write vectors
+    void reload();                                            // Reload
+    int size();                                               // Total cached fragments
 }
 
-public interface KnowledgeSearcher {
-    double score(String query, KnowledgeFragment fragment); // [0.0, 1.0] relevance score
-}
-
-public class KnowledgeBase {
-    KnowledgeBase(List<KnowledgeSource> sources, KnowledgeSearcher searcher);
-
-    List<KnowledgeFragment> search(String query, int topK, double minScore);
-    List<SearchResult> searchWithScores(String query, int topK, double minScore);
-    void reload();  // Reload all sources
-    int size();     // Total cached fragments
+public interface EmbeddingModel {
+    float[] embed(String text);  // Text → embedding vector
 }
 ```
 
-- **Default implementations**: `MarkdownKnowledgeSource` (segments by `##` headings), `SimpleKeywordSearcher` (mixed Chinese/English tokenization + keyword overlap scoring)
-- **Extension point**: Custom `KnowledgeSource` (database/Confluence/API) or `KnowledgeSearcher` (vector embedding semantic search)
+- **Default implementations**: `VectorStoreDocumentRetriever` (Markdown document segmentation + vector search), `IdentityQueryTransformer` (passes user query through unchanged)
+- **Pipeline flow**: `IdentityQueryTransformer` transforms query → `EmbeddingModel` embeds → `VectorStoreDocumentRetriever` retrieves → returns `KnowledgeFragment` list
+- **Extension point**: Custom `VectorStore` (Pinecone/Milvus/PGVector) or `EmbeddingModel` (OpenAI/Zhipu Embedding)
 
 ### 3.6 CodeGraph / CodeGraphBuilder / CodeGraphIndex — Code Knowledge Graph
 
@@ -375,14 +396,9 @@ public interface CostStore {
 - **Cost capture**: `CostTrackingLlmClient` decorates the original `LlmClient`, capturing token usage via `LlmEventSink.onUsage()`
 - **Extension point**: Implement `CostStore` to store cost records in a database
 
-### 3.9 WorkflowEngine / WorkflowDefinition — Workflow Orchestration
+### 3.9 WorkflowDefinition — Workflow Orchestration (engine impl pluggable)
 
 ```java
-public interface WorkflowEngine {
-    WorkflowResult execute(WorkflowDefinition workflow, Map<String, String> triggerInputs);
-    String type();
-}
-
 public final class WorkflowDefinition {
     String getName();                          // Workflow name
     String getDescription();                    // Description
@@ -390,39 +406,45 @@ public final class WorkflowDefinition {
 }
 ```
 
-- **Default implementations**: `SimpleWorkflowEngine` (sequential execution + conditional branching) + `YamlWorkflowLoader` (SnakeYAML parsing)
+- **Default implementations**: `SimpleWorkflowEngine` (sequential execution + conditional branching, in starter module) + `YamlWorkflowLoader` (SnakeYAML parsing)
 - **Condition syntax**: `${step.result != null}`, `${step.result.contains('text')}`, `${step.result.size > 0}`
 - **Variable references**: `${trigger.xxx}` (trigger inputs), `${step.result}` (preceding step result)
-- **Extension point**: Implement `WorkflowEngine` to support DAG parallelism/human approval
+- **Extension point**: Use graph runtime's `StateGraph` for DAG parallelism/human approval
 
-### 3.10 ConversationStore — Session History
+### 3.10 ChatMemory / ChatMemoryRepository — Session History (new SPI, replaces ConversationStore)
 
 ```java
-public interface ConversationStore {
-    Conversation save(Conversation conversation);              // Save/update (auto-generates ID)
-    Conversation load(String conversationId, String userId);  // Load (with ownership check)
-    List<ConversationSummary> list(String userId, String skillId); // List (optional skill filter)
-    boolean delete(String conversationId, String userId);      // Delete (with ownership check)
-    String exportMarkdown(String conversationId, String userId); // Export as Markdown
+public interface ChatMemory {
+    void add(String conversationId, Message message);              // Append message
+    List<Message> get(String conversationId);                      // Load all messages
+    void clear(String conversationId);                             // Clear
+}
+
+public interface ChatMemoryRepository {
+    String save(Conversation conversation);                        // Save (auto-generates ID)
+    Conversation load(String conversationId, String userId);      // Load (with ownership check)
+    List<ConversationSummary> list(String userId, String skillId); // List
+    boolean delete(String conversationId, String userId);          // Delete (with ownership check)
+    String exportMarkdown(String conversationId, String userId);  // Export as Markdown
 }
 ```
 
-- **Default implementation**: `FileConversationStore` (JSON storage in `{upload-skills-dir}/conversations/{userId}/`)
+- **Default implementation**: `FileChatMemoryRepository` (JSON storage in `{upload-skills-dir}/conversations/{userId}/`)
 - **Ownership isolation**: All methods take a `userId` parameter to prevent cross-user access
-- **Extension point**: Implement `ConversationStore` to store conversations in a database
+- **Extension point**: Implement `ChatMemoryRepository` to store conversations in a database
 
-### 3.11 SystemPromptExtender — Context Injection
+### 3.11 Advisor — Context Injection & Interception (replaces SystemPromptExtender)
 
 ```java
-public interface SystemPromptExtender {
-    String extend(SkillMeta skill, AgentTask task); // Returns context text to append to system prompt
+public interface Advisor {
+    String advise(SkillMeta skill, AgentTask task); // Returns context text to append to system prompt
 }
 ```
 
-AgentExecutor supports `List<SystemPromptExtender>` (v0.7), ordered by Spring `@Order`:
+`GraphExecutor` supports `List<Advisor>`, ordered by Spring `@Order`:
 
-1. `ProjectContextExtender` (v0.3): Scans project structure at startup, injects module/Java file count/key directory summary
-2. `KnowledgeInjector` (v0.7): Retrieves knowledge fragments from the knowledge base based on user query, injects matching business knowledge
+1. `ProjectContextAdvisor` (replacing `ProjectContextExtender`): Scans project structure at startup, injects module/Java file count/key directory summary
+2. `KnowledgeAdvisor` (replacing `KnowledgeInjector`): Retrieves knowledge fragments via the RAG pipeline based on user query, injects matching business knowledge
 
 Both work independently, each retrieving and injecting, then concatenated into the complete system prompt context.
 
@@ -430,7 +452,7 @@ Both work independently, each retrieving and injecting, then concatenated into t
 
 ## 4. Agent Execution Loop
 
-`AgentExecutor` is SnapAgent's core execution engine, driving the interaction loop between the LLM and tools.
+`GraphExecutor` is SnapAgent's core execution engine, based on `StateGraph` to drive the interaction loop between the LLM and tools. `ReActGraphFactory` constructs the graph structure; nodes include `EntryNode`, `AgentNode`, `ToolsNode`.
 
 ### Execution Flow
 
@@ -438,19 +460,19 @@ Both work independently, each retrieving and injecting, then concatenated into t
 User request → POST /runs
     │
     ▼
-AgentExecutor.execute(task, skill)
+GraphExecutor.execute(task, skill)  ← StateGraph built by ReActGraphFactory
     │
     ├─ 1. Build system prompt
-    │   ├─ READ_ONLY_PREFIX (read-only constraints + Phase troubleshooting instructions)
+    │   ├─ READ_ONLY_PREFIX or READ_WRITE_PREFIX (determined by SkillMode enum: READ_ONLY / READ_WRITE)
     │   ├─ skill.getName() + skill.getDescription()
     │   ├─ skill.getBody() (Phase troubleshooting body, {key} placeholders kept as references)
     │   ├─ INPUT_REF_INSTRUCTION (explains how {key} references are resolved)
     │   ├─ userId
-    │   └─ Iterate List<SystemPromptExtender>.extend() → append context
+    │   └─ Iterate List<Advisor>.advise() → append context
     │
-    ├─ 2. Build tools array (parse each ToolProvider.schema() JSON)
+    ├─ 2. Build tools array (parse each ToolCallback's JSON Schema from ToolCallbackRegistry)
     │
-    ├─ 3. Build messages (history messages + user input message)
+    ├─ 3. Build messages (via MessagePartitioner: partitioned history + user input message)
     │   └─ buildInputMessage(): <user_inputs>key=value</user_inputs> (injection-proof isolation)
     │
     ▼
@@ -464,7 +486,7 @@ AgentExecutor.execute(task, skill)
 │     └─ onStop → record stopReason                                     │
 │     └─ onError → record errorMessage                                  │
 │                                                                       │
-│  6. llmClient.stream(req, collector, taskId)                          │
+│  6. AgentNode → llmClient.stream(req, collector, taskId)             │
 │                                                                       │
 │  7. Error handling                                                    │
 │     ├─ CANCELLED → record "task cancelled", return                    │
@@ -476,10 +498,10 @@ AgentExecutor.execute(task, skill)
 │     └─ stopReason == "end_turn" || toolUses.isEmpty()                │
 │        → task.setReport(thoughts), SUCCEEDED, done event, return      │
 │                                                                       │
-│  9. Tool calls                                                        │
+│  9. ToolsNode → Tool calls                                           │
 │     ├─ messages.add(Message.assistant(thoughts, toolUseBlocks))      │
 │     ├─ for each toolUse:                                              │
-│     │   ├─ ToolDispatcher.dispatch(name, input, ctx)                │
+│     │   ├─ ToolCallbackRegistry.dispatch(name, input, ctx)         │
 │     │   ├─ transcript.add(toolCall event)                            │
 │     │   ├─ transcript.add(toolResult event)                          │
 │     │   └─ messages.add(Message.toolResult(id, serializedResult))   │
@@ -532,7 +554,7 @@ The main controller, mounted under `${snap-agent.base-path:/snap-agent}`, provid
 | `/skills/upload` | POST | Upload a single skill file |
 | `/skills/upload-folder` | POST | Upload skill directory (multiple files) |
 | `/tools` | GET | List registered tools |
-| `/tools/plugins` | GET | List tool plugin metadata |
+| `/tools/plugins` | GET | List tool callback metadata (`@Tool` annotation info) |
 | `/models` | GET | List available LLM models |
 | `/runs` | POST | Create and start a diagnostic task |
 | `/runs` | GET | List tasks |
@@ -723,12 +745,16 @@ Enterprise projects may store permissions in a principal's custom field (e.g., `
 
 ### Master Switch
 
+The former `SnapAgentAutoConfiguration` god-class has been decomposed into 8 domain `@Configuration` classes, each responsible for one functional domain's Bean assembly. The master switch is held by `SecurityConfig`:
+
 ```java
 @Configuration
 @ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(SnapAgentProperties.class)
-public class SnapAgentAutoConfiguration { ... }
+public class SecurityConfig { ... }
 ```
+
+The other 7: `ToolConfig`, `WebConfig`, `PatrolConfig`, `KnowledgeConfig`, `IssueConfig`, `CostConfig`, `WorkflowConfig`.
 
 Default `snap-agent.enabled = false`; the starter has zero impact when on the classpath but not activated.
 
@@ -797,14 +823,14 @@ Nearly all default implementation Beans are annotated with `@ConditionalOnMissin
 // Default implementation — host can replace
 @Bean
 @ConditionalOnMissingBean
-public ConversationStore conversationStore(SnapAgentProperties props) {
-    return new FileConversationStore(props.getUploadSkillsDir());
+public ChatMemoryRepository chatMemoryRepository(SnapAgentProperties props) {
+    return new FileChatMemoryRepository(props.getUploadSkillsDir());
 }
 
 // Host replaces with a database implementation
 @Bean
-public ConversationStore conversationStore(DataSource dataSource) {
-    return new JdbcConversationStore(dataSource);
+public ChatMemoryRepository chatMemoryRepository(DataSource dataSource) {
+    return new JdbcChatMemoryRepository(dataSource);
 }
 ```
 
@@ -817,23 +843,23 @@ public ConversationStore conversationStore(DataSource dataSource) {
 public LlmClient llmClient(SnapAgentProperties props) {
     String apiType = props.getLlm().getApiType();
     if ("openai".equalsIgnoreCase(apiType)) {
-        return new OpenAiLlmClient(...);  // Tongyi/Wenxin/Zhipu and other compatible APIs
+        return new OpenAiLlmClient(...);  // Tongyi/Wenxin/Zhipu, extends AbstractStreamingLlmClient
     }
-    return new AnthropicLlmClient(...);    // Default: Anthropic
+    return new AnthropicLlmClient(...);    // Default: Anthropic, extends AbstractStreamingLlmClient
 }
 ```
 
-### AgentExecutor Assembly
+### GraphExecutor Assembly
 
 ```java
 @Bean
 @ConditionalOnMissingBean
-public AgentExecutor agentExecutor(
+public GraphExecutor graphExecutor(
         ObjectProvider<LlmClient> llmClientProvider,
-        ToolDispatcher toolDispatcher,
+        ToolCallbackRegistry toolCallbackRegistry,
         TaskStore taskStore,
         SnapAgentProperties props,
-        ObjectProvider<SystemPromptExtender> extenderProvider,    // Collects all extenders
+        ObjectProvider<Advisor> advisorProvider,    // Collects all advisors
         ObjectProvider<CostTracker> costTrackerProvider,
         ObjectProvider<CostCalculator> costCalculatorProvider) {
 
@@ -842,9 +868,11 @@ public AgentExecutor agentExecutor(
     if (llmClient != null && costTracker != null && props.getCost().isEnabled()) {
         llmClient = new CostTrackingLlmClient(llmClient, costTracker, costCalculator, ...);
     }
-    // Collect all SystemPromptExtenders (ordered by @Order)
-    List<SystemPromptExtender> extenders = extenderProvider.orderedStream().collect(...);
-    return new AgentExecutor(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, extenders);
+    // Collect all Advisors (ordered by @Order, replacing SystemPromptExtender)
+    List<Advisor> advisors = advisorProvider.orderedStream().collect(...);
+    // ReActGraphFactory constructs StateGraph, injecting EntryNode / AgentNode / ToolsNode
+    ReActGraphFactory factory = new ReActGraphFactory(llmClient, toolCallbackRegistry, maxTurns, maxTokens, advisors);
+    return new GraphExecutor(factory, taskStore);
 }
 ```
 
@@ -854,17 +882,18 @@ public AgentExecutor agentExecutor(
 
 | Version | Deliverable | Key SPI/Components |
 |---------|------------|-------------------|
-| v0.1-alpha | Core SPI + LLM + basic tools | AgentExecutor, LlmClient, SkillRegistry, ToolDispatcher, JdbcQueryToolProvider, RedisReadToolProvider |
+| v0.1-alpha | Core SPI + LLM + basic tools | GraphExecutor, StateGraph, LlmClient, SkillRegistry, ToolCallbackRegistry, JdbcQueryTool, RedisReadTool |
 | v0.2 | Framework enhancements | SnapAgentFilter, AgentRequestContext, cross-pod routing subsystem (PeerRouter/PeerSseRelay) |
-| v0.3 | Code understanding | SystemPromptExtender, CodePathGuard, code_read/project_structure/git_log tools, ProjectContextExtender |
+| v0.3 | Code understanding | Advisor SPI, CodePathGuard, code_read/project_structure/git_log tools, ProjectContextAdvisor |
 | v0.4 | Ops diagnostics | ObservabilityHttpClient, TimeRangeParser, metrics_query/log_search/trace_search/config_read tools |
 | v0.5 | Proactive monitoring & push | AlertConverger, AnomalyEventListener, ScheduledPatrolScheduler, patrol skills |
 | v0.6 | Platform | DataSourceRegistry (multi-env), SkillMeta.requiredPermission (skill-level permissions), snap-agent-client REST SDK |
-| v0.7 | Embedded knowledge base | KnowledgeBase, KnowledgeSource, KnowledgeSearcher, KnowledgeInjector (multi-SystemPromptExtender) |
-| v0.8 | Code knowledge graph | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphToolProvider |
+| v0.7 | Embedded knowledge base | VectorStore, EmbeddingModel, VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeAdvisor (multi-Advisor) |
+| v0.8 | Code knowledge graph | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphTool |
 | v0.9 | Issue closure loop | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
-| v1.0 | Plugins + workflows + cost | ToolPlugin, WorkflowEngine, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage() |
-| v1.1 | Proactive monitoring SPI + Anchor Q&A | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (page-section anchor Q&A + smart skill routing + pre-summary cache) |
+| v1.0 | Workflows + cost + annotated tools | WorkflowDefinition, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage(), @Tool/@ToolParam, ToolCallback |
+| v1.1 | Proactive monitoring SPI + Anchor Q&A | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), VectorStore.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (page-section anchor Q&A + smart skill routing + pre-summary cache) |
+| v1.2 | Graph runtime + architecture refactor | StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys, MessagePartitioner, AbstractStreamingLlmClient, 8 domain @Configuration split, ChatMemory/ChatMemoryRepository, CheckpointStore, StructuredOutputConverter |
 
 ---
 
@@ -876,30 +905,31 @@ public AgentExecutor agentExecutor(
 |------------|-------------|
 | In-memory only | TaskStore is backed by ConcurrentHashMap; all tasks and transcripts are lost on process restart |
 | Java 8 + Spring Boot 2.x | Uses javax.servlet; does not support Spring Boot 3.x (jakarta.servlet) |
-| No vector search | Knowledge base uses keyword overlap scoring by default; no embedding-based semantic search |
+| Vector search requires EmbeddingModel | Default RAG pipeline uses keyword search; vector semantic search only available after plugging in an EmbeddingModel |
 | Regex-based code graph | SimpleCodeGraphBuilder uses regex; comments may cause false positives, overloads are not distinguished, lambdas may be missed |
 | No Spring Cloud dependency | Cross-pod routing self-implements K8s API/DNS discovery; does not depend on a service discovery framework |
 | SSE limitation | EventSource does not support custom headers; SSE endpoint requires permitAll + token query param |
 | Exact permission matching | SpringSecurityAdapter.hasPermission() matches authorities exactly; no wildcard/role inheritance support |
-| Sequential workflows | SimpleWorkflowEngine executes sequentially; no parallelism/DAG/human approval support |
+| Sequential workflows | SimpleWorkflowEngine executes sequentially; no parallelism/DAG/human approval support (use StateGraph for custom) |
 
 ### SPI Extension Guide
 
 | SPI | Default Implementation | How to Extend |
 |-----|----------------------|---------------|
-| `LlmClient` | AnthropicLlmClient / OpenAiLlmClient | Implement `LlmClient` + `@Component`; configure `api-type` to select |
-| `ToolProvider` | JdbcQueryToolProvider etc. | Implement `ToolProvider` + `@Component`; auto-collected by ToolDispatcher |
+| `LlmClient` | AnthropicLlmClient / OpenAiLlmClient (extend AbstractStreamingLlmClient) | Extend `AbstractStreamingLlmClient` + `@Component`; configure `api-type` to select |
+| `ToolCallback` | Built-in `@Tool`-annotated tools | Annotate a Bean method with `@Tool` + `@ToolParam`; auto-scanned by `ToolCallbackRegistry` |
 | `SecurityGateway` | SpringSecurityAdapter / ShiroAdapter | Implement and declare as Bean; `@ConditionalOnMissingBean` takes effect |
 | `PrincipalResolver` | DefaultPrincipalResolver | Implement `PrincipalResolver` + `@Component` |
-| `KnowledgeSource` | MarkdownKnowledgeSource | Implement `KnowledgeSource` + `@Component` (database/API/Confluence) |
-| `KnowledgeSearcher` | SimpleKeywordSearcher | Implement `KnowledgeSearcher` + `@Component` (vector embedding semantic search) |
+| `Advisor` | ProjectContextAdvisor / KnowledgeAdvisor | Implement `Advisor` + `@Component` (custom context injection and interception) |
+| `VectorStore` | VectorStoreDocumentRetriever | Implement `VectorStore` + `@Component` (Pinecone/Milvus/PGVector) |
+| `EmbeddingModel` | Built-in keyword matching (no vectors) | Implement `EmbeddingModel` + `@Component` (OpenAI/Zhipu Embedding) |
+| `ChatMemoryRepository` | FileChatMemoryRepository | Implement `ChatMemoryRepository` + `@Component` (database storage) |
 | `CodeGraphBuilder` | SimpleCodeGraphBuilder | Implement `CodeGraphBuilder` + `@Component` (JavaParser AST) |
 | `CodeGraphIndex` | InMemoryCodeGraphIndex | Implement `CodeGraphIndex` + `@Component` (SQLite/H2 persistence) |
 | `IssueStore` | FileIssueStore | Implement `IssueStore` + `@Component` (database storage) |
 | `IssueTracker` | NoopIssueTracker | Implement `IssueTracker` + `@Component` (Jira/GitHub Issues) |
 | `CostStore` | FileCostStore | Implement `CostStore` + `@Component` (database storage) |
-| `WorkflowEngine` | SimpleWorkflowEngine | Implement `WorkflowEngine` + `@Component` (DAG parallelism/human approval) |
-| `ConversationStore` | FileConversationStore | Implement `ConversationStore` + `@Component` (database storage) |
-| `SystemPromptExtender` | ProjectContextExtender / KnowledgeInjector | Implement `SystemPromptExtender` + `@Component` (custom context injection) |
+| `CheckpointStore` | In-memory implementation | Implement `CheckpointStore` + `@Component` (StateGraph checkpoint persistence) |
+| `StructuredOutputConverter` | Default JSON converter | Implement `StructuredOutputConverter` + `@Component` (custom tool return value structuring) |
 
 All extensions take effect via the Spring `@ConditionalOnMissingBean` mechanism: Beans declared by the host take precedence over default implementations, with no need to modify SnapAgent source code.

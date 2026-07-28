@@ -10,7 +10,7 @@ public interface LlmClient {
 
 public record LlmRequest(
     List<Message> messages,     // 含 system + 历史 + 新 tool_result
-    List<ToolDef> tools,        // ToolDispatcher 提供的 schema
+    List<ToolDef> tools,        // ToolCallbackRegistry 提供的 schema
     String model,               // per-run 覆盖后的最终 model
     int maxTokens,
     boolean streaming
@@ -27,7 +27,7 @@ public record LlmRequest(
 - Body：`{ model, max_tokens, system, messages, tools, stream:true }`
 - 流式：OkHttp `Call` + `ResponseBody.source()` 逐行读 SSE `event:`/`data:`，按 Anthropic streaming 协议累积 `content_block_delta`。
 
-### 事件映射（→ LlmEventSink → AgentExecutor → SSE transcript）
+### 事件映射（→ LlmEventSink → GraphExecutor → SSE transcript）
 | Anthropic 事件 | 处理 |
 |----------------|------|
 | `message_start` | 初始化 message 累积器 |
@@ -35,7 +35,7 @@ public record LlmRequest(
 | `content_block_delta` (text_delta) | 累积 + 推 thought 事件 |
 | `content_block_start` (type=tool_use) | 新开 tool_use 累积（id/name/input） |
 | `content_block_delta` (input_json_delta) | 累积 partial JSON |
-| `content_block_stop` | 完成当前 block（text→thought 事件；tool_use→交 ToolDispatcher） |
+| `content_block_stop` | 完成当前 block（text→thought 事件；tool_use→交 ToolsNode） |
 | `message_delta` (stop_reason) | 记录 stop_reason |
 | `message_stop` | 流结束 |
 | `error` | 推 error 事件，task 标 FAILED |
@@ -58,7 +58,7 @@ snap-agent:
     streaming: true
 ```
 
-- `api-key` 空 → `LlmClient` bean `@ConditionalOnProperty(api-key)` 不满足 → 不装配 → `AgentExecutor` 缺 LlmClient → 所有 skill 标 UNAVAILABLE。starter 不崩，日志 ERROR 提示。
+- `api-key` 空 → `LlmClient` bean `@ConditionalOnProperty(api-key)` 不满足 → 不装配 → `GraphExecutor` 缺 LlmClient → 所有 skill 标 UNAVAILABLE。starter 不崩，日志 ERROR 提示。
 - `base-url` 可指向企业内代理网关（如 `https://llm-gateway.corp/anthropic`）。
 
 ## 4. per-run model 覆盖 + 服务端强制白名单（决策 #7）
@@ -74,7 +74,7 @@ POST /runs { skillId, inputs, model?: "claude-opus-4-6" }
   ▼ 注入 AgentTask
 task.model = 最终 model（per-run，无 session 持久）
   │
-  ▼ AgentExecutor 每轮调 LlmClient
+  ▼ GraphExecutor 每轮调 LlmClient
 LlmRequest.model = task.model
 ```
 
@@ -100,7 +100,7 @@ LlmRequest.model = task.model
 
 ## 7. 风险
 
-- **LLM 幻觉工具名/参数**：见 [03](03-agent-engine.md) §9，`ToolDispatcher` 名单外工具返回 not-found。
+- **LLM 幻觉工具名/参数**：见 [03](03-agent-engine.md) §9，`ToolCallbackRegistry` 名单外工具返回 not-found。
 - **流式中断**：网络抖动断流 → OkHttp 抛 IOException → 该轮失败 → task FAILED + SSE error。不自动重试（避免重复计费/重复副作用；只读查询本可重试，但 Phase 1 不做，由用户重新发起 run）。
 - **max-tokens 不足**：复杂 skill 报告超 max-tokens 被截断 → stop_reason=`max_tokens`。可 yml 调大，注意成本。
 - **网关配额**：多用户并发跑 → LLM 网关限流。靠线程池 max=4 + 每用户并发 1 兜底。

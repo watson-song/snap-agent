@@ -1,6 +1,11 @@
 # SnapAgent 自定义 Plugin 开发指南
 
 > 版本：v0.5 | 更新日期：2026-07-22
+>
+> **架构说明：** 工具注册模型已演进。工具现在通过 `@Component` 类中的 `@Tool`
+> 注解方法声明（参数使用 `@ToolParam`），`ToolCallbackRegistry` 替代了 `ToolDispatcher`。
+> `AgentExecutor` 被 `GraphExecutor` 替代。以下旧版 `ToolProvider` SPI 代码示例保留
+> 以兼容现有实现；新集成应使用 `@Tool`/`@ToolParam` 注解模型。
 
 本指南介绍如何为 SnapAgent 开发自定义 Plugin —— 从项目生成到打包、上传、配置和测试的完整流程。
 
@@ -8,11 +13,11 @@
 
 ## 1. 核心概念
 
-### Plugin = 1 个 ToolProvider + 元数据声明
+### Plugin = 1 个 @Tool + 元数据声明
 
 SnapAgent 的 Plugin 是一个可热插拔的工具单元。每个 Plugin 包含:
 
-- **1 个 `ToolProvider` 实现** —— 提供 `name()`、`schema()`、`execute()` 三个方法
+- **1 个 `@Tool` 注解方法**（在 `@Component` 类中；旧版为 `ToolProvider` 实现，提供 `name()`、`schema()`、`execute()` 三个方法）
 - **元数据声明** —— 通过 `@ToolPluginAnnotation` 注解 (优先) 或 `plugin-info.yml` (备用) 声明
 
 ### toolType vs pluginId
@@ -22,7 +27,7 @@ SnapAgent 的 Plugin 是一个可热插拔的工具单元。每个 Plugin 包含
 | `toolType` | LLM 调用时看到的工具名。一个 toolType 可有多个 Plugin | `log_read` |
 | `pluginId` | Plugin 的唯一标识 | `remote-log`、`local-log` |
 
-LLM 不感知 plugin 的存在 —— 它只看到 `toolType`。`ToolDispatcher` 按 `pluginOverrides` 或默认 Plugin 路由到具体实现。
+LLM 不感知 plugin 的存在 —— 它只看到 `toolType`。`ToolCallbackRegistry` 按 `pluginOverrides` 或默认 Plugin 路由到具体实现。
 
 ### 1 plugin = 1 tool
 
@@ -32,10 +37,10 @@ LLM 不感知 plugin 的存在 —— 它只看到 `toolType`。`ToolDispatcher`
 
 | 类型 | 来源 | 可删除 |
 |------|------|--------|
-| system plugin | 内置 `@Component ToolProvider` bean，启动时自动包装 | 否 |
+| system plugin | 内置 `@Component` 含 `@Tool` 方法的 bean，启动时自动包装 | 否 |
 | custom plugin | 通过 `POST /tools/plugins/upload` 上传的 JAR | 是 |
 
-向后兼容: 现有 `@Component ToolProvider` bean 无需修改，启动时自动包装为 system plugin。
+向后兼容: 现有 `@Component` 含 `@Tool` 方法的 bean（或旧版 `ToolProvider` bean）无需修改，启动时自动包装为 system plugin。
 
 ---
 
@@ -73,9 +78,9 @@ my-remote-log-plugin/
 │   └── RemoteLogToolProviderTest.java
 ```
 
-### 2.2 实现 ToolProvider
+### 2.2 实现 ToolProvider（旧版 SPI — 新集成应使用 @Tool/@ToolParam）
 
-生成的 `RemoteLogToolProvider.java` 已包含基本骨架。核心是三个方法:
+生成的 `RemoteLogToolProvider.java` 已包含基本骨架。核心是三个方法（旧版 SPI；新代码应使用 `@Tool`/`@ToolParam` 注解替代）:
 
 ```java
 @ToolPluginAnnotation(
@@ -179,7 +184,7 @@ curl -X POST http://localhost:8080/skills-agent/tools/plugins/upload \
 1. JAR 保存到 `${upload-skills-dir}/plugins/{pluginId}/plugin.jar`
 2. 创建 `URLClassLoader` (parent = 主应用 ClassLoader)
 3. 扫描元数据 (`@ToolPluginAnnotation` 优先，`plugin-info.yml` 兜底)
-4. 实例化 `ToolProvider` (要求无参构造)
+4. 实例化 `ToolProvider`（旧版 SPI；`@Tool` 方法通过 `@Component` 自动发现）
 5. 构造 `PluginDescriptor` + 注册到 `PluginRegistry`
 6. 默认 `isDefault=false` —— 需主动调用 `PUT /tools/plugins/{id}/default` 设为默认
 
@@ -267,7 +272,7 @@ curl -X POST http://localhost:8080/skills-agent/runs \
 
 ```
 LLM -> tool_use(log_read, args)
-    -> ToolDispatcher.dispatch("log_read", args, ctx)
+    -> ToolCallbackRegistry.dispatch("log_read", args, ctx)
     -> ctx.pluginOverrides["log_read"] = "remote-log"
     -> registry.getPlugin("remote-log")
     -> plugin.provider.execute(args, ctx)
@@ -275,7 +280,7 @@ LLM -> tool_use(log_read, args)
 ```
 
 - LLM 只看到 `toolType` (如 `log_read`)，不感知 plugin
-- `ToolDispatcher` 先查 `ctx.pluginOverrides[toolType]`，再查 `registry.getDefault(toolType)`
+- `ToolCallbackRegistry` 先查 `ctx.pluginOverrides[toolType]`，再查 `registry.getDefault(toolType)`
 - 不传 `pluginOverrides` 时走默认 plugin —— 向后兼容
 
 ---

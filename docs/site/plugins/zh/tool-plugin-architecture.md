@@ -1,6 +1,12 @@
 # SnapAgent 工具插件架构
 
 > 版本：v1.0 | 更新日期：2026-07-17
+>
+> **架构说明：** 工具注册模型已演进。工具现在通过 `@Component` 类中的 `@Tool`
+> 注解方法声明（参数使用 `@ToolParam`），`ToolCallbackRegistry` 替代了 `ToolDispatcher`。
+> `AgentExecutor` 被 `GraphExecutor`（由 `ReActGraphFactory` 构建）替代。
+> 以下 SPI/代码示例为 v0.1–v1.0 API 的历史参考；新集成应使用
+> `@Tool`/`@ToolParam` 注解模型。
 
 ## 1. 架构概览
 
@@ -8,51 +14,55 @@ SnapAgent 采用**两层工具架构**，将工具的执行能力与元数据声
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                      AgentExecutor                        │
+│                      GraphExecutor                         │
 │   (执行循环：LLM → tool_use → dispatch → tool_result)     │
 └──────────────┬───────────────────────────┬──────────────┘
                │                           │
-   ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   ToolDispatcher       │   │  ToolPluginRegistry  │
+   ┌──────────▼─────────────┐   ┌──────────▼──────────┐
+   │  ToolCallbackRegistry   │   │  ToolPluginRegistry  │
    │   (按名路由 + 截断)      │   │  (元数据收集)          │
    │   - dispatch(name,args) │   │  - getPlugins()      │
    │   - availableToolNames()│   │  - 无条件装配           │
-   └───────────┬───────────┘   └──────────┬──────────┘
+   └──────────┬─────────────┘   └──────────┬──────────┘
                │                           │
-   ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   ToolProvider (SPI)   │   │  ToolPlugin (SPI)    │
-   │   第一层：执行 + 定义     │   │  第二层：元数据        │
-   │   - name()             │   │  - name()            │
-   │   - schema()           │   │  - version()         │
-   │   - execute() → Result │   │  - description()      │
-   └───────────────────────┘   │  - toolNames()       │
-                                └──────────────────────┘
+   ┌──────────▼─────────────┐   ┌──────────▼──────────┐
+   │  @Tool methods in       │   │  ToolPlugin (SPI)    │
+   │  @Component classes      │   │  第二层：元数据        │
+   │  第一层：执行 + 定义     │   │  - name()            │
+   │  - @Tool annotated      │   │  - version()         │
+   │  - @ToolParam params    │   │  - description()      │
+   └─────────────────────────┘   │  - toolNames()       │
+                                 └──────────────────────┘
 ```
 
 ### 两层职责分离
 
-**第一层：`ToolProvider` SPI（v0.1）**
+**第一层：`@Tool` / `@ToolParam` 注解模型**
 
-工具执行的核心 SPI。每个 `ToolProvider` 声明一个唯一的 `name()` 和 JSON Schema（Anthropic 工具格式），并提供 `execute()` 方法执行工具调用。通过 `@Component` 注解自动发现——classpath 上任何 `ToolProvider` bean 都会被 `ToolDispatcher` 收集。
+工具执行的核心模型。每个工具通过 `@Component` 类中的 `@Tool` 注解方法声明，参数使用 `@ToolParam` 注解。通过 `@Component` 注解自动发现——classpath 上任何 `@Tool` 方法都会被 `ToolCallbackRegistry` 收集。（旧版 `ToolProvider` SPI 保留向后兼容。）
 
 **第二层：`ToolPlugin` SPI（v1.0）
 
-工具插件元数据层。声明插件名称、版本、描述和贡献的工具名列表。由 `ToolPluginRegistry` 无条件收集，通过 `GET /tools/plugins` 端点暴露。**元数据层不影响工具发现**——即使不实现 `ToolPlugin`，`ToolProvider` 依然能被自动发现并执行。
+工具插件元数据层。声明插件名称、版本、描述和贡献的工具名列表。由 `ToolPluginRegistry` 无条件收集，通过 `GET /tools/plugins` 端点暴露。**元数据层不影响工具发现**——即使不实现 `ToolPlugin`，`@Tool` 方法依然能被自动发现并执行。
 
 ### 调用链路
 
 ```
-LLM → tool_use 事件 → AgentExecutor → ToolDispatcher.dispatch(name, args, ctx)
-    → ToolProvider.execute(args, ctx) → ToolResult → 回传 LLM → 继续推理
+LLM → tool_use 事件 → GraphExecutor → ToolCallbackRegistry.dispatch(name, args, ctx)
+    → @Tool 方法 execute(args, ctx) → ToolResult → 回传 LLM → 继续推理
 ```
 
 ---
 
-## 2. 核心 SPI
+## 2. 核心 SPI（旧版 — 已被 @Tool / @ToolParam 取代）
 
-### ToolProvider
+> 以下 SPI 接口为 v0.1–v1.0 工具注册模型文档。
+> 新集成应使用 `@Component` 类中的 `@Tool`/`@ToolParam` 注解；
+> `ToolCallbackRegistry` 自动发现 `@Tool` 方法并替代 `ToolDispatcher`。
 
-工具提供者 SPI，定义工具名称、JSON Schema 和执行逻辑：
+### ToolProvider（旧版 SPI）
+
+工具提供者 SPI，定义工具名称、JSON Schema 和执行逻辑。当前架构中已被 `@Tool` 注解方法取代：
 
 ```java
 public interface ToolProvider {
@@ -124,7 +134,7 @@ public final class ToolResult {
 
 ### AuditCallback
 
-工具执行后的审计回调，由 `ToolDispatcher` 在 `dispatch()` 内部调用：
+工具执行后的审计回调，由 `ToolCallbackRegistry` 在 `dispatch()` 内部调用：
 
 ```java
 public interface AuditCallback {
@@ -141,9 +151,9 @@ public interface AuditCallback {
 
 定义在 `tool` 包中，使 `ToolContext` 能携带它而不依赖 `agent` 包。Agent 层提供实现，构造 `AuditRecord` 对象。审计失败不会中断 agent 循环。
 
-### ToolDispatcher
+### ToolDispatcher（旧版 — 被 ToolCallbackRegistry 替代）
 
-按名路由 `tool_use` 调用到匹配的 `ToolProvider`：
+按名路由 `tool_use` 调用到匹配的 `ToolProvider`。当前架构中，`ToolCallbackRegistry` 解析 `@Tool` 方法替代此功能：
 
 ```java
 public class ToolDispatcher {
@@ -168,7 +178,7 @@ public class ToolDispatcher {
 ```
 
 关键行为：
-- 构造时建立不可变 Map<name, ToolProvider>，按 `ToolProvider.name()` 索引
+- 构造时建立不可变 Map<name, ToolProvider>，按 `ToolProvider.name()` 索引（`ToolCallbackRegistry` 从 `@Tool` 方法元数据构建相同的映射）
 - `dispatch()` 中捕获 `RuntimeException`，返回 `ToolResult.error()` 而非抛异常
 - 成功结果超过 `maxToolResultChars` 时，截断并附加 `[truncated, total N rows]` 后缀
 - 每次执行后调用 `AuditCallback.onToolExecuted()`（如果 ctx 中存在），审计异常被静默吞掉
@@ -197,7 +207,7 @@ public interface ToolPlugin {
 
 ## 3. 内置工具
 
-SnapAgent 提供以下内置 `ToolProvider` 实现，按功能域分组：
+SnapAgent 提供以下内置工具，按功能域分组（所示类名为旧版 `ToolProvider` 实现；当前架构中为 `@Component` 类含 `@Tool` 方法）：
 
 ### 数据诊断工具
 
@@ -267,14 +277,14 @@ public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPlug
 - `ToolPlugin` bean 按 Spring `@Order` 排序收集
 - `getPlugins()` 返回不可修改的列表视图
 
-### ToolProvider 与 ToolPlugin 的关系
+### @Tool 与 ToolPlugin 的关系
 
-| 维度 | `ToolProvider` | `ToolPlugin` |
+| 维度 | `@Tool` 方法 | `ToolPlugin` |
 |------|----------------|---------------|
 | 版本 | v0.1 起 | v1.0 起 |
 | 职责 | 提供工具定义 + 执行工具调用 | 声明插件元数据（名称/版本/描述/工具名） |
-| 发现机制 | `@Component` → `ToolDispatcher` 自动收集 | `@Component` → `ToolPluginRegistry` 自动收集 |
-| 影响执行 | 是——没有 `ToolProvider` 的工具无法被调用 | 否——纯元数据层 |
+| 发现机制 | `@Component` → `ToolCallbackRegistry` 自动收集 | `@Component` → `ToolPluginRegistry` 自动收集 |
+| 影响执行 | 是——没有 `@Tool` 方法的工具无法被调用 | 否——纯元数据层 |
 | REST 暴露 | `GET /tools`（仅工具名） | `GET /tools/plugins`（完整元数据） |
 
 一个插件可以包含多个工具（如 `CodeGraphToolProvider` 提供一个工具名 `code_graph_tools`，内部含 4 个子工具）。`ToolPlugin.toolNames()` 声明插件贡献的工具名列表，便于运维可视化。
@@ -295,7 +305,7 @@ public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPlug
 ### 执行时序
 
 ```
-  LLM                 AgentExecutor          ToolDispatcher        ToolProvider
+  LLM                 GraphExecutor          ToolCallbackRegistry  @Tool method
    │                       │                      │                     │
    │── tool_use ──────────▶│                      │                     │
    │   (name, args)        │                      │                     │
@@ -312,7 +322,7 @@ public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPlug
    │                       │── dispatch(name, ───▶│                     │
    │                       │   args, ctx)          │                     │
    │                       │                      │── 按 name 查找 ──▶   │
-   │                       │                      │   ToolProvider       │
+   │                       │                      │   @Tool method       │
    │                       │                      │                      │── execute(args, ctx)
    │                       │                      │                      │
    │                       │                      │                      │── ToolResult ──▶│
@@ -339,13 +349,13 @@ public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPlug
 ### 详细步骤
 
 1. **LLM 发出 tool_use 块**：LLM 返回的 assistant 消息包含 `tool_use` 块（工具名 + 参数 JSON），`TurnCollector` 通过 `LlmEventSink` 收集
-2. **AgentExecutor 检查 stop_reason**：若为 `tool_use`，表示 LLM 需要工具结果才能继续
+2. **GraphExecutor 检查 stop_reason**：若为 `tool_use`，表示 LLM 需要工具结果才能继续
 3. **记录 assistant 消息**：将带 `tool_use` 块的 assistant 消息加入对话列表（使下一轮请求能匹配 `tool_result` 与 `tool_use` ID）
 4. **构建 ToolContext**：`buildToolContext(task)` 创建携带 taskId、userId 和 AuditCallback 的上下文
 5. **逐个派发**：对每个 `ToolUseBlock`：
    - 记录 `tool_call` transcript 事件（toolId, toolName, input）
-   - 调用 `toolDispatcher.dispatch(name, input, ctx)`
-   - Dispatcher 按 name 查找 ToolProvider，执行 `execute(args, ctx)`
+   - 调用 `toolCallbackRegistry.dispatch(name, input, ctx)`
+   - Registry 按 name 查找 @Tool 方法，执行 `execute(args, ctx)`
    - 截断超长结果，调用 audit callback
    - 记录 `tool_result` transcript 事件（content 预览 500 字符, rowCount, truncated, durationMs, error）
    - 添加 `tool_result` message 到对话列表
@@ -399,16 +409,16 @@ SnapAgent 的工具体系从设计上保证只读安全。所有工具均**不�
 | Git 安全 | `GitLogToolProvider` 用 `ProcessBuilder` 参数列表（非 shell），`commit_hash` 正则 `^[0-9a-f]{7,40}$` 校验，10s 超时 |
 | 超时强制 | 运营工具（Metrics/LogSearch/TraceSearch）使用 `config.timeoutSeconds * 1000` 毫秒超时（默认 15s），Nacos 固定 15s |
 | 敏感脱敏 | `ConfigReadToolProvider` 对含 `password`/`secret`/`token`/`credential`/`key` 的配置值返回 `****` |
-| 结果截断 | `ToolDispatcher` 对超过 `maxToolResultChars` 的结果截断，防止 LLM context 溢出 |
+| 结果截断 | `ToolCallbackRegistry` 对超过 `maxToolResultChars` 的结果截断，防止 LLM context 溢出 |
 | 只读 HTTP | 运营工具仅使用 HTTP GET 请求，不提供 POST/PUT/DELETE |
 
 ---
 
 ## 7. 自定义工具插件
 
-### 完整示例：WeatherToolProvider
+### 完整示例：WeatherToolProvider（旧版 ToolProvider SPI — @Tool 替代方案见下方说明）
 
-实现一个调用天气 API 的自定义工具插件，展示 `ToolProvider`（执行层）和 `ToolPlugin`（元数据层）的组合使用：
+实现一个调用天气 API 的自定义工具插件，展示 `ToolProvider`（执行层，旧版）和 `ToolPlugin`（元数据层）的组合使用。新集成应使用 `@Tool`/`@ToolParam` 注解替代：
 
 ```java
 package com.example.snapagent.tools;
@@ -548,7 +558,7 @@ public class WeatherToolPlugin implements ToolPlugin {
 
 **无需任何配置**——两个类都标注 `@Component`，Spring 组件扫描会自动发现：
 
-- `WeatherToolProvider` → 被 `ToolDispatcher` 的 `ObjectProvider<ToolProvider>` 收集 → LLM 可调用 `weather_query`
+- `WeatherToolProvider` → 被 `ToolCallbackRegistry` 的 `ObjectProvider<ToolProvider>` 收集 → LLM 可调用 `weather_query`
 - `WeatherToolPlugin` → 被 `ToolPluginRegistry` 的 `ObjectProvider<ToolPlugin>` 收集 → `GET /tools/plugins` 返回此插件元数据
 
 ### JSON Schema 说明
@@ -648,7 +658,7 @@ v0.5 引入真正的 Plugin 抽象，取代 v1.0 的元数据层。新架构支�
 
 ### 9.2 核心组件
 
-ToolDispatcher 路由逻辑: dispatch(toolType, args, ctx) 先查 ctx.pluginOverrides[toolType] -> pluginId, 再查 registry.getDefault(toolType) -> pluginId, 最后 plugin.provider.execute(args, ctx)。
+ToolCallbackRegistry 路由逻辑: dispatch(toolType, args, ctx) 先查 ctx.pluginOverrides[toolType] -> pluginId, 再查 registry.getDefault(toolType) -> pluginId, 最后 plugin.provider.execute(args, ctx)。
 
 PluginRegistry 管理 plugins: Map<pluginId, PluginDescriptor>, 支持 register/unregister/enable/disable/setDefault。
 
@@ -660,11 +670,11 @@ RUNTIME retention 注解, 字段: id, toolType, displayName, description, versio
 
 ### 9.4 ToolContext 扩展
 
-ToolContext 新增 pluginOverrides (Map<toolType, pluginId>) 和 pluginContext 字段。pluginOverrides 由 POST /runs 请求体传入，dispatcher 按 override 路由。pluginContext 由 ToolDispatcher 从 PluginDescriptor 取出注入。
+ToolContext 新增 pluginOverrides (Map<toolType, pluginId>) 和 pluginContext 字段。pluginOverrides 由 POST /runs 请求体传入，dispatcher 按 override 路由。pluginContext 由 ToolCallbackRegistry 从 PluginDescriptor 取出注入。
 
 ### 9.5 Built-in 工具的透明包装
 
-启动时所有 @Component ToolProvider bean 自动包装为 system plugin: pluginId=ToolProvider.name(), toolType=ToolProvider.name(), system=true(不可 unregister), isDefault=true(每 toolType 第一个注册者)。
+启动时所有 @Component 含 @Tool 方法的 bean（旧版 ToolProvider bean）自动包装为 system plugin: pluginId=工具名, toolType=工具名, system=true(不可 unregister), isDefault=true(每 toolType 第一个注册者)。
 
 向后兼容: 现有 skill 不传 pluginOverrides -> 走 default -> 命中 system plugin -> 行为与 v1.0 完全一致。
 
@@ -680,4 +690,4 @@ ToolContext 新增 pluginOverrides (Map<toolType, pluginId>) 和 pluginContext �
 
 ### 9.7 v1.0 ToolPlugin SPI 兼容性
 
-v1.0 的 ToolPlugin 接口已被 v0.5 架构取代，但接口保留以兼容现有实现。v0.5 的 @ToolPluginAnnotation 是新的元数据声明方式。GET /tools/plugins 响应格式已扩展。迁移建议: 新 Plugin 使用 @ToolPluginAnnotation + ToolProvider 实现。
+v1.0 的 ToolPlugin 接口已被 v0.5 架构取代，但接口保留以兼容现有实现。v0.5 的 @ToolPluginAnnotation 是新的元数据声明方式。GET /tools/plugins 响应格式已扩展。迁移建议: 新 Plugin 使用 @ToolPluginAnnotation + @Tool/@ToolParam 注解方法（或 ToolProvider 实现以向后兼容）。

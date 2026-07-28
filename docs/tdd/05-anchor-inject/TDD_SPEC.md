@@ -516,7 +516,7 @@ Real: AnchorInjectionCache (Caffeine 真实实例), HtmlOutputConverter (真实�
 - `docs/superpowers/specs/2026-07-25-architecture-refactor-2x-design.md`
 - `.../anchor/AnchorGraphFactory.java`、`AnchorInjectionCache.java`、`InjectionCacheEntry.java`
 - `.../converter/HtmlOutputConverter.java`
-- `.../llm/AnthropicLlmClient.java` (skipThinking)、`.../static/snap-agent/anchor.js`
+- `.../llm/AbstractStreamingLlmClient.java` (skipThinking, 模板方法基类)、`.../static/snap-agent/anchor.js`
 
 ### 12.3 术语表
 | 术语 | 定义 |

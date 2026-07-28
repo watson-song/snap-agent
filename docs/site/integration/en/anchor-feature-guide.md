@@ -193,7 +193,7 @@ See [§Configuration Reference](#configuration-reference) below for full details
     - Picks up summary from preprocess result or cache (long content auto-summarized, short content used as-is)
     - Picks up `ClassifyResult` from preprocess (confidence ≥ threshold → route to skill; else fall back to general LLM direct answer)
     - Builds augmented user message: page URL + anchor name + truncation flag + section content (or summary) + user question
-    - Calls `LlmClient.stream()` to stream output via SSE
+    - Calls `AbstractStreamingLlmClient.stream()` to stream output via SSE
 11. SSE streams tokens back to the drawer, conversation completes
 
 ### Context Extraction
@@ -236,7 +236,7 @@ Server-side `AnchorContextSummarizer` triggers an LLM call when content exceeds 
 1. Builds a prompt listing all `AVAILABLE` skills (name + description)
 2. LLM returns JSON: `{"skillId": "...", "confidence": 0.0..1.0, "reason": "..."}`
 3. Confidence ≥ `classifier-confidence-threshold` (default 0.5) AND `skillId` non-empty → route to that skill
-4. Confidence < threshold or no match → fall back to general LLM direct answer (still with page context, calls `LlmClient.stream()` directly)
+4. Confidence < threshold or no match → fall back to general LLM direct answer (still with page context, calls `AbstractStreamingLlmClient.stream()` directly)
 
 Classifier model can be overridden: `classifier-model` (empty = use `snap-agent.llm.model`). Failures auto-degrade silently; the user always gets a response.
 
@@ -358,7 +358,7 @@ snap-agent:
     enabled: false
 ```
 
-When disabled, `anchor.js` does not scan the DOM or render icons, `AnchorOrchestrator` is not assembled (checked in `SnapAgentAutoConfiguration` via `isEnabled() && llmClient != null`), and all anchor-related endpoints return `503 ANCHOR_DISABLED`.
+When disabled, `anchor.js` does not scan the DOM or render icons, `AnchorOrchestrator` is not assembled (checked in `WebAutoConfiguration` via `isEnabled() && llmClient != null`), and all anchor-related endpoints return `503 ANCHOR_DISABLED`.
 
 ## API Endpoints
 
@@ -438,15 +438,15 @@ snap-agent:
 
 ## Auto-configuration
 
-`SnapAgentAutoConfiguration` auto-wires `AnchorOrchestrator` and injects it into `SnapAgentController` when **both** conditions are met:
+`WebAutoConfiguration` auto-wires `AnchorOrchestrator` and injects it into `SnapAgentController` when **both** conditions are met:
 
 1. `snap-agent.anchor.enabled=true` (default true)
-2. `LlmClient` is assembled (i.e., `snap-agent.llm.base-url` and credentials are configured)
+2. `AbstractStreamingLlmClient` is assembled (i.e., `snap-agent.llm.base-url` and credentials are configured)
 
 Wiring chain:
 
 ```
-LlmClient + SnapAgentProperties.Anchor
+AbstractStreamingLlmClient + SnapAgentProperties.Anchor
         │
         ▼
 AnchorSummaryCache (Caffeine LRU + TTL)

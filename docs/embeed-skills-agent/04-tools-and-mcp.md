@@ -1,17 +1,16 @@
 # 04 — 工具与 MCP
 
-## 1. ToolProvider SPI
+## 1. @Tool / @ToolParam 注解 + ToolCallback
+
+工具通过 `@Tool` 注解声明，参数通过 `@ToolParam` 注解描述。启动时 `ToolCallbackRegistry` 扫描所有 `@Tool` 方法，构建 `ToolCallback` 实例（含 JSON Schema），供 `ToolsNode` 在 ReAct 循环中路由调用。
 
 ```java
-public interface ToolProvider {
-    /** 工具名，skill frontmatter tools 字段引用此名 */
-    String name();
-
-    /** JSON Schema，注入 LLM tools 定义（Anthropic format） */
-    String schema();
-
-    /** 执行；ctx 提供 userId/tenantId/审计回调 */
-    ToolResult execute(Map<String, Object> args, ToolContext ctx);
+@Tool(name = "mysql_query", description = "Execute a read-only SQL query.")
+public ToolResult mysqlQuery(
+        @ToolParam(name = "sql", description = "SELECT/SHOW/DESCRIBE/EXPLAIN/WITH query",
+                   required = true) String sql,
+        ToolContext ctx) {
+    // 执行逻辑
 }
 
 public record ToolResult(
@@ -23,9 +22,9 @@ public record ToolResult(
 ) {}
 ```
 
-`ToolDispatcher` 持有所有已装配 `ToolProvider`（按 `name()` 建 map），路由 `tool_use.name`。skill 加载时用 `ToolDispatcher.availableToolNames()` 做 tools 契约校验（见 [02](02-skill-loading.md) §5）。
+`ToolCallbackRegistry` 持有所有已注册 `ToolCallback`（按 tool name 建 map），路由 `tool_use.name`。skill 加载时用 `ToolCallbackRegistry.registeredToolNames()` 做 tools 契约校验（见 [02](02-skill-loading.md) §5）。
 
-## 2. JdbcQueryToolProvider
+## 2. JdbcQueryTools
 
 ### 2.1 独立只读 DSN（决策 #3）
 
@@ -94,7 +93,7 @@ SELECT password FROM drp_sys_user WHERE user_name = 'admin'
 - 存 `AgentTask.transcript`（SSE 实时推）+ ring-buffer/Redis list（`GET /runs/{id}/transcript` 可查）。
 - 审计开关：`snap-agent.security.audit-log`（默认 true）。
 
-## 3. RedisReadToolProvider
+## 3. RedisReadTools
 
 - 用 `redis-template-bean-name` 指向的 `RedisTemplate`（按名注入，见 [01](01-architecture.md) §5）。
 - 工具名：`redis_get`。
@@ -128,17 +127,17 @@ snap-agent:
 
 ### McpToolProvider
 - 启动时按 `mcp.servers` 配置，对每个 server 调 `initialize` 握手，拉取其 `tools/list`。
-- 把远端工具以 `mcp__{server}__{tool}` 名注册到 `ToolDispatcher`（与 Claude Code MCP 工具命名一致）。
+- 把远端工具以 `mcp__{server}__{tool}` 名注册到 `ToolCallbackRegistry`（与 Claude Code MCP 工具命名一致）。
 - skill frontmatter `tools` 可声明 `mcp__bdp-data-map__search_table` 等。
 - 远端工具的执行 = OkHttp POST 到 MCP server 的 endpoint，透传结果。
 - **安全**：MCP server 的只读性由该 server 自身保证，本库不保证。文档标注：接 MCP 等于信任该 server 的安全边界。
 
 ## 5. 工具装配条件矩阵
 
-| ToolProvider | 装配条件 | 缺失时 |
+| ToolCallback | 装配条件 | 缺失时 |
 |--------------|---------|--------|
-| `JdbcQueryToolProvider` | `jdbc.enabled=true` 且 bean 名指向的 DataSource 存在 | 静默不装配；声明 `mysql_query` 的 skill 标 UNAVAILABLE |
-| `RedisReadToolProvider` | `redis.enabled=true` 且 RedisTemplate bean 存在 | 同上，`redis_get` 不可用 |
+| `JdbcQueryTools` | `jdbc.enabled=true` 且 bean 名指向的 DataSource 存在 | 静默不装配；声明 `mysql_query` 的 skill 标 UNAVAILABLE |
+| `RedisReadTools` | `redis.enabled=true` 且 RedisTemplate bean 存在 | 同上，`redis_get` 不可用 |
 | `McpToolProvider` | `mcp.enabled=true`（Phase 2） | 不装配 |
 
 ## 6. 验证（验证项 #3 只读强制证明）

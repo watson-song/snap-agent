@@ -93,8 +93,8 @@ inputs:
 ```
 
 正文侧的改造（由 skill 作者完成，本库不强约束）：
-- `mcp__mysql-sit__query` → 统一工具名 `mysql_query`（本库 `JdbcQueryToolProvider` 注册名）。环境选择不再由 skill 正文判断（`env=sit` 选哪个 MCP），而由 yml 配的只读 DSN 决定（一个 DSN 对应一个环境）。skill 正文只写 SQL 与结果判断。
-- `{skuCode}` 等占位由 `AgentExecutor` 在构造 system prompt 前用 `inputs` 值替换。
+- `mcp__mysql-sit__query` → 统一工具名 `mysql_query`（本库 `JdbcQueryTools` 用 `@Tool` 注解注册名）。环境选择不再由 skill 正文判断（`env=sit` 选哪个 MCP），而由 yml 配的只读 DSN 决定（一个 DSN 对应一个环境）。skill 正文只写 SQL 与结果判断。
+- `{skuCode}` 等占位由 `GraphExecutor` 在构造 system prompt 前用 `inputs` 值替换。
 
 > 迁移非本库代码职责；本库只要求 skill 文件 frontmatter 合规即可加载。
 
@@ -115,7 +115,7 @@ inputs:
 ## 4. 启动缓存 + 手动刷新（决策 #9）
 
 ### 启动扫描
-- `SnapAgentAutoConfiguration` 装配 `SkillRegistry` 时，构造阶段**两层扫描**：
+- `SnapAgentAutoConfiguration`（thin）+ 8 domain `@Configuration`（Security, Tool, Web, Patrol, Knowledge, Issue, Cost, Workflow）装配 `SkillRegistry` 时，构造阶段**两层扫描**：
   - **内置 skill**：经 `ClasspathSkillScanner` 用 Spring 的 `ResourcePatternResolver` 扫描 `classpath:/docs/skills/**/*.md`，启动时解析一次，只读。
   - **上传 skill**：经 `FilesystemSkillScanner` 用 `Files.walkFileTree` 扫描文件系统 `upload-skills-dir`，刷新时重新扫描，读写。
 - **目录 skill 扫描规则**：`preVisitDirectory` 检查目录下是否存在 `SKILL.md`；若存在，仅解析 `SKILL.md` 并跳过子树（`SKIP_SUBTREE`），整个目录视为一个 skill；若不存在，视为组织性目录，递归进入子目录继续扫描。
@@ -139,11 +139,11 @@ inputs:
 
 ## 5. tools 契约校验与 unavailable 标记（决策 #11）
 
-加载每个 skill 时，`SkillRegistry` 交叉校验 `frontmatter.tools` 与**已装配的 ToolProvider 名单**：
+加载每个 skill 时，`SkillRegistry` 交叉校验 `frontmatter.tools` 与**已注册的 `ToolCallback` 名单**（由 `ToolCallbackRegistry` 管理）：
 
 ```
 SkillMeta.tools = [mysql_query, redis_get]
-已装配 ToolProvider 名单 = { mysql_query }   # redis 未配/缺 RedisTemplate
+已注册 ToolCallback 名单 = { mysql_query }   # redis 未配/缺 RedisTemplate
 → redis_get 缺失 → availability = UNAVAILABLE
 → unavailableReason = "tool 'redis_get' not available (redis disabled or no RedisTemplate)"
 ```
@@ -181,7 +181,7 @@ SkillMeta.tools = [mysql_query, redis_get]
 ## 6. 占位符替换（决策 #12）
 
 - `inputs` frontmatter 是**唯一**的参数契约。**不再**从正则启发式提取 `{xxx}` 占位符。
-- `AgentExecutor` 在构造 system prompt 前，用用户提交的 `inputs` 值替换正文 `{key}`：
+- `GraphExecutor` 在构造 system prompt 前，用用户提交的 `inputs` 值替换正文 `{key}`：
   - 简单字符串替换：`body.replace("{" + key + "}", value)`。
   - 缺失的 required input → POST /runs 在入口即 400，不会进 agent 循环。
   - 未提供的 optional input → 替换为空字符串 `""`（与现有 skill 的 `IF('{warehouseCode}' = '', ...)` SQL 惯用法兼容）。

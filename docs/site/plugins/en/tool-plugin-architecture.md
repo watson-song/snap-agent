@@ -1,6 +1,13 @@
 # SnapAgent Tool Plugin Architecture
 
 > Version: v1.0 | Updated: 2026-07-17
+>
+> **Architecture Note:** The tool registration model has evolved. Tools are now
+> declared via `@Tool` annotated methods in `@Component` classes (with `@ToolParam`
+> for parameters), and `ToolCallbackRegistry` replaces `ToolDispatcher`. The
+> `AgentExecutor` is replaced by `GraphExecutor` (built by `ReActGraphFactory`).
+> The SPI/code examples below document the v0.1–v1.0 API for historical reference;
+> new integrations should use the `@Tool`/`@ToolParam` annotation model.
 
 ## 1. Architecture Overview
 
@@ -8,52 +15,56 @@ SnapAgent uses a **two-layer tool architecture** that separates tool execution c
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                      AgentExecutor                        │
+│                      GraphExecutor                         │
 │   (execution loop: LLM → tool_use → dispatch → result)    │
 └──────────────┬───────────────────────────┬──────────────┘
                │                           │
-   ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   ToolDispatcher       │   │  ToolPluginRegistry  │
-   │   (name routing +      │   │  (metadata collector) │
-   │    truncation)          │   │  - getPlugins()      │
-   │   - dispatch(name,args) │   │  - unconditional      │
-   │   - availableToolNames()│   │    assembly           │
-   └───────────┬───────────┘   └──────────┬──────────┘
+   ┌──────────▼─────────────┐   ┌──────────▼──────────┐
+   │  ToolCallbackRegistry   │   │  ToolPluginRegistry  │
+   │   (name routing +       │   │  (metadata collector) │
+   │    truncation)           │   │  - getPlugins()      │
+   │   - dispatch(name,args)  │   │  - unconditional      │
+   │   - availableToolNames() │   │    assembly           │
+   └──────────┬─────────────┘   └──────────┬──────────┘
                │                           │
-   ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   ToolProvider (SPI)   │   │  ToolPlugin (SPI)    │
-   │   Layer 1: exec + def   │   │  Layer 2: metadata   │
-   │   - name()             │   │  - name()            │
-   │   - schema()           │   │  - version()         │
-   │   - execute() → Result │   │  - description()      │
-   └───────────────────────┘   │  - toolNames()       │
-                                └──────────────────────┘
+   ┌──────────▼─────────────┐   ┌──────────▼──────────┐
+   │  @Tool methods in       │   │  ToolPlugin (SPI)    │
+   │  @Component classes      │   │  Layer 2: metadata   │
+   │  Layer 1: exec + def    │   │  - name()            │
+   │  - @Tool annotated      │   │  - version()         │
+   │  - @ToolParam params    │   │  - description()      │
+   └─────────────────────────┘   │  - toolNames()       │
+                                 └──────────────────────┘
 ```
 
 ### Two-Layer Responsibility Separation
 
-**Layer 1: `ToolProvider` SPI (v0.1)**
+**Layer 1: `@Tool` / `@ToolParam` annotation model**
 
-The core SPI for tool execution. Each `ToolProvider` declares a unique `name()` and JSON Schema (Anthropic tool format), and provides an `execute()` method to process tool calls. Auto-discovered via `@Component` — any `ToolProvider` bean on the classpath is collected by `ToolDispatcher`.
+The core tool execution model. Each tool is declared as an `@Tool` annotated method in a `@Component` class, with parameters annotated via `@ToolParam`. Auto-discovered via `@Component` — any `@Tool` method on the classpath is collected by `ToolCallbackRegistry`. (Legacy `ToolProvider` SPI is retained for backward compatibility.)
 
 **Layer 2: `ToolPlugin` SPI (v1.0)**
 
-The tool plugin metadata layer. Declares plugin name, version, description, and the list of tool names contributed. Collected unconditionally by `ToolPluginRegistry` and exposed via the `GET /tools/plugins` endpoint. **The metadata layer does not affect tool discovery** — even without implementing `ToolPlugin`, a `ToolProvider` is still auto-discovered and executable.
+The tool plugin metadata layer. Declares plugin name, version, description, and the list of tool names contributed. Collected unconditionally by `ToolPluginRegistry` and exposed via the `GET /tools/plugins` endpoint. **The metadata layer does not affect tool discovery** — even without implementing `ToolPlugin`, a `@Tool` method is still auto-discovered and executable.
 
 ### Call Chain
 
 ```
-LLM → tool_use event → AgentExecutor → ToolDispatcher.dispatch(name, args, ctx)
-    → ToolProvider.execute(args, ctx) → ToolResult → back to LLM → continue reasoning
+LLM → tool_use event → GraphExecutor → ToolCallbackRegistry.dispatch(name, args, ctx)
+    → @Tool method execute(args, ctx) → ToolResult → back to LLM → continue reasoning
 ```
 
 ---
 
-## 2. Core SPI
+## 2. Core SPI (Legacy — superseded by @Tool / @ToolParam)
 
-### ToolProvider
+> The following SPI interfaces document the v0.1–v1.0 tool registration model.
+> New integrations should use `@Tool`/`@ToolParam` annotations in `@Component` classes;
+> `ToolCallbackRegistry` auto-discovers `@Tool` methods and replaces `ToolDispatcher`.
 
-The tool provider SPI, defining tool name, JSON Schema, and execution logic:
+### ToolProvider (Legacy SPI)
+
+The tool provider SPI, defining tool name, JSON Schema, and execution logic. In the current architecture, this is superseded by `@Tool` annotated methods:
 
 ```java
 public interface ToolProvider {
@@ -125,12 +136,12 @@ public final class ToolResult {
 
 ### AuditCallback
 
-Audit callback invoked after tool execution, called by `ToolDispatcher` inside `dispatch()`:
+Audit callback invoked after tool execution, called by `ToolCallbackRegistry` inside `dispatch()`:
 
 ```java
 public interface AuditCallback {
     /**
-     * Called by ToolDispatcher after a tool provider returns a result.
+     * Called by ToolCallbackRegistry after a tool provider returns a result.
      *
      * @param toolName the registered name of the tool
      * @param args     the arguments passed to the tool
@@ -142,9 +153,9 @@ public interface AuditCallback {
 
 Defined in the `tool` package so that `ToolContext` can carry it without depending on the `agent` package. The agent layer provides an implementation that constructs `AuditRecord` objects. Audit failures never break the agent loop.
 
-### ToolDispatcher
+### ToolDispatcher (Legacy — replaced by ToolCallbackRegistry)
 
-Routes `tool_use` calls to the matching `ToolProvider` by name:
+Routes `tool_use` calls to the matching `ToolProvider` by name. In the current architecture, `ToolCallbackRegistry` resolves `@Tool` methods instead:
 
 ```java
 public class ToolDispatcher {
@@ -169,7 +180,7 @@ public class ToolDispatcher {
 ```
 
 Key behaviors:
-- At construction, builds an immutable Map<name, ToolProvider> indexed by `ToolProvider.name()`
+- At construction, builds an immutable Map<name, ToolProvider> indexed by `ToolProvider.name()`. (`ToolCallbackRegistry` builds the same map from `@Tool` method metadata.)
 - `dispatch()` catches `RuntimeException`, returns `ToolResult.error()` instead of throwing
 - Successful results exceeding `maxToolResultChars` are truncated with a `[truncated, total N rows]` suffix
 - Calls `AuditCallback.onToolExecuted()` after each execution (if present in ctx); audit exceptions are silently swallowed
@@ -198,7 +209,7 @@ public interface ToolPlugin {
 
 ## 3. Built-in Tools
 
-SnapAgent provides the following built-in `ToolProvider` implementations, grouped by functional domain:
+SnapAgent provides the following built-in tools, grouped by functional domain (class names shown are legacy `ToolProvider` implementations; in the current architecture these are `@Component` classes with `@Tool` methods):
 
 ### Data Diagnostics Tools
 
@@ -268,14 +279,14 @@ public ToolPluginRegistry toolPluginRegistry(ObjectProvider<ToolPlugin> toolPlug
 - `ToolPlugin` beans are collected in Spring `@Order` sequence
 - `getPlugins()` returns an unmodifiable list view
 
-### ToolProvider vs ToolPlugin Relationship
+### @Tool vs ToolPlugin Relationship
 
-| Dimension | `ToolProvider` | `ToolPlugin` |
+| Dimension | `@Tool` methods | `ToolPlugin` |
 |-----------|----------------|---------------|
 | Since | v0.1 | v1.0 |
 | Responsibility | Provides tool definitions + executes tool calls | Declares plugin metadata (name/version/description/tool names) |
-| Discovery | `@Component` → collected by `ToolDispatcher` | `@Component` → collected by `ToolPluginRegistry` |
-| Affects execution | Yes — tools without a `ToolProvider` cannot be called | No — pure metadata layer |
+| Discovery | `@Component` → collected by `ToolCallbackRegistry` | `@Component` → collected by `ToolPluginRegistry` |
+| Affects execution | Yes — tools without an `@Tool` method cannot be called | No — pure metadata layer |
 | REST exposure | `GET /tools` (tool names only) | `GET /tools/plugins` (full metadata) |
 
 A single plugin can contain multiple tools (e.g., `CodeGraphToolProvider` exposes one tool name `code_graph_tools` with 4 internal sub-tools). `ToolPlugin.toolNames()` declares the list of tool names a plugin contributes, for operational visibility.
@@ -296,7 +307,7 @@ A single plugin can contain multiple tools (e.g., `CodeGraphToolProvider` expose
 ### Execution Sequence
 
 ```
-  LLM                 AgentExecutor          ToolDispatcher        ToolProvider
+  LLM                 GraphExecutor          ToolCallbackRegistry  @Tool method
    │                       │                      │                     │
    │── tool_use ──────────▶│                      │                     │
    │   (name, args)        │                      │                     │
@@ -313,7 +324,7 @@ A single plugin can contain multiple tools (e.g., `CodeGraphToolProvider` expose
    │                       │── dispatch(name, ───▶│                     │
    │                       │   args, ctx)          │                     │
    │                       │                      │── lookup by name ─▶│
-   │                       │                      │   ToolProvider       │
+   │                       │                      │   @Tool method       │
    │                       │                      │                      │── execute(args, ctx)
    │                       │                      │                      │
    │                       │                      │                      │── ToolResult ──▶│
@@ -340,13 +351,13 @@ A single plugin can contain multiple tools (e.g., `CodeGraphToolProvider` expose
 ### Detailed Steps
 
 1. **LLM emits tool_use blocks**: The LLM's assistant message contains `tool_use` blocks (tool name + arguments JSON), collected by `TurnCollector` via `LlmEventSink`
-2. **AgentExecutor checks stop_reason**: If `tool_use`, the LLM needs tool results before continuing
+2. **GraphExecutor checks stop_reason**: If `tool_use`, the LLM needs tool results before continuing
 3. **Record assistant message**: The assistant message with `tool_use` blocks is added to the conversation list (so the next request can match `tool_result` to `tool_use` IDs)
 4. **Build ToolContext**: `buildToolContext(task)` creates a context carrying taskId, userId, and AuditCallback
 5. **Dispatch each tool**: For each `ToolUseBlock`:
    - Record `tool_call` transcript event (toolId, toolName, input)
-   - Call `toolDispatcher.dispatch(name, input, ctx)`
-   - Dispatcher looks up ToolProvider by name, executes `execute(args, ctx)`
+   - Call `toolCallbackRegistry.dispatch(name, input, ctx)`
+   - Registry looks up @Tool method by name, executes `execute(args, ctx)`
    - Truncates overlong results, invokes audit callback
    - Record `tool_result` transcript event (content preview 500 chars, rowCount, truncated, durationMs, error)
    - Add `tool_result` message to conversation list
@@ -400,16 +411,16 @@ The path safety defense for `CodeReaderToolProvider`, `ProjectStructureToolProvi
 | Git safety | `GitLogToolProvider` uses `ProcessBuilder` argument lists (never shell), `commit_hash` regex `^[0-9a-f]{7,40}$` validation, 10s timeout |
 | Timeout enforcement | Operations tools (Metrics/LogSearch/TraceSearch) use `config.timeoutSeconds * 1000` ms timeout (default 15s), Nacos fixed 15s |
 | Sensitive masking | `ConfigReadToolProvider` masks values with keys containing `password`/`secret`/`token`/`credential`/`key` as `****` |
-| Result truncation | `ToolDispatcher` truncates results exceeding `maxToolResultChars` to prevent LLM context overflow |
+| Result truncation | `ToolCallbackRegistry` truncates results exceeding `maxToolResultChars` to prevent LLM context overflow |
 | Read-only HTTP | Operations tools only use HTTP GET requests, no POST/PUT/DELETE |
 
 ---
 
 ## 7. Custom Tool Plugin
 
-### Complete Example: WeatherToolProvider
+### Complete Example: WeatherToolProvider (Legacy ToolProvider SPI — see @Tool alternative below)
 
-A custom tool plugin that calls a weather API, demonstrating the combination of `ToolProvider` (execution layer) and `ToolPlugin` (metadata layer):
+A custom tool plugin that calls a weather API, demonstrating the combination of `ToolProvider` (execution layer, legacy) and `ToolPlugin` (metadata layer). New integrations should use `@Tool`/`@ToolParam` annotations instead:
 
 ```java
 package com.example.snapagent.tools;
@@ -549,7 +560,7 @@ public class WeatherToolPlugin implements ToolPlugin {
 
 **No configuration needed** — both classes are annotated with `@Component`, and Spring component scanning auto-discovers them:
 
-- `WeatherToolProvider` → collected by `ToolDispatcher`'s `ObjectProvider<ToolProvider>` → LLM can call `weather_query`
+- `WeatherToolProvider` → collected by `ToolCallbackRegistry`'s `ObjectProvider<ToolProvider>` → LLM can call `weather_query`
 - `WeatherToolPlugin` → collected by `ToolPluginRegistry`'s `ObjectProvider<ToolPlugin>` → `GET /tools/plugins` returns this plugin's metadata
 
 ### JSON Schema Notes
@@ -649,7 +660,7 @@ v0.5 introduces a true Plugin abstraction, superseding the v1.0 metadata layer. 
 
 ### 9.2 Core Components
 
-ToolDispatcher routing logic: dispatch(toolType, args, ctx) checks ctx.pluginOverrides[toolType] -> pluginId, then registry.getDefault(toolType) -> pluginId, then plugin.provider.execute(args, ctx).
+ToolCallbackRegistry routing logic: dispatch(toolType, args, ctx) checks ctx.pluginOverrides[toolType] -> pluginId, then registry.getDefault(toolType) -> pluginId, then plugin.provider.execute(args, ctx).
 
 PluginRegistry manages plugins: Map<pluginId, PluginDescriptor>, supports register/unregister/enable/disable/setDefault.
 
@@ -661,11 +672,11 @@ RUNTIME retention annotation, fields: id, toolType, displayName, description, ve
 
 ### 9.4 ToolContext Extensions
 
-ToolContext adds pluginOverrides (Map<toolType, pluginId>) and pluginContext fields. pluginOverrides passed from POST /runs request body, dispatcher routes by override. pluginContext injected by ToolDispatcher from PluginDescriptor.
+ToolContext adds pluginOverrides (Map<toolType, pluginId>) and pluginContext fields. pluginOverrides passed from POST /runs request body, dispatcher routes by override. pluginContext injected by ToolCallbackRegistry from PluginDescriptor.
 
 ### 9.5 Built-in Tool Transparent Wrapping
 
-At startup, all @Component ToolProvider beans are auto-wrapped as system plugins: pluginId=ToolProvider.name(), toolType=ToolProvider.name(), system=true (cannot unregister), isDefault=true (first registered per toolType).
+At startup, all @Component beans with @Tool methods (legacy ToolProvider beans) are auto-wrapped as system plugins: pluginId=tool name, toolType=tool name, system=true (cannot unregister), isDefault=true (first registered per toolType).
 
 Backward compatibility: existing skills without pluginOverrides -> default -> system plugin -> behavior identical to v1.0.
 
@@ -681,4 +692,4 @@ Backward compatibility: existing skills without pluginOverrides -> default -> sy
 
 ### 9.7 v1.0 ToolPlugin SPI Compatibility
 
-The v1.0 ToolPlugin interface has been superseded by the v0.5 architecture, but the interface is retained for compatibility. v0.5's @ToolPluginAnnotation is the new metadata declaration method. GET /tools/plugins response format has been extended. Migration recommendation: new Plugins should use @ToolPluginAnnotation + ToolProvider implementation.
+The v1.0 ToolPlugin interface has been superseded by the v0.5 architecture, but the interface is retained for compatibility. v0.5's @ToolPluginAnnotation is the new metadata declaration method. GET /tools/plugins response format has been extended. Migration recommendation: new Plugins should use @ToolPluginAnnotation + @Tool/@ToolParam annotated methods (or ToolProvider implementation for backward compatibility).

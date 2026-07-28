@@ -22,11 +22,11 @@ The host application only needs to add the Starter dependency and set `snap-agen
 │  ┌──────────────────────▼───────────────────▼──────────┐     │
 │  │        SnapAgent Starter (auto-discovered, @Component) │     │
 │  │  ┌──────────────┐ ┌────────────┐ ┌───────────────┐  │     │
-│  │  │ ToolProvider │ │ SkillLoader│ │ SecurityGateway│  │     │
-│  │  │ (Jdbc/Redis/ │ │ (builtin+  │ │ (Spring/Shiro) │  │     │
-│  │  │  Code/Ops…)  │ │  uploaded) │ │                │  │     │
+│  │  │ @Tool       │ │ SkillLoader│ │ SecurityGateway│  │     │
+│  │  │ ToolCallbac │ │ (builtin+  │ │ (Spring/Shiro) │  │     │
+│  │  │ kRegistry  │ │  uploaded) │ │                │  │     │
 │  │  └──────────────┘ └────────────┘ └───────────────┘  │     │
-│  │         AgentExecutor + SSE Controller              │     │
+│  │         GraphExecutor + SSE Controller              │     │
 │  └──────────────────────┬──────────────────────────────┘     │
 │                         │ /v1/messages (SSE)                  │
 └─────────────────────────┼────────────────────────────────────┘
@@ -44,7 +44,7 @@ The host application only needs to add the Starter dependency and set `snap-agen
 - **Zero intrusion**: When `snap-agent.enabled=false` (default), the Starter creates zero beans — no Filter, no thread pool, no routes (TDD_SPEC §AC15).
 - **Read-only diagnostics**: All built-in tools are read-only (SELECT queries, GET requests, file reads); they never mutate host state.
 - **Delegated authentication**: SnapAgent does not implement authentication itself; it only reads the host's already-authenticated Principal and checks permissions.
-- **Auto-discovery**: A custom tool only needs to implement `ToolProvider` + `@Component` to be collected by `ToolDispatcher`.
+- **Auto-discovery**: A custom tool only needs a `@Tool`-annotated method on a `@Component` bean to be scanned and registered by `ToolCallbackRegistry`.
 
 ---
 
@@ -70,11 +70,11 @@ Built-in tools in the Starter are conditionally assembled via `@ConditionalOnCla
 
 | Built-in tool | Required dependency | Notes |
 |---------------|---------------------|-------|
-| `mysql_query` (JdbcQueryToolProvider) | `spring-jdbc` + a `DataSource` bean + JDBC driver | Default `snap-agent.jdbc.enabled=true` |
-| `redis_read` (RedisReadToolProvider) | `spring-data-redis` + a `RedisTemplate` bean | Default `snap-agent.redis.enabled=true` |
-| `log_read` (LogReadToolProvider) | No extra dependency | Default `snap-agent.logs.enabled=true` |
+| `mysql_query` (`@Tool` JdbcQuery) | `spring-jdbc` + a `DataSource` bean + JDBC driver | Default `snap-agent.jdbc.enabled=true` |
+| `redis_read` (`@Tool` RedisRead) | `spring-data-redis` + a `RedisTemplate` bean | Default `snap-agent.redis.enabled=true` |
+| `log_read` (`@Tool` LogRead) | No extra dependency | Default `snap-agent.logs.enabled=true` |
 | `metrics_query` / `log_search` / `trace_search` | No extra dependency (JDK HttpURLConnection) | Each `enabled` defaults to false; needs `base-url` |
-| LLM streaming (AnthropicLlmClient / OpenAiLlmClient) | `com.squareup.okhttp3:okhttp` | **Required** — LLM calls won't work without it |
+| LLM streaming (AnthropicLlmClient / OpenAiLlmClient, both extend AbstractStreamingLlmClient) | `com.squareup.okhttp3:okhttp` | **Required** — LLM calls won't work without it |
 
 A typical host `pom.xml` dependency snippet (mirrors the `snap-agent-demo` module):
 
@@ -167,7 +167,7 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 | `timeout-seconds` | `120` | HTTP connect + read timeout (shares this budget) |
 | `streaming` | `true` | Whether SSE streaming is enabled |
 
-> The `llmClient` bean is created only when `api-key` or `auth-token` is non-empty (`@ConditionalOnExpression`). If both are empty, AgentExecutor logs a WARN and cannot function.
+> The `llmClient` bean is created only when `api-key` or `auth-token` is non-empty (`@ConditionalOnExpression`). If both are empty, GraphExecutor logs a WARN and cannot function.
 
 ### 3.3 Agent Execution Configuration (`snap-agent.agent.*`)
 
@@ -186,7 +186,7 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `enabled` | `true` | Whether to assemble JdbcQueryToolProvider |
+| `enabled` | `true` | Whether to assemble `@Tool` JdbcQuery |
 | `datasource-bean-name` | `snapAgentReadOnlyDataSource` | DataSource bean name in single-DS mode |
 | `datasources` | `{}` | Multi-environment datasource map (v0.6). key=env name, value=`{url,username,password,driver-class-name}` |
 | `default-env` | `""` | Default env name (empty = first entry) |
@@ -197,7 +197,7 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `enabled` | `true` | Whether to assemble RedisReadToolProvider (also requires `RedisTemplate` on classpath) |
+| `enabled` | `true` | Whether to assemble `@Tool` RedisRead (also requires `RedisTemplate` on classpath) |
 | `redis-template-bean-name` | `redisTemplate` | RedisTemplate bean name |
 | `max-key-count` | `100` | Max keys returned per call |
 
@@ -205,7 +205,7 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `enabled` | `true` | Whether to assemble LogReadToolProvider |
+| `enabled` | `true` | Whether to assemble `@Tool` LogRead |
 | `allowed-paths` | `[]` | List of log directories allowed to read |
 | `max-lines` | `500` | Max log lines returned per call |
 | `max-file-bytes` | `10485760` (10MB) | Max single file size (prevents OOM) |
@@ -377,15 +377,15 @@ snap-agent:
 
 ## 4. Startup Flow
 
-When the host application starts, Spring Boot auto-configures `SnapAgentAutoConfiguration` via `META-INF/spring.factories`. The class carries `@ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")`, so it activates only when `snap-agent.enabled=true`. The assembly order after activation:
+When the host application starts, Spring Boot auto-configures the 8 domain `@Configuration` classes via `META-INF/spring.factories`. `SecurityConfig` carries `@ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")`, so it activates only when `snap-agent.enabled=true`. The assembly order after activation:
 
 ```
 Host startup
   │
   ▼
-SnapAgentAutoConfiguration activates (snap-agent.enabled=true)
+8 domain @Configuration classes activate (snap-agent.enabled=true)
   │
-  ├─ 1. Infrastructure beans
+  ├─ 1. Infrastructure beans (SecurityConfig)
   │     SqlGuard(maxResultRows) → TaskStore → RateLimiter
   │     → PrincipalResolver → AuditStore + SecurityAuditLogger
   │
@@ -394,45 +394,46 @@ SnapAgentAutoConfiguration activates (snap-agent.enabled=true)
   │     @ConditionalOnClass(ShiroUtils)            → ShiroAdapter
   │     (host can declare a custom SecurityGateway bean to override, @ConditionalOnMissingBean)
   │
-  ├─ 3. LlmClient (routed by api-type)
+  ├─ 3. LlmClient (routed by api-type, both extend AbstractStreamingLlmClient)
   │     api-key or auth-token non-empty → create LlmClient:
   │       api-type=openai  → OpenAiLlmClient  (POST {base-url}/v1/chat/completions)
   │       api-type=anthropic(default) → AnthropicLlmClient (POST {base-url}/v1/messages)
   │
-  ├─ 4. Tool layer (conditionally assembled)
-  │     DataSourceRegistry(multi-env) / JdbcQueryToolProvider(@ConditionalOnBean DataSource)
-  │     RedisReadToolProvider(@ConditionalOnClass RedisTemplate)
-  │     LogPathGuard + LogReadToolProvider
+  ├─ 4. Tool layer (ToolConfig, conditionally assembled)
+  │     DataSourceRegistry(multi-env) / @Tool JdbcQuery(@ConditionalOnBean DataSource)
+  │     @Tool RedisRead(@ConditionalOnClass RedisTemplate)
+  │     LogPathGuard + @Tool LogRead
   │     CodePathGuard(@ConditionalOnExpression code.enabled + project-root non-empty)
-  │       → ProjectContextExtender + CodeReader/ProjectStructure/GitLog ToolProvider
-  │     Metrics/LogSearch/Trace/ConfigRead ToolProvider (each enabled+base-url)
+  │       → ProjectContextAdvisor + @Tool CodeReader/ProjectStructure/GitLog
+  │     @Tool Metrics/LogSearch/Trace/ConfigRead (each enabled+base-url)
   │
-  ├─ 5. ToolDispatcher (collects all ToolProvider beans)
-  │     ObjectProvider<ToolProvider>.orderedStream() → List
-  │     + McpBootstrap.getProviders() (if enabled)
-  │     custom @Component ToolProvider beans are also collected
+  ├─ 5. ToolCallbackRegistry (scans all @Tool-annotated methods)
+  │     Scans all Bean methods annotated with @Tool → builds ToolCallback list
+  │     + McpBootstrap.getCallbacks() (if enabled)
+  │     host-custom @Tool methods are also scanned
   │
   ├─ 6. Skill layer
   │     ClasspathSkillScanner.scan(builtin-skills-dir)
   │       two-pass scan: SnapAgent JAR resources first → host classpath resources second
-  │     SkillRegistry(uploadDir, builtinSkills, toolDispatcher)
+  │     SkillRegistry(uploadDir, builtinSkills, toolCallbackRegistry)
   │       merge: custom overrides builtin by name; deleting custom restores builtin
   │     SkillHotReloader (watches upload-skills-dir, on by default)
   │
-  ├─ 7. SystemPromptExtender collection (ObjectProvider.orderedStream)
-  │     ProjectContextExtender (v0.3, project structure summary)
-  │     KnowledgeInjector (v0.7, business knowledge fragments) — if knowledge.enabled
+  ├─ 7. Advisor collection (ObjectProvider.orderedStream, replacing SystemPromptExtender)
+  │     ProjectContextAdvisor (v0.3, project structure summary)
+  │     KnowledgeAdvisor (v0.7, business knowledge fragments via RAG pipeline) — if knowledge.enabled
   │
-  ├─ 8. AgentExecutor
+  ├─ 8. GraphExecutor (StateGraph built by ReActGraphFactory)
   │     if cost.enabled → wrap original LlmClient with CostTrackingLlmClient
-  │     new AgentExecutor(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, extenders)
+  │     ReActGraphFactory builds StateGraph (EntryNode/AgentNode/ToolsNode)
+  │     new GraphExecutor(factory, taskStore, maxTurns, maxTokens, advisors)
   │
   ├─ 9. Thread pool + routing
   │     snapAgentExecutor (ThreadPoolTaskExecutor: core=2, max=4, queue=10)
   │     PeerRouter (mode: k8s-api/headless-dns/static/none)
   │     PeerSseRelay + InternalTaskController (internal pod-to-pod endpoints)
   │
-  └─ 10. Web layer
+  └─ 10. Web layer (WebConfig)
         SnapAgentFilter (FilterRegistrationBean, url-pattern={base-path}/*)
         SnapAgentController (mounted at {base-path}/**, injects all ObjectProvider optional deps)
         auto-resolves app-profiles + app-log-file
@@ -440,38 +441,43 @@ SnapAgentAutoConfiguration activates (snap-agent.enabled=true)
 
 ### Key Assembly Points
 
-1. **`@ConditionalOnMissingBean` precedence**: Nearly all built-in beans are annotated with `@ConditionalOnMissingBean`; the host can declare a same-named bean to replace it (e.g., a custom `SecurityGateway`, `ConversationStore`, `LlmClient`, `PrincipalResolver`).
-2. **Conditional tool activation**: Without `spring-jdbc`, `JdbcQueryToolProvider` is never created (`@ConditionalOnBean(DataSource.class)`); without Redis, `RedisReadToolProvider` is skipped.
+1. **`@ConditionalOnMissingBean` precedence**: Nearly all built-in beans are annotated with `@ConditionalOnMissingBean`; the host can declare a same-named bean to replace it (e.g., a custom `SecurityGateway`, `ChatMemoryRepository`, `LlmClient`, `PrincipalResolver`).
+2. **Conditional tool activation**: Without `spring-jdbc`, `@Tool` JdbcQuery is never created (`@ConditionalOnBean(DataSource.class)`); without Redis, `@Tool` RedisRead is skipped.
 3. **`ClasspathSkillScanner` two-pass scan**: SnapAgent JAR resources (URL contains `snap-agent-spring-boot` or `snap-agent-core`) are processed first, then host classpath resources; on name collision the host version is skipped with a WARN, preventing accidental shadowing of built-in skills.
-4. **`ToolDispatcher` collects all `ToolProvider` beans**: both built-in (Jdbc/Redis/Code/Ops) and host-custom (`@Component` implementing `ToolProvider`), dispatched uniformly.
+4. **`ToolCallbackRegistry` scans all `@Tool` methods**: both built-in (Jdbc/Redis/Code/Ops) and host-custom (Bean methods annotated with `@Tool`), registered uniformly as `ToolCallback`.
 
 ---
 
 ## 5. Custom Tools
 
-### 5.1 ToolProvider SPI
+### 5.1 @Tool / @ToolParam Annotations
 
-A custom tool only needs to implement the `ToolProvider` interface (in `snap-agent-core`) and be annotated with `@Component` to be auto-discovered by `ToolDispatcher`:
+A custom tool only needs to annotate a Bean method with `@Tool` (in `snap-agent-core`) and it will be auto-discovered by `ToolCallbackRegistry`:
 
 ```java
 package cn.watsontech.snapagent.core.tool;
 
-import java.util.Map;
+import java.lang.annotation.*;
 
-public interface ToolProvider {
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Tool {
     /** Unique tool name; referenced by the tools field in skill frontmatter */
     String name();
 
-    /** JSON Schema string injected into the LLM tool definition (Anthropic tool format) */
-    String schema();
+    /** Description injected into the LLM tool definition (helps the LLM decide when to call) */
+    String description() default "";
+}
 
-    /**
-     * Execute the tool call.
-     * @param args arguments parsed from the LLM tool_use block
-     * @param ctx  request-scoped context (taskId, userId, audit)
-     * @return immutable result; never null
-     */
-    ToolResult execute(Map<String, Object> args, ToolContext ctx);
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ToolParam {
+    /** Parameter name */
+    String value();
+    /** Parameter description */
+    String description() default "";
+    /** Whether required */
+    boolean required() default true;
 }
 ```
 
@@ -480,8 +486,8 @@ public interface ToolProvider {
 ```java
 package com.example.myapp.tools;
 
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.springframework.stereotype.Component;
 
@@ -490,27 +496,11 @@ import java.net.URL;
 import java.util.Map;
 
 @Component
-public class HttpHealthCheckToolProvider implements ToolProvider {
+public class HttpHealthCheckTool {
 
-    @Override
-    public String name() {
-        return "http_health_check";
-    }
-
-    @Override
-    public String schema() {
-        return "{\"name\":\"http_health_check\","
-            + "\"description\":\"Check HTTP endpoint health (read-only GET).\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{\"url\":{\"type\":\"string\","
-            + "\"description\":\"Absolute HTTP(S) URL to check\"}},"
-            + "\"required\":[\"url\"]}}";
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
+    @Tool(name = "http_health_check", description = "Check HTTP endpoint health (read-only GET).")
+    public ToolResult execute(@ToolParam(value = "url", description = "Absolute HTTP(S) URL to check") String url) {
         long start = System.currentTimeMillis();
-        String url = args.get("url") != null ? args.get("url").toString() : null;
         if (url == null || url.isEmpty()) {
             return ToolResult.error("missing required parameter: url", 0);
         }
@@ -530,7 +520,7 @@ public class HttpHealthCheckToolProvider implements ToolProvider {
 }
 ```
 
-No extra registration is needed — `@Component` lets Spring scan it, and `ToolDispatcher` collects it via `ObjectProvider<ToolProvider>.orderedStream()`. Reference it in a skill's frontmatter with `tools: [http_health_check]`.
+No extra registration is needed — `@Component` lets Spring scan it, and `ToolCallbackRegistry` auto-constructs a `ToolCallback` by scanning `@Tool`-annotated methods. Reference it in a skill's frontmatter with `tools: [http_health_check]`.
 
 ### 5.3 Context and Result
 
@@ -551,20 +541,20 @@ ToolResult.error(message, durationMs);               // failure (content is null
 ```
 Fields: `content`, `rowCount`, `truncated`, `durationMs`, `error`.
 
-**`AuditCallback`**: invoked by `ToolDispatcher` after a tool returns, for audit recording:
+**`AuditCallback`**: invoked by `ToolCallbackRegistry` after a tool returns, for audit recording:
 ```java
 void onToolExecuted(String toolName, Map<String, Object> args, ToolResult result);
 ```
 
 ### 5.4 JSON Schema Conventions
 
-`schema()` returns a JSON string (not a JSON object — a String) in the Anthropic tool-use format. Key fields:
+The `@Tool` annotation's `name` and `description` + the `@ToolParam` annotation's parameter metadata are used by `ToolCallbackRegistry` to auto-generate the JSON Schema (Anthropic tool-use format). Key fields:
 
-- `name`: must match `name()`
-- `description`: the LLM uses this to decide when to call the tool
-- `input_schema`: a JSON Schema, `type: object` + `properties` + `required`
+- `name`: matches `@Tool.name()`
+- `description`: from `@Tool.description()`, the LLM uses this to decide when to call the tool
+- `input_schema`: auto-generated from `@ToolParam` annotations, `type: object` + `properties` + `required`
 
-Refer to the built-in `JdbcQueryToolProvider` schema (multi-env mode additionally exposes an `env` parameter):
+Refer to the built-in `@Tool` JdbcQuery schema (multi-env mode additionally exposes an `env` parameter):
 
 ```json
 {
@@ -830,7 +820,7 @@ const es = new EventSource(`/snap-agent/runs/${taskId}/stream?token=${token}`);
 
 ## 8. Multi-LLM Integration
 
-SnapAgent switches LLM client implementations via `snap-agent.llm.api-type`. The `SnapAgentAutoConfiguration.llmClient()` bean method routes by `api-type`:
+SnapAgent switches LLM client implementations via `snap-agent.llm.api-type`. The `ToolConfig.llmClient()` bean method routes by `api-type` (both extend `AbstractStreamingLlmClient`):
 
 ```java
 if ("openai".equalsIgnoreCase(apiType)) {
@@ -898,7 +888,7 @@ snap-agent:
     proxy-url: http://proxy.internal:8080
 ```
 
-Both `AnthropicLlmClient` and `OpenAiLlmClient` accept a `proxyUrl` constructor argument and configure OkHttp's `Proxy(Type.HTTP, ...)`.
+Both `AnthropicLlmClient` and `OpenAiLlmClient` (extending `AbstractStreamingLlmClient`) accept a `proxyUrl` constructor argument and configure OkHttp's `Proxy(Type.HTTP, ...)`.
 
 ### 8.4 Fully Custom LlmClient
 
@@ -948,19 +938,20 @@ yields to your custom bean.
 
 | SPI interface | Default impl | Wiring condition | Purpose |
 |---------------|-------------|-------------------|---------|
-| `LlmClient` | `AnthropicLlmClient` | `snap-agent.llm.api-type=anthropic` | LLM streaming |
-| `ToolProvider` | multiple built-in | `@Component` discovery | Tools |
+| `LlmClient` | `AnthropicLlmClient` (extends AbstractStreamingLlmClient) | `snap-agent.llm.api-type=anthropic` | LLM streaming |
+| `ToolCallback` | multiple built-in `@Tool` methods | `@Tool` annotation discovery | Tools |
 | `SecurityGateway` | `SpringSecurityAdapter` | `@ConditionalOnMissingBean` | Permission check |
 | `PrincipalResolver` | `SpringPrincipalResolver` | `@ConditionalOnMissingBean` | User identity resolution |
-| `SystemPromptExtender` | `ProjectContextExtender` / `KnowledgeInjector` | `@ConditionalOnMissingBean` | system prompt injection |
-| `ConversationStore` | `FileConversationStore` | `@ConditionalOnMissingBean` | Conversation history |
+| `Advisor` | `ProjectContextAdvisor` / `KnowledgeAdvisor` | `@ConditionalOnMissingBean` | system prompt injection + interception |
+| `ChatMemoryRepository` | `FileChatMemoryRepository` | `@ConditionalOnMissingBean` | Conversation history |
 | `IssueStore` | `FileIssueStore` | `@ConditionalOnMissingBean` | Issue persistence |
 | `IssueTracker` | `NoopIssueTracker` | `@ConditionalOnMissingBean` | External issue tracker |
-| `KnowledgeSource` | `MarkdownKnowledgeSource` | `@ConditionalOnMissingBean` | Knowledge sources |
-| `KnowledgeSearcher` | `SimpleKeywordSearcher` | `@ConditionalOnMissingBean` | Knowledge search |
+| `VectorStore` | `VectorStoreDocumentRetriever` | `@ConditionalOnMissingBean` | Vector store and retrieval |
+| `EmbeddingModel` | Built-in keyword matching (no vectors) | `@ConditionalOnMissingBean` | Text embedding |
 | `CostStore` | `FileCostStore` | `@ConditionalOnMissingBean` | Cost record persistence |
 | `CostTracker` | `DefaultCostTracker` | `@ConditionalOnMissingBean` | Cost tracking |
-| `WorkflowEngine` | `SimpleWorkflowEngine` | `@ConditionalOnMissingBean` | Workflow engine |
+| `CheckpointStore` | In-memory implementation | `@ConditionalOnMissingBean` | StateGraph checkpoint persistence |
+| `StructuredOutputConverter` | Default JSON converter | `@ConditionalOnMissingBean` | Tool return value structuring |
 | `PatrolScheduler` | `ScheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | Patrol scheduling |
 | `PatrolReportStore` | `InMemoryPatrolReportStore` | `snap-agent.patrol.enabled=true` | Patrol report storage (v1.1 SPI) |
 | `PatrolLockProvider` | `NoopPatrolLockProvider` | `snap-agent.patrol.enabled=true` | Multi-Pod patrol lock (new in v1.1) |

@@ -252,7 +252,7 @@ List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minSc
 
 ### 5.1 Injection Mechanism
 
-`KnowledgeInjector` implements `SystemPromptExtender` SPI, automatically injecting business knowledge before LLM reasoning:
+`KnowledgeInjector` implements `Advisor` SPI, automatically injecting business knowledge before LLM reasoning:
 
 1. Extract user query from task inputs
 2. Call `knowledgeBase.search(query, maxFragments, minScore)`
@@ -272,9 +272,9 @@ snap-agent:
         dir: classpath:/docs/knowledge/
 ```
 
-### 5.3 AgentExecutor Multi-Extender
+### 5.3 GraphExecutor Multi-Advisor
 
-`AgentExecutor` supports `List<SystemPromptExtender>` (v0.7), ordered by Spring `@Order`:
+`GraphExecutor` supports `List<Advisor>` (v0.7), ordered by Spring `@Order`:
 1. `ProjectContextExtender` (v0.3): injects project structure summary
 2. `KnowledgeInjector` (v0.7): injects business knowledge fragments
 

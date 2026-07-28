@@ -25,16 +25,18 @@ SnapAgent 是一个**嵌入式 LLM 诊断 Agent 库**，让 Spring Boot 2.x 应�
 ┌─────────────────────────────────────────────────────────────────────┐
 │              snap-agent-spring-boot-2x-starter                       │
 │  ┌───────────────────────────────────────────────────────────────┐   │
-│  │  SnapAgentAutoConfiguration (条件装配入口)                     │   │
+│  │  8 个领域 @Configuration 类 (条件装配入口)                    │   │
+│  │  Security / Tool / Web / Patrol / Knowledge /                │   │
+│  │  Issue / Cost / Workflow                                       │   │
 │  │  - @ConditionalOnProperty / @ConditionalOnClass              │   │
 │  │  - @ConditionalOnMissingBean (SPI 替换点)                     │   │
 │  └───────────────────────────┬───────────────────────────────────┘   │
 │                              │                                        │
 │  ┌───────────┐  ┌───────────┐  │  ┌────────────┐  ┌──────────────┐  │
 │  │ Web 层    │  │ LLM 实现  │  │  │ 内置工具    │  │ 路由子系统    │  │
-│  │ Controller│  │ Anthropic │  │  │ Jdbc/Redis  │  │ PeerRouter   │  │
-│  │ Filter    │  │ OpenAI    │  │  │ Code/Metrics│  │ PeerSseRelay │  │
-│  │ SSE       │  │ LlmClient │  │  │ LogSearch   │  │              │  │
+│  │ Controller│  │ AbstractSt │  │  │ @Tool 注解  │  │ PeerRouter   │  │
+│  │ Filter    │  │ reaming   │  │  │ ToolCallbac │  │ PeerSseRelay │  │
+│  │ SSE       │  │ LlmClient  │  │  │ kRegistry   │  │              │  │
 │  └─────┬─────┘  └─────┬─────┘  │  └──────┬─────┘  └──────┬───────┘  │
 │        │              │        │         │               │           │
 │        └──────────────┴────────┴─────────┴───────────────┘           │
@@ -45,24 +47,28 @@ SnapAgent 是一个**嵌入式 LLM 诊断 Agent 库**，让 Spring Boot 2.x 应�
 │                     snap-agent-core (纯 SPI 层)                      │
 │                                                                     │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Agent       │ │ LLM SPI      │ │ Skill SPI    │ │ Tool SPI    │ │
-│  │ Executor    │ │ LlmClient    │ │ SkillRegistry│ │ ToolDispatch│ │
-│  │ TaskStore   │ │ LlmEventSink │ │ SkillLoader  │ │ ToolProvider│ │
-│  │ RateLimiter │ │ LlmRequest   │ │ SkillMeta    │ │ ToolPlugin  │ │
+│  │ Graph       │ │ LLM SPI      │ │ Skill SPI    │ │ Tool SPI    │ │
+│  │ Runtime     │ │ LlmClient    │ │ SkillRegistry│ │ @Tool       │ │
+│  │ GraphExecut │ │ LlmEventSink │ │ SkillLoader  │ │ @ToolParam  │ │
+│  │ StateGraph  │ │ LlmRequest   │ │ SkillMeta    │ │ ToolCallback│ │
+│  │ ReActGraph  │ │ Message      │ │              │ │ ToolCallback│ │
+│  │ Factory     │ │ Partitioner  │ │              │ │ Registry    │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Security    │ │ Knowledge   │ │ CodeGraph    │ │ Issue       │ │
-│  │ Gateway     │ │ KnowledgeBase│ │ CodeGraph    │ │ IssueStore  │ │
-│  │ Principal   │ │ KnowledgeSrc │ │ Builder/Index│ │ IssueTracker│ │
-│  │ Resolver    │ │ Searcher     │ │              │ │             │ │
+│  │ Security    │ │ RAG /        │ │ CodeGraph    │ │ Issue       │ │
+│  │ Gateway     │ │ VectorStore  │ │ CodeGraph    │ │ IssueStore  │ │
+│  │ Principal   │ │ VectorStoreD │ │ Builder/Index│ │ IssueTracker│ │
+│  │ Resolver    │ │ ocRetriever  │ │              │ │             │ │
+│  │             │ │ IdentityQry  │ │              │ │             │ │
+│  │             │ │ Transformer  │ │              │ │             │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ ┌─────────────┐ │
-│  │ Cost        │ │ Workflow     │ │ Conversation │ │ Patrol      │ │
-│  │ CostTracker │ │ WorkflowEng │ │ ConversationSt│ │ AlertConverg│ │
-│  │ CostStore   │ │ WorkflowDef │ │              │ │ PatrolSched │ │
+│  │ Cost        │ │ Workflow     │ │ Memory       │ │ Patrol      │ │
+│  │ CostTracker │ │ WorkflowEng  │ │ ChatMemory   │ │ AlertConverg│ │
+│  │ CostStore   │ │ WorkflowDef  │ │ ChatMemoryRep│ │ PatrolSched │ │
 │  └─────────────┘ └──────────────┘ └──────────────┘ └─────────────┘ │
 │  ┌──────────────────────────────────────────────────────────────────┐│
-│  │ SystemPromptExtender (上下文注入 SPI)                            ││
+│  │ Advisor SPI (上下文注入 + 拦截，取代 SystemPromptExtender)       ││
 │  └──────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -87,17 +93,20 @@ SnapAgent 采用多模块 Maven 结构，核心原则是 **SPI 层与实现层�
 
 ```
 cn.watsontech.snapagent.core/
-├── agent/        AgentExecutor, AgentTask, TaskStore, RateLimiter, SystemPromptExtender, TranscriptEvent
-├── llm/          LlmClient, LlmEventSink, LlmRequest, Message, ToolDef, ToolUseBlock
-├── skill/        SkillRegistry, SkillLoader, SkillMeta, InputSpec, SkillAvailability, Shortcut
-├── tool/         ToolDispatcher, ToolProvider, ToolContext, ToolResult, ToolPlugin, AuditCallback
+├── graph/        GraphExecutor, StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys
+├── execution/    AgentTask, TaskStore, RateLimiter, TranscriptEvent
+├── llm/          LlmClient, LlmEventSink, LlmRequest, Message, ToolDef, ToolUseBlock, MessagePartitioner
+├── skill/        SkillRegistry, SkillLoader, SkillMeta, InputSpec, SkillAvailability, Shortcut, SkillMode
+├── tool/         @Tool, @ToolParam, ToolCallback, ToolCallbackRegistry, ToolContext, ToolResult, AuditCallback
 ├── security/     SecurityGateway, PrincipalResolver, UserInfo, AuditStore, SecurityAuditLogger
-├── knowledge/     KnowledgeBase, KnowledgeSource, KnowledgeSearcher, KnowledgeFragment, SearchResult
+├── advisor/      Advisor (取代 SystemPromptExtender，提供上下文注入 + 拦截)
+├── memory/       ChatMemory, ChatMemoryRepository (会话历史 SPI)
+├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer (RAG 管道命名类)
+├── vectorstore/  VectorStore, EmbeddingModel (向量存储 SPI)
 ├── codegraph/    CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphNode, CodeGraphEdge
 ├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner
 ├── cost/         CostTracker, CostStore, CostRecord, CostSummary
-├── workflow/     WorkflowEngine, WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus
-├── conversation/ ConversationStore, Conversation, ConversationMessage, ConversationSummary
+├── workflow/     WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus (引擎实现可插拔)
 └── patrol/       AlertConverger, AnomalyEvent, AnomalyEventListener, PatrolScheduler, PatrolTask, BugfixSuggester
 ```
 
@@ -109,34 +118,42 @@ Spring Boot 2.x 自动装配层，提供所有内置实现：
 
 ```
 cn.watsontech.snapagent.boot2x/
-├── autoconfig/   SnapAgentAutoConfiguration, SnapAgentProperties
+├── autoconfig/   8 个领域 @Configuration: SecurityConfig, ToolConfig, WebConfig, PatrolConfig,
+│                 KnowledgeConfig, IssueConfig, CostConfig, WorkflowConfig + SnapAgentProperties
 ├── web/          SnapAgentController, SnapAgentFilter, AgentRequestContext, KnowledgeController, InternalTaskController
-├── llm/          AnthropicLlmClient, OpenAiLlmClient
+├── llm/          AnthropicLlmClient, OpenAiLlmClient (均继承 AbstractStreamingLlmClient 模板方法)
 ├── security/     SpringSecurityAdapter, ShiroAdapter, DefaultPrincipalResolver, InMemoryAuditStore
 ├── skill/        ClasspathSkillScanner, SkillHotReloader
-├── tool/         JdbcQueryToolProvider, RedisReadToolProvider, CodeReaderToolProvider, ProjectStructureToolProvider,
-│                 GitLogToolProvider, MetricsToolProvider, LogSearchToolProvider, TraceSearchToolProvider,
-│                 ConfigReadToolProvider, CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
-│                 TimeRangeParser, ToolPluginRegistry, mcp/McpBootstrap, mcp/McpToolProvider
-├── context/      ProjectContextExtender
-├── knowledge/    MarkdownKnowledgeSource, SimpleKeywordSearcher, KnowledgeInjector
-├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphToolProvider
+├── tool/         @Tool 注解内置实现: JdbcQueryTool, RedisReadTool, CodeReaderTool, ProjectStructureTool,
+│                 GitLogTool, MetricsTool, LogSearchTool, TraceSearchTool, ConfigReadTool,
+│                 CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
+│                 TimeRangeParser, ToolCallbackRegistry, mcp/McpBootstrap, mcp/McpToolCallback
+├── advisor/      ProjectContextAdvisor, KnowledgeAdvisor (取代 ProjectContextExtender / KnowledgeInjector)
+├── knowledge/    MarkdownKnowledgeSource, VectorStoreDocumentRetriever, IdentityQueryTransformer
+├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphTool
 ├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationExtractor,
 │                 TemplateSolutionSuggester, SimpleVerificationRunner
 ├── cost/         FileCostStore, BudgetEnforcer, DefaultCostTracker, CostTrackingLlmClient, CostSummaryService, CostCalculator
 ├── workflow/     YamlWorkflowLoader, SimpleWorkflowEngine
-├── conversation/ FileConversationStore
+├── memory/       FileChatMemoryRepository (ChatMemory 默认实现)
 ├── patrol/       DefaultAnomalyEventListener, InMemoryAlertConverger, ScheduledPatrolScheduler, TemplateBugfixSuggester,
 │                 InMemoryPatrolReportStore, NoopPatrolLockProvider, WebhookAlertPushChannel, EmailAlertPushChannel
 ├── anchor/       AnchorOrchestrator, AnchorContext, AnchorContextSummarizer, AnchorSkillClassifier, AnchorSummaryCache
 └── routing/      PeerRouter, NoopPeerRouter, StaticPeerRouter, K8sApiPeerRouter, HeadlessDnsPeerRouter, PeerSseRelay
 ```
 
-通过 `META-INF/spring.factories` 注册自动装配：
+通过 `META-INF/spring.factories` 注册自动装配（8 个领域 `@Configuration` 类）：
 
 ```properties
 org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentAutoConfiguration
+  cn.watsontech.snapagent.boot2x.autoconfig.SecurityConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.ToolConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.WebConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.PatrolConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.KnowledgeConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.IssueConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.CostConfig,\
+  cn.watsontech.snapagent.boot2x.autoconfig.WorkflowConfig
 ```
 
 ### snap-agent-client
@@ -145,7 +162,7 @@ cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentAutoConfiguration
 
 ### snap-agent-demo
 
-独立的 Spring Boot 演示应用，包含 `DemoApplication`、`SecurityConfig`、`EchoToolProvider`，用于 E2E 测试（`e2e-local.sh` 主机直跑、`e2e-docker.sh` 容器跑）。
+独立的 Spring Boot 演示应用，包含 `DemoApplication`、`SecurityConfig`、`EchoTool`（使用 `@Tool` 注解），用于 E2E 测试（`e2e-local.sh` 主机直跑、`e2e-docker.sh` 容器跑）。
 
 ---
 
@@ -168,7 +185,7 @@ public interface LlmClient {
 }
 ```
 
-`LlmEventSink` 是事件回调接口，AgentExecutor 通过它接收 LLM 的流式输出：
+`LlmEventSink` 是事件回调接口，`GraphExecutor` 通过它接收 LLM 的流式输出：
 
 ```java
 public interface LlmEventSink {
@@ -181,8 +198,8 @@ public interface LlmEventSink {
 }
 ```
 
-- **默认实现**：`AnthropicLlmClient`（Anthropic Messages API + SSE 解析）、`OpenAiLlmClient`（OpenAI 兼容 API）
-- **扩展点**：实现 `LlmClient` + 注册为 Bean 即可接入通义千问/文心/智谱等兼容 API
+- **默认实现**：`AnthropicLlmClient`（Anthropic Messages API + SSE 解析）、`OpenAiLlmClient`（OpenAI 兼容 API）—— 两者均继承 `AbstractStreamingLlmClient`，复用模板方法处理流式连接、重试、取消
+- **扩展点**：继承 `AbstractStreamingLlmClient` + 注册为 Bean 即可接入通义千问/文心/智谱等兼容 API
 
 ### 3.2 SkillRegistry / SkillLoader — 两层 Skill 系统
 
@@ -190,7 +207,7 @@ public interface LlmEventSink {
 
 ```java
 public class SkillRegistry {
-    SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills, ToolDispatcher dispatcher);
+    SkillRegistry(Path uploadDir, List<SkillMeta> builtinSkills, ToolCallbackRegistry registry);
 
     List<SkillMeta> all();           // 合并后的所有 skill（custom 覆盖同名 builtin）
     SkillMeta get(String name);      // 按名查找
@@ -226,23 +243,32 @@ public final class SkillMeta {
 
 - **合并逻辑**：custom 按 name 覆盖 builtin；删除 custom 后 builtin 自动恢复
 - **目录 skill**：子目录含 `SKILL.md` → 整目录是一个 skill，仅解析 `SKILL.md`
-- **契约校验**：`SkillRegistry` 启动时校验 skill 声明的 tools 是否在 `ToolDispatcher` 中注册，缺失则降级为 UNAVAILABLE
+- **契约校验**：`SkillRegistry` 启动时校验 skill 声明的 tools 是否在 `ToolCallbackRegistry` 中注册，缺失则降级为 UNAVAILABLE
 
-### 3.3 ToolDispatcher / ToolProvider — 工具插件架构
+### 3.3 @Tool / @ToolParam + ToolCallback — 工具插件架构
+
+工具通过 `@Tool` 注解声明，参数通过 `@ToolParam` 注解描述。`ToolCallback` 封装工具元数据与执行逻辑，由 `ToolCallbackRegistry` 统一注册和路由：
 
 ```java
-public interface ToolProvider {
-    String name();                                         // 唯一工具名
-    String schema();                                       // JSON Schema (Anthropic tool 格式)
-    ToolResult execute(Map<String, Object> args, ToolContext ctx); // 执行工具调用
+@Target(ElementType.METHOD)
+public @interface Tool {
+    String name();                  // 唯一工具名
+    String description() default ""; // 描述（供 LLM 判断何时调用）
+}
+
+@Target(ElementType.PARAMETER)
+public @interface ToolParam {
+    String value();                 // 参数名
+    String description() default "";
+    boolean required() default true;
 }
 ```
 
-`ToolDispatcher` 按 name 路由工具调用，收集所有 `ToolProvider` Bean：
+`ToolCallbackRegistry` 按 name 路由工具调用，扫描所有带 `@Tool` 注解的方法并构造 `ToolCallback`：
 
 ```java
-public class ToolDispatcher {
-    ToolDispatcher(Collection<ToolProvider> providerList, int maxToolResultChars);
+public class ToolCallbackRegistry {
+    ToolCallbackRegistry(List<ToolCallback> callbacks, int maxToolResultChars);
 
     Set<String> availableToolNames();               // 已注册工具名
     ToolResult dispatch(String name, Map<String, Object> args, ToolContext ctx); // 路由执行
@@ -250,10 +276,10 @@ public class ToolDispatcher {
 }
 ```
 
-- **自动发现**：任何 `ToolProvider` + `@Component` Bean 会被 `ToolDispatcher` 自动收集
+- **自动发现**：任何 Bean 上的 `@Tool` 方法会被 `ToolCallbackRegistry` 自动扫描注册
 - **截断保护**：超过 `maxToolResultChars` 的结果自动截断并标注 `[truncated, total N rows]`
 - **审计回调**：`ToolContext` 携带 `AuditCallback`，每次工具执行后异步记录审计
-- **ToolPlugin 元数据 SPI**（v1.0）：提供 name/version/description/toolNames 元数据，通过 `GET /tools/plugins` 暴露，不影响工具发现
+- **StructuredOutputConverter**（新 SPI）：用于将工具返回值转换为结构化 JSON Schema
 
 ### 3.4 SecurityGateway / PrincipalResolver — 权限模型
 
@@ -273,31 +299,26 @@ public interface PrincipalResolver {
 - **权限检查**：`hasPermission` 遍历 `GrantedAuthority` 做精确匹配（非通配符）
 - **扩展点**：宿主声明自定义 `SecurityGateway` Bean 即可替换（`@ConditionalOnMissingBean`）
 
-### 3.5 KnowledgeBase / KnowledgeSource / KnowledgeSearcher — 业务知识
+### 3.5 RAG 管道 — VectorStore / VectorStoreDocumentRetriever / IdentityQueryTransformer
+
+知识检索由 `VectorStore`、`EmbeddingModel` 两个 SPI + `VectorStoreDocumentRetriever`、`IdentityQueryTransformer` 两个命名类组成 RAG 管道：
 
 ```java
-public interface KnowledgeSource {
-    List<KnowledgeFragment> load();  // 加载知识片段
-    void reload();                    // 热重载
-    String type();                    // 源类型标识
+public interface VectorStore {
+    List<KnowledgeFragment> search(String query, int topK);  // 向量相似度检索
+    void add(List<KnowledgeFragment> fragments);             // 写入向量
+    void reload();                                            // 重新加载
+    int size();                                               // 缓存片段总数
 }
 
-public interface KnowledgeSearcher {
-    double score(String query, KnowledgeFragment fragment); // [0.0, 1.0] 相关度评分
-}
-
-public class KnowledgeBase {
-    KnowledgeBase(List<KnowledgeSource> sources, KnowledgeSearcher searcher);
-
-    List<KnowledgeFragment> search(String query, int topK, double minScore);
-    List<SearchResult> searchWithScores(String query, int topK, double minScore);
-    void reload();  // 重新加载所有源
-    int size();     // 缓存片段总数
+public interface EmbeddingModel {
+    float[] embed(String text);  // 文本 → 向量嵌入
 }
 ```
 
-- **默认实现**：`MarkdownKnowledgeSource`（按 `##` 分段）、`SimpleKeywordSearcher`（中英文混合分词 + 关键词重叠打分）
-- **扩展点**：自定义 `KnowledgeSource`（数据库/Confluence/API）或 `KnowledgeSearcher`（向量嵌入语义检索）
+- **默认实现**：`VectorStoreDocumentRetriever`（基于 Markdown 文档分段 + 向量检索）、`IdentityQueryTransformer`（原样透传用户查询）
+- **管道流程**：`IdentityQueryTransformer` 变换查询 → `EmbeddingModel` 嵌入 → `VectorStoreDocumentRetriever` 检索 → 返回 `KnowledgeFragment` 列表
+- **扩展点**：自定义 `VectorStore`（Pinecone/Milvus/PGVector）或 `EmbeddingModel`（OpenAI/智谱 Embedding）
 
 ### 3.6 CodeGraph / CodeGraphBuilder / CodeGraphIndex — 代码知识图谱
 
@@ -375,14 +396,9 @@ public interface CostStore {
 - **成本捕获**：`CostTrackingLlmClient` 装饰原始 `LlmClient`，通过 `LlmEventSink.onUsage()` 捕获 token 用量
 - **扩展点**：实现 `CostStore` 用数据库存储成本记录
 
-### 3.9 WorkflowEngine / WorkflowDefinition — 工作流编排
+### 3.9 WorkflowDefinition — 工作流编排（引擎实现可插拔）
 
 ```java
-public interface WorkflowEngine {
-    WorkflowResult execute(WorkflowDefinition workflow, Map<String, String> triggerInputs);
-    String type();
-}
-
 public final class WorkflowDefinition {
     String getName();                          // 工作流名
     String getDescription();                    // 描述
@@ -390,39 +406,45 @@ public final class WorkflowDefinition {
 }
 ```
 
-- **默认实现**：`SimpleWorkflowEngine`（顺序执行 + 条件分支）+ `YamlWorkflowLoader`（SnakeYAML 解析）
+- **默认实现**：`SimpleWorkflowEngine`（顺序执行 + 条件分支，位于 starter 模块）+ `YamlWorkflowLoader`（SnakeYAML 解析）
 - **条件语法**：`${step.result != null}`、`${step.result.contains('text')}`、`${step.result.size > 0}`
 - **变量引用**：`${trigger.xxx}`（触发输入）、`${step.result}`（前序步骤结果）
-- **扩展点**：实现 `WorkflowEngine` 支持 DAG 并行/人工审批
+- **扩展点**：通过 graph runtime 的 `StateGraph` 实现 DAG 并行/人工审批
 
-### 3.10 ConversationStore — 会话历史
+### 3.10 ChatMemory / ChatMemoryRepository — 会话历史（新 SPI，取代 ConversationStore）
 
 ```java
-public interface ConversationStore {
-    Conversation save(Conversation conversation);              // 保存/更新（自动生成 ID）
-    Conversation load(String conversationId, String userId);  // 加载（带归属校验）
-    List<ConversationSummary> list(String userId, String skillId); // 列出（可选 skill 过滤）
-    boolean delete(String conversationId, String userId);      // 删除（带归属校验）
-    String exportMarkdown(String conversationId, String userId); // 导出 Markdown
+public interface ChatMemory {
+    void add(String conversationId, Message message);              // 追加消息
+    List<Message> get(String conversationId);                      // 加载全量消息
+    void clear(String conversationId);                             // 清空
+}
+
+public interface ChatMemoryRepository {
+    String save(Conversation conversation);                        // 保存（自动生成 ID）
+    Conversation load(String conversationId, String userId);      // 加载（带归属校验）
+    List<ConversationSummary> list(String userId, String skillId); // 列出
+    boolean delete(String conversationId, String userId);          // 删除（带归属校验）
+    String exportMarkdown(String conversationId, String userId);  // 导出 Markdown
 }
 ```
 
-- **默认实现**：`FileConversationStore`（JSON 存储在 `{upload-skills-dir}/conversations/{userId}/`）
+- **默认实现**：`FileChatMemoryRepository`（JSON 存储在 `{upload-skills-dir}/conversations/{userId}/`）
 - **归属隔离**：所有方法带 `userId` 参数，防止跨用户访问
-- **扩展点**：实现 `ConversationStore` 用数据库存储
+- **扩展点**：实现 `ChatMemoryRepository` 用数据库存储
 
-### 3.11 SystemPromptExtender — 上下文注入
+### 3.11 Advisor — 上下文注入与拦截（取代 SystemPromptExtender）
 
 ```java
-public interface SystemPromptExtender {
-    String extend(SkillMeta skill, AgentTask task); // 返回要追加到 system prompt 的上下文文本
+public interface Advisor {
+    String advise(SkillMeta skill, AgentTask task); // 返回要追加到 system prompt 的上下文文本
 }
 ```
 
-AgentExecutor 支持 `List<SystemPromptExtender>`（v0.7），按 Spring `@Order` 排序：
+`GraphExecutor` 支持 `List<Advisor>`，按 Spring `@Order` 排序：
 
-1. `ProjectContextExtender`（v0.3）：启动时扫描项目结构，注入模块/Java 文件数/关键目录摘要
-2. `KnowledgeInjector`（v0.7）：从用户查询检索知识库，注入匹配的业务知识片段
+1. `ProjectContextAdvisor`（取代 `ProjectContextExtender`）：启动时扫描项目结构，注入模块/Java 文件数/关键目录摘要
+2. `KnowledgeAdvisor`（取代 `KnowledgeInjector`）：通过 RAG 管道检索知识库，注入匹配的业务知识片段
 
 两者独立工作，各自检索和注入，最后拼接为完整的 system prompt 上下文。
 
@@ -430,7 +452,7 @@ AgentExecutor 支持 `List<SystemPromptExtender>`（v0.7），按 Spring `@Order
 
 ## 4. 执行循环
 
-`AgentExecutor` 是 SnapAgent 的核心执行引擎，驱动 LLM 与工具的交互循环。
+`GraphExecutor` 是 SnapAgent 的核心执行引擎，基于 `StateGraph` 驱动 LLM 与工具的交互循环。`ReActGraphFactory` 构造图结构，节点包括 `EntryNode`、`AgentNode`、`ToolsNode`。
 
 ### 执行流程
 
@@ -438,19 +460,19 @@ AgentExecutor 支持 `List<SystemPromptExtender>`（v0.7），按 Spring `@Order
 用户请求 → POST /runs
     │
     ▼
-AgentExecutor.execute(task, skill)
+GraphExecutor.execute(task, skill)  ← 由 ReActGraphFactory 构建 StateGraph
     │
     ├─ 1. 构建 system prompt
-    │   ├─ READ_ONLY_PREFIX（只读约束 + Phase 排查指令）
+    │   ├─ READ_ONLY_PREFIX 或 READ_WRITE_PREFIX（由 SkillMode 枚举决定：READ_ONLY / READ_WRITE）
     │   ├─ skill.getName() + skill.getDescription()
     │   ├─ skill.getBody()（Phase 排查步骤正文，{key} 占位符保留为引用）
     │   ├─ INPUT_REF_INSTRUCTION（说明 {key} 引用如何解析）
     │   ├─ userId
-    │   └─ 遍历 List<SystemPromptExtender>.extend() → 追加上下文
+    │   └─ 遍历 List<Advisor>.advise() → 追加上下文
     │
-    ├─ 2. 构建 tools 数组（解析每个 ToolProvider.schema() JSON）
+    ├─ 2. 构建 tools 数组（从 ToolCallbackRegistry 解析每个 ToolCallback 的 JSON Schema）
     │
-    ├─ 3. 构建 messages（历史消息 + 用户输入消息）
+    ├─ 3. 构建 messages（通过 MessagePartitioner 分区历史消息 + 用户输入消息）
     │   └─ buildInputMessage(): <user_inputs>key=value</user_inputs>（防注入隔离）
     │
     ▼
@@ -464,7 +486,7 @@ AgentExecutor.execute(task, skill)
 │     └─ onStop → 记录 stopReason                                      │
 │     └─ onError → 记录 errorMessage                                   │
 │                                                                       │
-│  6. llmClient.stream(req, collector, taskId)                         │
+│  6. AgentNode → llmClient.stream(req, collector, taskId)             │
 │                                                                       │
 │  7. 错误处理                                                           │
 │     ├─ CANCELLED → 记录 "任务已取消", return                          │
@@ -475,10 +497,10 @@ AgentExecutor.execute(task, skill)
 │     └─ stopReason == "end_turn" || toolUses.isEmpty()                │
 │        → task.setReport(thoughts), SUCCEEDED, done 事件, return       │
 │                                                                       │
-│  9. 工具调用                                                           │
+│  9. ToolsNode → 工具调用                                              │
 │     ├─ messages.add(Message.assistant(thoughts, toolUseBlocks))      │
 │     ├─ for each toolUse:                                              │
-│     │   ├─ ToolDispatcher.dispatch(name, input, ctx)                │
+│     │   ├─ ToolCallbackRegistry.dispatch(name, input, ctx)          │
 │     │   ├─ transcript.add(toolCall event)                            │
 │     │   ├─ transcript.add(toolResult event)                          │
 │     │   └─ messages.add(Message.toolResult(id, serializedResult))   │
@@ -531,7 +553,7 @@ String buildInputMessage(Map<String, String> inputs) {
 | `/skills/upload` | POST | 上传单个 skill 文件 |
 | `/skills/upload-folder` | POST | 上传 skill 目录（多文件） |
 | `/tools` | GET | 列出已注册工具 |
-| `/tools/plugins` | GET | 列出工具插件元数据 |
+| `/tools/plugins` | GET | 列出工具回调元数据（`@Tool` 注解信息） |
 | `/models` | GET | 列出可用 LLM 模型 |
 | `/runs` | POST | 创建并启动诊断任务 |
 | `/runs` | GET | 列出任务 |
@@ -722,12 +744,16 @@ tools: [jdbc_query]
 
 ### 总开关
 
+原先的 `SnapAgentAutoConfiguration` 单一巨类已拆分为 8 个领域 `@Configuration` 类，各自负责一个功能域的 Bean 装配。总开关由 `SecurityConfig` 持有：
+
 ```java
 @Configuration
 @ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(SnapAgentProperties.class)
-public class SnapAgentAutoConfiguration { ... }
+public class SecurityConfig { ... }
 ```
+
+其余 7 个：`ToolConfig`、`WebConfig`、`PatrolConfig`、`KnowledgeConfig`、`IssueConfig`、`CostConfig`、`WorkflowConfig`。
 
 默认 `snap-agent.enabled = false`，starter 在 classpath 但未激活时零影响。
 
@@ -796,14 +822,14 @@ public class SnapAgentProperties {
 // 默认实现 — 宿主可替换
 @Bean
 @ConditionalOnMissingBean
-public ConversationStore conversationStore(SnapAgentProperties props) {
-    return new FileConversationStore(props.getUploadSkillsDir());
+public ChatMemoryRepository chatMemoryRepository(SnapAgentProperties props) {
+    return new FileChatMemoryRepository(props.getUploadSkillsDir());
 }
 
 // 宿主替换为数据库实现
 @Bean
-public ConversationStore conversationStore(DataSource dataSource) {
-    return new JdbcConversationStore(dataSource);
+public ChatMemoryRepository chatMemoryRepository(DataSource dataSource) {
+    return new JdbcChatMemoryRepository(dataSource);
 }
 ```
 
@@ -816,23 +842,23 @@ public ConversationStore conversationStore(DataSource dataSource) {
 public LlmClient llmClient(SnapAgentProperties props) {
     String apiType = props.getLlm().getApiType();
     if ("openai".equalsIgnoreCase(apiType)) {
-        return new OpenAiLlmClient(...);  // 通义/文心/智谱等兼容 API
+        return new OpenAiLlmClient(...);  // 通义/文心/智谱等兼容 API，继承 AbstractStreamingLlmClient
     }
-    return new AnthropicLlmClient(...);    // 默认 Anthropic
+    return new AnthropicLlmClient(...);    // 默认 Anthropic，继承 AbstractStreamingLlmClient
 }
 ```
 
-### AgentExecutor 装配
+### GraphExecutor 装配
 
 ```java
 @Bean
 @ConditionalOnMissingBean
-public AgentExecutor agentExecutor(
+public GraphExecutor graphExecutor(
         ObjectProvider<LlmClient> llmClientProvider,
-        ToolDispatcher toolDispatcher,
+        ToolCallbackRegistry toolCallbackRegistry,
         TaskStore taskStore,
         SnapAgentProperties props,
-        ObjectProvider<SystemPromptExtender> extenderProvider,    // 收集所有 extender
+        ObjectProvider<Advisor> advisorProvider,    // 收集所有 advisor
         ObjectProvider<CostTracker> costTrackerProvider,
         ObjectProvider<CostCalculator> costCalculatorProvider) {
 
@@ -841,9 +867,11 @@ public AgentExecutor agentExecutor(
     if (llmClient != null && costTracker != null && props.getCost().isEnabled()) {
         llmClient = new CostTrackingLlmClient(llmClient, costTracker, costCalculator, ...);
     }
-    // 收集所有 SystemPromptExtender（按 @Order 排序）
-    List<SystemPromptExtender> extenders = extenderProvider.orderedStream().collect(...);
-    return new AgentExecutor(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, extenders);
+    // 收集所有 Advisor（按 @Order 排序，取代 SystemPromptExtender）
+    List<Advisor> advisors = advisorProvider.orderedStream().collect(...);
+    // ReActGraphFactory 构造 StateGraph，注入 EntryNode / AgentNode / ToolsNode
+    ReActGraphFactory factory = new ReActGraphFactory(llmClient, toolCallbackRegistry, maxTurns, maxTokens, advisors);
+    return new GraphExecutor(factory, taskStore);
 }
 ```
 
@@ -853,17 +881,18 @@ public AgentExecutor agentExecutor(
 
 | 版本 | 交付内容 | 关键 SPI/组件 |
 |------|---------|-------------|
-| v0.1-alpha | 核心 SPI + LLM + 基础工具 | AgentExecutor, LlmClient, SkillRegistry, ToolDispatcher, JdbcQueryToolProvider, RedisReadToolProvider |
+| v0.1-alpha | 核心 SPI + LLM + 基础工具 | GraphExecutor, StateGraph, LlmClient, SkillRegistry, ToolCallbackRegistry, JdbcQueryTool, RedisReadTool |
 | v0.2 | 框架增强 | SnapAgentFilter, AgentRequestContext, 跨 Pod 路由子系统 (PeerRouter/PeerSseRelay) |
-| v0.3 | 代码理解能力 | SystemPromptExtender, CodePathGuard, code_read/project_structure/git_log 工具, ProjectContextExtender |
+| v0.3 | 代码理解能力 | Advisor SPI, CodePathGuard, code_read/project_structure/git_log 工具, ProjectContextAdvisor |
 | v0.4 | 运营诊断能力 | ObservabilityHttpClient, TimeRangeParser, metrics_query/log_search/trace_search/config_read 工具 |
 | v0.5 | 主动监控与推送 | AlertConverger, AnomalyEventListener, ScheduledPatrolScheduler, 巡检 skill |
 | v0.6 | 平台化 | DataSourceRegistry (多环境), SkillMeta.requiredPermission (skill 级权限), snap-agent-client REST SDK |
-| v0.7 | 嵌入式业务知识库 | KnowledgeBase, KnowledgeSource, KnowledgeSearcher, KnowledgeInjector (SystemPromptExtender 多 extender) |
-| v0.8 | 代码知识图谱 | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphToolProvider |
+| v0.7 | 嵌入式业务知识库 | VectorStore, EmbeddingModel, VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeAdvisor (Advisor 多 advisor) |
+| v0.8 | 代码知识图谱 | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphTool |
 | v0.9 | 问题问答闭环 | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
-| v1.0 | 工具插件 + 工作流 + 成本核算 | ToolPlugin, WorkflowEngine, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage() |
-| v1.1 | 主动监控 SPI 化 + 锚点问答 | PatrolReportStore 接口化 (InMemoryPatrolReportStore), PatrolLockProvider (多 Pod 协调), AlertPushChannel (Webhook+Email 默认实现), KnowledgeBase.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (页面区域锚点问答 + 智能技能路由 + 预摘要缓存) |
+| v1.0 | 工作流 + 成本核算 + 注解化工具 | WorkflowDefinition, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage(), @Tool/@ToolParam, ToolCallback |
+| v1.1 | 主动监控 SPI 化 + 锚点问答 | PatrolReportStore 接口化 (InMemoryPatrolReportStore), PatrolLockProvider (多 Pod 协调), AlertPushChannel (Webhook+Email 默认实现), VectorStore.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (页面区域锚点问答 + 智能技能路由 + 预摘要缓存) |
+| v1.2 | Graph runtime + 架构重构 | StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys, MessagePartitioner, AbstractStreamingLlmClient, 8 领域 @Configuration 拆分, ChatMemory/ChatMemoryRepository, CheckpointStore, StructuredOutputConverter |
 
 ---
 
@@ -875,30 +904,31 @@ public AgentExecutor agentExecutor(
 |------|------|
 | 仅内存状态 | TaskStore 基于 ConcurrentHashMap，进程重启丢失所有任务和 transcript |
 | Java 8 + Spring Boot 2.x | 使用 javax.servlet，不支持 Spring Boot 3.x (jakarta.servlet) |
-| 无向量搜索 | 知识库默认使用关键词重叠打分，无 embedding 语义检索 |
+| 向量搜索需配置 EmbeddingModel | 默认 RAG 管道使用关键词检索；接入 EmbeddingModel 后才有向量语义检索 |
 | 正则解析代码图谱 | SimpleCodeGraphBuilder 基于正则，注释可能假阳性，不区分重载，lambda 可能遗漏 |
 | 无 Spring Cloud 依赖 | 跨 Pod 路由自实现 K8s API/DNS 探测，不依赖服务发现框架 |
 | SSE 限制 | EventSource 不支持自定义 header，SSE 端点需 permitAll + token query param |
 | 精确权限匹配 | SpringSecurityAdapter.hasPermission() 精确匹配 authority，不支持通配符/角色继承 |
-| 串行工作流 | SimpleWorkflowEngine 顺序执行，不支持并行/DAG/人工审批 |
+| 串行工作流 | SimpleWorkflowEngine 顺序执行，不支持并行/DAG/人工审批（需基于 StateGraph 自定义） |
 
 ### SPI 扩展指南
 
 | SPI | 默认实现 | 扩展方式 |
 |-----|---------|---------|
-| `LlmClient` | AnthropicLlmClient / OpenAiLlmClient | 实现 `LlmClient` + `@Component`，配置 `api-type` 选择 |
-| `ToolProvider` | JdbcQueryToolProvider 等 | 实现 `ToolProvider` + `@Component`，自动被 ToolDispatcher 收集 |
+| `LlmClient` | AnthropicLlmClient / OpenAiLlmClient (继承 AbstractStreamingLlmClient) | 继承 `AbstractStreamingLlmClient` + `@Component`，配置 `api-type` 选择 |
+| `ToolCallback` | 带 `@Tool` 注解的内置工具 | 在 Bean 方法上标注 `@Tool` + `@ToolParam`，即被 `ToolCallbackRegistry` 自动扫描 |
 | `SecurityGateway` | SpringSecurityAdapter / ShiroAdapter | 实现并声明 Bean，`@ConditionalOnMissingBean` 生效 |
 | `PrincipalResolver` | DefaultPrincipalResolver | 实现 `PrincipalResolver` + `@Component` |
-| `KnowledgeSource` | MarkdownKnowledgeSource | 实现 `KnowledgeSource` + `@Component`（数据库/API/Confluence） |
-| `KnowledgeSearcher` | SimpleKeywordSearcher | 实现 `KnowledgeSearcher` + `@Component`（向量嵌入语义检索） |
+| `Advisor` | ProjectContextAdvisor / KnowledgeAdvisor | 实现 `Advisor` + `@Component`（自定义上下文注入与拦截） |
+| `VectorStore` | VectorStoreDocumentRetriever | 实现 `VectorStore` + `@Component`（Pinecone/Milvus/PGVector） |
+| `EmbeddingModel` | 内置关键词匹配（无向量） | 实现 `EmbeddingModel` + `@Component`（OpenAI/智谱 Embedding） |
+| `ChatMemoryRepository` | FileChatMemoryRepository | 实现 `ChatMemoryRepository` + `@Component`（数据库存储） |
 | `CodeGraphBuilder` | SimpleCodeGraphBuilder | 实现 `CodeGraphBuilder` + `@Component`（JavaParser AST） |
 | `CodeGraphIndex` | InMemoryCodeGraphIndex | 实现 `CodeGraphIndex` + `@Component`（SQLite/H2 持久化） |
 | `IssueStore` | FileIssueStore | 实现 `IssueStore` + `@Component`（数据库存储） |
 | `IssueTracker` | NoopIssueTracker | 实现 `IssueTracker` + `@Component`（Jira/GitHub Issues） |
 | `CostStore` | FileCostStore | 实现 `CostStore` + `@Component`（数据库存储） |
-| `WorkflowEngine` | SimpleWorkflowEngine | 实现 `WorkflowEngine` + `@Component`（DAG 并行/人工审批） |
-| `ConversationStore` | FileConversationStore | 实现 `ConversationStore` + `@Component`（数据库存储） |
-| `SystemPromptExtender` | ProjectContextExtender / KnowledgeInjector | 实现 `SystemPromptExtender` + `@Component`（自定义上下文注入） |
+| `CheckpointStore` | 内存实现 | 实现 `CheckpointStore` + `@Component`（StateGraph 检查点持久化） |
+| `StructuredOutputConverter` | 默认 JSON 转换 | 实现 `StructuredOutputConverter` + `@Component`（自定义工具返回值结构化） |
 
 所有扩展均通过 Spring `@ConditionalOnMissingBean` 机制生效：宿主声明的 Bean 优先于默认实现，无需修改 SnapAgent 源码。

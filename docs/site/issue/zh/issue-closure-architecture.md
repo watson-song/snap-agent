@@ -363,7 +363,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 4.5 IssueClosureService (编排服务)
 
-核心编排器, 连接 `AgentExecutor`、`IssueStore`、`IssueTracker`、`KnowledgeBase`:
+核心编排器, 连接 `GraphExecutor`、`IssueStore`、`IssueTracker`、`KnowledgeBase`:
 
 #### `proposeSolution(taskId)` — 方案建议
 

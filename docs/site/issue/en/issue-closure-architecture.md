@@ -367,7 +367,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 4.5 IssueClosureService (Orchestration Service)
 
-The core orchestrator, connecting `AgentExecutor`, `IssueStore`, `IssueTracker`, and `KnowledgeBase`:
+The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`, and `KnowledgeBase`:
 
 #### `proposeSolution(taskId)` — Propose Solutions
 

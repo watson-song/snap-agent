@@ -52,12 +52,12 @@ Trigger (service=order-service)
 | 组件 | 模块 | 职责 |
 |------|------|------|
 | `YamlWorkflowLoader` | starter (`boot2x/workflow/`) | 从文件系统 `.yml` 文件解析 `WorkflowDefinition` |
-| `SimpleWorkflowEngine` | starter (`boot2x/workflow/`) | 顺序执行步骤，条件求值，失败处理 |
-| `WorkflowEngine` (SPI) | core (`core/workflow/`) | 执行引擎接口，宿主可替换实现 |
+| `WorkflowDefinition` + Step Runner | starter (`boot2x/workflow/`) | 顺序执行步骤，条件求值，失败处理 |
+| `WorkflowDefinition` (SPI) | core (`core/workflow/`) | 工作流结构接口，宿主可替换实现 |
 | `WorkflowDefinition` / `WorkflowStep` | core | 不可变值对象，描述工作流结构 |
 | `WorkflowResult` / `StepResult` | core | 不可变值对象，承载执行结果 |
 
-工作流定义以 YAML 格式编写，放在 `snap-agent.workflows.dir` 指定的目录中。启动时 `YamlWorkflowLoader` 扫描所有 `.yml` 文件并解析为 `WorkflowDefinition` 列表。REST API 触发执行后，`SimpleWorkflowEngine` 逐步调用 `AgentExecutor` 运行每个 Skill，汇总结果为 `WorkflowResult` 返回。
+工作流定义以 YAML 格式编写，放在 `snap-agent.workflows.dir` 指定的目录中。启动时 `YamlWorkflowLoader` 扫描所有 `.yml` 文件并解析为 `WorkflowDefinition` 列表。REST API 触发执行后，工作流步骤执行器逐步调用 `GraphExecutor` 运行每个 Skill，汇总结果为 `WorkflowResult` 返回。
 
 ---
 
@@ -309,7 +309,7 @@ execute(workflow, triggerInputs)
 │       └─ ${stepName.result} → 前序步骤结果         │
 │    3. 查找 Skill (SkillRegistry.get)               │
 │       └─ 未找到 → 按 onFailure 处理                │
-│    4. 执行 Skill (AgentExecutor.execute, 同步)     │
+│    4. 执行 Skill (GraphExecutor.execute, 同步)     │
 │       └─ 构造 AgentTask → 执行 → StepResult        │
 │    5. 失败处理 (onFailure):                        │
 │       ├─ RETRY → 重试一次                          │
@@ -380,7 +380,7 @@ public WorkflowResult execute(WorkflowDefinition workflow,
 
 ### 4.3 步骤执行 (executeStep)
 
-每个步骤通过 `AgentExecutor` 同步执行：
+每个步骤通过 `GraphExecutor` 同步执行：
 
 ```java
 private StepResult executeStep(String workflowName, WorkflowStep step,
@@ -729,7 +729,7 @@ snap-agent:
 
 ### 8.2 自动装配
 
-`SnapAgentAutoConfiguration` 在 `enabled=true` 时装配两个 Bean：
+`WorkflowAutoConfiguration` 在 `enabled=true` 时装配两个 Bean：
 
 ```java
 @Bean
@@ -745,11 +745,11 @@ public YamlWorkflowLoader yamlWorkflowLoader(SnapAgentProperties props) {
 @ConditionalOnProperty(prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
 @ConditionalOnMissingBean(WorkflowEngine.class)
 public SimpleWorkflowEngine simpleWorkflowEngine(
-        AgentExecutor agentExecutor,
+        GraphExecutor graphExecutor,
         SkillRegistry skillRegistry,
         SnapAgentProperties props) {
     // systemUserId 来自 snap-agent.issue-closure.system-user-id
-    return new SimpleWorkflowEngine(agentExecutor, skillRegistry, systemUserId);
+    return new SimpleWorkflowEngine(graphExecutor, skillRegistry, systemUserId);
 }
 ```
 
@@ -816,4 +816,4 @@ public class DatabaseWorkflowLoader extends YamlWorkflowLoader {
 | 无定时/事件触发 | 仅支持 REST API 手动触发 | v1.0.1 定时/事件触发 |
 | 单条件表达式 | 不支持 AND/OR 逻辑组合 | 未来增强 |
 | 无 `.size >= N` | 仅支持 `.size > 0`，不支持任意数值比较 | 未来增强 |
-| 同步执行 | 步骤同步调用 `AgentExecutor`，长时间工作流阻塞 HTTP 线程 | v1.0.1 异步执行 |
+| 同步执行 | 步骤同步调用 `GraphExecutor`，长时间工作流阻塞 HTTP 线程 | v1.0.1 异步执行 |

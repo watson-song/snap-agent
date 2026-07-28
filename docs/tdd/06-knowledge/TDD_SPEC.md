@@ -732,9 +732,11 @@ public class SearchRequest {
 public interface QueryTransformer {
     String transform(String originalQuery, ExecutionContext ctx);
 }
+// 默认实现: IdentityQueryTransformer (直通，原样传递 query)
 public interface DocumentRetriever {
     List<Document> retrieve(String query, int topK);
 }
+// 默认实现: VectorStoreDocumentRetriever (委托 VectorStore.similaritySearch)
 public interface QueryAugmenter {
     String augment(String originalQuery, List<Document> retrievedDocs);
 }
@@ -916,8 +918,8 @@ Mock: VectorStore(匿名实现), EmbeddingModel(lambda), QueryTransformer/Docume
 | EmbeddingModel | 嵌入模型 SPI (embed/embedBatch)，2.x 新增 |
 | Document | 知识文档 (id+content+metadata+embedding)，替代旧 KnowledgeFragment |
 | SearchRequest | 检索请求 (query+topK+similarityThreshold+filterExpression) |
-| QueryTransformer | RAG 第一段: 重写 query（如多查询、扩展） |
-| DocumentRetriever | RAG 第二段: 从 VectorStore 检索文档 |
+| QueryTransformer | RAG 第一段: 重写 query（如多查询、扩展）。默认实现 `IdentityQueryTransformer` 直通 |
+| DocumentRetriever | RAG 第二段: 从 VectorStore 检索文档。默认实现 `VectorStoreDocumentRetriever` |
 | QueryAugmenter | RAG 第三段: 将检索文档注入 originalQuery 合成 prompt |
 | RetrievalAugmentationAdvisor | 组合三段式的 Advisor (order=200)，before agent_node 注入 state["rag.context"] |
 | allowEmptyContext | 空上下文策略: false 返回"无相关知识"指令，true 返回空字符串 |

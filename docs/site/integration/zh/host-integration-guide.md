@@ -22,11 +22,11 @@ SnapAgent 是一个嵌入式 LLM 诊断 Agent 库，让 Spring Boot 2.x 应用�
 │  ┌──────────────────────▼───────────────────▼──────────┐     │
 │  │        SnapAgent Starter (自动发现, @Component)       │     │
 │  │  ┌──────────────┐ ┌────────────┐ ┌───────────────┐  │     │
-│  │  │ ToolProvider │ │ SkillLoader│ │ SecurityGateway│  │     │
-│  │  │ (Jdbc/Redis/ │ │ (内置+上传) │ │ (Spring/Shiro) │  │     │
-│  │  │  Code/Ops…)  │ └────────────┘ └───────────────┘  │     │
+│  │  │ @Tool       │ │ SkillLoader│ │ SecurityGateway│  │     │
+│  │  │ ToolCallbac │ │ (内置+上传) │ │ (Spring/Shiro) │  │     │
+│  │  │ kRegistry  │ └────────────┘ └───────────────┘  │     │
 │  │  └──────────────┘                                   │     │
-│  │         AgentExecutor + SSE Controller              │     │
+│  │         GraphExecutor + SSE Controller              │     │
 │  └──────────────────────┬──────────────────────────────┘     │
 │                         │ /v1/messages (SSE)                    │
 └─────────────────────────┼────────────────────────────────────┘
@@ -43,7 +43,7 @@ SnapAgent 是一个嵌入式 LLM 诊断 Agent 库，让 Spring Boot 2.x 应用�
 - **零侵入**：`snap-agent.enabled=false`（默认）时，Starter 不创建任何 Bean —— 无 Filter、无线程池、无路由（满足 TDD_SPEC §AC15）。
 - **只读诊断**：所有内置工具均为只读（SELECT 查询、GET 请求、文件读取），不会修改宿主状态。
 - **认证委托**：SnapAgent 不自行实现认证，仅读取宿主已认证的 Principal 并做权限校验。
-- **自动发现**：自定义工具只需实现 `ToolProvider` 接口 + `@Component` 注解，即被 `ToolDispatcher` 自动收集。
+- **自动发现**：自定义工具只需在 Bean 方法上标注 `@Tool` + `@ToolParam` 注解，即被 `ToolCallbackRegistry` 自动扫描注册。
 
 ---
 
@@ -69,11 +69,11 @@ Starter 中的内置工具按 `@ConditionalOnClass` / `@ConditionalOnBean` 条�
 
 | 内置工具 | 需要的依赖 | 备注 |
 |---------|-----------|------|
-| `mysql_query` (JdbcQueryToolProvider) | `spring-jdbc` + 一个 `DataSource` Bean + JDBC 驱动 | 默认 `snap-agent.jdbc.enabled=true` |
-| `redis_read` (RedisReadToolProvider) | `spring-data-redis` + 一个 `RedisTemplate` Bean | 默认 `snap-agent.redis.enabled=true` |
-| `log_read` (LogReadToolProvider) | 无额外依赖 | 默认 `snap-agent.logs.enabled=true` |
+| `mysql_query` (`@Tool` JdbcQuery) | `spring-jdbc` + 一个 `DataSource` Bean + JDBC 驱动 | 默认 `snap-agent.jdbc.enabled=true` |
+| `redis_read` (`@Tool` RedisRead) | `spring-data-redis` + 一个 `RedisTemplate` Bean | 默认 `snap-agent.redis.enabled=true` |
+| `log_read` (`@Tool` LogRead) | 无额外依赖 | 默认 `snap-agent.logs.enabled=true` |
 | `metrics_query` / `log_search` / `trace_search` | 无额外依赖（JDK HttpURLConnection） | 各自 `enabled` 默认 false，需配 `base-url` |
-| LLM 流式（AnthropicLlmClient / OpenAiLlmClient） | `com.squareup.okhttp3:okhttp` | **必需**，否则 LLM 调用无法工作 |
+| LLM 流式（AnthropicLlmClient / OpenAiLlmClient，均继承 AbstractStreamingLlmClient） | `com.squareup.okhttp3:okhttp` | **必需**，否则 LLM 调用无法工作 |
 
 一个典型的宿主 `pom.xml` 依赖片段（参考 `snap-agent-demo` 模块）：
 
@@ -166,7 +166,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 | `timeout-seconds` | `120` | HTTP 连接 + 读取超时（共享此预算） |
 | `streaming` | `true` | 是否启用 SSE 流式输出 |
 
-> `llmClient` Bean 仅当 `api-key` 或 `auth-token` 非空时才创建（`@ConditionalOnExpression`）。两者皆空时 AgentExecutor 会 WARN 且无法工作。
+> `llmClient` Bean 仅当 `api-key` 或 `auth-token` 非空时才创建（`@ConditionalOnExpression`）。两者皆空时 GraphExecutor 会 WARN 且无法工作。
 
 ### 3.3 Agent 执行配置 (`snap-agent.agent.*`)
 
@@ -185,7 +185,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 
 | 属性 | 默认值 | 说明 |
 |------|-------|------|
-| `enabled` | `true` | 是否装配 JdbcQueryToolProvider |
+| `enabled` | `true` | 是否装配 `@Tool` JdbcQuery |
 | `datasource-bean-name` | `snapAgentReadOnlyDataSource` | 单数据源模式下的 DataSource Bean 名 |
 | `datasources` | `{}` | 多环境数据源 Map（v0.6）。key=环境名，value=`{url,username,password,driver-class-name}` |
 | `default-env` | `""` | 默认环境名（空=取第一个条目） |
@@ -196,7 +196,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 
 | 属性 | 默认值 | 说明 |
 |------|-------|------|
-| `enabled` | `true` | 是否装配 RedisReadToolProvider（还需 classpath 有 `RedisTemplate`） |
+| `enabled` | `true` | 是否装配 `@Tool` RedisRead（还需 classpath 有 `RedisTemplate`） |
 | `redis-template-bean-name` | `redisTemplate` | RedisTemplate Bean 名 |
 | `max-key-count` | `100` | 单次返回 key 数上限 |
 
@@ -204,7 +204,7 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 
 | 属性 | 默认值 | 说明 |
 |------|-------|------|
-| `enabled` | `true` | 是否装配 LogReadToolProvider |
+| `enabled` | `true` | 是否装配 `@Tool` LogRead |
 | `allowed-paths` | `[]` | 允许读取的日志目录列表 |
 | `max-lines` | `500` | 单次返回日志行数上限 |
 | `max-file-bytes` | `10485760` (10MB) | 单文件大小上限（防 OOM） |
@@ -376,15 +376,15 @@ snap-agent:
 
 ## 4. 启动流程
 
-宿主应用启动时，Spring Boot 通过 `META-INF/spring.factories` 自动装配 `SnapAgentAutoConfiguration`。该类带 `@ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")`，只有 `snap-agent.enabled=true` 时才会激活。激活后的装配顺序如下：
+宿主应用启动时，Spring Boot 通过 `META-INF/spring.factories` 自动装配 8 个领域 `@Configuration` 类。`SecurityConfig` 带 `@ConditionalOnProperty(prefix = "snap-agent", name = "enabled", havingValue = "true")`，只有 `snap-agent.enabled=true` 时才会激活。激活后的装配顺序如下：
 
 ```
 宿主启动
   │
   ▼
-SnapAgentAutoConfiguration 激活 (snap-agent.enabled=true)
+8 个领域 @Configuration 激活 (snap-agent.enabled=true)
   │
-  ├─ 1. 基础设施 Bean
+  ├─ 1. 基础设施 Bean (SecurityConfig)
   │     SqlGuard(maxResultRows) → TaskStore → RateLimiter
   │     → PrincipalResolver → AuditStore + SecurityAuditLogger
   │
@@ -393,45 +393,46 @@ SnapAgentAutoConfiguration 激活 (snap-agent.enabled=true)
   │     @ConditionalOnClass(ShiroUtils)            → ShiroAdapter
   │     (宿主可声明自定义 SecurityGateway Bean 覆盖, @ConditionalOnMissingBean)
   │
-  ├─ 3. LlmClient (api-type 路由)
+  ├─ 3. LlmClient (api-type 路由, 均继承 AbstractStreamingLlmClient)
   │     api-key 或 auth-token 非空 → 创建 LlmClient:
   │       api-type=openai  → OpenAiLlmClient  (POST {base-url}/v1/chat/completions)
   │       api-type=anthropic(默认) → AnthropicLlmClient (POST {base-url}/v1/messages)
   │
-  ├─ 4. 工具层 (按条件装配)
-  │     DataSourceRegistry(多env) / JdbcQueryToolProvider(@ConditionalOnBean DataSource)
-  │     RedisReadToolProvider(@ConditionalOnClass RedisTemplate)
-  │     LogPathGuard + LogReadToolProvider
+  ├─ 4. 工具层 (ToolConfig, 按条件装配)
+  │     DataSourceRegistry(多env) / @Tool JdbcQuery(@ConditionalOnBean DataSource)
+  │     @Tool RedisRead(@ConditionalOnClass RedisTemplate)
+  │     LogPathGuard + @Tool LogRead
   │     CodePathGuard(@ConditionalOnExpression code.enabled + project-root 非空)
-  │       → ProjectContextExtender + CodeReader/ProjectStructure/GitLog ToolProvider
-  │     Metrics/LogSearch/Trace/ConfigRead ToolProvider (各自 enabled+base-url)
+  │       → ProjectContextAdvisor + @Tool CodeReader/ProjectStructure/GitLog
+  │     @Tool Metrics/LogSearch/Trace/ConfigRead (各自 enabled+base-url)
   │
-  ├─ 5. ToolDispatcher (收集所有 ToolProvider Bean)
-  │     ObjectProvider<ToolProvider>.orderedStream() → List
-  │     + McpBootstrap.getProviders() (如启用)
-  │     自定义 @Component ToolProvider 也会被自动收集
+  ├─ 5. ToolCallbackRegistry (扫描所有 @Tool 注解方法)
+  │     扫描所有 Bean 上的 @Tool 方法 → 构造 ToolCallback 列表
+  │     + McpBootstrap.getCallbacks() (如启用)
+  │     宿主自定义 @Tool 方法也会被自动扫描
   │
   ├─ 6. 技能层
   │     ClasspathSkillScanner.scan(builtin-skills-dir)
   │       两趟扫描: SnapAgent JAR 资源优先 → 宿主 classpath 资源次之
-  │     SkillRegistry(uploadDir, builtinSkills, toolDispatcher)
+  │     SkillRegistry(uploadDir, builtinSkills, toolCallbackRegistry)
   │       合并: custom 按 name 覆盖 builtin; 删除 custom 后 builtin 自动恢复
   │     SkillHotReloader (watch upload-skills-dir, 默认开启)
   │
-  ├─ 7. SystemPromptExtender 收集 (ObjectProvider.orderedStream)
-  │     ProjectContextExtender (v0.3, 项目结构摘要)
-  │     KnowledgeInjector (v0.7, 业务知识片段) — 如 knowledge.enabled
+  ├─ 7. Advisor 收集 (ObjectProvider.orderedStream, 取代 SystemPromptExtender)
+  │     ProjectContextAdvisor (v0.3, 项目结构摘要)
+  │     KnowledgeAdvisor (v0.7, 业务知识片段 via RAG 管道) — 如 knowledge.enabled
   │
-  ├─ 8. AgentExecutor
+  ├─ 8. GraphExecutor (由 ReActGraphFactory 构建 StateGraph)
   │     若 cost.enabled → 用 CostTrackingLlmClient 包装原始 LlmClient
-  │     new AgentExecutor(llmClient, toolDispatcher, taskStore, maxTurns, maxTokens, extenders)
+  │     ReActGraphFactory 构造 StateGraph (EntryNode/AgentNode/ToolsNode)
+  │     new GraphExecutor(factory, taskStore, maxTurns, maxTokens, advisors)
   │
   ├─ 9. 线程池 + 路由
   │     snapAgentExecutor (ThreadPoolTaskExecutor: core=2, max=4, queue=10)
   │     PeerRouter (mode: k8s-api/headless-dns/static/none)
   │     PeerSseRelay + InternalTaskController (内部 Pod 间端点)
   │
-  └─ 10. Web 层
+  └─ 10. Web 层 (WebConfig)
         SnapAgentFilter (FilterRegistrationBean, url-pattern={base-path}/*)
         SnapAgentController (挂载 {base-path}/**, 注入所有 ObjectProvider 可选依赖)
         自动解析 app-profiles + app-log-file
@@ -439,38 +440,43 @@ SnapAgentAutoConfiguration 激活 (snap-agent.enabled=true)
 
 ### 关键装配要点
 
-1. **`@ConditionalOnMissingBean` 优先**：几乎所有内置 Bean 都标注了 `@ConditionalOnMissingBean`，宿主声明同名 Bean 即可替换（如自定义 `SecurityGateway`、`ConversationStore`、`LlmClient`、`PrincipalResolver`）。
-2. **工具按条件激活**：未引入 `spring-jdbc` 则 `JdbcQueryToolProvider` 不会被创建（`@ConditionalOnBean(DataSource.class)`）；未引入 Redis 则 `RedisReadToolProvider` 跳过。
+1. **`@ConditionalOnMissingBean` 优先**：几乎所有内置 Bean 都标注了 `@ConditionalOnMissingBean`，宿主声明同名 Bean 即可替换（如自定义 `SecurityGateway`、`ChatMemoryRepository`、`LlmClient`、`PrincipalResolver`）。
+2. **工具按条件激活**：未引入 `spring-jdbc` 则 `@Tool` JdbcQuery 不会被创建（`@ConditionalOnBean(DataSource.class)`）；未引入 Redis 则 `@Tool` RedisRead 跳过。
 3. **`ClasspathSkillScanner` 双趟扫描**：先处理 SnapAgent JAR 资源（URL 含 `snap-agent-spring-boot` 或 `snap-agent-core`），再处理宿主 classpath 资源；同名时宿主版本被跳过并 WARN，防止宿主 `docs/skills/` 误覆盖内置技能。
-4. **`ToolDispatcher` 收集所有 `ToolProvider` Bean**：包括内置的（Jdbc/Redis/Code/Ops）和宿主自定义的（`@Component` 实现 `ToolProvider`），统一调度。
+4. **`ToolCallbackRegistry` 扫描所有 `@Tool` 方法**：包括内置的（Jdbc/Redis/Code/Ops）和宿主自定义的（Bean 方法上标注 `@Tool`），统一注册为 `ToolCallback`。
 
 ---
 
 ## 5. 自定义工具
 
-### 5.1 ToolProvider SPI
+### 5.1 @Tool / @ToolParam 注解
 
-自定义工具只需实现 `ToolProvider` 接口（`snap-agent-core` 模块）并标注 `@Component`，即被 `ToolDispatcher` 自动发现：
+自定义工具只需在 Bean 方法上标注 `@Tool` 注解（`snap-agent-core` 模块），即被 `ToolCallbackRegistry` 自动发现：
 
 ```java
 package cn.watsontech.snapagent.core.tool;
 
-import java.util.Map;
+import java.lang.annotation.*;
 
-public interface ToolProvider {
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface Tool {
     /** 工具唯一名，技能 frontmatter 的 tools 字段引用此名 */
     String name();
 
-    /** 注入 LLM 工具定义的 JSON Schema 字符串（Anthropic tool 格式） */
-    String schema();
+    /** 注入 LLM 工具定义的描述（供 LLM 判断何时调用） */
+    String description() default "";
+}
 
-    /**
-     * 执行工具调用。
-     * @param args 从 LLM tool_use block 解析的参数
-     * @param ctx  请求级上下文（taskId, userId, audit）
-     * @return 不可变结果，永不返回 null
-     */
-    ToolResult execute(Map<String, Object> args, ToolContext ctx);
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+public @interface ToolParam {
+    /** 参数名 */
+    String value();
+    /** 参数描述 */
+    String description() default "";
+    /** 是否必填 */
+    boolean required() default true;
 }
 ```
 
@@ -479,8 +485,8 @@ public interface ToolProvider {
 ```java
 package com.example.myapp.tools;
 
-import cn.watsontech.snapagent.core.tool.ToolContext;
-import cn.watsontech.snapagent.core.tool.ToolProvider;
+import cn.watsontech.snapagent.core.tool.Tool;
+import cn.watsontech.snapagent.core.tool.ToolParam;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.springframework.stereotype.Component;
 
@@ -489,27 +495,11 @@ import java.net.URL;
 import java.util.Map;
 
 @Component
-public class HttpHealthCheckToolProvider implements ToolProvider {
+public class HttpHealthCheckTool {
 
-    @Override
-    public String name() {
-        return "http_health_check";
-    }
-
-    @Override
-    public String schema() {
-        return "{\"name\":\"http_health_check\","
-            + "\"description\":\"Check HTTP endpoint health (read-only GET).\","
-            + "\"input_schema\":{\"type\":\"object\","
-            + "\"properties\":{\"url\":{\"type\":\"string\","
-            + "\"description\":\"Absolute HTTP(S) URL to check\"}},"
-            + "\"required\":[\"url\"]}}";
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
+    @Tool(name = "http_health_check", description = "Check HTTP endpoint health (read-only GET).")
+    public ToolResult execute(@ToolParam(value = "url", description = "Absolute HTTP(S) URL to check") String url) {
         long start = System.currentTimeMillis();
-        String url = args.get("url") != null ? args.get("url").toString() : null;
         if (url == null || url.isEmpty()) {
             return ToolResult.error("missing required parameter: url", 0);
         }
@@ -529,7 +519,7 @@ public class HttpHealthCheckToolProvider implements ToolProvider {
 }
 ```
 
-无需任何额外注册 —— `@Component` 让 Spring 扫描到它，`ToolDispatcher` 通过 `ObjectProvider<ToolProvider>.orderedStream()` 自动收集。在技能 frontmatter 中引用 `tools: [http_health_check]` 即可。
+无需任何额外注册 —— `@Component` 让 Spring 扫描到它，`ToolCallbackRegistry` 通过扫描 `@Tool` 注解方法自动构造 `ToolCallback`。在技能 frontmatter 中引用 `tools: [http_health_check]` 即可。
 
 ### 5.3 上下文与结果
 
@@ -550,20 +540,20 @@ ToolResult.error(message, durationMs);               // 失败（content 为 nul
 ```
 字段包括 `content`、`rowCount`、`truncated`、`durationMs`、`error`。
 
-**`AuditCallback`**：工具执行后由 `ToolDispatcher` 回调，用于审计记录：
+**`AuditCallback`**：工具执行后由 `ToolCallbackRegistry` 回调，用于审计记录：
 ```java
 void onToolExecuted(String toolName, Map<String, Object> args, ToolResult result);
 ```
 
 ### 5.4 JSON Schema 约定
 
-`schema()` 返回的是 Anthropic tool-use 格式的 JSON 字符串（不是 JSON 对象，是 String）。关键字段：
+`@Tool` 注解的 `name` 和 `description` + `@ToolParam` 注解的参数元数据由 `ToolCallbackRegistry` 自动生成 JSON Schema（Anthropic tool-use 格式）。关键字段：
 
-- `name`：与 `name()` 一致
-- `description`：LLM 据此判断何时调用此工具
-- `input_schema`：JSON Schema，`type: object` + `properties` + `required`
+- `name`：与 `@Tool.name()` 一致
+- `description`：来自 `@Tool.description()`，LLM 据此判断何时调用此工具
+- `input_schema`：由 `@ToolParam` 注解自动生成 JSON Schema，`type: object` + `properties` + `required`
 
-参考内置 `JdbcQueryToolProvider` 的 schema 写法（多环境模式额外暴露 `env` 参数）：
+参考内置 `@Tool` JdbcQuery 的 schema 写法（多环境模式额外暴露 `env` 参数）：
 
 ```json
 {
@@ -829,7 +819,7 @@ const es = new EventSource(`/snap-agent/runs/${taskId}/stream?token=${token}`);
 
 ## 8. 多 LLM 对接
 
-SnapAgent 通过 `snap-agent.llm.api-type` 切换 LLM 客户端实现。`SnapAgentAutoConfiguration.llmClient()` Bean 方法根据 `api-type` 路由：
+SnapAgent 通过 `snap-agent.llm.api-type` 切换 LLM 客户端实现。`ToolConfig.llmClient()` Bean 方法根据 `api-type` 路由（两者均继承 `AbstractStreamingLlmClient`）：
 
 ```java
 if ("openai".equalsIgnoreCase(apiType)) {
@@ -897,7 +887,7 @@ snap-agent:
     proxy-url: http://proxy.internal:8080
 ```
 
-`AnthropicLlmClient` / `OpenAiLlmClient` 均支持 `proxyUrl` 构造参数，用 OkHttp 的 `Proxy(Type.HTTP, ...)` 配置。
+`AnthropicLlmClient` / `OpenAiLlmClient`（均继承 `AbstractStreamingLlmClient`）均支持 `proxyUrl` 构造参数，用 OkHttp 的 `Proxy(Type.HTTP, ...)` 配置。
 
 ### 8.4 完全自定义 LlmClient
 
@@ -946,19 +936,20 @@ SnapAgent 的所有核心组件均以 SPI 接口形式暴露，宿主可按需�
 
 | SPI 接口 | 默认实现 | 装配条件 | 用途 |
 |---------|---------|---------|------|
-| `LlmClient` | `AnthropicLlmClient` | `snap-agent.llm.api-type=anthropic` | LLM 流式调用 |
-| `ToolProvider` | 多个内置 | `@Component` 即发现 | 工具实现 |
+| `LlmClient` | `AnthropicLlmClient` (继承 AbstractStreamingLlmClient) | `snap-agent.llm.api-type=anthropic` | LLM 流式调用 |
+| `ToolCallback` | 多个内置 `@Tool` 方法 | `@Tool` 注解即发现 | 工具实现 |
 | `SecurityGateway` | `SpringSecurityAdapter` | `@ConditionalOnMissingBean` | 权限校验 |
 | `PrincipalResolver` | `SpringPrincipalResolver` | `@ConditionalOnMissingBean` | 用户身份解析 |
-| `SystemPromptExtender` | `ProjectContextExtender` / `KnowledgeInjector` | `@ConditionalOnMissingBean` | system prompt 注入 |
-| `ConversationStore` | `FileConversationStore` | `@ConditionalOnMissingBean` | 会话历史持久化 |
+| `Advisor` | `ProjectContextAdvisor` / `KnowledgeAdvisor` | `@ConditionalOnMissingBean` | system prompt 注入与拦截 |
+| `ChatMemoryRepository` | `FileChatMemoryRepository` | `@ConditionalOnMissingBean` | 会话历史持久化 |
 | `IssueStore` | `FileIssueStore` | `@ConditionalOnMissingBean` | Issue 持久化 |
 | `IssueTracker` | `NoopIssueTracker` | `@ConditionalOnMissingBean` | 外部 Issue 跟踪 |
-| `KnowledgeSource` | `MarkdownKnowledgeSource` | `@ConditionalOnMissingBean` | 知识源 |
-| `KnowledgeSearcher` | `SimpleKeywordSearcher` | `@ConditionalOnMissingBean` | 知识检索算法 |
+| `VectorStore` | `VectorStoreDocumentRetriever` | `@ConditionalOnMissingBean` | 向量存储与检索 |
+| `EmbeddingModel` | 内置关键词匹配（无向量） | `@ConditionalOnMissingBean` | 文本嵌入 |
 | `CostStore` | `FileCostStore` | `@ConditionalOnMissingBean` | 成本记录持久化 |
 | `CostTracker` | `DefaultCostTracker` | `@ConditionalOnMissingBean` | 成本追踪 |
-| `WorkflowEngine` | `SimpleWorkflowEngine` | `@ConditionalOnMissingBean` | 工作流引擎 |
+| `CheckpointStore` | 内存实现 | `@ConditionalOnMissingBean` | StateGraph 检查点持久化 |
+| `StructuredOutputConverter` | 默认 JSON 转换 | `@ConditionalOnMissingBean` | 工具返回值结构化 |
 | `PatrolScheduler` | `ScheduledPatrolScheduler` | `snap-agent.patrol.enabled=true` | 巡检调度 |
 | `PatrolReportStore` | `InMemoryPatrolReportStore` | `snap-agent.patrol.enabled=true` | 巡检报告存储（v1.1 SPI） |
 | `PatrolLockProvider` | `NoopPatrolLockProvider` | `snap-agent.patrol.enabled=true` | 多 Pod 巡检锁（v1.1 新增） |

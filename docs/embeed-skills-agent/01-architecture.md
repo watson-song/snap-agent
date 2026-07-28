@@ -18,7 +18,7 @@ snap-agent-core/                       cn.watsontech.snapagent.core
   └─ security/     SecurityGateway SPI (接口定义, 实现在 starter)
 
 snap-agent-spring-boot-2x-starter/     cn.watsontech.snapagent.boot2x
-  ├─ autoconfig/   SnapAgentAutoConfiguration (thin) + 8 domain @Configuration:
+  ├─ autoconfig/   SnapAgentAutoConfiguration (thin marker) + 8 domain @Configuration:
   │                Security, Tool, Web, Patrol, Knowledge, Issue, Cost, Workflow
   ├─ knowledge/    VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeETLPipeline
   ├─ llm/          AbstractStreamingLlmClient, AnthropicLlmClient, OpenAiLlmClient
@@ -50,22 +50,22 @@ core 暴露的 `SnapAgentController` 所需的 web 抽象由 starter 注入；co
 |------|------|------|
 | **SkillRegistry** | core | 两层 skill 模型：① builtin skills 由 `ClasspathSkillScanner` 从 classpath（`classpath:/docs/skills/`）扫描；② upload skills 从文件系统 `upload-skills-dir` 扫描；同名时 custom 覆盖 builtin。支持目录型 skill（以 `SKILL.md` 为入口文件）。解析 frontmatter，交叉校验 `tools` 契约，缓存 `SkillMeta`；`POST /skills/refresh` 重扫 upload 目录并合并 builtin |
 | **SkillMeta** | core | 一份 skill 的内存表示：name/description/inputs/tools/body/availability |
-| **AgentExecutor** | core | LLM 流式循环：构造 system prompt（只读前缀 + skill 正文 + 工具清单）→ 调 LLM → 解析 `tool_use` → 交 ToolDispatcher → 回填 → 直到 `end_turn` 或 `max-turns` |
+| **GraphExecutor** | core | 基于 `StateGraph`（由 `ReActGraphFactory` 构建）驱动 ReAct 循环：`EntryNode` 构造 system prompt（SkillMode 条件护栏 + skill 正文 + 工具清单）→ `AgentNode` 调 LLM → `ToolsNode` 解析 `tool_use` 执行 → `ShouldContinue` 判断结束 |
 | **TaskStore** | core | 内存 + 可选 Redis 持久的 `AgentTask` 仓库（status + transcript + 审计） |
 | **AgentTask** | core | 一次 run 的运行时态：id/userId/skillId/inputs/model/status/transcript/审计/created/updated |
-| **ToolDispatcher** | core | 按 `tool_use.name` 路由到对应 `ToolProvider`，收集结果，截断到 `max-tool-result-chars` |
-| **ToolProvider** (SPI) | core | 接口：`name()` / `schema()` / `execute(args, ctx)` |
+| **ToolCallbackRegistry** | core | 按 `tool_use.name` 路由到对应 `ToolCallback`（`@Tool` 方法），收集结果，截断到 `max-tool-result-chars` |
+| **@Tool / @ToolParam** (SPI) | core | 注解：`@Tool(name, description)` 标记工具方法，`@ToolParam` 标记参数，反射自动生成 JSON Schema |
 | **LlmClient** (SPI) | core | 接口：流式调用 Messages API，回推 token/thought/tool_use 事件 |
-| **AnthropicLlmClient** | 2x-starter | `LlmClient` 实现，OkHttp SSE 解析 |
-| **JdbcQueryToolProvider** | 2x-starter | 只读 DSN + SQL guard + LIMIT 注入 + 行数截断 + 审计 |
-| **RedisReadToolProvider** | 2x-starter | get/keys/exists，`KEYS *` 拒绝，前缀 pattern + max-key-count |
+| **AnthropicLlmClient / OpenAiLlmClient** | 2x-starter | `LlmClient` 实现，继承 `AbstractStreamingLlmClient` 基类（OkHttp SSE） |
+| **JdbcQueryTools** | 2x-starter | 只读 DSN + SQL guard + LIMIT 注入 + 行数截断 + 审计 |
+| **RedisReadTools** | 2x-starter | get/keys/exists，`KEYS *` 拒绝，前缀 pattern + max-key-count |
 | **McpToolProvider** | (Phase 2) | SSE/HTTP MCP 工具桥接 |
 | **SnapAgentController** | 2x-starter | REST + SSE 入口，`/snap-agent/**` |
 | **SnapAgentFilter** | 2x-starter | `javax.servlet` Filter，解析 principal 注入 AgentRequest 上下文 |
 | **SecurityGateway** (SPI) | core 接口 / starter 实现 | `currentUserId()` / `hasPermission(code)` |
 | **SpringSecurityAdapter / ShiroAdapter** | 2x-starter | SecurityGateway 两实现，`@ConditionalOnClass` 自动选 |
 | **PrincipalResolver** (SPI) | core 接口 / starter 默认实现 | principal → userId 转换 |
-| **SnapAgentAutoConfiguration** | 2x-starter | 所有 bean 的条件装配入口 |
+| **8 Domain @Configuration** | 2x-starter | 条件装配入口：Security / Tool / Web / Patrol / Knowledge / Issue / Cost / Workflow |
 
 ## 3. 依赖关系
 
@@ -102,7 +102,7 @@ core 暴露的 `SnapAgentController` 所需的 web 抽象由 starter 注入；co
 @ConditionalOnClass(SnapAgentAutoConfiguration.class)  // marker, 永真
 @EnableConfigurationProperties(SnapAgentProperties.class)
 public class SnapAgentAutoConfiguration {
-    // 所有内部 @Bean 都在此类内部, 受外层 ConditionalOnProperty 约束
+    // thin marker — 实际 bean 在 8 domain @Configuration 类中, 受外层 ConditionalOnProperty 约束
 }
 ```
 
@@ -112,9 +112,9 @@ public class SnapAgentAutoConfiguration {
 |----|---------|------|
 | AutoConfiguration 装配 | ❌ 不装配 | `@ConditionalOnProperty(enabled=true)` 不满足 |
 | SkillRegistry | ❌ | 在 AutoConfig 内部 |
-| AgentExecutor / TaskStore | ❌ | 同上 |
+| GraphExecutor / TaskStore | ❌ | 同上 |
 | LlmClient | ❌ | 同上 |
-| ToolProvider beans | ❌ | 同上 |
+| @Tool beans / ToolCallbackRegistry | ❌ | 同上 |
 | SnapAgentController | ❌ | 同上 |
 | **SnapAgentFilter** | ❌ | `FilterRegistrationBean` 在 AutoConfig 内部；不注册则容器无此 Filter |
 | **专用线程池** | ❌ | `ThreadPoolTaskExecutor` bean 在 AutoConfig 内部；不创建则无线程 |
@@ -137,17 +137,17 @@ public class SnapAgentAutoConfiguration {
 ```java
 @Bean
 @ConditionalOnProperty(prefix = "snap-agent.jdbc", name = "enabled", havingValue = "true")
-public JdbcQueryToolProvider jdbcQueryToolProvider(
+public JdbcQueryTools jdbcQueryTools(
         ObjectProvider<DataSource> dataSourceProvider,    // 按名延迟解析
         ConfigurableListableBeanFactory beanFactory,
         SnapAgentProperties props) {
     String beanName = props.getJdbc().getDatasourceBeanName(); // snapAgentReadOnlyDataSource
     DataSource ds = (DataSource) beanFactory.getBean(beanName); // 按名取
     if (ds == null) {
-        log.warn("DataSource bean '{}' not found; JdbcQueryToolProvider not assembled", beanName);
+        log.warn("DataSource bean '{}' not found; JdbcQueryTools not assembled", beanName);
         return null;  // 静默不装配
     }
-    return new JdbcQueryToolProvider(ds, props.getAgent().getMaxResultRows(), ...);
+    return new JdbcQueryTools(ds, props.getAgent().getMaxResultRows(), ...);
 }
 ```
 

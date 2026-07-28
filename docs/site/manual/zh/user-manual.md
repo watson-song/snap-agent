@@ -57,7 +57,7 @@
 
 3. **启动宿主应用**
 
-   Spring Boot 通过 `META-INF/spring.factories` 自动装配 `SnapAgentAutoConfiguration`。激活后，`{base-path}/**` 下挂载完整的 Agent Web UI 与 REST API，宿主的 `DataSource`、`RedisTemplate`、Spring Security 认证信息被自动复用。
+   Spring Boot 通过 `META-INF/spring.factories` 自动装配 8 个领域 `@Configuration` 类（Security / Tool / Web / Patrol / Knowledge / Issue / Cost / Workflow）。激活后，`{base-path}/**` 下挂载完整的 Agent Web UI 与 REST API，宿主的 `DataSource`、`RedisTemplate`、Spring Security 认证信息被自动复用。
 
 集成完整清单（依赖、可选依赖、自动装配顺序、SecurityGateway 自定义、basePath 冲突检查、冒烟测试）详见 [宿主集成指南 §2–§4](../integration/zh/host-integration-guide.md)。
 
@@ -205,7 +205,7 @@ inputs:
 | `done` | 终端事件，`data.status` 为最终状态，可选 `data.report` |
 | `comment` | 心跳（每 15s） |
 
-4. 用户可随时点 "取消"（或前端代码调 `POST /runs/{id}/cancel`），后端将 `task.status` 置为 `CANCELLED`，调用 `LlmClient.cancel(taskId)` 中断在途 HTTP 调用，并发送 `done` SSE 事件。
+4. 用户可随时点 "取消"（或前端代码调 `POST /runs/{id}/cancel`），后端将 `task.status` 置为 `CANCELLED`，调用 `AbstractStreamingLlmClient.cancel(taskId)` 中断在途 HTTP 调用，并发送 `done` SSE 事件。
 5. 任务结束（`SUCCEEDED` / `FAILED` / `TIMEOUT` / `CANCELLED`）后，最终回复自动保存为 `assistant` 消息到当前会话。
 
 ### 3.4 多环境数据源
@@ -300,9 +300,9 @@ inputs:
 
 每条结果右侧的 **相关度 N%** badge 来自 `SearchResult.score * 100`（向下取整）。低于 `min-score` 的片段不返回。
 
-### 5.2 自动注入（KnowledgeInjector）
+### 5.2 自动注入（Advisor + RAG）
 
-运行 Skill 时，`KnowledgeInjector`（实现 `SystemPromptExtender`）会从 `task.inputs` 拼接查询串 → `knowledgeBase.search(query, maxFragments, minScore)` → 把匹配片段格式化后注入 LLM 的 system prompt。注入上限由 `snap-agent.knowledge.max-fragments`（默认 3）控制，避免 token 爆炸。用户无需手动操作。
+运行 Skill 时，`VectorStoreDocumentRetriever` 会从 `task.inputs` 拼接查询串 → `IdentityQueryTransformer` 处理 → `VectorStore` 向量检索 + `EmbeddingModel` 相似度计算 → 把匹配片段通过 `Advisor` SPI 注入 LLM 的 system prompt。注入上限由 `snap-agent.knowledge.max-fragments`（默认 3）控制，避免 token 爆炸。用户无需手动操作。
 
 ### 5.3 REST API
 
@@ -337,7 +337,7 @@ curl -u user:pass 'http://localhost:8080/snap-agent/knowledge/search?q=%E6%95%B0
 
 ### 5.4 添加知识
 
-把 `.md` 文件放到 `snap-agent.knowledge.sources[].dir`（默认 `classpath:/docs/knowledge/`）。每个 `##` 标题下的内容成为一个 `KnowledgeFragment`，H1 标题作为 `metadata.category`；无 `##` 的文件整文件作为一个片段。修改后调 `KnowledgeBase.reload()` 或重启生效。
+把 `.md` 文件放到 `snap-agent.knowledge.sources[].dir`（默认 `classpath:/docs/knowledge/`）。每个 `##` 标题下的内容成为一个 `KnowledgeFragment`，H1 标题作为 `metadata.category`；无 `##` 的文件整文件作为一个片段。修改后调 `VectorStore.reload()` 或重启生效。
 
 ```yaml
 snap-agent:
@@ -380,21 +380,21 @@ SnapAgent 打包内置 13 个 Skill（位于 `docs/skills/`），按功能域分
 
 ### 6.2 内置工具
 
-按功能域分组的 `ToolProvider` 实现（详见 [工具插件架构 §3](../plugins/zh/tool-plugin-architecture.md)）：
+按功能域分组的 `@Tool` 注解实现（详见 [工具插件架构 §3](../plugins/zh/tool-plugin-architecture.md)）：
 
 | 工具名 | 提供者 | 启用配置 |
 |--------|--------|----------|
-| `mysql_query` | `JdbcQueryToolProvider` | `snap-agent.jdbc.*` |
-| `redis_get` | `RedisReadToolProvider` | `snap-agent.redis.*` |
-| `code_read` | `CodeReaderToolProvider` | `snap-agent.code.enabled=true` + `project-root` |
-| `project_structure` | `ProjectStructureToolProvider` | 同上 |
-| `git_log` | `GitLogToolProvider` | 同上 |
-| `log_read` | `LogReadToolProvider` | `snap-agent.logs.allowed-paths` |
-| `metrics_query` | `MetricsToolProvider` | `snap-agent.metrics.enabled=true` + `base-url` |
-| `log_search` | `LogSearchToolProvider` | `snap-agent.log-search.enabled=true` + `base-url` |
-| `trace_search` | `TraceSearchToolProvider` | `snap-agent.trace.enabled=true` + `base-url` |
-| `config_read` | `ConfigReadToolProvider` | `snap-agent.config-read.enabled=true` |
-| `code_graph_tools` | `CodeGraphToolProvider` | `snap-agent.code-graph.enabled=true` |
+| `mysql_query` | `@Tool` JdbcQuery | `snap-agent.jdbc.*` |
+| `redis_get` | `@Tool` RedisRead | `snap-agent.redis.*` |
+| `code_read` | `@Tool` CodeReader | `snap-agent.code.enabled=true` + `project-root` |
+| `project_structure` | `@Tool` ProjectStructure | 同上 |
+| `git_log` | `@Tool` GitLog | 同上 |
+| `log_read` | `@Tool` LogRead | `snap-agent.logs.allowed-paths` |
+| `metrics_query` | `@Tool` Metrics | `snap-agent.metrics.enabled=true` + `base-url` |
+| `log_search` | `@Tool` LogSearch | `snap-agent.log-search.enabled=true` + `base-url` |
+| `trace_search` | `@Tool` TraceSearch | `snap-agent.trace.enabled=true` + `base-url` |
+| `config_read` | `@Tool` ConfigRead | `snap-agent.config-read.enabled=true` |
+| `code_graph_tools` | `@Tool` CodeGraph | `snap-agent.code-graph.enabled=true` |
 
 `code_graph_tools` 是单一工具含 4 个子工具：`call_chain` / `reverse_chain` / `impact_analysis` / `find`。
 
@@ -432,7 +432,7 @@ curl -u user:pass -X POST \
 
 ### 7.2 执行语义
 
-`SimpleWorkflowEngine` 顺序执行 steps：
+工作流执行器（`WorkflowDefinition` + step runner）顺序执行 steps：
 
 - 无 `condition` 的 step 总是执行；有 `condition` 的 step 先解析表达式（`${step.result != null}` / `.contains('error')` / `.size > 0` / `${trigger.xxx}`）
 - `onFailure: STOP` → 失败立即终止整个工作流
@@ -503,7 +503,7 @@ steps:
         ▼
   ⑤ 关闭问题: POST /issues/{issueId}/close
      → KnowledgeSedimentationExtractor 从 IssueClosure 抽取知识片段
-     → 写入 KnowledgeBase 供未来诊断复用
+     → 写入 VectorStore 供未来诊断复用
      → IssueClosure.status = CLOSED
 ```
 
@@ -527,7 +527,7 @@ steps:
 
 ## 9. 成本与预算
 
-成本核算（v1.0）通过 `CostTrackingLlmClient` 装饰原始 `LlmClient`，从 SSE `message_start` / `message_delta` 的 `usage` 字段捕获 token 用量并落盘。架构详见 [系统架构总览 §6 成本核算](../architecture/zh/system-architecture.md)。
+成本核算（v1.0）通过 `CostTrackingLlmClient` 装饰 `AbstractStreamingLlmClient`（`AnthropicLlmClient` / `OpenAiLlmClient` 的模板方法父类），从 SSE `message_start` / `message_delta` 的 `usage` 字段捕获 token 用量并落盘。架构详见 [系统架构总览 §6 成本核算](../architecture/zh/system-architecture.md)。
 
 ### 9.1 配置
 

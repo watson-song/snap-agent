@@ -366,32 +366,20 @@ env:
 
 ## 自定义工具
 
-实现 `ToolProvider` 接口并注册为 `@Component`：
+使用 `@Tool` 和 `@ToolParam` 注解声明工具方法，注册为 `@Component`，由 `ToolCallbackRegistry` 自动发现：
 
 ```java
 @Component
-public class HttpCallToolProvider implements ToolProvider {
-    @Override
-    public String name() { return "http_call"; }
+public class HttpCallTool {
 
-    @Override
-    public String schema() {
-        return "{\"name\":\"http_call\","
-             + "\"description\":\"Calls an internal API endpoint\","
-             + "\"input_schema\":{\"type\":\"object\","
-             + "\"properties\":{\"url\":{\"type\":\"string\"},"
-             + "\"method\":{\"type\":\"string\",\"enum\":[\"GET\",\"POST\"]}},"
-             + "\"required\":[\"url\",\"method\"]}}";
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
+    @Tool(name = "http_call", description = "Calls an internal API endpoint")
+    public ToolResult httpCall(
+            @ToolParam(description = "Target URL") String url,
+            @ToolParam(description = "HTTP method", required = false) String method) {
         long start = System.currentTimeMillis();
-        String url = (String) args.get("url");
-        String method = (String) args.get("method");
         try {
             // 你的 HTTP 调用逻辑
-            String result = doHttpCall(url, method);
+            String result = doHttpCall(url, method != null ? method : "GET");
             return ToolResult.success(result, 0, System.currentTimeMillis() - start);
         } catch (Exception e) {
             return ToolResult.failure(e.getMessage(), System.currentTimeMillis() - start);
@@ -400,7 +388,7 @@ public class HttpCallToolProvider implements ToolProvider {
 }
 ```
 
-工具会自动被 `ToolDispatcher` 收集并暴露给 LLM。在 Skill 文件中通过工具名引导 LLM 使用。
+工具方法会被 `ToolCallbackRegistry` 自动扫描并封装为 `ToolCallback`，暴露给 `ToolsNode` 供 LLM 调用。在 Skill 文件中通过工具名引导 LLM 使用。
 
 ## 集成注意事项
 

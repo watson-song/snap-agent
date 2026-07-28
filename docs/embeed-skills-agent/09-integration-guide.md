@@ -493,7 +493,7 @@ public class HostSecurityGateway extends SpringSecurityAdapter {
 | 现象 | 排查 |
 |------|------|
 | `GET /skills` 404 | `enabled` 未设 true；或 `base-path` 被宿主 controller 抢占；或宿主 security 没放行 |
-| 所有 skill `UNAVAILABLE` | LlmClient 未装配（`api-key` 空）；或所有 ToolProvider 未装配（JDBC/Redis bean 名不对） |
+| 所有 skill `UNAVAILABLE` | LlmClient 未装配（`api-key` 空）；或所有 `@Tool` bean 未装配（JDBC/Redis bean 名不对） |
 | `mysql_query` 调用报「DataSource bean 'xxx' not found」 | `jdbc.datasource-bean-name` 与宿主声明的 bean 名不一致 |
 | `mysql_query` 报 SQL 被拒 | 看 `unavailableReason` / 日志，对照 [04](04-tools-and-mcp.md) §2.4 拒绝用例 |
 | SSE 收不到事件 / 一次性全到 | 反向代理 buffering 未关；Nginx 加 `proxy_buffering off` |

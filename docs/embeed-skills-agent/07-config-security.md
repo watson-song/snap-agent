@@ -147,27 +147,27 @@ snap-agent:
 
 | 配置 | 落点组件 | 文档 |
 |------|---------|------|
-| `enabled` | AutoConfig `@ConditionalOnProperty` | 01 §4 |
+| `enabled` | SnapAgentAutoConfiguration (thin) + domain `@Configuration` `@ConditionalOnProperty` | 01 §4 |
 | `base-path` | SnapAgentController `@RequestMapping` | 06 |
 | `builtin-skills-dir` | 内置 Skill 扫描路径（classpath，只读），默认 `classpath:/docs/skills/` | 02 §4 |
 | `upload-skills-dir` | 上传 Skill 扫描路径（文件系统，读写），默认 `/tmp/snap-agent-skills` | 02 §4 |
-| `llm.*` | AnthropicLlmClient / `GET /models` / POST /runs 校验 | 05 |
-| `agent.max-turns` | AgentExecutor 停止条件 | 03 §4 |
-| `agent.task-timeout-minutes` | AgentExecutor 超时 | 03 §4 |
+| `llm.*` | AnthropicLlmClient (extends `AbstractStreamingLlmClient`) / `GET /models` / POST /runs 校验 | 05 |
+| `agent.max-turns` | GraphExecutor 停止条件 | 03 §4 |
+| `agent.task-timeout-minutes` | GraphExecutor 超时 | 03 §4 |
 | `agent.executor` | 线程池 bean 名 | 03 §7 |
 | `agent.max-concurrent-runs-per-user` / `max-runs-per-hour` | 限流 | 03 §6 |
-| `agent.max-result-rows` / `max-tool-result-chars` | ToolDispatcher / JdbcToolProvider | 04 §2.2 |
+| `agent.max-result-rows` / `max-tool-result-chars` | ToolCallbackRegistry / JdbcQueryTools | 04 §2.2 |
 | `agent.transcript-event-limit` | TaskStore | 03 §5 |
-| `jdbc.*` | JdbcQueryToolProvider | 04 §2 |
-| `redis.*` | RedisReadToolProvider | 04 §3 |
-| `logs.*` | LogReadToolProvider | 04 §2.3 |
-| `code.*` | CodeReadToolProvider / GitLogToolProvider / ProjectStructureToolProvider | 04 §4 |
-| `metrics.*` | MetricsToolProvider（Prometheus 查询） | 04 §5 |
-| `log-search.*` | LogSearchToolProvider（Loki 日志搜索） | 04 §5 |
-| `trace.*` | TraceSearchToolProvider（Jaeger 链路追踪） | 04 §5 |
-| `config-read.*` | ConfigReadToolProvider（本地配置 + Nacos） | 04 §5 |
+| `jdbc.*` | JdbcQueryTools | 04 §2 |
+| `redis.*` | RedisReadTools | 04 §3 |
+| `logs.*` | LogReadTools | 04 §2.3 |
+| `code.*` | CodeReaderTools / GitLogTools / ProjectStructureTools | 04 §4 |
+| `metrics.*` | MetricsQueryTools（Prometheus 查询） | 04 §5 |
+| `log-search.*` | LogSearchTools（Loki 日志搜索） | 04 §5 |
+| `trace.*` | TraceSearchTools（Jaeger 链路追踪） | 04 §5 |
+| `config-read.*` | ConfigReadTools（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
-| `knowledge.*` | KnowledgeBase / MarkdownKnowledgeSource / SimpleKeywordSearcher / KnowledgeInjector | §12 |
+| `knowledge.*` | KnowledgeBase / VectorStoreDocumentRetriever / IdentityQueryTransformer / KnowledgeInjector | §12 |
 | `anchor.*` | AnchorOrchestrator / AnchorSkillClassifier / AnchorSummaryCache / anchor.js | §13 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
@@ -292,7 +292,7 @@ required-permission: snap-agent:db-query   # 运行此 skill 需要的权限码
 ## 4. Filter 可配序、鉴权委托宿主（决策 #4）
 
 ### Filter 职责
-`SnapAgentFilter`（`javax.servlet.Filter`）只做一件事：在 `/snap-agent/**` 请求进入 controller 前，从安全框架取 principal，塞进 `AgentRequestContext`（ThreadLocal 或 request attribute），供 controller / ToolDispatcher / 审计用。**不做认证本身**（认证由宿主安全框架负责）。
+`SnapAgentFilter`（`javax.servlet.Filter`）只做一件事：在 `/snap-agent/**` 请求进入 controller 前，从安全框架取 principal，塞进 `AgentRequestContext`（ThreadLocal 或 request attribute），供 controller / `ToolCallbackRegistry` / 审计用。**不做认证本身**（认证由宿主安全框架负责）。
 
 ### Filter 注册
 ```java
@@ -382,7 +382,7 @@ public PrincipalResolver snapAgentPrincipalResolver() {
 1. 宿主 SecurityFilterChain 已认证，`SecurityContextHolder.authentication.principal = "user001"`（String）。
 2. 请求 `POST /snap-agent/runs` → SnapAgentFilter（order 2147483637，在 SecurityFilterChain 之后）→ `SecurityGateway.currentUserId()` → SpringSecurityAdapter → principalResolver.resolve("user001") = "user001"。
 3. `hasPermission("")` → true（required-permission 空）。
-4. controller 放行，AgentExecutor 启动，审计 userId=user001。
+4. controller 放行，GraphExecutor 启动，审计 userId=user001。
 
 ### Shiro 路径
 1. Shiro Subject 已认证，`Subject.principal = new User(id="u9", perms=["snap-agent:*"])`。
@@ -535,15 +535,14 @@ snap-agent:
 
 ### 检索算法
 
-`SimpleKeywordSearcher` 基于词频重叠评分：
-- 英文：按空格/标点分词，转小写，过滤 <2 字符的词
-- 中文：2 字符 bigram 分词（"补货策略" → ["补货","货策","策略"]）
-- 评分 = `(标题命中数 × 2 + 正文命中数) / (查询词数 × 2)`，截断到 [0.0, 1.0]
-- 标题命中权重 ×2，确保标题直接相关的片段排名更高
+`VectorStoreDocumentRetriever`（实现 `DocumentRetriever` SPI）通过 `VectorStore` 做向量相似度检索，查询经 `IdentityQueryTransformer`（实现 `QueryTransformer` SPI）处理：
+- 查询文本嵌入为向量，在 `VectorStore` 中做近邻搜索
+- 评分 = 向量余弦相似度，截断到 [0.0, 1.0]
+- 返回 top-K 片段（K = `max-fragments`），低于 `min-score` 的片段过滤掉
 
 ### 知识注入
 
-`KnowledgeInjector` 实现 `SystemPromptExtender`，与 v0.3 的 `ProjectContextExtender` 并行生效：
+`KnowledgeInjector` 实现 `RetrievalAugmentationAdvisor`，与 v0.3 的 `ProjectContextExtender` 并行生效：
 - 运行时从 `AgentTask` 的输入值构建查询
 - 调用 `KnowledgeBase.search(query, maxFragments, minScore)` 检索相关片段
 - 将匹配片段格式化为 Markdown 注入 system prompt
@@ -596,7 +595,7 @@ snap-agent:
 
 | Bean | 职责 |
 |------|------|
-| `AnchorOrchestrator` | 锚点问答主编排器：接收前端 preprocess 请求 → 提取锚点上下文 → 预摘要/预分类 → 调用 AgentExecutor 执行诊断 → 返回结果 |
+| `AnchorOrchestrator` | 锚点问答主编排器：接收前端 preprocess 请求 → 提取锚点上下文 → 预摘要/预分类 → 调用 GraphExecutor 执行诊断 → 返回结果 |
 | `AnchorSkillClassifier` | 智能技能路由：根据锚点内容和用户问题，调用 LLM 分类最合适的 skill |
 | `AnchorContextSummarizer` | 预摘要器：对长内容生成摘要，减少 LLM token 消耗 |
 | `AnchorSummaryCache` | Caffeine LRU 缓存：相同锚点内容的摘要/分类结果缓存，避免重复 LLM 调用 |

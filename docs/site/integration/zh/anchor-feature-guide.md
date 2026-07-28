@@ -192,7 +192,7 @@ snap-agent:
     - 从预摘要结果或缓存中取摘要（长内容自动摘要，短内容直接用原文）
     - 从预分类结果取 `ClassifyResult`（置信度 ≥ 阈值则路由到对应技能，否则降级为通用 LLM 直答）
     - 构建增强用户消息：页面 URL + 锚点名 + 截断标记 + 区块内容（或摘要）+ 用户提问
-    - 调 `LlmClient.stream()` 流式输出到 SSE
+    - 调 `AbstractStreamingLlmClient.stream()` 流式输出到 SSE
 11. SSE 流式返回 token 到抽屉，对话完成
 
 ### 上下文提取
@@ -235,7 +235,7 @@ snap-agent:
 1. 构造 prompt，列出所有 `AVAILABLE` 状态的技能（name + description）
 2. LLM 返回 JSON：`{"skillId": "...", "confidence": 0.0..1.0, "reason": "..."}`
 3. 置信度 ≥ `classifier-confidence-threshold`（默认 0.5）且 `skillId` 非空 → 路由到对应技能
-4. 置信度 < 阈值或无匹配 → 降级为通用 LLM 直答（仍带页面上下文，调用 `LlmClient.stream()` 直接回答）
+4. 置信度 < 阈值或无匹配 → 降级为通用 LLM 直答（仍带页面上下文，调用 `AbstractStreamingLlmClient.stream()` 直接回答）
 
 分类器使用的模型可单独配置：`classifier-model`（空字符串 = 用 `snap-agent.llm.model`）。失败时自动降级，用户无感知。
 
@@ -358,7 +358,7 @@ snap-agent:
     enabled: false
 ```
 
-关闭后 `anchor.js` 不再扫描 DOM、不渲染图标，`AnchorOrchestrator` 不会被装配（在 `SnapAgentAutoConfiguration` 中检查 `isEnabled() && llmClient != null`），所有锚点相关端点返回 `503 ANCHOR_DISABLED`。
+关闭后 `anchor.js` 不再扫描 DOM、不渲染图标，`AnchorOrchestrator` 不会被装配（在 `WebAutoConfiguration` 中检查 `isEnabled() && llmClient != null`），所有锚点相关端点返回 `503 ANCHOR_DISABLED`。
 
 ## API 端点
 
@@ -438,15 +438,15 @@ snap-agent:
 
 ## 自动装配
 
-`SnapAgentAutoConfiguration` 在以下条件同时满足时自动装配 `AnchorOrchestrator` 并注入到 `SnapAgentController`：
+`WebAutoConfiguration` 在以下条件同时满足时自动装配 `AnchorOrchestrator` 并注入到 `SnapAgentController`：
 
 1. `snap-agent.anchor.enabled=true`（默认 true）
-2. `LlmClient` 已装配（即 `snap-agent.llm.base-url` 和认证信息已配置）
+2. `AbstractStreamingLlmClient` 已装配（即 `snap-agent.llm.base-url` 和认证信息已配置）
 
 装配链：
 
 ```
-LlmClient + SnapAgentProperties.Anchor
+AbstractStreamingLlmClient + SnapAgentProperties.Anchor
         │
         ▼
 AnchorSummaryCache (Caffeine LRU + TTL)

@@ -18,10 +18,10 @@ graph TD
 
     subgraph Service ["核心业务层 (Service Layer)"]
         direction LR
-        KB["KnowledgeBase<br/>管理所有源, 委托检索"]
+        KB["VectorStore<br/>管理所有源, 委托检索"]
         Source["KnowledgeSource SPI<br/>知识源加载 classpath / FS"]
-        Searcher["KnowledgeSearcher<br/>中英文分词 + 关键词打分"]
-        Injector["KnowledgeInjector<br/>匹配片段注入 prompt"]
+        Searcher["VectorStoreDocumentRetriever<br/>向量检索 + 相似度打分"]
+        Injector["Advisor SPI<br/>匹配片段注入 prompt"]
     end
 
     subgraph Data ["数据与存储层 (Data Layer)"]

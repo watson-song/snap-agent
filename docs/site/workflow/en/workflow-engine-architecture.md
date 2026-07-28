@@ -52,12 +52,12 @@ Trigger (service=order-service)
 | Component | Module | Responsibility |
 |-----------|--------|----------------|
 | `YamlWorkflowLoader` | starter (`boot2x/workflow/`) | Parses `WorkflowDefinition` from `.yml` files on the filesystem |
-| `SimpleWorkflowEngine` | starter (`boot2x/workflow/`) | Sequential step execution, condition evaluation, failure handling |
-| `WorkflowEngine` (SPI) | core (`core/workflow/`) | Engine interface; hosts can replace the implementation |
+| `WorkflowDefinition` + Step Runner | starter (`boot2x/workflow/`) | Sequential step execution, condition evaluation, failure handling |
+| `WorkflowDefinition` (SPI) | core (`core/workflow/`) | Workflow structure interface; hosts can replace the implementation |
 | `WorkflowDefinition` / `WorkflowStep` | core | Immutable value objects describing the workflow structure |
 | `WorkflowResult` / `StepResult` | core | Immutable value objects carrying execution results |
 
-Workflow definitions are written in YAML format and placed in the directory specified by `snap-agent.workflows.dir`. At startup, `YamlWorkflowLoader` scans all `.yml` files and parses them into a list of `WorkflowDefinition` objects. When triggered via REST API, `SimpleWorkflowEngine` executes each step by calling `AgentExecutor` to run the corresponding Skill, aggregating results into a `WorkflowResult`.
+Workflow definitions are written in YAML format and placed in the directory specified by `snap-agent.workflows.dir`. At startup, `YamlWorkflowLoader` scans all `.yml` files and parses them into a list of `WorkflowDefinition` objects. When triggered via REST API, the workflow step runner executes each step by calling `GraphExecutor` to run the corresponding Skill, aggregating results into a `WorkflowResult`.
 
 ---
 
@@ -311,7 +311,7 @@ execute(workflow, triggerInputs)
 │       └─ ${stepName.result} → prior step result    │
 │    3. Look up Skill (SkillRegistry.get)            │
 │       └─ not found → handle per onFailure         │
-│    4. Execute Skill (AgentExecutor.execute, sync)  │
+│    4. Execute Skill (GraphExecutor.execute, sync)  │
 │       └─ construct AgentTask → execute →          │
 │          StepResult                                │
 │    5. Failure handling (onFailure):                │
@@ -384,7 +384,7 @@ public WorkflowResult execute(WorkflowDefinition workflow,
 
 ### 4.3 Step Execution (executeStep)
 
-Each step is executed synchronously via `AgentExecutor`:
+Each step is executed synchronously via `GraphExecutor`:
 
 ```java
 private StepResult executeStep(String workflowName, WorkflowStep step,
@@ -733,7 +733,7 @@ snap-agent:
 
 ### 8.2 Auto-Configuration
 
-`SnapAgentAutoConfiguration` assembles two beans when `enabled=true`:
+`WorkflowAutoConfiguration` assembles two beans when `enabled=true`:
 
 ```java
 @Bean
@@ -749,11 +749,11 @@ public YamlWorkflowLoader yamlWorkflowLoader(SnapAgentProperties props) {
 @ConditionalOnProperty(prefix = "snap-agent.workflows", name = "enabled", havingValue = "true")
 @ConditionalOnMissingBean(WorkflowEngine.class)
 public SimpleWorkflowEngine simpleWorkflowEngine(
-        AgentExecutor agentExecutor,
+        GraphExecutor graphExecutor,
         SkillRegistry skillRegistry,
         SnapAgentProperties props) {
     // systemUserId from snap-agent.issue-closure.system-user-id
-    return new SimpleWorkflowEngine(agentExecutor, skillRegistry, systemUserId);
+    return new SimpleWorkflowEngine(graphExecutor, skillRegistry, systemUserId);
 }
 ```
 
@@ -821,4 +821,4 @@ public class DatabaseWorkflowLoader extends YamlWorkflowLoader {
 | No scheduled/event triggers | Only manual REST API triggering | v1.0.1 scheduled/event triggers |
 | Single condition expression | No AND/OR logical combinations | Future enhancement |
 | No `.size >= N` | Only `.size > 0`; no arbitrary numeric comparison | Future enhancement |
-| Synchronous execution | Steps call `AgentExecutor` synchronously; long workflows block HTTP threads | v1.0.1 async execution |
+| Synchronous execution | Steps call `GraphExecutor` synchronously; long workflows block HTTP threads | v1.0.1 async execution |

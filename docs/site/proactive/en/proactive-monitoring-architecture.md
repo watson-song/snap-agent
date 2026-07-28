@@ -24,12 +24,12 @@ modes — **Patrol** and **Alert**.
 ## 1. Architecture Overview
 
 Proactive monitoring consists of two independent data flows that share the same
-`AgentExecutor` execution engine and `PatrolReportStore` report storage:
+`GraphExecutor` execution engine and `PatrolReportStore` report storage:
 
 ```
 Patrol Flow:
   ┌──────────────┐   cron trigger  ┌──────────────────┐   execute()   ┌──────────────┐
-  │ PatrolTask   │ ─────────────► │ ScheduledPatrol  │ ───────────► │ AgentExecutor │
+  │ PatrolTask   │ ─────────────► │ ScheduledPatrol  │ ───────────► │ GraphExecutor  │
   │ (skill+cron) │                │ Scheduler         │               │ (runs skill)  │
   └──────────────┘                └────────┬─────────┘               └──────┬───────┘
                                            │                                 │
@@ -49,7 +49,7 @@ Alert Flow:
                                            │ (default: error-spike-investigation)  │ (fingerprint dedup)
                                            ▼                                      ▼
                                          ┌──────────────┐   execute()   ┌──────────────────────────┐
-                                         │ AgentExecutor │ ───────────► │ PatrolReportStore (save) │
+                                         │ GraphExecutor │ ───────────► │ PatrolReportStore (save) │
                                          │ (runs skill)  │               │ + AlertConverger (link)  │
                                          └──────────────┘               └──────────────────────────┘
 ```
@@ -744,7 +744,7 @@ webhook polling.
 
 ### 7.1 Bean Assembly
 
-All patrol/alert beans are conditionally assembled in `SnapAgentAutoConfiguration`
+All patrol/alert beans are conditionally assembled in `PatrolAutoConfiguration`
 via `@ConditionalOnProperty`:
 
 | Bean | Condition | Default Impl | Description |
@@ -908,7 +908,7 @@ public class LlmBugfixSuggester implements BugfixSuggester {
     @Override
     public BugfixSuggestion suggest(String taskId, List<TranscriptEvent> transcript) {
         // Pass transcript to LLM for analysis, generate more precise root cause and suggestions
-        // Can leverage KnowledgeBase to inject business context
+        // Can leverage VectorStore + Advisor to inject business context
     }
 }
 ```

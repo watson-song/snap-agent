@@ -290,7 +290,7 @@ List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minSc
 
 ### 5.1 注入机制
 
-`KnowledgeInjector` 实现 `SystemPromptExtender` SPI，在 LLM 开始思考前自动注入业务知识：
+`KnowledgeInjector` 实现 `Advisor` SPI，在 LLM 开始思考前自动注入业务知识：
 
 ```
 用户输入 "SKU-001 为什么没生成补货策略？"
@@ -304,7 +304,7 @@ KnowledgeInjector.extend(skillMeta, agentTask)
     └─ 返回注入到 system prompt 的知识文本
     │
     ▼
-AgentExecutor 组装 system prompt:
+GraphExecutor 组装 system prompt:
     "你是诊断 Agent...
      ## 业务知识上下文
      补货策略依赖 replm_inv_param_sku_wh_input 表...
@@ -327,9 +327,9 @@ snap-agent:
 - `max-fragments`：注入上限（默认 3），控制 system prompt 的 token 消耗
 - `min-score`：注入阈值，低于此分数的知识不会被注入
 
-### 5.3 AgentExecutor 多 Extender
+### 5.3 GraphExecutor 多 Advisor
 
-`AgentExecutor` 支持 `List<SystemPromptExtender>`（v0.7 改造），按 Spring `@Order` 排序：
+`GraphExecutor` 支持 `List<Advisor>`（v0.7 改造），按 Spring `@Order` 排序：
 
 1. `ProjectContextExtender`（v0.3）：注入项目结构摘要
 2. `KnowledgeInjector`（v0.7）：注入业务知识片段

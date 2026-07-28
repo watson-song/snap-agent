@@ -13,11 +13,11 @@
 
 | 能力 | 说明 |
 |------|------|
-| AgentExecutor | 多轮循环：LLM 思考 → tool_use 分发 → 结果反馈 → 继续思考 → end_turn |
+| GraphExecutor + StateGraph | 多轮循环：LLM 思考 → tool_use 分发 → 结果反馈 → 继续思考 → end_turn |
 | LLM 流式 | OkHttp SSE → `LlmEventSink` → `TranscriptEvent` → `SseEmitter` token 级推送 |
 | Skill Markdown | YAML frontmatter (name/description/inputs) + 步骤式 body，启动加载 + 手动刷新 |
-| JDBC 工具 | `JdbcQueryToolProvider` + `SqlGuard` (白名单+黑名单+LIMIT 注入+多语句拒绝) |
-| Redis 工具 | `RedisReadToolProvider` (get/exists，KEYS 拒绝) |
+| JDBC 工具 | `@Tool` 注解的 JdbcQuery 工具 + `SqlGuard` (白名单+黑名单+LIMIT 注入+多语句拒绝) |
+| Redis 工具 | `@Tool` 注解的 RedisRead 工具 (get/exists，KEYS 拒绝) |
 | 安全适配 | SpringSecurityAdapter + ShiroAdapter + DefaultPrincipalResolver |
 | 限流 | 每用户并发 1 / 每小时 20 / 专用线程池 core2-max4-queue10 |
 | 跨 Pod 中继 | K8s API → Headless DNS → Static → None 降级链 |
@@ -77,10 +77,10 @@
 ```
 用户: "OrderService.createOrder 这个方法为什么会跳过库存校验？"
 Agent:
-  1. 调用 CodeReaderToolProvider 读取 OrderService.java
+  1. 调用 code_read 工具读取 OrderService.java
   2. 分析 createOrder 方法逻辑
   3. 发现 if (skipValidation) 分支
-  4. 调用 GitLogToolProvider 查看 skipValidation 字段的变更历史
+  4. 调用 git_log 工具查看 skipValidation 字段的变更历史
   5. 发现是 3 个月前为了紧急上线临时加的
   6. 输出: "该分支由 @zhangsan 在 2025-10-15 添加，commit message: 紧急上线跳过校验。
            建议移除该分支或增加前置条件检查。"
@@ -124,13 +124,13 @@ Agent:
 ```
 用户: "线上订单创建接口今天为什么这么慢？"
 Agent:
-  1. 调用 MetricsToolProvider 查 /api/orders POST 的 P99 延迟趋势
+  1. 调用 metrics 工具查 /api/orders POST 的 P99 延迟趋势
   2. 发现 14:00 开始延迟从 200ms 飙升到 3s
-  3. 调用 TraceAnalysisToolProvider 查该时段的调用链
+  3. 调用 trace_analysis 工具查该时段的调用链
   4. 发现 InventoryService.check 库存校验耗时 2.8s
-  5. 调用 MetricsToolProvider 查库存服务的 CPU 和 DB 连接池
+  5. 调用 metrics 工具查库存服务的 CPU 和 DB 连接池
   6. 发现 DB 连接池打满
-  7. 调用 LogAnalysisToolProvider 查库存服务日志
+  7. 调用 log_analysis 工具查库存服务日志
   8. 发现大量 "Connection timeout" 日志
   9. 输出: "根因: 库存服务 DB 连接池打满 (14:00 开始)，导致订单接口级联超时。
            可能原因: 14:00 有定时任务批量查库存，占满连接池。
@@ -181,10 +181,10 @@ Agent:
 事件: NullPointerException 在 OrderService.createOrder 频繁出现 (10次/分钟)
 
 Agent 自动执行:
-  1. 调用 LogAnalysisToolProvider 拉取异常堆栈
-  2. 调用 CodeReaderToolProvider 读取 OrderService.java 对应行
+  1. 调用 log_analysis 工具拉取异常堆栈
+  2. 调用 code_read 工具读取 OrderService.java 对应行
   3. 分析: order.getItem().getPrice() NPE，因为 getItem() 返回 null
-  4. 调用 GitLogToolProvider 查该行最近变更
+  4. 调用 git_log 工具查该行最近变更
   5. 发现: @lisi 昨天 18:00 重构，把 item 从构造函数参数改成了 setter 注入
   6. 生成 Bugfix 建议:
      "根因: OrderService 第 87 行 order.getItem() 返回 null
@@ -213,7 +213,7 @@ Agent 自动执行:
 |----|------|
 | Spring Boot 3.x | `jakarta.servlet` 版本 starter |
 | Skill 市场 | 社区共享 Skill 模板，一行配置导入 |
-| 工具市场 | 开箱即用的 ToolProvider 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
+| 工具市场 | 开箱即用的 `@Tool` 扩展包 (Kafka/MQ/Apollo/Nacos/...) |
 | 多租户 | Agent 对话隔离，Skill/工具按租户配置 |
 
 ---
@@ -250,11 +250,9 @@ snap-agent:
 
 | 组件 | 职责 |
 |------|------|
-| `KnowledgeBase` (SPI) | 知识源管理 + 检索接口 `search(query, topK)` |
-| `MarkdownKnowledgeSource` | 从 Markdown 文件加载知识，自动分段、建索引 |
-| `ConversationKnowledgeSource` | 从历史诊断对话中提取有价值的问题→结论对，自动摘要入库 |
-| `ExternalApiKnowledgeSource` | 对接外部 Wiki/文档系统，实时检索 |
-| `KnowledgeInjector` | Agent 启动时注入知识摘要到系统提示；运行时按用户问题检索相关知识片段，动态注入。完整设计见 [知识编排层](#知识编排层--knowledgeinjector横切-v07v08v09) |
+| `VectorStoreDocumentRetriever` | 基于 VectorStore 的文档检索，`retrieve(query)` 返回相关片段 |
+| `IdentityQueryTransformer` | 直通查询转换器，原样传递用户 query 用于检索 |
+| `RetrievalAugmentationAdvisor` | Agent 运行时通过 Advisor 链注入相关知识片段到上下文。完整设计见 [知识编排层](#知识编排层--retrievalaugmentationadvisor横切-v07v08v09) |
 
 ### 知识结构
 
@@ -281,7 +279,7 @@ snap-agent:
 ```
 用户: "SKU-001 为什么没生成补货策略？"
   ↓
-KnowledgeInjector.search("补货策略 生成规则 依赖表")
+VectorStoreDocumentRetriever.retrieve("补货策略 生成规则 依赖表")
   → 命中知识片段: 补货策略生成规则 + 关键依赖表 + 常见问题
   ↓
 注入到 LLM 系统提示: "已知业务规则: ..."
@@ -289,7 +287,7 @@ KnowledgeInjector.search("补货策略 生成规则 依赖表")
 Agent 思考:
   1. 从知识库知道需要先查 replm_inv_param_sku_wh_input 表
   2. 知道常见原因是 init_replenishment_param 任务未执行
-  3. 调用 JdbcQueryToolProvider 查该 SKU 参数 → 确实无数据
+  3. 调用 jdbc_query 工具查该 SKU 参数 → 确实无数据
   4. 输出: "SKU-001 在补货参数输入表中无记录。常见原因: init_replenishment_param
            定时任务未执行或该 SKU 被过滤。建议检查..."
 ```
@@ -310,7 +308,7 @@ Agent 思考:
 
 ### 核心问题
 
-v0.3 的 `CodeReaderToolProvider` 只能读单文件。用户问"订单创建流程经过哪些服务"，Agent 无法回答——需要理解方法调用链、类依赖关系、模块边界。
+v0.3 的 code_read 工具只能读单文件。用户问"订单创建流程经过哪些服务"，Agent 无法回答——需要理解方法调用链、类依赖关系、模块边界。
 
 ### 方案设计：代码图谱 (Code Graph)
 
@@ -334,8 +332,8 @@ snap-agent:
 |------|------|
 | `CodeGraphBuilder` | 基于 JavaParser (或 Spoon) 解析 AST，构建调用图 |
 | `CodeGraphIndex` | 图索引存储（节点表 + 边表 + 全文检索），默认文件存储（SQLite/H2） |
-| `CodeGraphToolProvider` | Agent 工具：查询调用链、反向调用链、依赖路径、影响范围 |
-| `CodeSemanticSearchToolProvider` | 语义搜索：用自然语言查找代码（如"处理订单超时的逻辑在哪"） |
+| `@Tool` code_graph | Agent 工具：查询调用链、反向调用链、依赖路径、影响范围 |
+| `@Tool` code_semantic_search | 语义搜索：用自然语言查找代码（如"处理订单超时的逻辑在哪"） |
 
 ### 图模型
 
@@ -382,8 +380,8 @@ Agent:
 
 ### 与 v0.3 的关系
 
-- v0.3 `CodeReaderToolProvider` 读取单文件内容（"这个文件里写了什么"）
-- v0.8 `CodeGraphToolProvider` 查询代码间关系（"谁调用了谁、改了影响什么"）
+- v0.3 `code_read` 工具读取单文件内容（"这个文件里写了什么"）
+- v0.8 `code_graph` 工具查询代码间关系（"谁调用了谁、改了影响什么"）
 - 两者互补：先用图谱定位，再用 Reader 读具体内容
 
 ---
@@ -487,14 +485,14 @@ class IssueClosure {
 
 ---
 
-## 知识编排层 — KnowledgeInjector（横切 v0.7/v0.8/v0.9）
+## 知识编排层 — RetrievalAugmentationAdvisor（横切 v0.7/v0.8/v0.9）
 
 > 本节不是独立版本，而是贯穿 v0.7→v0.8→v0.9 的编排核心。
 > 当三个知识源（业务知识库、代码图谱、问题经验）就绪后，**如何让 Agent 在面对用户问题时自动选择正确的知识源和工具组合**，是整个知识体系能否落地的关键。
 
 ### 核心设计原则：不路由，注入
 
-不需要单独的"意图分类层"或"路由器"。现有 `AgentExecutor` 已经是 LLM 驱动的工具选择循环——**LLM 本身就是最好的路由器**。`KnowledgeInjector` 的职责是在 LLM 开始思考之前，把相关知识自动注入到上下文中，让 LLM"天然知道该怎么做"。
+不需要单独的"意图分类层"或"路由器"。现有 `GraphExecutor` + `StateGraph` 已经是 LLM 驱动的工具选择循环——**LLM 本身就是最好的路由器**。`RetrievalAugmentationAdvisor` 的职责是在 LLM 开始思考之前，通过 Advisor 链把相关知识自动注入到上下文中，让 LLM"天然知道该怎么做"。
 
 ```
 用户问题
@@ -520,44 +518,49 @@ class IssueClosure {
 └──────────────────────────────┬───────────────────────────┘
                                ▼
 ┌──────────────────────────────────────────────────────────┐
-│  第三层：LLM 自主工具选择（AgentExecutor 多轮循环）        │
+│  第三层：LLM 自主工具选择（GraphExecutor 多轮循环）        │
 │  LLM 看到: 注入的知识 + Skill 步骤 + 可用工具列表         │
 │  自主决策: 调 JDBC? 调 CodeGraph? 调 knowledge_search?   │
 │  多轮循环: think → tool_use → result → think → ...       │
 └──────────────────────────────────────────────────────────┘
 ```
 
-### SPI 接口
+### Advisor 接口
 
 ```java
-package cn.watsontech.snapagent.core.knowledge;
+package cn.watsontech.snapagent.core.advisor;
 
 /**
- * 知识注入器 — 在 LLM 请求发出前，自动检索相关知识并注入到系统提示中。
- * 宿主可实现此接口替换默认实现（如对接向量数据库、外部知识平台）。
+ * RAG 检索增强 Advisor — 在 LLM 请求发出前，通过 Advisor 链自动检索相关知识并注入到上下文中。
+ * 宿主可自定义 QueryTransformer 或 DocumentRetriever 替换默认实现（如对接向量数据库、外部知识平台）。
  */
-public interface KnowledgeInjector {
+public class RetrievalAugmentationAdvisor implements Advisor {
 
     /**
-     * 在 AgentExecutor 发起首次 LLM 调用前调用。
+     * 在 GraphExecutor 发起首次 LLM 调用前，通过 Advisor 链拦截。
      * 根据用户问题检索各知识源，将结果拼装为上下文段落。
      *
      * @param context 包含用户问题、Skill 元数据、可用工具列表
-     * @return 注入到 system prompt 的知识上下文（可能为空字符串）
+     * @return 增强后的请求上下文（含注入的知识片段）
      */
-    String inject(InjectionContext context);
+    public AdvisedRequest before(AdvisedRequest request) {
+        // 使用 IdentityQueryTransformer 直通用户 query
+        // 通过 VectorStoreDocumentRetriever 检索相关文档
+        // 将结果注入到 system prompt
+    }
 
     /**
-     * 在 AgentExecutor 多轮循环中，每轮 LLM 调用前可选触发。
+     * 在 GraphExecutor 多轮循环中，每轮 LLM 调用前可选触发。
      * 用于根据已有 tool_result 动态补充知识（如发现新表名后补查业务知识）。
-     * 默认实现返回 null（不补充）。
      */
-    default String injectPerTurn(InjectionContext context) { return null; }
+    public AdvisedRequest beforeTurn(AdvisedRequest request) {
+        // 默认不补充
+    }
 }
 ```
 
 ```java
-public class InjectionContext {
+public class AdvisedRequest {
     private String userQuery;           // 用户原始问题
     private String skillName;           // 当前 Skill 名称
     private String skillDescription;    // Skill 描述
@@ -593,51 +596,38 @@ boolean shouldInjectCodeSummary(String query) {
 }
 ```
 
-### 默认实现：DefaultKnowledgeInjector
+### 默认实现：DefaultRetrievalAugmentationAdvisor
 
 ```java
 @Component
-@ConditionalOnMissingBean(KnowledgeInjector.class)
-@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
-public class DefaultKnowledgeInjector implements KnowledgeInjector {
+@ConditionalOnMissingBean(RetrievalAugmentationAdvisor.class)
+@ConditionalOnProperty(prefix = "snap-agent.rag", name = "enabled", havingValue = "true")
+public class DefaultRetrievalAugmentationAdvisor implements Advisor {
 
-    private final KnowledgeBase knowledgeBase;           // v0.7 业务知识库
-    private final IssueExperienceStore issueStore;       // v0.9 问题经验库
-    private final CodeGraphIndex codeGraphIndex;         // v0.8 代码图谱
-    private final KnowledgeInjectorProperties config;    // 配置
+    private final VectorStoreDocumentRetriever documentRetriever;  // 向量存储文档检索
+    private final IdentityQueryTransformer queryTransformer;       // 直通查询转换
+    private final CodeGraphIndex codeGraphIndex;                   // v0.8 代码图谱
+    private final RetrievalAugmentationProperties config;           // 配置
 
     @Override
-    public String inject(InjectionContext ctx) {
+    public AdvisedRequest before(AdvisedRequest request) {
         StringBuilder sb = new StringBuilder();
-        String query = ctx.getUserQuery();
+        String query = request.query();
 
-        // 1. 业务知识（始终注入）
-        if (knowledgeBase != null) {
-            List<KnowledgeSnippet> results = knowledgeBase.search(query, config.getBusinessTopK());
+        // 1. 业务知识文档检索（始终注入）
+        if (documentRetriever != null) {
+            List<Document> results = documentRetriever.retrieve(
+                queryTransformer.transform(query));
             if (!results.isEmpty()) {
                 sb.append("## 业务知识上下文\n");
-                for (KnowledgeSnippet s : results) {
-                    sb.append("### ").append(s.getTitle()).append("\n")
-                      .append(s.getContent()).append("\n\n");
+                for (Document doc : results) {
+                    sb.append("### ").append(doc.getMetadata().get("title")).append("\n")
+                      .append(doc.getText()).append("\n\n");
                 }
             }
         }
 
-        // 2. 问题经验（始终注入）
-        if (issueStore != null) {
-            List<IssueQa> similar = issueStore.searchSimilar(query, config.getIssueTopK());
-            if (!similar.isEmpty()) {
-                sb.append("## 历史相似问题\n");
-                for (IssueQa qa : similar) {
-                    sb.append("### 问题: ").append(qa.getQuestion()).append("\n")
-                      .append("根因: ").append(qa.getRootCause()).append("\n")
-                      .append("方案: ").append(qa.getSolution()).append("\n")
-                      .append("(来源: ").append(qa.getIssueId()).append(")\n\n");
-                }
-            }
-        }
-
-        // 3. 代码结构摘要（条件注入）
+        // 2. 代码结构摘要（条件注入）
         if (codeGraphIndex != null && shouldInjectCodeSummary(query)) {
             String summary = codeGraphIndex.getProjectSummary();
             if (summary != null) {
@@ -645,14 +635,18 @@ public class DefaultKnowledgeInjector implements KnowledgeInjector {
             }
         }
 
-        return sb.length() > 0 ? sb.toString() : "";
+        // 注入到 system prompt
+        if (sb.length() > 0) {
+            return request.withAugmentedSystemPrompt(sb.toString());
+        }
+        return request;
     }
 
     @Override
-    public String injectPerTurn(InjectionContext ctx) {
+    public AdvisedRequest beforeTurn(AdvisedRequest request) {
         // 默认不补充。宿主可覆写此方法实现动态知识补充。
         // 例如: 解析 tool_result 中的表名，自动补查该表的业务知识。
-        return null;
+        return request;
     }
 }
 ```
@@ -663,7 +657,7 @@ public class DefaultKnowledgeInjector implements KnowledgeInjector {
 snap-agent:
   knowledge:
     enabled: true
-    injector:
+    advisor:
       business-top-k: 5              # 业务知识注入条数
       issue-top-k: 3                 # 问题经验注入条数
       inject-code-summary: true      # 是否条件注入代码结构摘要
@@ -684,7 +678,7 @@ snap-agent:
 预注入会增加 system prompt 的 token 数量。需要控制总量避免成本失控：
 
 ```java
-class InjectionBudget {
+class RetrievalBudget {
     private static final int MAX_INJECTION_TOKENS = 1500;
 
     String trimToFit(String injection, int maxTokens) {
@@ -716,31 +710,20 @@ class InjectionBudget {
 
 ```java
 @Component
-@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
-public class KnowledgeSearchToolProvider implements ToolProvider {
+@ConditionalOnProperty(prefix = "snap-agent.rag", name = "enabled", havingValue = "true")
+public class KnowledgeSearchTool {
 
-    @Override
-    public List<ToolDef> getToolDefinitions() {
-        return List.of(
-            ToolDef.builder()
-                .name("knowledge_search")
-                .description("搜索业务知识库，获取业务规则、操作手册、配置说明等。" +
-                             "当预注入的知识不足以回答问题时使用。输入自然语言查询。")
-                .inputSchema(JsonSchema.object()
-                    .property("query", JsonSchema.string("自然语言查询"))
-                    .property("top_k", JsonSchema.integer("返回条数，默认5", 5))
-                    .build())
-                .build()
-        );
-    }
-
-    @Override
-    public ToolResult execute(ToolContext ctx) {
-        String query = ctx.getInput("query");
-        int topK = ctx.getInput("top_k", 5);
-        List<KnowledgeSnippet> results = knowledgeBase.search(query, topK);
+    @Tool(name = "knowledge_search",
+          description = "搜索业务知识库，获取业务规则、操作手册、配置说明等。" +
+                       "当预注入的知识不足以回答问题时使用。输入自然语言查询。")
+    public ToolResult knowledgeSearch(
+            @ToolParam(description = "自然语言查询") String query,
+            @ToolParam(description = "返回条数，默认5", required = false) Integer topK) {
+        int k = topK != null ? topK : 5;
+        List<Document> results = documentRetriever.retrieve(
+            queryTransformer.transform(query), k);
         return ToolResult.success(results.stream()
-            .map(r -> Map.of("title", r.getTitle(), "content", r.getContent()))
+            .map(r -> Map.of("title", r.getMetadata().get("title"), "content", r.getText()))
             .collect(Collectors.toList()));
     }
 }
@@ -753,35 +736,31 @@ public class KnowledgeSearchToolProvider implements ToolProvider {
 | `code_graph_call_chain` | 方法签名 | 调用链 | v0.8 工具，LLM 按需调用 |
 | `code_graph_impact_analysis` | 类/方法 | 影响范围 | v0.8 工具，LLM 按需调用 |
 
-### 与 AgentExecutor 的集成
+### 与 GraphExecutor 的集成
 
-`KnowledgeInjector` 在 `AgentExecutor` 的执行流程中注入点如下：
+`RetrievalAugmentationAdvisor` 在 `GraphExecutor` 的执行流程中通过 Advisor 链注入：
 
 ```java
-public class AgentExecutor {
+public class GraphExecutor {
 
-    private final KnowledgeInjector knowledgeInjector;  // 可为 null
+    private final List<Advisor> advisors;  // Advisor 链，RetrievalAugmentationAdvisor 可在其中
 
     public AgentTask execute(String userQuery, String skillName, ...) {
-        // ── 注入点 1: 首次 LLM 调用前 ──
-        String knowledgeContext = "";
-        if (knowledgeInjector != null) {
-            InjectionContext ctx = new InjectionContext(userQuery, skillName, toolNames);
-            knowledgeContext = knowledgeInjector.inject(ctx);
+        // ── 注入点 1: 首次 LLM 调用前（Advisor before 拦截）──
+        AdvisedRequest request = new AdvisedRequest(userQuery, skillName, toolNames);
+        for (Advisor advisor : advisors) {
+            request = advisor.before(request);
         }
 
-        // 组装 system prompt
-        String systemPrompt = buildSystemPrompt(skillBody, knowledgeContext);
+        // 组装 system prompt（含 advisor 注入的知识上下文）
+        String systemPrompt = buildSystemPrompt(skillBody, request.getAugmentedContext());
 
-        // 多轮循环
+        // 多轮循环（StateGraph 驱动）
         for (int turn = 0; turn < maxTurns; turn++) {
-            // ── 注入点 2: 每轮 LLM 调用前（可选）──
-            if (turn > 0 && knowledgeInjector != null && perTurnEnabled) {
-                InjectionContext ctx = new InjectionContext(
-                    userQuery, skillName, toolNames, priorToolResults);
-                String补充 = knowledgeInjector.injectPerTurn(ctx);
-                if (补充 != null) {
-                    messages.add(Message.system(补充));
+            // ── 注入点 2: 每轮 LLM 调用前（Advisor beforeTurn 拦截）──
+            if (turn > 0) {
+                for (Advisor advisor : advisors) {
+                    request = advisor.beforeTurn(request);
                 }
             }
 
@@ -805,16 +784,16 @@ public class AgentExecutor {
 ```
 用户: "SKU-001 为什么没有生成补货策略？"
 
-═══ 预注入阶段（自动，LLM 之前） ═══
+═══ 预注入阶段（Advisor before，LLM 之前） ═══
 
-KnowledgeInjector.inject("SKU-001 为什么没有生成补货策略？")
+RetrievalAugmentationAdvisor.before("SKU-001 为什么没有生成补货策略？")
   │
-  ├─ 业务知识库 search("补货策略 生成规则"):
+  ├─ VectorStoreDocumentRetriever.retrieve("补货策略 生成规则"):
   │   → 命中 1: "补货策略依赖 replm_inv_param_sku_wh_input 表"
   │   → 命中 2: "常见原因: init_replenishment_param 任务未执行"
   │   → 命中 3: "策略生成后需通过 allocation_score 评分才下发"
   │
-  ├─ 问题经验库 searchSimilar("补货策略 未生成"):
+  ├─ 问题经验检索("补货策略 未生成"):
   │   → 命中 1: "SKU-999 → 根因: SKU 状态为 INACTIVE 被过滤"
   │   → 命中 2: "SKU-888 → 根因: 仓库未配置在 warehouse_group 中"
   │
@@ -890,22 +869,24 @@ LLM 思考: "确认: SKU-001 状态 INACTIVE，被 filterByStatus() 过滤。
 
 ```java
 @Override
-public String injectPerTurn(InjectionContext ctx) {
+public AdvisedRequest beforeTurn(AdvisedRequest request) {
     // 示例: 解析前序 tool_result 中的表名，自动补查该表的业务知识
-    List<ToolResult> results = ctx.getPriorResults();
+    List<ToolResult> results = request.getPriorResults();
     for (ToolResult r : results) {
         String content = r.getContent();
         // 简单正则提取表名（以 _ 分隔的全小写单词）
         Matcher m = Pattern.compile("\\b([a-z]+_[a-z_]+)\\b").matcher(content);
         while (m.find()) {
             String tableName = m.group(1);
-            List<KnowledgeSnippet> tableKnowledge = knowledgeBase.search(tableName, 2);
+            List<Document> tableKnowledge = documentRetriever.retrieve(
+                queryTransformer.transform(tableName), 2);
             if (!tableKnowledge.isEmpty()) {
-                return "## 补充知识: 表 " + tableName + "\n" + format(tableKnowledge);
+                return request.withAugmentedSystemPrompt(
+                    "## 补充知识: 表 " + tableName + "\n" + format(tableKnowledge));
             }
         }
     }
-    return null;
+    return request;
 }
 ```
 
@@ -950,34 +931,32 @@ LLM 读到步骤后按顺序推理。这不是强制路由——LLM 可以跳步
 ### 装配方式
 
 ```java
-// SnapAgentAutoConfiguration
+// RagAutoConfiguration (8 个领域 @Configuration 之一)
 @Bean
 @ConditionalOnMissingBean
-@ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "enabled", havingValue = "true")
-public KnowledgeInjector knowledgeInjector(
-        Optional<KnowledgeBase> knowledgeBase,
-        Optional<IssueExperienceStore> issueStore,
+@ConditionalOnProperty(prefix = "snap-agent.rag", name = "enabled", havingValue = "true")
+public RetrievalAugmentationAdvisor retrievalAugmentationAdvisor(
+        Optional<VectorStoreDocumentRetriever> documentRetriever,
         Optional<CodeGraphIndex> codeGraph,
-        KnowledgeInjectorProperties config) {
-    return new DefaultKnowledgeInjector(
-        knowledgeBase.orElse(null),
-        issueStore.orElse(null),
+        RetrievalAugmentationProperties config) {
+    return new DefaultRetrievalAugmentationAdvisor(
+        documentRetriever.orElse(null),
         codeGraph.orElse(null),
         config
     );
 }
 
-// AgentExecutor 构造时注入（可选）
+// GraphRuntimeAutoConfiguration 构造时注入 Advisor 链
 @Bean
-public AgentExecutor agentExecutor(
+public GraphExecutor graphExecutor(
         LlmClient llmClient,
-        ToolDispatcher toolDispatcher,
-        Optional<KnowledgeInjector> knowledgeInjector) {
-    return new AgentExecutor(llmClient, toolDispatcher, knowledgeInjector.orElse(null));
+        ToolCallbackRegistry toolCallbackRegistry,
+        List<Advisor> advisors) {
+    return new GraphExecutor(llmClient, toolCallbackRegistry, advisors);
 }
 ```
 
-`KnowledgeInjector` 是 `Optional` 注入——如果知识功能未启用，`AgentExecutor` 行为与当前完全一致，零影响。
+`RetrievalAugmentationAdvisor` 是通过 `List<Advisor>` 注入——如果知识功能未启用，`GraphExecutor` 行为与当前完全一致，零影响。
 
 ### 知识源就绪度矩阵
 
@@ -992,7 +971,7 @@ public AgentExecutor agentExecutor(
 ### 版本演进路径
 
 ```
-v0.1-alpha   AgentExecutor + JDBC/Redis 工具               ← 已交付
+v0.1-alpha   GraphExecutor + JDBC/Redis 工具               ← 已交付
     │
     ▼
 v0.3          CodeReader/GitLog/ProjectStructure             ← 已交付
@@ -1007,19 +986,19 @@ v0.5          Patrol/Alert/BugfixSuggester                 ← 已交付
 v0.6          多环境数据源 + Skill 级权限控制                ← 已交付（部分）
     │                                                        平台化
     ▼
-v0.7          KnowledgeBase SPI + KnowledgeInjector(仅业务)  ← 已交付（业务知识预注入）
+v0.7          VectorStore + RetrievalAugmentationAdvisor(仅业务)  ← 已交付（业务知识预注入）
     │
     ▼
 v0.8          CodeGraph + 代码结构摘要条件注入                ← 已交付（代码知识按需）
     │
     ▼
 v0.9          IssueExperienceStore + 问题经验预注入            ← 三源齐备
-    │                                                        KnowledgeInjector 完整版
+    │                                                        RetrievalAugmentationAdvisor 完整版
     ▼
 v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 编排层完善
 ```
 
-每个版本 `KnowledgeInjector` 的行为是渐进增强的：知识源未就绪时自动跳过，不影响已有功能。
+每个版本 `RetrievalAugmentationAdvisor` 的行为是渐进增强的：知识源未就绪时自动跳过，不影响已有功能。
 
 ---
 
@@ -1037,9 +1016,9 @@ v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 
 
 | 项 | 说明 |
 |----|------|
-| 工具插件 SDK | 标准化 `ToolPlugin` 接口：`plugin-info.yml` + ToolProvider 实现 + 可选前端组件 |
-| MySQL 插件 | `snap-agent-tool-mysql`：独立 jar，`JdbcQueryToolProvider` + MySQL 专用优化（执行计划、索引建议、慢日志） |
-| Redis 插件 | `snap-agent-tool-redis`：`RedisReadToolProvider` + Cluster 模式 + Lua 脚本只读执行 |
+| 工具插件 SDK | 标准化 `ToolPlugin` 接口：`plugin-info.yml` + `@Tool` 注解方法 + 可选前端组件 |
+| MySQL 插件 | `snap-agent-tool-mysql`：独立 jar，`@Tool` 查询方法 + MySQL 专用优化（执行计划、索引建议、慢日志） |
+| Redis 插件 | `snap-agent-tool-redis`：`@Tool` Redis 读取方法 + Cluster 模式 + Lua 脚本只读执行 |
 | 自有应用 MCP 插件 | 宿主应用通过 MCP 协议暴露自身 API 为工具，其他 Agent 可调用（如订单服务暴露"查订单状态"工具） |
 | 插件自动发现 | `META-INF/snap-agent/tools/` 目录扫描 + `@ToolPlugin` 注解，零配置注册 |
 | 插件配置 | 每个插件独立 YAML 配置段，`snap-agent.tools.{plugin-name}.*` |
@@ -1054,9 +1033,9 @@ snap-agent-tool-mysql/
 │   description: MySQL 诊断工具
 │   tools: [query, explain, slow-log, index-advice]
 ├── src/main/java/.../
-│   ├── MysqlQueryToolProvider.java
-│   ├── MysqlExplainToolProvider.java
-│   └── MysqlSlowLogToolProvider.java
+│   ├── MysqlQueryTool.java
+│   ├── MysqlExplainTool.java
+│   └── MysqlSlowLogTool.java
 └── src/main/resources/
     └── snap-agent/tools/    # 可选 Skill 模板
         └── mysql-diagnostics.md
@@ -1232,7 +1211,7 @@ Agent (内置 cost-analysis Skill):
 | AlertPushChannel SPI | 异常报告推送渠道接口；默认 `WebhookAlertPushChannel` + `EmailAlertPushChannel`（后者依赖 `spring-boot-starter-mail`，可选） |
 | ScheduledPatrolScheduler 增强 | 注入 `PatrolLockProvider` + `List<AlertPushChannel>` + `lockTtlSeconds`；`executePatrol` 增加 tryAcquire/异常检测/pushToChannels/finally release |
 | DefaultAnomalyEventListener 增强 | 注入 `List<AlertPushChannel>`，诊断后异常报告自动推送 |
-| KnowledgeBase.listAll() | 新增方法返回所有片段（不可变列表）；`GET /knowledge/fragments` 端点供前端"知识点"统计卡片点击展开查看 |
+| VectorStoreDocumentRetriever.listAll() | 新增方法返回所有片段（不可变列表）；`GET /knowledge/fragments` 端点供前端"知识点"统计卡片点击展开查看 |
 | ObservabilityHttpClient.httpPost() | 新增 POST 方法，供 `WebhookAlertPushChannel` 复用 |
 | FileConversationStore taskId 修复 | `toMap/fromMap` 漏掉 `taskId` 字段导致前端刷新后丢失问题闭环 badge，已修复 |
 | NoopMarkerBean 模式 | 当 optional 依赖（如 JavaMailSender）缺失时，返回 marker bean 而非 null，保持 Spring 兼容性 |
@@ -1289,9 +1268,9 @@ snap-agent:
 | PluginDescriptor + PluginRegistry | Core SPI：`PluginDescriptor`(pluginId/toolType/jarPath/classLoader/isDefault/isEnabled) + `PluginRegistry`(register/unregister/setEnabled/setDefault/getDefault/getAll/isRegistered)；`InMemoryPluginRegistry` 线程安全实现（synchronized + 默认覆盖清除旧标记） |
 | JAR 上传 + 元数据扫描 | `PluginUploader`：临时 JAR → `PluginMetadataScanner`(JarFile 扫描 `plugin-info.yml`) → `PluginInfoYmlParser`(SnakeYAML + LoaderOptions 防 billion laughs) → 正则校验 pluginId(`^[a-zA-Z0-9_-]+$` 防 path traversal) → 持久化 JAR + URLClassLoader 隔离加载 |
 | 运行时管理 REST API | `SnapAgentController` 新增端点：`POST /plugins/upload`(multipart)、`DELETE /plugins/{id}`(卸载+清理 ClassLoader+删 JAR)、`POST /plugins/{id}/enable`、`POST /plugins/{id}/disable`、`POST /plugins/{id}/set-default`、`GET /plugins`(列表) |
-| pluginOverrides 路由 | `POST /runs` 请求体支持 `pluginOverrides` Map<String,String>（toolType→pluginId），AgentExecutor 执行前覆盖默认插件路由，实现请求级插件选择 |
+| pluginOverrides 路由 | `POST /runs` 请求体支持 `pluginOverrides` Map<String,String>（toolType→pluginId），GraphExecutor 执行前覆盖默认插件路由，实现请求级插件选择 |
 | URLClassLoader 隔离 | 每个插件 JAR 独立 `URLClassLoader`（parent=AppClassLoader），卸载时 `close()` + 删除 JAR 文件，防止资源泄漏 |
-| Maven Archetype 脚手架 | `snap-agent-plugin-archetype` 模块：`mvn archetype:generate` 生成标准插件项目骨架（pom.xml + PluginInfo.yml + 示例 ToolProvider + @ToolPluginAnnotation） |
+| Maven Archetype 脚手架 | `snap-agent-plugin-archetype` 模块：`mvn archetype:generate` 生成标准插件项目骨架（pom.xml + PluginInfo.yml + 示例 `@Tool` 方法 + @ToolPluginAnnotation） |
 
 ### 安全加固
 
@@ -1311,10 +1290,10 @@ snap-agent:
 ---
 
 1. **嵌入式优先** — 永远是库，不是独立服务。不增加运维负担。
-2. **只读优先** — 内置工具默认只读。写操作需要自定义 ToolProvider 且明确标注风险。
+2. **只读优先** — 内置工具默认只读（可通过 `SkillMode` 枚举切换）。写操作需要自定义 `@Tool` 方法且明确标注风险。
 3. **零影响** — `enabled=false` 时不创建任何 Bean。宿主不感知。
 4. **Skill 驱动** — 新场景 = 新 Markdown 文件，不需要写代码（除非需要新工具）。
-5. **工具可扩展** — `ToolProvider` SPI + `@Component` 零配置自动发现；v0.5 起支持 JAR 热插拔（PluginRegistry 运行时注册/卸载/启停/设默认）。
+5. **工具可扩展** — `@Tool` 注解 + `@Component` 零配置自动发现，`ToolCallbackRegistry` 自动扫描封装为 `ToolCallback`；v0.5 起支持 JAR 热插拔（PluginRegistry 运行时注册/卸载/启停/设默认）。
 6. **安全内建** — SqlGuard、限流、审计、SecurityGateway，安全不是后加的。
 7. **成本透明** — 从 v1.0 起，每次 LLM 调用的成本可追溯、可预算、可控制。
 8. **知识沉淀** — 诊断不是一次性的，经验自动提取、人工确认、反哺知识库。
@@ -1326,7 +1305,7 @@ snap-agent:
 
 | 缺口ID | 模块 | 描述 | 优先级 | 状态 |
 |--------|------|------|--------|------|
-| GAP-8 | Agent Engine | `task-timeout-minutes`（总时长限制，默认 30 分钟）在 `docs/embeed-skills-agent/03-agent-engine.md` 与 `INTEGRATION.md` 配置示例中已设计，但 `AgentExecutor` 未实现。当前仅有 `max-turns`（轮次限制）和 `max-tokens`（单轮 token 限制）兜底；长时间运行的单轮任务（如超大 SQL）无法被总时长中断。实现时需在 execute 循环中检查 `System.currentTimeMillis() - task.getCreatedAt() >= taskTimeoutMs` 并将 task 标为 `TIMEOUT`。 | P2 | 待实现 |
+| GAP-8 | Agent Engine | `task-timeout-minutes`（总时长限制，默认 30 分钟）在 `docs/embeed-skills-agent/03-agent-engine.md` 与 `INTEGRATION.md` 配置示例中已设计，但 `GraphExecutor` 未实现。当前仅有 `max-turns`（轮次限制）和 `max-tokens`（单轮 token 限制）兜底；长时间运行的单轮任务（如超大 SQL）无法被总时长中断。实现时需在 execute 循环中检查 `System.currentTimeMillis() - task.getCreatedAt() >= taskTimeoutMs` 并将 task 标为 `TIMEOUT`。 | P2 | 待实现 |
 
 ---
 

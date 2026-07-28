@@ -57,7 +57,7 @@ Three minimum steps turn a Spring Boot 2.x app into an LLM diagnostic agent:
 
 3. **Start the host app**
 
-   Spring Boot auto-configures `SnapAgentAutoConfiguration` via `META-INF/spring.factories`. Once activated, the full Agent Web UI and REST API are mounted under `{base-path}/**` and the host's `DataSource`, `RedisTemplate`, and Spring Security identity are reused automatically.
+   Spring Boot auto-configures the 8 domain `@Configuration` classes (e.g. `SecurityAutoConfiguration`, `ToolAutoConfiguration`, `WebAutoConfiguration`, etc.) via `META-INF/spring.factories`. Once activated, the full Agent Web UI and REST API are mounted under `{base-path}/**` and the host's `DataSource`, `RedisTemplate`, and Spring Security identity are reused automatically.
 
 The complete checklist (dependencies, optional dependencies, auto-configuration order, `SecurityGateway` customization, base-path conflict check, smoke test) is in [Host Integration Guide §2–§4](../integration/en/host-integration-guide.md).
 
@@ -204,7 +204,7 @@ After clicking "➤ Run":
 | `done` | Terminal event; `data.status` is the final status, optional `data.report` |
 | `comment` | Heartbeat (every 15s) |
 
-4. The user can cancel at any time by clicking "Cancel" (or by calling `POST /runs/{id}/cancel`). The backend sets `task.status = CANCELLED`, calls `LlmClient.cancel(taskId)` to interrupt the in-flight HTTP call, and sends a `done` SSE event.
+4. The user can cancel at any time by clicking "Cancel" (or by calling `POST /runs/{id}/cancel`). The backend sets `task.status = CANCELLED`, calls `AbstractStreamingLlmClient.cancel(taskId)` to interrupt the in-flight HTTP call, and sends a `done` SSE event.
 5. When the task ends (`SUCCEEDED` / `FAILED` / `TIMEOUT` / `CANCELLED`), the final reply is automatically saved as an `assistant` message in the current conversation.
 
 ### 3.4 Multi-environment datasources
@@ -299,9 +299,9 @@ Click the "📚" button in the sidebar:
 
 The **Relevance N%** badge on the right of each result comes from `SearchResult.score * 100` (rounded down). Fragments below `min-score` are not returned.
 
-### 5.2 Auto-injection (KnowledgeInjector)
+### 5.2 Auto-injection (Advisor + RAG)
 
-When a skill runs, `KnowledgeInjector` (implements `SystemPromptExtender`) builds a query string from `task.inputs` → calls `knowledgeBase.search(query, maxFragments, minScore)` → formats the matching fragments and injects them into the LLM's system prompt. The injection ceiling is `snap-agent.knowledge.max-fragments` (default 3), preventing token bloat. No user action is needed.
+When a skill runs, `VectorStoreDocumentRetriever` builds a query string from `task.inputs` → `IdentityQueryTransformer` processes it → `VectorStore` vector search + `EmbeddingModel` similarity scoring → the matching fragments are injected into the LLM's system prompt via the `Advisor` SPI. The injection ceiling is `snap-agent.knowledge.max-fragments` (default 3), preventing token bloat. No user action is needed.
 
 ### 5.3 REST API
 
@@ -336,7 +336,7 @@ curl -u user:pass 'http://localhost:8080/snap-agent/knowledge/search?q=database'
 
 ### 5.4 Adding knowledge
 
-Drop `.md` files into `snap-agent.knowledge.sources[].dir` (default `classpath:/docs/knowledge/`). Each `##` heading's content becomes one `KnowledgeFragment`; the H1 heading becomes `metadata.category`; a file without `##` is treated as one fragment. After editing, call `KnowledgeBase.reload()` or restart.
+Drop `.md` files into `snap-agent.knowledge.sources[].dir` (default `classpath:/docs/knowledge/`). Each `##` heading's content becomes one `KnowledgeFragment`; the H1 heading becomes `metadata.category`; a file without `##` is treated as one fragment. After editing, call `VectorStore.reload()` or restart.
 
 ```yaml
 snap-agent:
@@ -379,21 +379,21 @@ SnapAgent ships 13 builtin skills (in `docs/skills/`), grouped by domain:
 
 ### 6.2 Builtin tools
 
-`ToolProvider` implementations grouped by domain (see [Tool Plugin Architecture §3](../plugins/en/tool-plugin-architecture.md)):
+`@Tool`-annotated implementations grouped by domain (see [Tool Plugin Architecture §3](../plugins/en/tool-plugin-architecture.md)):
 
 | Tool name | Provider | Enable config |
 |-----------|----------|---------------|
-| `mysql_query` | `JdbcQueryToolProvider` | `snap-agent.jdbc.*` |
-| `redis_get` | `RedisReadToolProvider` | `snap-agent.redis.*` |
-| `code_read` | `CodeReaderToolProvider` | `snap-agent.code.enabled=true` + `project-root` |
-| `project_structure` | `ProjectStructureToolProvider` | same as above |
-| `git_log` | `GitLogToolProvider` | same as above |
-| `log_read` | `LogReadToolProvider` | `snap-agent.logs.allowed-paths` |
-| `metrics_query` | `MetricsToolProvider` | `snap-agent.metrics.enabled=true` + `base-url` |
-| `log_search` | `LogSearchToolProvider` | `snap-agent.log-search.enabled=true` + `base-url` |
-| `trace_search` | `TraceSearchToolProvider` | `snap-agent.trace.enabled=true` + `base-url` |
-| `config_read` | `ConfigReadToolProvider` | `snap-agent.config-read.enabled=true` |
-| `code_graph_tools` | `CodeGraphToolProvider` | `snap-agent.code-graph.enabled=true` |
+| `mysql_query` | `@Tool` JdbcQuery | `snap-agent.jdbc.*` |
+| `redis_get` | `@Tool` RedisRead | `snap-agent.redis.*` |
+| `code_read` | `@Tool` CodeReader | `snap-agent.code.enabled=true` + `project-root` |
+| `project_structure` | `@Tool` ProjectStructure | same as above |
+| `git_log` | `@Tool` GitLog | same as above |
+| `log_read` | `@Tool` LogRead | `snap-agent.logs.allowed-paths` |
+| `metrics_query` | `@Tool` Metrics | `snap-agent.metrics.enabled=true` + `base-url` |
+| `log_search` | `@Tool` LogSearch | `snap-agent.log-search.enabled=true` + `base-url` |
+| `trace_search` | `@Tool` TraceSearch | `snap-agent.trace.enabled=true` + `base-url` |
+| `config_read` | `@Tool` ConfigRead | `snap-agent.config-read.enabled=true` |
+| `code_graph_tools` | `@Tool` CodeGraph | `snap-agent.code-graph.enabled=true` |
 
 `code_graph_tools` is a single tool exposing 4 sub-tools: `call_chain` / `reverse_chain` / `impact_analysis` / `find`.
 
@@ -431,7 +431,7 @@ curl -u user:pass -X POST \
 
 ### 7.2 Execution semantics
 
-`SimpleWorkflowEngine` runs steps sequentially:
+The workflow executor (`WorkflowDefinition` + step runner) runs steps sequentially:
 
 - A step without `condition` always runs; a step with `condition` is gated by expression evaluation (`${step.result != null}` / `.contains('error')` / `.size > 0` / `${trigger.xxx}`)
 - `onFailure: STOP` → abort the whole workflow on step failure
@@ -502,7 +502,7 @@ Issue closure (v0.9) chains "diagnosis → solution suggestion → external issu
         ▼
   ⑤ Close issue: POST /issues/{issueId}/close
      → KnowledgeSedimentationExtractor extracts a knowledge fragment from IssueClosure
-     → Writes it to KnowledgeBase for future diagnosis
+     → Writes it to VectorStore for future diagnosis
      → IssueClosure.status = CLOSED
 ```
 
@@ -526,7 +526,7 @@ The sidebar "🐛 Issue Closure" button opens a modal listing recent runs. Each 
 
 ## 9. Cost & Budgets
 
-Cost tracking (v1.0) decorates the original `LlmClient` with `CostTrackingLlmClient`, capturing token usage from SSE `message_start` / `message_delta` `usage` blocks and persisting it. Architecture: [System Architecture Overview §6 Cost Tracking](../architecture/en/system-architecture.md).
+Cost tracking (v1.0) decorates `AbstractStreamingLlmClient` (the template-method parent of `AnthropicLlmClient` / `OpenAiLlmClient`) with `CostTrackingLlmClient`, capturing token usage from SSE `message_start` / `message_delta` `usage` blocks and persisting it. Architecture: [System Architecture Overview §6 Cost Tracking](../architecture/en/system-architecture.md).
 
 ### 9.1 Configuration
 

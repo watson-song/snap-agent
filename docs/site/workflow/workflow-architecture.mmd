@@ -19,13 +19,13 @@ graph TD
 
     subgraph Service ["核心业务层 (Service Layer)"]
         direction LR
-        Engine["SimpleWorkflowEngine<br/>顺序执行 + 条件分支"]
+        Engine["WorkflowDefinition + Step Runner<br/>顺序执行 + 条件分支"]
         Loader["YamlWorkflowLoader<br/>SnakeYAML 解析工作流定义"]
     end
 
     subgraph AI ["AI 引擎层 (AI Layer)"]
         direction LR
-        Executor["AgentExecutor<br/>逐步骤执行 skill"]
+        Executor["GraphExecutor<br/>逐步骤执行 skill"]
     end
 
     subgraph Data ["数据与存储层 (Data Layer)"]

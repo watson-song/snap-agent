@@ -22,7 +22,7 @@
 - **成功指标**: enabled=false 时容器无 SnapAgent bean；各模块 enabled 开关 100% 生效；所有 REST 端点可正常响应；2.x 新增 bean 在对应开关开启时 100% 装配。
 
 ### 1.2 范围边界
-- **包含**: `SnapAgentAutoConfiguration` (条件装配)、`SnapAgentProperties` (属性绑定)、`SnapAgentFilter` (请求过滤+身份注入)、`AgentRequestContext` (ThreadLocal 上下文)、`SnapAgentController` (REST 端点)、`InternalTaskController` (多 Pod 内部中继)、`PeerRouter` SPI + 实现 (Noop/Static/K8sApi/HeadlessDns)、`PeerSseRelay` (SSE 中继)、安全适配器 (SpringSecurityAdapter/ShiroAdapter/DefaultPrincipalResolver)、静态资源服务 (anchor.js/app.js/index.html)、2.x 新增: `GraphExecutor` / `ReActGraphFactory` / `CheckpointStore` (Sqlite/Redis) / `VectorStore` (Redis/Jdbc) / `EmbeddingModel` (OpenAI/Ollama) / `ChatMemory` + `ChatMemoryRepository` / `Advisor` 链 / `CostBudgetAdvisor`。
+- **包含**: 8 个领域 `@Configuration` 类 (条件装配)、`SnapAgentProperties` (属性绑定)、`SnapAgentFilter` (请求过滤+身份注入)、`AgentRequestContext` (ThreadLocal 上下文)、`SnapAgentController` (REST 端点)、`InternalTaskController` (多 Pod 内部中继)、`PeerRouter` SPI + 实现 (Noop/Static/K8sApi/HeadlessDns)、`PeerSseRelay` (SSE 中继)、安全适配器 (SpringSecurityAdapter/ShiroAdapter/DefaultPrincipalResolver)、静态资源服务 (anchor.js/app.js/index.html)、2.x 新增: `GraphExecutor` / `ReActGraphFactory` / `CheckpointStore` (Sqlite/Redis) / `VectorStore` (Redis/Jdbc) / `EmbeddingModel` (OpenAI/Ollama) / `ChatMemory` + `ChatMemoryRepository` / `Advisor` 链 / `CostBudgetAdvisor`。
 - **不包含**: 各模块内部逻辑 (各自有独立 TDD spec)、LlmClient 实现 (01-agent-engine)、具体 @Tool 工具实现 (03-tool-dispatcher)、Advisor 链内部实现 (10-cost-security)。
 
 ### 1.3 风险与假设
@@ -373,7 +373,7 @@ AC34: Given snap-agent.memory.type=jdbc 且宿主 DataSource 存在
 
 ```gherkin
 @priority:high @type:integration
-功能: SnapAgentAutoConfiguration 条件装配 (含 2.x 图运行时)
+功能: 8 领域 @Configuration 条件装配 (SnapAgentAutoConfiguration @Import, 含 2.x 图运行时)
 
   场景: enabled=false 时不创建任何 bean
     Given snap-agent.enabled=false
@@ -585,20 +585,23 @@ AC34: Given snap-agent.memory.type=jdbc 且宿主 DataSource 存在
 ## 4. 接口规格
 
 ```java
-// SnapAgentAutoConfiguration — @ConditionalOnProperty(prefix="snap-agent", name="enabled", havingValue="true")
+// 8 个领域 @Configuration 类 — @ConditionalOnProperty(prefix="snap-agent", name="enabled", havingValue="true")
 // 各模块: @ConditionalOnProperty(prefix="snap-agent.{module}", name="enabled", havingValue="true")
 // LlmClient: @ConditionalOnExpression("${snap-agent.llm.api-key:} != ''")
 // PeerRouter: 按 routing.mode 选择实现 (Noop/Static/K8sApi/HeadlessDns)
 // SnapAgentFilter: @ConditionalOnBean(SecurityGateway.class), order=LOWEST_PRECEDENCE-10
 
-// 2.x 新增 AutoConfiguration 类:
-//   GraphRuntimeAutoConfiguration — GraphExecutor, ReActGraphFactory (默认启用)
-//   CheckpointAutoConfiguration — SqliteCheckpointStore (默认) / RedisCheckpointStore (type=redis)
-//   VectorStoreAutoConfiguration — RedisVectorStore / JdbcVectorStore (vectorstore.enabled=false 默认)
-//   EmbeddingAutoConfiguration — OpenAIEmbeddingModel / OllamaEmbeddingModel (与 VectorStore 一起启用)
-//   RagAutoConfiguration — RetrievalAugmentationAdvisor + QueryTransformer + DocumentRetriever + QueryAugmenter (rag.enabled=false 默认)
-//   MemoryAutoConfiguration — ChatMemory + ChatMemoryRepository + MessageChatMemoryAdvisor (默认 in-memory)
-//   CostAutoConfiguration — CostBudgetAdvisor (cost.enabled=false 默认)
+// 8 个领域 @Configuration 类 (替代旧 SnapAgentAutoConfiguration god-class), 由 SnapAgentAutoConfiguration @Import:
+//   SecurityAutoConfiguration — SqlGuard, PrincipalResolver, AuditStore
+//   ToolAutoConfiguration — JdbcQueryTools, RedisReadTools, LogReadTools, CodeReaderTools
+//   WebAutoConfiguration — SnapAgentController, SnapAgentFilter, PeerRouter
+//   PatrolAutoConfiguration — PatrolScheduler, AlertConverger, PushChannels
+//   KnowledgeAutoConfiguration — RAG pipeline, CodeGraph
+//   IssueAutoConfiguration — IssueTracker, VcsClient, FixExecution, KnowledgeSedimentation
+//   CostAutoConfiguration — CostStore, BudgetEnforcer, CostTracker
+//   WorkflowAutoConfiguration — YamlWorkflowLoader, SimpleWorkflowEngine
+// 注: SnapAgentAutoConfiguration 仍为 spring.factories 唯一入口，定义核心 bean (SkillRegistry, LlmClient,
+//     TaskStore, RateLimiter, ToolCallbackRegistry) 并通过 @Import 引入上述 8 个领域配置
 
 // SnapAgentProperties — @ConfigurationProperties(prefix="snap-agent")
 // 嵌套: Llm, Agent, Jdbc, Redis, Code, Patrol, Knowledge, Mcp, Cost, Workflows, Security, Logs, Routing,
@@ -614,14 +617,7 @@ AC34: Given snap-agent.memory.type=jdbc 且宿主 DataSource 存在
 ```yaml
 spring.factories:
   EnableAutoConfiguration:
-    - SnapAgentAutoConfiguration
-    - GraphRuntimeAutoConfiguration
-    - CheckpointAutoConfiguration
-    - VectorStoreAutoConfiguration
-    - EmbeddingAutoConfiguration
-    - RagAutoConfiguration
-    - MemoryAutoConfiguration
-    - CostAutoConfiguration
+    - SnapAgentAutoConfiguration   # 唯一入口, @Import 8 个领域 @Configuration 类
 
 snap-agent.* 配置前缀:
   enabled: false (默认关闭)
@@ -749,7 +745,7 @@ ChatMemory (2.x 新增):
 
 | 测试文件 | 数量 | 覆盖 |
 |----------|------|------|
-| `SnapAgentAutoConfigurationTest` | 35 | enabled=false/true、api-key 空/非空、jdbc/redis/code/patrol/knowledge/code-graph/cost/workflows 模块开关、routing 模式选择 (none/static/k8s-api/headless-dns)、PeerSseRelay+InternalController 条件、2.x 新增: checkpoint.type=sqlite/redis/降级、vectorstore+embedding 组合、rag.enabled、memory.type=in-memory/jdbc、cost.enabled |
+| `AutoConfigurationTest` | 35 | enabled=false/true、api-key 空/非空、jdbc/redis/code/patrol/knowledge/code-graph/cost/workflows 模块开关、routing 模式选择 (none/static/k8s-api/headless-dns)、PeerSseRelay+InternalController 条件、2.x 新增: checkpoint.type=sqlite/redis/降级、vectorstore+embedding 组合、rag.enabled、memory.type=in-memory/jdbc、cost.enabled |
 | `SnapAgentPropertiesTest` | 28 | 所有默认值、所有嵌套组设值生效 (Llm/Agent/Jdbc/Redis/Mcp/Security/Logs/Routing + 2.x 新增 Checkpoint/VectorStore/Embedding/Rag/Memory/Cost) |
 | `SnapAgentFilterTest` | 5 | snap-agent 路径注入、非 snap-agent 放行、finally 清理、basePath 自定义 |
 | `AgentRequestContextTest` | 3 | set/get/clear、线程隔离 |
@@ -772,7 +768,7 @@ ChatMemory (2.x 新增):
 
 | 路径ID | 关键路径 | 端点/组件 | 状态 |
 |--------|----------|-----------|------|
-| E2E-1 | AutoConfiguration 条件装配: snap-agent.enabled=false → 无 bean / enabled=true + api-key 空 → 无 LlmClient | SnapAgentAutoConfiguration | ✅已覆盖 (SnapAgentAutoConfigurationTest 35测试) |
+| E2E-1 | AutoConfiguration 条件装配: snap-agent.enabled=false → 无 bean / enabled=true + api-key 空 → 无 LlmClient | SnapAgentAutoConfiguration + 8 @Import | ✅已覆盖 (AutoConfigurationTest 35测试) |
 | E2E-2 | 会话 CRUD: POST /conversations → GET /conversations → GET /conversations/{id} → DELETE /conversations/{id} | POST/GET/DELETE /conversations | ✅已覆盖 (ConversationEndpointTest) |
 | E2E-3 | SSE 跨 Pod 中继: POST /runs (Pod A) → InternalTaskController (Pod B) → SSE relay → 客户端 | GET /snap-agent-internal/tasks/{id}/stream | ⚠未实现 (GAP-6 P2 需分布式环境) |
 | E2E-4 | 静态资源服务: GET /snap-agent/ → 200 (static HTML/JS/CSS) | GET /snap-agent/** | ⚠未实现 (GAP-2 P2 需 Spring 上下文) |
@@ -788,7 +784,7 @@ ChatMemory (2.x 新增):
 |----|------|--------|------|
 | GAP-1 | ⚠环境约束: K8s API 实际调用需 K8s mock server 或集成集群环境 | P2 | 需 K8s 集成环境 |
 | GAP-2 | ⚠框架约束: 静态资源服务由 Spring MVC ResourceHandler 提供，standalone MockMvc 不包含，需 @WebMvcTest 或 @SpringBootTest | P2 | 需 Spring 上下文测试 |
-| GAP-3 | ✅已关闭: security.framework=auto 检测逻辑已由 `SnapAgentAutoConfigurationTest` 覆盖 (shouldCreateSecurityGatewayWhenSpringSecurityOnClasspath: Spring Security+Shiro同时在test classpath时验证SpringSecurityAdapter优先) | — | P1 |
+| GAP-3 | ✅已关闭: security.framework=auto 检测逻辑已由 `AutoConfigurationTest` 覆盖 (shouldCreateSecurityGatewayWhenSpringSecurityOnClasspath: Spring Security+Shiro同时在test classpath时验证SpringSecurityAdapter优先) | — | P1 |
 | GAP-4 | ✅已关闭: 会话历史 API 边界场景已由 `ConversationEndpointTest` 覆盖 (POST/GET/DELETE /conversations + 404/503 boundary + FileConversationStoreTest 空会话) | — | P2 |
 | GAP-5 | ✅已关闭: PluginUploader 安全验证已由 `PluginUploaderTest` 覆盖 (shouldRejectPluginIdWithPathTraversal/shouldRejectPluginIdWithSpecialCharacters/shouldThrowWhenPluginIdAlreadyRegistered/shouldThrowWhenProviderClassNotFound/shouldThrowWhenProviderInstantiationFails/shouldWrapIOExceptionWhenSavingTempFile) | — | P1 |
 | GAP-6 | ⚠环境约束: 多 Pod SSE 中继端到端需双 Pod 集群环境 | P2 | 需分布式集成环境 |
@@ -796,7 +792,7 @@ ChatMemory (2.x 新增):
 | GAP-8 | ⚠功能缺失: `conversation.enabled` 属性在源码中不存在（ConversationStore 仅用 @ConditionalOnMissingBean），需先添加条件注解再测试 | P2 | 功能未实现 |
 | GAP-9 | ⚠E2E缺失: HITL resume 端到端 (POST /runs/{id}/resume + checkpoint 恢复) 无 E2E 覆盖 — 见 E2E-8 | P1 | 需 Testcontainers 集成测试 |
 | GAP-10 | ⚠E2E缺失: Checkpoint 回放 (POST /runs/{id}/replay) 无 E2E 覆盖 — 见 E2E-9 | P2 | 需 E2E 集成测试 |
-| GAP-11 | ✅已关闭: 2.x 新增模块 (checkpoint/vectorstore/embedding/rag/memory/cost) 条件装配已由 `SnapAgentAutoConfigurationTest` 覆盖 (35个测试，含 sqlite/redis 切换、降级、vectorstore+embedding 组合、rag.enabled、memory.type 切换、cost.enabled) | — | P0 |
+| GAP-11 | ✅已关闭: 2.x 新增模块 (checkpoint/vectorstore/embedding/rag/memory/cost) 条件装配已由 `AutoConfigurationTest` 覆盖 (35个测试，含 sqlite/redis 切换、降级、vectorstore+embedding 组合、rag.enabled、memory.type 切换、cost.enabled) | — | P0 |
 | GAP-12 | ⚠环境约束: RedisVectorStore 真实 Redis 调用需 Testcontainers + redis 镜像 | P2 | 需 Testcontainers 集成环境 |
 | GAP-13 | ⚠边缘场景: OllamaEmbeddingModel 真实调用需本地 Ollama 或 mock HTTP server | P3 | 需 mock HTTP 集成 |
 
@@ -862,12 +858,16 @@ Redis: Testcontainers + redis 镜像 (2.x 新增模块)
 | 2.1 | 2026-07-25 | Team | 适配 2.x: 新增 GraphExecutor/ReActGraphFactory/CheckpointStore/VectorStore/EmbeddingModel/ChatMemory/ChatMemoryRepository/Advisor/CostBudgetAdvisor bean; 新增 snap-agent.checkpoint/vectorstore/embedding/rag/memory/cost 配置组; Controller 新增 POST /runs/{id}/resume + GET /runs/{id}/checkpoints + POST /runs/{id}/interrupt + POST /runs/{id}/replay; 新增 US-11/12/13 (CheckpointStore/VectorStore/ChatMemory 装配); AgentExecutor→GraphExecutor+ReActGraphFactory, ToolDispatcher→ToolCallbackRegistry, KnowledgeInjector→RetrievalAugmentationAdvisor |
 
 ### 12.2 参考文档
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/SnapAgentAutoConfiguration.java`
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/SnapAgentAutoConfiguration.java` (@Import 8 个领域 @Configuration 类)
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/SnapAgentProperties.java`
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/GraphRuntimeAutoConfiguration.java` (2.x 新增)
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/CheckpointAutoConfiguration.java` (2.x 新增)
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/VectorStoreAutoConfiguration.java` (2.x 新增)
-- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/MemoryAutoConfiguration.java` (2.x 新增)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/SecurityAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/ToolAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/WebAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/PatrolAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/KnowledgeAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/IssueAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/CostAutoConfiguration.java` (领域配置)
+- `snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/WorkflowAutoConfiguration.java` (领域配置)
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../web/SnapAgentFilter.java`
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../web/SnapAgentController.java`
 - `snap-agent-spring-boot-2x-starter/src/main/java/.../routing/PeerRouter.java`

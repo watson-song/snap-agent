@@ -18,7 +18,7 @@ SnapAgent 的主动监控能力由 `snap-agent-core` 的 `patrol` 包（SPI + �
 
 ## 1. 架构概览
 
-主动监控分为两条独立的数据流，共享同一套 `AgentExecutor` 执行引擎和 `PatrolReportStore` 报告存储：
+主动监控分为两条独立的数据流，共享同一套 `GraphExecutor` 执行引擎和 `PatrolReportStore` 报告存储：
 
 ```
 巡检流 (Patrol):
@@ -29,7 +29,7 @@ SnapAgent 的主动监控能力由 `snap-agent-core` 的 `patrol` 包（SPI + �
                                           │ lock 获取成功                   │
                                           │                                 ▼
                                           │  execute()                ┌──────────────┐
-                                          │ ─────────────────────────►│ AgentExecutor │
+                                          │ ─────────────────────────►│ GraphExecutor  │
                                           │                           │ (运行 skill)  │
                                           │                                 ▼
                                           │  PatrolReport                  │ task.getReport()
@@ -55,7 +55,7 @@ SnapAgent 的主动监控能力由 `snap-agent-core` 的 `patrol` 包（SPI + �
                                          │ (默认 error-spike-investigation)       │ (fingerprint 去重)
                                          ▼                                      ▼
                                        ┌──────────────┐   execute()   ┌──────────────────────────┐
-                                       │ AgentExecutor │ ───────────► │ PatrolReportStore (存报告) │
+                                       │ GraphExecutor │ ───────────► │ PatrolReportStore (存报告) │
                                        │ (运行 skill)  │               │ + AlertConverger (关联)   │
                                        └──────────────┘               │ + AlertPushChannel[] (推送)└──────────────────────────┘
 ```
@@ -734,7 +734,7 @@ webhook 轮询集成到告警平台（如 PagerDuty、企业微信等）。
 
 ### 7.1 Bean 装配
 
-所有 patrol/alert bean 在 `SnapAgentAutoConfiguration` 中通过 `@ConditionalOnProperty`
+所有 patrol/alert bean 在 `PatrolAutoConfiguration` 中通过 `@ConditionalOnProperty`
 条件装配：
 
 | Bean | 条件 | 默认实现 | 说明 |
@@ -892,7 +892,7 @@ public class LlmBugfixSuggester implements BugfixSuggester {
     @Override
     public BugfixSuggestion suggest(String taskId, List<TranscriptEvent> transcript) {
         // 将 transcript 交给 LLM 分析，生成更精准的根因和建议
-        // 可利用 KnowledgeBase 注入业务上下文
+        // 可利用 VectorStore + Advisor 注入业务上下文
     }
 }
 ```
