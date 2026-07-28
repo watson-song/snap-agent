@@ -8,8 +8,8 @@ SnapAgent knowledge base uses a three-layer SPI architecture, achieving full dec
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    KnowledgeBase                         │
-│   (manages all KnowledgeSource, delegates to Searcher)   │
+│                    VectorStore                           │
+│   (manages all KnowledgeSource, delegates to Retriever)  │
 │   - search(query, topK, minScore) → List<KnowledgeFragment>     │
 │   - searchWithScores(query, topK, minScore) → List<SearchResult>│
 │   - reload() / size()                                   │
@@ -60,7 +60,7 @@ public final class SearchResult {
 }
 ```
 
-### KnowledgeBase Search Flow
+### VectorStore Search Flow
 
 1. Boundary check: null/empty query or no fragments → return empty list
 2. Score each fragment via `searcher.score(query, fragment)`
@@ -224,7 +224,7 @@ snap-agent:
 
 ### 4.2 Filter Mechanism
 
-`KnowledgeBase.searchWithScores()` filters `score >= minScore` after scoring:
+`VectorStore.searchWithScores()` filters `score >= minScore` after scoring:
 - Fragments with score=0.0 (no match) are excluded
 - Only fragments reaching the threshold appear in results
 - Results sorted by score descending
@@ -237,9 +237,9 @@ snap-agent:
 
 ```java
 // Bug: hardcoded 0.0
-List<KnowledgeFragment> fragments = knowledgeBase.search(q, searchTopK, 0.0);
+List<KnowledgeFragment> fragments = vectorStore.search(q, searchTopK, 0.0);
 // Fix: use configured minScore
-List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minScore);
+List<SearchResult> results = vectorStore.searchWithScores(q, searchTopK, minScore);
 ```
 
 **Bug 2: 2-token minimum restriction**
@@ -248,14 +248,14 @@ List<SearchResult> results = knowledgeBase.searchWithScores(q, searchTopK, minSc
 
 ---
 
-## 5. KnowledgeInjector Auto-Injection
+## 5. VectorStoreDocumentRetriever + Advisor Auto-Injection
 
 ### 5.1 Injection Mechanism
 
-`KnowledgeInjector` implements `Advisor` SPI, automatically injecting business knowledge before LLM reasoning:
+`VectorStoreDocumentRetriever` retrieves relevant documents via `VectorStore`, injected through `Advisor` SPI, automatically injecting business knowledge before LLM reasoning:
 
 1. Extract user query from task inputs
-2. Call `knowledgeBase.search(query, maxFragments, minScore)`
+2. Call `vectorStore.search(query, maxFragments, minScore)`
 3. Format matched fragments into context block
 4. Return text to be appended to system prompt
 
@@ -276,7 +276,7 @@ snap-agent:
 
 `GraphExecutor` supports `List<Advisor>` (v0.7), ordered by Spring `@Order`:
 1. `ProjectContextExtender` (v0.3): injects project structure summary
-2. `KnowledgeInjector` (v0.7): injects business knowledge fragments
+2. `VectorStoreDocumentRetriever + Advisor` (v0.7): injects business knowledge fragments
 
 ---
 
@@ -344,7 +344,7 @@ Differences from `/knowledge/search`:
 | `GET /knowledge/search` | Search by query keywords | Yes (`score` field) | `q` (query) |
 | `GET /knowledge/fragments` | List all fragments for browsing | No | None |
 
-Underlying implementation: `KnowledgeBase.listAll()` returns
+Underlying implementation: `VectorStore.listAll()` returns
 `Collections.unmodifiableList(allFragments)`, preserving load order.
 
 ---
