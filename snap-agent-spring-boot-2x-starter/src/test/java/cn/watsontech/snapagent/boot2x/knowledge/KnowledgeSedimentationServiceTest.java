@@ -34,7 +34,7 @@ class KnowledgeSedimentationServiceTest {
 
     private IssueClosure createIssue(String issueId, String userQuery, String rootCause,
                                       String selectedSolution) {
-        return new IssueClosure(issueId, null, null, null, "u1",
+        return new IssueClosure(issueId, null, null, null, null, "u1",
                 userQuery, rootCause, null, selectedSolution,
                 IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
@@ -102,7 +102,7 @@ class KnowledgeSedimentationServiceTest {
         SolutionSuggestion suggestion = new SolutionSuggestion(
                 Arrays.asList(opt1, opt2), "opt-2", null, null, null);
 
-        IssueClosure issue = new IssueClosure("issue-004", null, null, null, "u1",
+        IssueClosure issue = new IssueClosure("issue-004", null, null, null, null, "u1",
                 "查询慢", "缺索引", suggestion, "方案2: 加索引",
                 IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());
@@ -119,7 +119,7 @@ class KnowledgeSedimentationServiceTest {
     @Test
     @DisplayName("rootCause 缺失 → 返回 null + 不写入 VectorStore")
     void shouldSkipWhenRootCauseMissing() {
-        IssueClosure issue = new IssueClosure("issue-005", null, null, null, "u1",
+        IssueClosure issue = new IssueClosure("issue-005", null, null, null, null, "u1",
                 "query", null, null, null,
                 IssueStatus.CLOSED, null, null, null, null, null,
                 System.currentTimeMillis(), System.currentTimeMillis());

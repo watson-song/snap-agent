@@ -164,8 +164,8 @@ class IssueClosureServiceTest {
     @Test
     void shouldCreateExternalIssueAndUpdateStatus() {
         IssueClosure existing = new IssueClosure(
-                "issue-001", null, "task-100",
-                null, null, "query", "root cause text",
+                "issue-001", null, null, "task-100",
+                null, "user1", "query", "root cause text",
                 suggestionOf("solution A", "solution B"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
                 null, null,
@@ -174,15 +174,18 @@ class IssueClosureServiceTest {
         when(issueStore.findByTaskId("task-100")).thenReturn(existing);
         when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
                 .thenReturn("EXT-001");
+        when(issueTracker.type()).thenReturn("zentao");
 
         IssueClosure result = service.createExternalIssue("task-100", "solution A");
 
         assertThat(result).isNotNull();
         assertThat(result.getExternalIssueId()).isEqualTo("EXT-001");
+        assertThat(result.getExternalIssueSource()).isEqualTo("zentao");
         assertThat(result.getSelectedSolution()).isEqualTo("solution A");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.FIX_IN_PROGRESS);
 
-        verify(issueTracker).createIssue(anyString(), eq("solution A"), nullable(String.class));
+        verify(issueTracker).createIssue(anyString(), anyString(), eq("user1"));
+        verify(issueTracker).addComment(eq("EXT-001"), anyString());
         verify(issueStore).save(any(IssueClosure.class));
     }
 
@@ -199,7 +202,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldHandleNullExternalIssueIdFromNoopTracker() {
         IssueClosure existing = new IssueClosure(
-                "issue-002", null, "task-200",
+                "issue-002", null, null, "task-200",
                 null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
@@ -209,6 +212,7 @@ class IssueClosureServiceTest {
         when(issueStore.findByTaskId("task-200")).thenReturn(existing);
         when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
                 .thenReturn(null); // NoopIssueTracker returns null
+        when(issueTracker.type()).thenReturn("noop");
 
         IssueClosure result = service.createExternalIssue("task-200", "sol");
 
@@ -217,6 +221,28 @@ class IssueClosureServiceTest {
         assertThat(result.getSelectedSolution()).isEqualTo("sol");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.FIX_IN_PROGRESS);
         verify(issueStore).save(any(IssueClosure.class));
+    }
+
+    // ---- Idempotency: duplicate createExternalIssue should not create a second bug ----
+
+    @Test
+    void shouldNotCreateDuplicateWhenExternalIssueIdAlreadySet() {
+        IssueClosure existing = new IssueClosure(
+                "issue-dup", "EXT-001", "zentao", "task-dup",
+                null, "user1", "query", "root cause",
+                suggestionOf("sol A"), "sol A",
+                IssueStatus.FIX_IN_PROGRESS, null,
+                null, null,
+                null, null,
+                1_000L, 2_000L);
+        when(issueStore.findByTaskId("task-dup")).thenReturn(existing);
+
+        IssueClosure result = service.createExternalIssue("task-dup", "sol A");
+
+        // Should return existing issue without calling createIssue again
+        assertThat(result).isSameAs(existing);
+        verify(issueTracker, never()).createIssue(anyString(), anyString(), nullable(String.class));
+        verify(issueStore, never()).save(any(IssueClosure.class));
     }
 
     // ---- NoopIssueTracker AC: no exception, graceful null handling ----
@@ -230,7 +256,7 @@ class IssueClosureServiceTest {
         // of whether the tracker returns null; this test verifies the graceful
         // handling (no exception, null externalIssueId, issue persisted).
         IssueClosure existing = new IssueClosure(
-                "issue-noop", null, "task-noop",
+                "issue-noop", null, null, "task-noop",
                 null, null, "query", "root cause text",
                 suggestionOf("fix pool"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
@@ -240,6 +266,7 @@ class IssueClosureServiceTest {
         when(issueStore.findByTaskId("task-noop")).thenReturn(existing);
         when(issueTracker.createIssue(anyString(), anyString(), nullable(String.class)))
                 .thenReturn(null); // NoopIssueTracker returns null
+        when(issueTracker.type()).thenReturn("noop");
 
         IssueClosure result = service.createExternalIssue("task-noop", "fix pool");
 
@@ -261,7 +288,7 @@ class IssueClosureServiceTest {
         //     When createExternalIssue(issue)
         //     Then 不创建工单 (仅 SOLUTION_PROPOSED / FIX_IN_PROGRESS 状态可创建)
         IssueClosure existing = new IssueClosure(
-                "issue-closed", null, "task-closed",
+                "issue-closed", null, null, "task-closed",
                 null, null, "query", "root cause text",
                 suggestionOf("solution A"), null,
                 IssueStatus.CLOSED, null,
@@ -284,7 +311,7 @@ class IssueClosureServiceTest {
     void shouldNotCreateExternalIssueWhenStatusIsVerified() {
         // AC: terminal status VERIFIED must also be blocked
         IssueClosure existing = new IssueClosure(
-                "issue-verified", "EXT-old", "task-verified",
+                "issue-verified", null, null, "task-verified",
                 null, null, "query", "root cause text",
                 suggestionOf("solution A"), "solution A",
                 IssueStatus.VERIFIED, null,
@@ -304,7 +331,7 @@ class IssueClosureServiceTest {
     void shouldNotCreateExternalIssueWhenStatusIsFailed() {
         // AC: terminal status FAILED must also be blocked
         IssueClosure existing = new IssueClosure(
-                "issue-failed", null, "task-failed",
+                "issue-failed", null, null, "task-failed",
                 null, null, "query", "root cause text",
                 suggestionOf("solution A"), null,
                 IssueStatus.FAILED, null,
@@ -325,7 +352,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldVerifyFixAndUpdateIssue() {
         IssueClosure existing = new IssueClosure(
-                "issue-003", "EXT-1", "task-300",
+                "issue-003", "EXT-1", null, "task-300",
                 null, null, "order timeout", "connection pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
@@ -369,7 +396,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldReturnNullWhenVerifyFixSkillNotFound() {
         IssueClosure existing = new IssueClosure(
-                "issue-004", null, "task-400",
+                "issue-004", null, null, "task-400",
                 null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.FIX_IN_PROGRESS, null,
@@ -390,7 +417,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldCloseIssueAndSedimentKnowledge() {
         IssueClosure existing = new IssueClosure(
-                "issue-005", "EXT-5", "task-500",
+                "issue-005", "EXT-5", null, "task-500",
                 null, null, "order timeout", "pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.VERIFIED, null,
@@ -429,7 +456,7 @@ class IssueClosureServiceTest {
                 null, null, "system", null);
 
         IssueClosure existing = new IssueClosure(
-                "issue-006", null, "task-600",
+                "issue-006", null, null, "task-600",
                 null, null, "query", "root cause",
                 suggestionOf("sol"), "sol",
                 IssueStatus.VERIFIED, null,
@@ -520,7 +547,7 @@ class IssueClosureServiceTest {
         IssueClosureService serviceWithRunner = newIssueClosureService(null, runner);
 
         IssueClosure existing = new IssueClosure(
-                "issue-spi", "EXT-1", "task-spi",
+                "issue-spi", "EXT-1", null, "task-spi",
                 null, null, "order timeout", "connection pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
@@ -552,7 +579,7 @@ class IssueClosureServiceTest {
         IssueClosureService serviceWithRunner = newIssueClosureService(null, runner);
 
         IssueClosure existing = new IssueClosure(
-                "issue-orphan", "EXT-9", "task-gone",
+                "issue-orphan", "EXT-9", null, "task-gone",
                 null, null, "order timeout", "pool exhausted",
                 suggestionOf("increase pool"), "increase pool",
                 IssueStatus.FIX_IN_PROGRESS, null,
@@ -593,7 +620,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldListIssuesDelegatingToStore() {
         IssueClosure issue1 = new IssueClosure(
-                "issue-list-1", null, "task-1",
+                "issue-list-1", null, null, "task-1",
                 null, null, "query1", "root1",
                 suggestionOf("sol1"), null,
                 IssueStatus.SOLUTION_PROPOSED, null,
@@ -601,7 +628,7 @@ class IssueClosureServiceTest {
                 null, null,
                 1_000L, 2_000L);
         IssueClosure issue2 = new IssueClosure(
-                "issue-list-2", "EXT-2", "task-2",
+                "issue-list-2", "EXT-2", null, "task-2",
                 null, null, "query2", "root2",
                 suggestionOf("sol2"), "sol2",
                 IssueStatus.CLOSED, null,
@@ -631,7 +658,7 @@ class IssueClosureServiceTest {
     @Test
     void shouldLoadIssueDelegatingToStore() {
         IssueClosure existing = new IssueClosure(
-                "issue-load-1", null, "task-load",
+                "issue-load-1", null, null, "task-load",
                 null, null, "query", "root cause",
                 suggestionOf("sol"), null,
                 IssueStatus.VERIFIED, null,

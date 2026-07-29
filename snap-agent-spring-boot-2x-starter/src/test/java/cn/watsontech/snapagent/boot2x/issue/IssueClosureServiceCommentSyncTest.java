@@ -28,7 +28,7 @@ class IssueClosureServiceCommentSyncTest {
     @Test
     void close_addsCommentToExternalIssue() {
         IssueClosure issue = new IssueClosure(
-                "i1", "EXT-1", "t1", null, "u", "q", "rc",
+                "i1", "EXT-1", null, "t1", null, "u", "q", "rc",
                 null, null, IssueStatus.VERIFIED,
                 "sha", null, null,
                 new VerificationResult(true, "ok", null, null, 1L),
@@ -44,7 +44,7 @@ class IssueClosureServiceCommentSyncTest {
     @Test
     void close_commentFailureDoesNotBlock() {
         IssueClosure issue = new IssueClosure(
-                "i2", "EXT-2", "t2", null, "u", "q", "rc",
+                "i2", "EXT-2", null, "t2", null, "u", "q", "rc",
                 null, null, IssueStatus.VERIFIED,
                 null, null, null, null, null, 1L, 1L);
         when(issueStore.load("i2")).thenReturn(issue);

@@ -114,28 +114,27 @@ public class IssueClosureService {
         String userQuery = extractUserQuery(task.getInputs());
         String userId = task.getUserId();
 
+        // Idempotency: if an issue closure already exists for this task,
+        // update it with the new solution rather than creating a duplicate.
+        IssueClosure existing = issueStore.findByTaskId(taskId);
         long now = System.currentTimeMillis();
-        // Build the issue first with DIAGNOSED status and no solution, so the
-        // suggester (if any) receives an issue without a pre-existing solution.
-        IssueClosure issue = new IssueClosure(
-                "issue_" + now + "_" + randomSuffix(),
-                null,
-                taskId,
-                null,
-                userId,
-                userQuery,
-                rootCause,
-                null,
-                null,
-                IssueStatus.DIAGNOSED,
-                null,
-                null,
-                null,
-                null,
-                null,
-                now,
-                now
-        );
+
+        IssueClosure issue;
+        if (existing != null) {
+            issue = existing;
+        } else {
+            issue = new IssueClosure(
+                    "issue_" + now + "_" + randomSuffix(),
+                    null, null, taskId,
+                    null, userId, userQuery,
+                    rootCause,
+                    null, null,
+                    IssueStatus.DIAGNOSED, null,
+                    null, null,
+                    null, null,
+                    now, now
+            );
+        }
 
         SolutionSuggestion suggestion;
         if (solutionSuggester != null) {
@@ -216,6 +215,14 @@ public class IssueClosureService {
             return null;
         }
 
+        // Idempotency guard: if an external issue was already created, return
+        // the existing issue without creating a duplicate.
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            log.info("External issue {} already exists for task {}; skipping creation",
+                    issue.getExternalIssueId(), taskId);
+            return issue;
+        }
+
         // Status guard: only SOLUTION_PROPOSED (normal entry) and FIX_IN_PROGRESS
         // (recovery when a previous noop tracker returned null) may create an
         // external issue. Terminal statuses (VERIFIED, CLOSED, FAILED) and
@@ -230,14 +237,29 @@ public class IssueClosureService {
 
         String title = issue.getRootCause() != null
                 ? truncate(issue.getRootCause(), 80) : "Issue for task " + taskId;
-        String description = selectedSolution != null ? selectedSolution : "";
-        String externalIssueId = issueTracker.createIssue(title, description, null);
+        String description = buildIssueDescription(issue, selectedSolution);
+        String assignee = issue.getUserId();
+        String externalIssueId = issueTracker.createIssue(title, description, assignee);
+        String trackerType = issueTracker.type();
 
         long now = System.currentTimeMillis();
-        IssueClosure updated = issue.withExternalIssue(externalIssueId, selectedSolution,
-                IssueStatus.FIX_IN_PROGRESS, now);
+        IssueClosure updated = issue.withExternalIssue(externalIssueId, trackerType,
+                selectedSolution, IssueStatus.FIX_IN_PROGRESS, now);
         issueStore.save(updated);
-        log.info("Created external issue {} for issue {}", externalIssueId, issue.getIssueId());
+        log.info("Created external issue {} (source={}) for issue {}",
+                externalIssueId, trackerType, issue.getIssueId());
+
+        // Add initial comment with root cause and solution details
+        if (externalIssueId != null && !externalIssueId.isEmpty()) {
+            try {
+                issueTracker.addComment(externalIssueId,
+                        buildCreationComment(issue, selectedSolution));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add creation comment to external issue {}: {}",
+                        externalIssueId, e.getMessage());
+            }
+        }
+
         return updated;
     }
 
@@ -624,6 +646,58 @@ public class IssueClosureService {
     }
 
     // ---- helpers ----
+
+    /**
+     * Builds a rich description for the external issue from the issue closure's
+     * root cause, user query, and solution options.
+     */
+    private String buildIssueDescription(IssueClosure issue, String selectedSolution) {
+        StringBuilder sb = new StringBuilder();
+        if (issue.getUserQuery() != null && !issue.getUserQuery().isEmpty()) {
+            sb.append("## 问题描述\n\n").append(issue.getUserQuery()).append("\n\n");
+        }
+        if (issue.getRootCause() != null && !issue.getRootCause().isEmpty()) {
+            sb.append("## 根因分析\n\n").append(issue.getRootCause()).append("\n\n");
+        }
+        if (issue.getSolution() != null && issue.getSolution().getOptions() != null) {
+            sb.append("## 建议方案\n\n");
+            int idx = 1;
+            for (SolutionOption opt : issue.getSolution().getOptions()) {
+                sb.append(idx++).append(". **").append(opt.getTitle() != null ? opt.getTitle() : "")
+                  .append("** — ").append(opt.getDescription() != null ? opt.getDescription() : "")
+                  .append(" (工作量: ").append(opt.getEffort() != null ? opt.getEffort() : "")
+                  .append(")\n");
+            }
+            if (issue.getSolution().getRecommendedOptionId() != null) {
+                sb.append("\n推荐方案: ").append(issue.getSolution().getRecommendedOptionId()).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (selectedSolution != null && !selectedSolution.isEmpty()) {
+            sb.append("## 选定方案\n\n").append(selectedSolution).append("\n");
+        }
+        if (sb.length() == 0) {
+            sb.append("由 SnapAgent 自动创建");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Builds the initial comment to add to the external issue after creation.
+     */
+    private String buildCreationComment(IssueClosure issue, String selectedSolution) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 📋 Issue 由 SnapAgent 自动创建\n\n");
+        sb.append("**关联任务**: ").append(issue.getTaskId()).append("\n");
+        if (issue.getUserId() != null) {
+            sb.append("**创建人**: ").append(issue.getUserId()).append("\n");
+        }
+        if (selectedSolution != null && !selectedSolution.isEmpty()) {
+            sb.append("**选定方案**: ").append(selectedSolution).append("\n");
+        }
+        sb.append("\n---\n_由 SnapAgent 自动生成_");
+        return sb.toString();
+    }
 
     /**
      * Extracts the user's original query from the diagnostic task's input map

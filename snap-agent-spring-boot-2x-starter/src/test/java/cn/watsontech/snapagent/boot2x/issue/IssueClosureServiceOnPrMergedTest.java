@@ -33,7 +33,7 @@ class IssueClosureServiceOnPrMergedTest {
     @Test
     void onPrMerged_idempotentWhenWrongStatus() {
         IssueClosure issue = new IssueClosure(
-                "issue_2", null, "t", null, "u", "q", "rc",
+                "issue_2", null, null, "t", null, "u", "q", "rc",
                 null, null, IssueStatus.VERIFIED,
                 null, null, null, null, null, 1L, 1L);
         when(issueStore.findByPrNumber("2")).thenReturn(issue);
@@ -44,7 +44,7 @@ class IssueClosureServiceOnPrMergedTest {
     void onPrMerged_verifiesAndClosesIssue() {
         // 1. Stub findByPrNumber to return a FIX_SUBMITTED issue with an external ID
         IssueClosure issue = new IssueClosure(
-                "issue_42", "EXT-1", "t", null, "u", "q", "rc",
+                "issue_42", "EXT-1", null, "t", null, "u", "q", "rc",
                 null, null, IssueStatus.FIX_SUBMITTED,
                 "sha", null, "42",
                 null, null, 1L, 1L);

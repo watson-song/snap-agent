@@ -33,7 +33,7 @@ class IssueClosureServiceAutoFixTest {
     @Test
     void autoFix_transitionsToFixSubmitted() {
         IssueClosure issue = new IssueClosure(
-                "issue_1", "EXT-1", "task_1", null, "user1", "query",
+                "issue_1", "EXT-1", null, "task_1", null, "user1", "query",
                 "root cause", null, null, IssueStatus.FIX_IN_PROGRESS,
                 null, null, null, null, null, 1000L, 1000L);
         when(issueStore.load("issue_1")).thenReturn(issue);
@@ -62,7 +62,7 @@ class IssueClosureServiceAutoFixTest {
     @Test
     void autoFix_returnsNullWhenWrongStatus() {
         IssueClosure issue = new IssueClosure(
-                "issue_2", null, "task_2", null, "u", "q", "rc",
+                "issue_2", null, null, "task_2", null, "u", "q", "rc",
                 null, null, IssueStatus.VERIFIED,
                 null, null, null, null, null, 1L, 1L);
         when(issueStore.load("issue_2")).thenReturn(issue);
@@ -72,7 +72,7 @@ class IssueClosureServiceAutoFixTest {
     @Test
     void autoFix_addCommentFailureDoesNotBlock() {
         IssueClosure issue = new IssueClosure(
-                "issue_3", "EXT-3", "task_3", null, "u", "q", "rc",
+                "issue_3", "EXT-3", null, "task_3", null, "u", "q", "rc",
                 null, null, IssueStatus.FIX_IN_PROGRESS,
                 null, null, null, null, null, 1L, 1L);
         when(issueStore.load("issue_3")).thenReturn(issue);

@@ -16,6 +16,7 @@ public final class IssueClosure {
 
     private final String issueId;
     private final String externalIssueId;
+    private final String externalIssueSource;
     private final String taskId;
     private final String conversationId;
     private final String userId;
@@ -37,6 +38,7 @@ public final class IssueClosure {
      *
      * @param issueId            内部闭环 ID (UUID)
      * @param externalIssueId    外部 Issue ID (Jira/工单, 可空)
+     * @param externalIssueSource 外部 Issue 来源类型 (e.g. "zentao", "jira", 可空)
      * @param taskId             关联的诊断任务 ID
      * @param conversationId     关联的会话 ID (可空)
      * @param userId             创建人 (发起诊断的用户 ID, 可空)
@@ -53,7 +55,8 @@ public final class IssueClosure {
      * @param createdAt          创建时间 (epoch millis)
      * @param updatedAt          更新时间 (epoch millis)
      */
-    public IssueClosure(String issueId, String externalIssueId, String taskId,
+    public IssueClosure(String issueId, String externalIssueId, String externalIssueSource,
+                        String taskId,
                         String conversationId, String userId, String userQuery,
                         String rootCause,
                         SolutionSuggestion solution, String selectedSolution,
@@ -63,6 +66,7 @@ public final class IssueClosure {
                         long createdAt, long updatedAt) {
         this.issueId = issueId;
         this.externalIssueId = externalIssueId;
+        this.externalIssueSource = externalIssueSource;
         this.taskId = taskId;
         this.conversationId = conversationId;
         this.userId = userId;
@@ -88,6 +92,11 @@ public final class IssueClosure {
     /** 外部 Issue ID (Jira/工单, 可空)。 */
     public String getExternalIssueId() {
         return externalIssueId;
+    }
+
+    /** 外部 Issue 来源类型 (e.g. "zentao", "jira", 可空)。 */
+    public String getExternalIssueSource() {
+        return externalIssueSource;
     }
 
     /** 关联的诊断任务 ID。 */
@@ -182,7 +191,7 @@ public final class IssueClosure {
      */
     public IssueClosure withStatus(IssueStatus status, long updatedAt) {
         return new IssueClosure(
-                this.issueId, this.externalIssueId, this.taskId,
+                this.issueId, this.externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
@@ -201,7 +210,7 @@ public final class IssueClosure {
      */
     public IssueClosure withExternalIssue(String externalIssueId, IssueStatus status, long updatedAt) {
         return new IssueClosure(
-                this.issueId, externalIssueId, this.taskId,
+                this.issueId, externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, this.fixCommitId,
@@ -225,7 +234,30 @@ public final class IssueClosure {
     public IssueClosure withExternalIssue(String externalIssueId, String selectedSolution,
                                           IssueStatus status, long updatedAt) {
         return new IssueClosure(
-                this.issueId, externalIssueId, this.taskId,
+                this.issueId, externalIssueId, this.externalIssueSource, this.taskId,
+                this.conversationId, this.userId, this.userQuery, this.rootCause,
+                this.solution, selectedSolution,
+                status, this.fixCommitId,
+                this.fixPrUrl, this.fixPrNumber,
+                this.verificationResult, this.knowledgeEntryId,
+                this.createdAt, updatedAt);
+    }
+
+    /**
+     * 返回一个外部 Issue ID、来源、选择方案、状态和更新时间变更后的新实例, 其余字段不变。
+     *
+     * @param externalIssueId    外部 Issue ID
+     * @param externalIssueSource 外部 Issue 来源类型 (e.g. "zentao")
+     * @param selectedSolution   用户选择的方案 ID
+     * @param status              新状态
+     * @param updatedAt           新的更新时间 (epoch millis)
+     * @return new {@link IssueClosure} with updated externalIssueId, externalIssueSource, selectedSolution, status and updatedAt
+     */
+    public IssueClosure withExternalIssue(String externalIssueId, String externalIssueSource,
+                                          String selectedSolution,
+                                          IssueStatus status, long updatedAt) {
+        return new IssueClosure(
+                this.issueId, externalIssueId, externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, selectedSolution,
                 status, this.fixCommitId,
@@ -243,7 +275,7 @@ public final class IssueClosure {
      */
     public IssueClosure withSolution(SolutionSuggestion solution, long updatedAt) {
         return new IssueClosure(
-                this.issueId, this.externalIssueId, this.taskId,
+                this.issueId, this.externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 solution, this.selectedSolution,
                 this.status, this.fixCommitId,
@@ -261,7 +293,7 @@ public final class IssueClosure {
      */
     public IssueClosure withVerification(VerificationResult verificationResult, long updatedAt) {
         return new IssueClosure(
-                this.issueId, this.externalIssueId, this.taskId,
+                this.issueId, this.externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
@@ -279,7 +311,7 @@ public final class IssueClosure {
      */
     public IssueClosure withKnowledgeEntry(String knowledgeEntryId, long updatedAt) {
         return new IssueClosure(
-                this.issueId, this.externalIssueId, this.taskId,
+                this.issueId, this.externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 this.status, this.fixCommitId,
@@ -301,7 +333,7 @@ public final class IssueClosure {
     public IssueClosure withFix(String commitId, String prUrl, String prNumber,
                                IssueStatus status, long updatedAt) {
         return new IssueClosure(
-                this.issueId, this.externalIssueId, this.taskId,
+                this.issueId, this.externalIssueId, this.externalIssueSource, this.taskId,
                 this.conversationId, this.userId, this.userQuery, this.rootCause,
                 this.solution, this.selectedSolution,
                 status, commitId,
@@ -313,7 +345,8 @@ public final class IssueClosure {
     @Override
     public String toString() {
         return "IssueClosure{issueId='" + issueId + "', externalIssueId='"
-                + externalIssueId + "', taskId='" + taskId
+                + externalIssueId + "', externalIssueSource='" + externalIssueSource
+                + "', taskId='" + taskId
                 + "', userId='" + userId + "'"
                 + ", status=" + status + ", solution="
                 + (solution != null ? "present(" + solution.getOptions().size() + " options)" : "null")

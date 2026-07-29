@@ -243,7 +243,7 @@ class SnapAgentControllerAutoFixTest {
 
     private IssueClosure createIssue(String issueId, String taskId, IssueStatus status) {
         IssueClosure base = new IssueClosure(
-                issueId, "EXT-1", taskId,
+                issueId, "EXT-1", null, taskId,
                 "conv-1", "user001", "test query", "root cause",
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS, "commit-abc",

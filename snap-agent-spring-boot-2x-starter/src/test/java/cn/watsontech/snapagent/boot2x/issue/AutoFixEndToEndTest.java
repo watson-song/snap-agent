@@ -55,7 +55,7 @@ class AutoFixEndToEndTest {
     void fullFlow_autoFix_thenOnPrMerged_thenClose() {
         // 1. Start with an issue in FIX_IN_PROGRESS
         IssueClosure issue = new IssueClosure(
-                "issue_1", "EXT-1", "task_1", null, "u", "q", "rc",
+                "issue_1", "EXT-1", null, "task_1", null, "u", "q", "rc",
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS,
                 null, null, null,
@@ -94,7 +94,7 @@ class AutoFixEndToEndTest {
     @Test
     void autoFix_failureTransitionsToFailed() {
         IssueClosure issue = new IssueClosure(
-                "issue_2", "EXT-2", "task_2", null, "u", "q", "rc",
+                "issue_2", "EXT-2", null, "task_2", null, "u", "q", "rc",
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS,
                 null, null, null,
@@ -121,7 +121,7 @@ class AutoFixEndToEndTest {
     @Test
     void onPrMerged_skipsWhenNotFixSubmitted() {
         IssueClosure issue = new IssueClosure(
-                "issue_3", "EXT-3", "task_3", null, "u", "q", "rc",
+                "issue_3", "EXT-3", null, "task_3", null, "u", "q", "rc",
                 null, null,
                 IssueStatus.DIAGNOSED,
                 null, null, null,

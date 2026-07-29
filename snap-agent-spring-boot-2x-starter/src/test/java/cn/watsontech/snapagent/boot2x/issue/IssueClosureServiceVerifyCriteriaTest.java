@@ -29,7 +29,7 @@ class IssueClosureServiceVerifyCriteriaTest {
         SolutionSuggestion sol = new SolutionSuggestion(
                 java.util.Collections.emptyList(), null, null, null, null);
         IssueClosure issue = new IssueClosure(
-                "i1", "EXT-1", "t1", null, "u", "q", "rc",
+                "i1", "EXT-1", null, "t1", null, "u", "q", "rc",
                 sol, null, IssueStatus.FIX_SUBMITTED,
                 "sha", null, null, null, null, 1L, 1L);
         when(issueStore.load("i1")).thenReturn(issue);
@@ -47,7 +47,7 @@ class IssueClosureServiceVerifyCriteriaTest {
         VerificationResult vr = new VerificationResult(true, "passed",
                 "FIX_SUBMITTED", "VERIFIED", 2000L);
         IssueClosure issue = new IssueClosure(
-                "i2", "EXT-2", "t2", null, "u", "q", "rc",
+                "i2", "EXT-2", null, "t2", null, "u", "q", "rc",
                 sol, null, IssueStatus.FIX_SUBMITTED,
                 "sha", null, null, null, null, 1L, 1L);
         when(issueStore.load("i2")).thenReturn(issue);
@@ -69,7 +69,7 @@ class IssueClosureServiceVerifyCriteriaTest {
         VerificationResult vr = new VerificationResult(false, "failed",
                 "FIX_SUBMITTED", "FAILED", 2000L);
         IssueClosure issue = new IssueClosure(
-                "i3", null, "t3", null, "u", "q", "rc",
+                "i3", null, null, "t3", null, "u", "q", "rc",
                 sol, null, IssueStatus.FIX_SUBMITTED,
                 "sha", null, null, null, null, 1L, 1L);
         when(issueStore.load("i3")).thenReturn(issue);

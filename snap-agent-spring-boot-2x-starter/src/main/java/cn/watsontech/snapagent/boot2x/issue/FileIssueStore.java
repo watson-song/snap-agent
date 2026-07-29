@@ -215,6 +215,7 @@ public class FileIssueStore implements IssueStore {
         Map<String, Object> map = new LinkedHashMap<String, Object>();
         map.put("issueId", issue.getIssueId());
         map.put("externalIssueId", issue.getExternalIssueId());
+        map.put("externalIssueSource", issue.getExternalIssueSource());
         map.put("taskId", issue.getTaskId());
         map.put("conversationId", issue.getConversationId());
         map.put("userId", issue.getUserId());
@@ -299,6 +300,7 @@ public class FileIssueStore implements IssueStore {
         return new IssueClosure(
                 str(data.get("issueId")),
                 nullableStr(data.get("externalIssueId")),
+                nullableStr(data.get("externalIssueSource")),
                 str(data.get("taskId")),
                 nullableStr(data.get("conversationId")),
                 nullableStr(data.get("userId")),

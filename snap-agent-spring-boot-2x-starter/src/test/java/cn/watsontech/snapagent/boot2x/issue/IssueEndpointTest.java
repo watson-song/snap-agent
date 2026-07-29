@@ -70,7 +70,7 @@ class IssueEndpointTest {
     }
 
     private IssueClosure sampleIssue(String issueId, IssueStatus status) {
-        return new IssueClosure(issueId, "EXT-" + issueId, "task-1",
+        return new IssueClosure(issueId, "EXT-" + issueId, null, "task-1",
                 null, "test-user", "why QPS drop?",
                 "NPE at line 87", null, null,
                 status, null, null, null, null, null,

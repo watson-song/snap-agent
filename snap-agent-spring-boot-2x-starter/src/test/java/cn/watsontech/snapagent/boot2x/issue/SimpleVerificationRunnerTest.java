@@ -52,7 +52,7 @@ class SimpleVerificationRunnerTest {
 
     private IssueClosure issueWithTaskId(String taskId) {
         return new IssueClosure(
-                "issue-verify", null, taskId,
+                "issue-verify", null, null, taskId,
                 null, "user1", "为什么订单服务超时?", "连接池打满",
                 null, null,
                 IssueStatus.FIX_IN_PROGRESS, null,

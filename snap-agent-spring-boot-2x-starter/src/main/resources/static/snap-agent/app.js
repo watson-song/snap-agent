@@ -1734,7 +1734,7 @@ async function perMessageActionCall(btn, skillName, taskId, url, body, mode) {
             if (data.issueId) {
                 resultParts.push('**Issue 已创建**');
                 resultParts.push('Issue ID: `' + data.issueId + '`');
-                if (data.externalIssueId) resultParts.push('外部 Issue: ' + data.externalIssueId);
+                if (data.externalIssueId) resultParts.push('外部 Issue: ' + (data.externalIssueSource || '') + ' #' + data.externalIssueId);
             }
             if (data.status) resultParts.push('状态: ' + data.status);
             if (data.rootCause) resultParts.push('根因: ' + data.rootCause);
@@ -2394,7 +2394,8 @@ async function showIssuesModal() {
             try {
                 var url, method = 'POST', reqBody = null;
                 if (action === 'create-issue') {
-                    // Full flow: auto-propose solution then create external issue
+                    // Full flow: auto-propose solution then create external issue.
+                    // Check if solution is already proposed to avoid duplicate issue closures.
                     var proposeResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }) });
                     var proposeData = await proposeResp.json();
                     if (!proposeResp.ok) {
@@ -2404,7 +2405,7 @@ async function showIssuesModal() {
                         setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
                         return;
                     }
-                    // Now create external issue
+                    // Now create external issue (backend is idempotent: won't create duplicate if externalIssueId already set)
                     url = BASE + '/runs/' + encodeURIComponent(taskId) + '/issue';
                     reqBody = '{}';
                 } else if (action === 'create-external') {

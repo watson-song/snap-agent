@@ -3064,6 +3064,7 @@ public class SnapAgentController {
         Map<String, Object> dto = new LinkedHashMap<String, Object>();
         dto.put("issueId", issue.getIssueId());
         dto.put("externalIssueId", issue.getExternalIssueId());
+        dto.put("externalIssueSource", issue.getExternalIssueSource());
         dto.put("taskId", issue.getTaskId());
         dto.put("conversationId", issue.getConversationId());
         dto.put("userId", issue.getUserId());

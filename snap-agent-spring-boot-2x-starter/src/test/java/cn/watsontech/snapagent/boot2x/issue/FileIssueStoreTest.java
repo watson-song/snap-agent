@@ -34,7 +34,7 @@ class FileIssueStoreTest {
     private IssueClosure newSample(String issueId, String taskId, IssueStatus status,
                                    long createdAt, long updatedAt) {
         return new IssueClosure(
-                issueId, null, taskId,
+                issueId, null, null, taskId,
                 "conv-100", "user1", "为什么订单服务超时?", "连接池打满",
                 sampleSuggestion(), null,
                 status, null,
@@ -102,7 +102,7 @@ class FileIssueStoreTest {
         store.save(issue);
 
         IssueClosure updated = new IssueClosure(
-                "issue-002", "EXT-1", "task-200",
+                "issue-002", "EXT-1", "zentao", "task-200",
                 null, null, "updated query", "updated root cause",
                 suggestionOf("new solution"), "selected",
                 IssueStatus.FIX_IN_PROGRESS, "commit-abc",
@@ -225,7 +225,7 @@ class FileIssueStoreTest {
     @Test
     void shouldHandleNullSolutionsOnSaveAndLoad() {
         IssueClosure issue = new IssueClosure(
-                "issue-null-sols", null, "task-null",
+                "issue-null-sols", null, null, "task-null",
                 null, null, "query", "root cause",
                 null, null,
                 IssueStatus.DIAGNOSED, null,
@@ -242,7 +242,7 @@ class FileIssueStoreTest {
     @Test
     void shouldPreserveAllFieldsWithExternalIssue() {
         IssueClosure issue = new IssueClosure(
-                "issue-full", "JIRA-42", "task-full",
+                "issue-full", "JIRA-42", "jira", "task-full",
                 "conv-42", "user1", "full query", "full root cause",
                 suggestionOf("sol1", "sol2"), "sol1",
                 IssueStatus.FIX_IN_PROGRESS, "commit-xyz",
