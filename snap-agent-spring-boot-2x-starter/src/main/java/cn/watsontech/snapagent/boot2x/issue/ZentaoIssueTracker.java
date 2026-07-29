@@ -63,7 +63,7 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
             body.put("assignedTo", assignee);
         }
 
-        JsonNode resp = jsonRequest(url, "POST", tokenHeader(token), body);
+        JsonNode resp = jsonRequest(url, "POST", header("Token", token), body);
         // Zentao returns {"id": 123} on success
         if (resp != null && resp.has("id")) {
             return String.valueOf(resp.get("id").asInt());
@@ -86,7 +86,7 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
             body.put("resolvedBy", "");
         }
 
-        jsonRequest(url, "POST", tokenHeader(token), body.isEmpty() ? null : body);
+        jsonRequest(url, "POST", header("Token", token), body.isEmpty() ? null : body);
     }
 
     @Override
@@ -112,7 +112,7 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("comment", comment != null ? comment : "");
 
-        jsonRequest(url, "POST", tokenHeader(token), body);
+        jsonRequest(url, "POST", header("Token", token), body);
     }
 
     /**
@@ -137,17 +137,6 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
         }
         // resolved, fixed, verified, etc.
         return "resolve";
-    }
-
-    /**
-     * Builds a header map with a {@code Token} entry.
-     * ZenTao REST API v1 uses the {@code Token} header directly (not
-     * {@code Authorization: Bearer} or {@code Authorization: Token}).
-     */
-    private static Map<String, String> tokenHeader(String token) {
-        Map<String, String> h = new LinkedHashMap<String, String>();
-        h.put("Token", token);
-        return h;
     }
 
     private static String trimSlash(String s) {

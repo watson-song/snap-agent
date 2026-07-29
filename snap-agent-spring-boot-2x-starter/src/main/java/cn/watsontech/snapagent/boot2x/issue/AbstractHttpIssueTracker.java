@@ -67,8 +67,17 @@ abstract class AbstractHttpIssueTracker {
      * Builds a header map with a single Authorization entry.
      */
     protected static Map<String, String> authHeader(String value) {
+        return header("Authorization", value);
+    }
+
+    /**
+     * Builds a header map with a single custom entry.
+     * Subclasses that need a non-Authorization header (e.g. ZenTao uses
+     * {@code Token}) should use this instead of a private helper.
+     */
+    protected static Map<String, String> header(String name, String value) {
         Map<String, String> h = new LinkedHashMap<String, String>();
-        h.put("Authorization", value);
+        h.put(name, value);
         return h;
     }
 
