@@ -18,6 +18,7 @@ import cn.watsontech.snapagent.core.memory.MessagePartitioner;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
+import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
@@ -85,7 +86,35 @@ public class AgentNode implements Node {
         // --- Build messages list ---
         // Layer 5: Short-term Notes — partition conversation history + user message
         List<Message> history = state.get(StateKeys.MEMORY_MESSAGES);
-        List<Message> messages = messagePartitioner.partition(history, userMessage);
+        List<Message> messages = new ArrayList<>(
+            messagePartitioner.partition(history, userMessage));
+
+        // --- ReAct loop memory: append previous turn's thought + tool results ---
+        // When AgentNode is called after ToolsNode (second+ turn), the state
+        // carries THOUGHT, TOOL_USE_BLOCKS, and TOOL_RESULTS from the previous
+        // turn. Without appending these to the messages, the LLM has no context
+        // about what it already did and keeps repeating the same tool call.
+        @SuppressWarnings("unchecked")
+        List<ToolUseBlock> prevToolUses = state.get(StateKeys.TOOL_USE_BLOCKS);
+        @SuppressWarnings("unchecked")
+        List<ToolResult> prevToolResults = state.get(StateKeys.TOOL_RESULTS);
+        if (prevToolUses != null && !prevToolUses.isEmpty()) {
+            String prevThought = state.get(StateKeys.THOUGHT);
+            messages.add(Message.assistant(
+                prevThought != null ? prevThought : "",
+                prevToolUses
+            ));
+            if (prevToolResults != null) {
+                for (int i = 0; i < prevToolUses.size() && i < prevToolResults.size(); i++) {
+                    ToolUseBlock toolUse = prevToolUses.get(i);
+                    ToolResult result = prevToolResults.get(i);
+                    String content = result.getContent() != null ? result.getContent()
+                        : (result.getError() != null ? "Error: " + result.getError()
+                        : "No output");
+                    messages.add(Message.toolResult(toolUse.getId(), content));
+                }
+            }
+        }
 
         // --- Layer 4: Tools (filtered by skill declaration) ---
         List<ToolDef> toolDefs = new ArrayList<>();
