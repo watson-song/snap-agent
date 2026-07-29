@@ -19,6 +19,8 @@ public class UserInfo {
     private List<String> activeProfiles = new ArrayList<String>();
     /** Whether issue-closure (问题闭环) feature is enabled and the /runs/{taskId}/issue endpoints are active. */
     private boolean issueClosureEnabled;
+    /** Whether the browser network bridge is enabled. Frontend uses this to conditionally load bridge-client.js. */
+    private boolean bridgeEnabled;
 
     public UserInfo() {
     }
@@ -102,5 +104,13 @@ public class UserInfo {
 
     public void setIssueClosureEnabled(boolean issueClosureEnabled) {
         this.issueClosureEnabled = issueClosureEnabled;
+    }
+
+    public boolean isBridgeEnabled() {
+        return bridgeEnabled;
+    }
+
+    public void setBridgeEnabled(boolean bridgeEnabled) {
+        this.bridgeEnabled = bridgeEnabled;
     }
 }

@@ -1,28 +1,28 @@
 package cn.watsontech.snapagent.boot2x.issue;
 
+import cn.watsontech.snapagent.core.issue.HttpExecutor;
+import cn.watsontech.snapagent.core.issue.HttpResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Base class for HTTP-based {@link cn.watsontech.snapagent.core.issue.IssueTracker}
  * implementations. Provides a minimal JSON HTTP client using
- * {@link HttpURLConnection} + Jackson {@link ObjectMapper}.
+ * {@link HttpExecutor} + Jackson {@link ObjectMapper}.
  *
  * <p>Subclasses call {@link #jsonRequest} to perform HTTP requests and receive
  * parsed JSON responses. Error handling is centralized: non-2xx responses
  * throw {@link TrackerException} with the response body.</p>
+ *
+ * <p>The HTTP execution is delegated to {@link #httpExecutor}, which defaults
+ * to {@link DirectHttpExecutor} (using {@link java.net.HttpURLConnection}).
+ * When the browser bridge is enabled, a {@code BridgeHttpExecutor} is injected
+ * via {@code BeanPostProcessor} to route requests through the user's browser.</p>
  */
 abstract class AbstractHttpIssueTracker {
 
@@ -31,7 +31,19 @@ abstract class AbstractHttpIssueTracker {
     protected final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
+     * HTTP executor used for all outbound requests. Defaults to
+     * {@link DirectHttpExecutor} (direct {@link java.net.HttpURLConnection}).
+     * Replaced by {@code BridgeHttpExecutor} when the bridge is enabled.
+     */
+    protected HttpExecutor httpExecutor = new DirectHttpExecutor();
+
+    /**
      * Performs an HTTP request and returns the parsed JSON response body.
+     *
+     * <p>Delegates the actual HTTP call to {@link #httpExecutor} and handles
+     * error wrapping and JSON parsing. When {@code bridge.enabled=false}
+     * (the default), {@code httpExecutor} is {@link DirectHttpExecutor} and
+     * behavior is identical to the pre-bridge implementation.</p>
      *
      * @param urlStr  full URL
      * @param method  HTTP method (GET, POST, PATCH, PUT, DELETE)
@@ -42,57 +54,12 @@ abstract class AbstractHttpIssueTracker {
      */
     protected JsonNode jsonRequest(String urlStr, String method,
                                    Map<String, String> headers, Object body) {
-        HttpURLConnection conn = null;
         try {
-            URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod(method);
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
-            conn.setInstanceFollowRedirects(true);
-
-            // Always send/receive JSON
-            conn.setRequestProperty("Accept", "application/json");
-
-            if (headers != null) {
-                for (Map.Entry<String, String> e : headers.entrySet()) {
-                    conn.setRequestProperty(e.getKey(), e.getValue());
-                }
-            }
-
-            if (body != null) {
-                conn.setDoOutput(true);
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-                String json = objectMapper.writeValueAsString(body);
-                byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-                conn.setRequestProperty("Content-Length", String.valueOf(bytes.length));
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(bytes);
-                    os.flush();
-                }
-            }
-
-            int code = conn.getResponseCode();
-            String responseBody = readAll(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
-
-            if (code >= 400) {
-                throw new TrackerException(type(),
-                        "HTTP " + code + " from " + method + " " + urlStr + ": " + responseBody);
-            }
-
-            if (responseBody == null || responseBody.isEmpty()) {
-                return null;
-            }
-            return objectMapper.readTree(responseBody);
-        } catch (TrackerException e) {
-            throw e;
-        } catch (Exception e) {
+            HttpResponse resp = httpExecutor.execute(urlStr, method, headers, body);
+            return resp.getJsonBody(objectMapper);
+        } catch (RuntimeException e) {
             throw new TrackerException(type(),
-                    "Failed " + method + " " + urlStr + ": " + e.getMessage(), e);
-        } finally {
-            if (conn != null) {
-                conn.disconnect();
-            }
+                    e.getMessage(), e.getCause());
         }
     }
 
@@ -112,27 +79,6 @@ abstract class AbstractHttpIssueTracker {
         Map<String, String> h = new LinkedHashMap<String, String>();
         h.put("Authorization", authValue);
         return h;
-    }
-
-    private String readAll(InputStream is) {
-        if (is == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder();
-        BufferedReader reader = new BufferedReader(
-                new InputStreamReader(is, StandardCharsets.UTF_8));
-        String line;
-        try {
-            while ((line = reader.readLine()) != null) {
-                if (sb.length() > 0) {
-                    sb.append('\n');
-                }
-                sb.append(line);
-            }
-        } catch (Exception e) {
-            log.warn("Failed reading response stream: {}", e.getMessage());
-        }
-        return sb.toString();
     }
 
     /**

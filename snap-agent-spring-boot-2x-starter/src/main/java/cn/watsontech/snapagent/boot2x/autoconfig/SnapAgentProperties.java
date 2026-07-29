@@ -75,6 +75,7 @@ public class SnapAgentProperties {
     private Memory memory = new Memory();
     private Vcs vcs = new Vcs();
     private Fix fix = new Fix();
+    private Bridge bridge;
 
     // ---- getters / setters ----
 
@@ -350,6 +351,14 @@ public class SnapAgentProperties {
 
     public void setFix(Fix fix) {
         this.fix = fix;
+    }
+
+    public Bridge getBridge() {
+        return bridge;
+    }
+
+    public void setBridge(Bridge bridge) {
+        this.bridge = bridge;
     }
 
     // ---- nested classes ----
@@ -2182,5 +2191,30 @@ public class SnapAgentProperties {
             public String getSecret() { return secret; }
             public void setSecret(String secret) { this.secret = secret; }
         }
+    }
+
+    /**
+     * Browser network bridge configuration.
+     *
+     * <p>When {@code enabled=true}, HTTP calls from {@code AbstractHttpIssueTracker}
+     * and {@code AbstractHttpVcsClient} are routed through the user's browser
+     * via SSE + Chrome Extension, bypassing direct connection when the extension
+     * is installed and activated. When {@code enabled=false} (default), zero
+     * behavior change for existing deployments.</p>
+     */
+    public static class Bridge {
+        /** Master switch. Default false — zero impact when disabled. */
+        private boolean enabled = false;
+        /** Timeout for a single bridge proxy request (ms). Default 30s. */
+        private long requestTimeoutMs = 30000;
+        /** Target URL host whitelist. Only URLs matching these patterns are proxied. */
+        private List<String> allowedHostPatterns = new ArrayList<String>();
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public long getRequestTimeoutMs() { return requestTimeoutMs; }
+        public void setRequestTimeoutMs(long requestTimeoutMs) { this.requestTimeoutMs = requestTimeoutMs; }
+        public List<String> getAllowedHostPatterns() { return allowedHostPatterns; }
+        public void setAllowedHostPatterns(List<String> allowedHostPatterns) { this.allowedHostPatterns = allowedHostPatterns; }
     }
 }

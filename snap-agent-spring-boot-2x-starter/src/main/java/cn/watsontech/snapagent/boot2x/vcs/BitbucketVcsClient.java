@@ -1,15 +1,12 @@
 package cn.watsontech.snapagent.boot2x.vcs;
 
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
+import cn.watsontech.snapagent.core.issue.HttpResponse;
 import cn.watsontech.snapagent.core.vcs.FileChange;
 import cn.watsontech.snapagent.core.vcs.MergeRequestInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,31 +60,16 @@ public class BitbucketVcsClient extends AbstractHttpVcsClient {
     }
 
     private String putFileContent(String urlStr, String content) {
-        HttpURLConnection conn = null;
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("content", content != null ? content : "");
+
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("Authorization", "Bearer " + token);
+        headers.put("Content-Type", "application/json; charset=UTF-8");
+
         try {
-            URL url = new URL(urlStr);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("PUT");
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(30000);
-            conn.setDoOutput(true);
-            conn.setRequestProperty("Authorization", "Bearer " + token);
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-
-            Map<String, Object> body = new LinkedHashMap<String, Object>();
-            body.put("content", content != null ? content : "");
-            String json = objectMapper.writeValueAsString(body);
-            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(bytes);
-                os.flush();
-            }
-
-            int code = conn.getResponseCode();
-            String respBody = readAll(code >= 400 ? conn.getErrorStream() : conn.getInputStream());
-            if (code >= 400) {
-                throw new RuntimeException("HTTP " + code + ": " + respBody);
-            }
+            HttpResponse resp = httpExecutor.execute(urlStr, "PUT", headers, body);
+            String respBody = resp.getBody();
             if (!respBody.isEmpty()) {
                 JsonNode node = objectMapper.readTree(respBody);
                 if (node.has("id")) return node.get("id").asText();
@@ -97,8 +79,6 @@ public class BitbucketVcsClient extends AbstractHttpVcsClient {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("Failed PUT: " + e.getMessage(), e);
-        } finally {
-            if (conn != null) conn.disconnect();
         }
     }
 

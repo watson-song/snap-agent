@@ -476,6 +476,8 @@ public class SnapAgentController {
         info.setActiveProfilesFromCsv(properties.getAppProfiles());
         // Surface whether the issue-closure (问题闭环) feature is enabled so the UI can show/hide action buttons
         info.setIssueClosureEnabled(issueClosureService != null);
+        // Surface whether the browser network bridge is enabled so the UI can conditionally load bridge-client.js
+        info.setBridgeEnabled(properties.getBridge() != null && properties.getBridge().isEnabled());
         if (securityGateway == null) {
             info.setMessage("security not configured");
             return ResponseEntity.ok(info);

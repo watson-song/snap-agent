@@ -86,6 +86,13 @@ async function checkUserStatus() {
         if (typeof info.issueClosureEnabled === 'boolean') {
             issueClosureEnabled = info.issueClosureEnabled;
         }
+        // Conditionally load bridge-client.js when the browser network bridge is enabled
+        if (info.bridgeEnabled && !document.getElementById('bridgeClientScript')) {
+            var script = document.createElement('script');
+            script.id = 'bridgeClientScript';
+            script.src = 'bridge-client.js';
+            document.head.appendChild(script);
+        }
         return true;
     } catch (e) {
         showAuthPrompt('网络错误', '无法连接服务器，请检查网络后重试');

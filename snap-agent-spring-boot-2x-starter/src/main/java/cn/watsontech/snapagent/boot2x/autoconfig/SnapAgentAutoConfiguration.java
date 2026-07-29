@@ -50,6 +50,7 @@ import java.nio.file.Paths;
  *   <li>{@link IssueAutoConfiguration} — issue tracking, VCS, auto-fix</li>
  *   <li>{@link CostAutoConfiguration} — cost tracking, budgets, pricing</li>
  *   <li>{@link WorkflowAutoConfiguration} — workflow engine, plugin registry</li>
+ *   <li>{@link BridgeAutoConfiguration} — browser network bridge (when enabled)</li>
  * </ul>
  */
 @Configuration
@@ -63,7 +64,8 @@ import java.nio.file.Paths;
         KnowledgeAutoConfiguration.class,
         IssueAutoConfiguration.class,
         CostAutoConfiguration.class,
-        WorkflowAutoConfiguration.class
+        WorkflowAutoConfiguration.class,
+        BridgeAutoConfiguration.class
 })
 public class SnapAgentAutoConfiguration {
 
