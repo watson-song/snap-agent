@@ -23,9 +23,9 @@
           data-en="SnapAgent — Embeddable AI Skill Framework"
           content="SnapAgent — 嵌入式 AI 技能框架">
     <meta property="og:description" id="ogDescription"
-          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检与成本核算。"
-          data-en="Give your Spring Boot 2.x app an embedded AI skill agent: natural-language chat, read-only tool calls, page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, and cost tracking."
-          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检与成本核算。">
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算与浏览器网络桥接。"
+          data-en="Give your Spring Boot 2.x app an embedded AI skill agent: natural-language chat, read-only tool calls, page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, cost tracking, and browser network bridge."
+          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算与浏览器网络桥接。">
     <meta property="og:url" content="https://watson-song.github.io/snap-agent/">
     <meta property="og:locale" id="ogLocale"
           data-zh="zh_CN" data-en="en_US"
@@ -412,6 +412,59 @@
         @media (max-width: 768px) {
             .anchor-showcase { grid-template-columns: 1fr; }
         }
+
+        /* ===== Bridge Showcase Section ===== */
+        .bridge-section { background: var(--bg-secondary); }
+        .bridge-showcase {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+            margin-top: 48px;
+        }
+        .bridge-mode-card {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 28px; transition: all 0.25s;
+        }
+        .bridge-mode-card:hover { border-color: var(--border-hover); }
+        .bridge-mode-card .mode-badge {
+            display: inline-block; font-size: 11px; font-weight: 600;
+            padding: 3px 10px; border-radius: 999px; margin-bottom: 16px;
+            font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .mode-badge.direct { background: var(--accent-light); color: var(--accent); }
+        .mode-badge.bridge { background: rgba(45, 212, 191, 0.15); color: #2dd4bf; }
+        .bridge-mode-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 12px; color: var(--text-primary); }
+        .bridge-mode-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px; }
+        .bridge-steps {
+            list-style: none; counter-reset: step;
+            margin-bottom: 16px;
+        }
+        .bridge-steps li {
+            counter-increment: step;
+            padding: 6px 0 6px 32px;
+            position: relative;
+            font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+        }
+        .bridge-steps li::before {
+            content: counter(step);
+            position: absolute; left: 0; top: 6px;
+            width: 22px; height: 22px; border-radius: 50%;
+            background: var(--bg-tertiary); color: var(--text-primary);
+            font-size: 11px; font-weight: 600;
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--mono);
+        }
+        .bridge-code {
+            background: var(--bg-input); border: 1px solid var(--border);
+            border-radius: var(--radius-sm); padding: 14px 18px;
+            font-family: var(--mono); font-size: 12px; line-height: 1.6;
+            color: var(--text-primary); overflow-x: auto;
+        }
+        .bridge-code .c-com { color: var(--text-muted); }
+        .bridge-code .c-key { color: #c792ea; }
+        .bridge-code .c-str { color: #c3e88d; }
+        .bridge-cta { margin-top: 32px; text-align: center; }
+        @media (max-width: 768px) {
+            .bridge-showcase { grid-template-columns: 1fr; }
+        }
     </style>
 </head>
 <body data-lang="zh">
@@ -429,6 +482,9 @@
             </a>
             <a href="#anchor" class="nav-link">
                 <span data-lang="zh">锚点</span><span data-lang="en">Anchor</span>
+            </a>
+            <a href="#bridge" class="nav-link">
+                <span data-lang="zh">桥接</span><span data-lang="en">Bridge</span>
             </a>
             <a href="#quickstart" class="nav-link">
                 <span data-lang="zh">快速开始</span><span data-lang="en">Quick Start</span>
@@ -642,6 +698,15 @@
                 <div class="feature-meta">v0.1 · ChatMemoryRepository + MessageChatMemoryAdvisor (order=100)</div>
             </div>
 
+            <div class="feature-card c-cyan">
+                <div class="feature-icon">🔌</div>
+                <h3 data-lang="zh">浏览器网络桥接</h3>
+                <h3 data-lang="en" style="display:none">Browser Network Bridge</h3>
+                <p data-lang="zh">Chrome Extension 代理模式：当容器/K8s 无法直连内网禅道、GitLab 等系统时，通过用户浏览器转发 HTTP 请求。状态优先路由（扩展激活→直接桥接，不尝试直连），主开关+服务开关+域名白名单三重安全控制，bridge.enabled=false 时零侵入。</p>
+                <p data-lang="en" style="display:none">Chrome Extension proxy mode: when containers/K8s can't reach internal Zentao, GitLab, etc., HTTP requests are routed through the user's browser. Status-first routing (extension active → direct bridge, no direct attempt), master switch + service toggles + host whitelist triple security, zero intrusion when bridge.enabled=false.</p>
+                <div class="feature-meta">v2.0 · BridgeHttpExecutor + Chrome Extension (Manifest V3)</div>
+            </div>
+
         </div>
     </div>
 </section>
@@ -716,6 +781,124 @@
     </div>
 </section>
 
+<!-- ===== Browser Bridge Showcase ===== -->
+<section class="section bridge-section" id="bridge">
+    <div class="container">
+        <div class="section-header">
+            <div class="section-tag">
+                <span data-lang="zh">独特功能</span><span data-lang="en">Unique Feature</span>
+            </div>
+            <h2 class="section-title">
+                <span data-lang="zh">浏览器桥接 — 让容器突破网络隔离</span>
+                <span data-lang="en">Browser Bridge — Break through network isolation</span>
+            </h2>
+            <p class="section-desc">
+                <span data-lang="zh">K8s 容器往往无法直接访问内网禅道、GitLab 等。SnapAgent Chrome Extension 利用用户浏览器的网络环境，将服务端请求经 SSE 推送到前端，再由扩展无 CORS 代理到内网系统。零侵入设计，不使用时行为不变。</span>
+                <span data-lang="en">K8s containers often can't reach internal Zentao, GitLab, etc. The SnapAgent Chrome Extension leverages the user's browser network to proxy server-side requests via SSE → frontend → extension → internal systems. Zero-intrusion design, no change when disabled.</span>
+            </p>
+        </div>
+
+        <div class="bridge-showcase">
+            <!-- Direct Mode -->
+            <div class="bridge-mode-card">
+                <span class="mode-badge direct" data-lang="zh">直连模式 (默认)</span>
+                <span class="mode-badge direct" data-lang="en" style="display:none">Direct Mode (Default)</span>
+                <h3 data-lang="zh">容器网络直达，无需桥接</h3>
+                <h3 data-lang="en" style="display:none">Container network reachable, no bridge needed</h3>
+                <p data-lang="zh">bridge.enabled=false（默认）时，所有 HTTP 请求使用 DirectHttpExecutor 直接发起，与现有行为完全一致，零额外配置。</p>
+                <p data-lang="en" style="display:none">When bridge.enabled=false (default), all HTTP requests use DirectHttpExecutor directly, identical to existing behavior, zero extra configuration.</p>
+                <div class="bridge-code"><span class="c-com"># application.yml — 无 bridge 配置</span>
+<span class="c-key">snap-agent:</span>
+  <span class="c-key">issue-closure:</span>
+    <span class="c-key">enabled:</span> <span class="c-str">true</span>
+    <span class="c-key">tracker-type:</span> <span class="c-str">zentao</span>
+    <span class="c-key">zentao:</span>
+      <span class="c-key">base-url:</span> <span class="c-str">http://zentao.internal.com</span></div>
+            </div>
+
+            <!-- Bridge Mode -->
+            <div class="bridge-mode-card">
+                <span class="mode-badge bridge" data-lang="zh">桥接模式 v2.0</span>
+                <span class="mode-badge bridge" data-lang="en" style="display:none">Bridge Mode v2.0</span>
+                <h3 data-lang="zh">扩展代理 — 经浏览器访问内网</h3>
+                <h3 data-lang="en" style="display:none">Extension proxy — reach internal via browser</h3>
+                <p data-lang="zh">容器无法直连内网时，安装 Chrome Extension，请求经 SSE → 浏览器扩展 → 内网系统，无 CORS 限制。状态优先路由，扩展激活时不尝试直连。</p>
+                <p data-lang="en" style="display:none">When containers can't reach internal networks, install the Chrome Extension. Requests flow via SSE → browser extension → internal systems, no CORS restrictions. Status-first routing, no direct attempt when extension is active.</p>
+                <div class="bridge-code"><span class="c-com"># application.yml — 开启桥接</span>
+<span class="c-key">snap-agent:</span>
+  <span class="c-key">bridge:</span>
+    <span class="c-key">enabled:</span> <span class="c-str">true</span>
+    <span class="c-key">allowed-host-patterns:</span>
+      - <span class="c-str">"*.sfcloud.local"</span></div>
+            </div>
+        </div>
+
+        <!-- Use Cases -->
+        <div style="margin-top: 32px;">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: var(--text-primary);">
+                <span data-lang="zh">使用案例</span>
+                <span data-lang="en" style="display:none">Use Cases</span>
+            </h3>
+            <div class="features-grid">
+                <div class="feature-card c-cyan">
+                    <div class="feature-icon">🐛</div>
+                    <h3 data-lang="zh">K8s 容器创建禅道 Bug</h3>
+                    <h3 data-lang="en" style="display:none">Create Zentao Bugs from K8s</h3>
+                    <p data-lang="zh">SnapAgent 部署在 K8s 中，禅道在内网。用户点击"创建 Issue"→ 服务端 SSE 推送 → Chrome Extension fetch() → 禅道 API → Bug 创建成功。无需修改网络策略或 VPN。</p>
+                    <p data-lang="en" style="display:none">SnapAgent in K8s, Zentao on internal network. User clicks "Create Issue" → server SSE push → Chrome Extension fetch() → Zentao API → Bug created. No network policy changes or VPN needed.</p>
+                </div>
+                <div class="feature-card c-cyan">
+                    <div class="feature-icon">🔀</div>
+                    <h3 data-lang="zh">内网 GitLab 创建修复 PR</h3>
+                    <h3 data-lang="en" style="display:none">Create Fix PRs on Internal GitLab</h3>
+                    <p data-lang="zh">自动诊断后需要通过 GitLab API 创建修复分支和 MR。BridgeHttpExecutor 检测 vcs 代理已激活 → 请求经 SSE → 扩展 → GitLab API → PR 创建成功。</p>
+                    <p data-lang="en" style="display:none">After auto-diagnosis, create fix branches and MRs via GitLab API. BridgeHttpExecutor detects vcs proxy active → request via SSE → extension → GitLab API → PR created.</p>
+                </div>
+                <div class="feature-card c-cyan">
+                    <div class="feature-icon">⚖️</div>
+                    <h3 data-lang="zh">混合模式 — 按服务独立控制</h3>
+                    <h3 data-lang="en" style="display:none">Hybrid Mode — Per-Service Control</h3>
+                    <p data-lang="zh">禅道在内网（走桥接），LLM 在公网（直连）。扩展中开启 Issue Tracker 代理，VCS 代理按需开关。每个服务类型独立控制，BridgeHttpExecutor 按 serviceType 路由。</p>
+                    <p data-lang="en" style="display:none">Zentao internal (bridge), LLM public (direct). Enable Issue Tracker proxy in extension, VCS toggle as needed. Each service type independently controlled, BridgeHttpExecutor routes by serviceType.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Architecture Flow -->
+        <div style="margin-top: 32px;">
+            <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: var(--text-primary);">
+                <span data-lang="zh">桥接数据流</span>
+                <span data-lang="en" style="display:none">Bridge Data Flow</span>
+            </h3>
+            <div class="arch-diagram">┌─────────────────────────────────────────────────────────────┐
+│  SnapAgent Server (容器/K8s)                                  │
+│  IssueClosureService → ZentaoIssueTracker                    │
+│    → AbstractHttpIssueTracker.jsonRequest()                   │
+│      → BridgeHttpExecutor.execute()                           │
+│          isBridgeActive("issue-tracker") → true               │
+│          → IssueBridgeService.proxyRequest()                  │
+│              SSE push → BridgeController → Frontend           │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ SSE: proxy-request
+┌──────────────────────────────┼──────────────────────────────┐
+│  Browser                     │                               │
+│  bridge-client.js ◄──────────┘                               │
+│    → Chrome Extension (sendMessage)                          │
+│      → background.js: fetch(zentaoUrl)  ← 用户网络, 无 CORS   │
+│      ← 禅道 API 返回 {"id": 42}                               │
+│    → POST /bridge/result                                      │
+│  ← IssueClosure 更新状态                                      │
+└──────────────────────────────────────────────────────────────┘</div>
+        </div>
+
+        <div class="bridge-cta">
+            <a href="docs.html#bridge-architecture" class="btn-secondary">
+                📖 <span data-lang="zh">查看桥接架构文档</span><span data-lang="en">Read Bridge Architecture Docs</span>
+            </a>
+        </div>
+    </div>
+</section>
+
 <!-- ===== Architecture ===== -->
 <section class="section arch-section" id="architecture">
     <div class="container">
@@ -752,11 +935,24 @@
 │   │  │ Patrol  │ │  GraphExecutor · SSE Controller       │     │    │
 │   │  │ + Alert │ │  · SecurityGateway                    │     │    │
 │   │  └─────────┘ └──────────────────────┬───────────────┘     │    │
+│   │  ┌──────────────────────────────────────────────────────┐  │    │
+│   │  │  Bridge (可选): BridgeHttpExecutor · DirectHttpExec  │  │    │
+│   │  │  · IssueBridgeService · BridgeController             │  │    │
+│   │  └──────────────────────┬───────────────────────────────┘  │    │
 │   └─────────────────────────┼────────────────────────────────┘    │
 └─────────────────────────────┼────────────────────────────────────┘
                               │
                      ┌────────▼────────┐
                      │   LLM Provider  │  Anthropic · 通义 · 文心 · 智谱
+                     └────────┬────────┘
+                              │
+              ┌────────────────┼────────────────┐
+              │ Chrome Extension (可选)          │
+              │  Bridge 代理 · 无 CORS          │
+              └────────────────┬────────────────┘
+                               │
+                     ┌────────▼────────┐
+                     │ 内网禅道/GitLab │
                      └─────────────────┘</div>
 
         <!-- Mobile fallback: semantic nested list (hidden on desktop via CSS) -->
@@ -777,12 +973,14 @@
                                 <li><strong>Cost Tracker</strong> — token 记账 + 预算管控（v1.0）</li>
                                 <li><strong>Workflow Engine</strong> — 多步诊断流水线（v1.0）</li>
                                 <li><strong>Patrol + Alert</strong> — 主动巡检 + 告警收敛（v0.5）</li>
+                                <li><strong>Browser Bridge</strong> — Chrome Extension 网络桥接（v2.0, 可选）</li>
                                 <li><strong>GraphExecutor</strong> · SSE Controller · SecurityGateway</li>
                             </ul>
                         </li>
                     </ul>
                 </li>
                 <li><span class="arch-node">LLM Provider</span> — Anthropic · 通义 · 文心 · 智谱</li>
+                <li><span class="arch-node">Chrome Extension (可选)</span> — Browser Bridge 代理 · 禅道/GitLab 等内网系统</li>
             </ul>
         </div>
     </div>

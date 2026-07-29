@@ -1,0 +1,89 @@
+graph TD
+    %% ===== Glassmorphism Node Classes (Tailwind pastels, semi-transparent) =====
+    classDef client fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef service fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef ai fill:#dcfce7,stroke:#4ade80,stroke-width:1.5px,color:#166534,rx:6px,ry:6px
+    classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+    classDef bridge fill:#ccfbf1,stroke:#2dd4bf,stroke-width:1.5px,color:#134e4a,rx:6px,ry:6px
+
+    %% ===== L1 接入层: Browser + Extension =====
+    subgraph Client ["接入层 (Clients / Browser)"]
+        direction LR
+        A1["SnapAgent Web UI<br/>bridge-client.js (SSE + postMessage)"]
+        A2["Chrome Extension<br/>background.js · content.js · popup.html"]
+        A3["代理指示灯<br/>🟢 已连接 / 🔴 未连接"]
+    end
+
+    %% ===== L2 网关与接口层 =====
+    subgraph Gateway ["网关与接口层 (API & Gateway)"]
+        direction LR
+        B1["BridgeController<br/>GET /bridge/stream · POST /bridge/result<br/>POST /bridge/status-update · GET /bridge/status"]
+        B2["SnapAgentFilter<br/>用户身份注入 ThreadLocal"]
+    end
+
+    %% ===== L3 桥接核心层 =====
+    subgraph BridgeLayer ["桥接核心层 (Bridge Core)"]
+        direction LR
+        C1["IssueBridgeService<br/>SSE 推送 + CompletableFuture 等待<br/>+ BridgeClientStatus 状态追踪"]
+        C2["BridgeHttpExecutor<br/>状态优先路由: isBridgeActive() ? SSE : 直连"]
+        C3["DirectHttpExecutor<br/>HttpURLConnection (默认, 原逻辑)"]
+        C4["BridgeHttpExecutorPostProcessor<br/>BeanPostProcessor 透明注入"]
+    end
+
+    %% ===== L4 业务服务层 (不变) =====
+    subgraph Service ["业务服务层 (Service Layer, 不变)"]
+        direction LR
+        D1["IssueClosureService<br/>IssueTracker SPI"]
+        D2["FixExecutionService<br/>VcsClient SPI"]
+        D3["ZentaoIssueTracker<br/>GitLabVcsClient<br/>(AbstractHttpXxx)"]
+    end
+
+    %% ===== L5 外部系统 =====
+    subgraph External ["外部系统 (External Systems)"]
+        direction LR
+        E1["禅道 / Zentao<br/>内网 Issue Tracker"]
+        E2["GitLab / Bitbucket<br/>内网 VCS"]
+        E3["LLM Provider<br/>(v2: 流式 chunked relay)"]
+    end
+
+    %% ===== 连线 =====
+    A1 -->|"SSE: proxy-request"| B1
+    A2 -->|"fetch() 无 CORS"| E1
+    A2 -->|"fetch() 无 CORS"| E2
+    A1 -->|"POST /bridge/result"| B1
+    A1 -->|"POST /bridge/status-update"| B1
+    A2 -.->|"postMessage: BRIDGE_READY"| A1
+    A2 -.->|"postMessage: CONFIG_CHANGED"| A1
+    A1 -.->|"postMessage: QUERY_CONFIG"| A2
+
+    B2 --> B1
+    B1 --> C1
+    C1 --> C2
+    C2 -->|"桥接激活"| C1
+    C2 -->|"桥接未激活"| C3
+    C4 -.->|"注入 httpExecutor"| D3
+    C1 -.->|"SSE push"| A1
+
+    D1 --> D3
+    D2 --> D3
+    D3 --> C2
+    C3 --> E1
+    C3 --> E2
+    E1 -.-> A2
+    E2 -.-> A2
+
+    %% ===== Glass Layer Styles =====
+    style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style BridgeLayer fill:#14b8a6,stroke:#14b8a6,stroke-width:2px,color:#5eead4
+    style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+
+    %% ===== 应用颜色类 =====
+    class A1,A2,A3 client
+    class B1,B2 api
+    class C1,C2,C3,C4 bridge
+    class D1,D2,D3 service
+    class E1,E2,E3 external

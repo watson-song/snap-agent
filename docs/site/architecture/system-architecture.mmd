@@ -6,12 +6,14 @@ graph TD
     classDef ai fill:#dcfce7,stroke:#4ade80,stroke-width:1.5px,color:#166534,rx:6px,ry:6px
     classDef storage fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
     classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+    classDef bridge fill:#ccfbf1,stroke:#2dd4bf,stroke-width:1.5px,color:#134e4a,rx:6px,ry:6px
 
     %% ===== L1 接入层 =====
     subgraph Client ["接入层 (Clients)"]
         direction LR
         A1["Browser (Web UI)<br/>Skill 选择 + SSE 流式"]
         A2["第三方 REST Client<br/>API SDK 调用"]
+        A3["Chrome Extension<br/>Bridge 代理 (可选)"]
     end
 
     %% ===== L2 网关与接口层 =====
@@ -21,6 +23,15 @@ graph TD
         B2["SecurityGateway<br/>权限校验与身份解析"]
         B3["SnapAgentController<br/>REST API + SSE 端点"]
         B4["KnowledgeController<br/>知识库搜索/上传端点"]
+        B5["BridgeController<br/>SSE 桥接通道 + 状态管理"]
+    end
+
+    %% ===== L2.5 桥接层 (可选) =====
+    subgraph BridgeLayer ["桥接层 (Bridge Layer, 可选)"]
+        direction LR
+        BR1["BridgeHttpExecutor<br/>状态优先路由"]
+        BR2["DirectHttpExecutor<br/>直连 (默认)"]
+        BR3["IssueBridgeService<br/>SSE 推送 + 状态追踪"]
     end
 
     %% ===== L3 核心业务层 =====
@@ -56,17 +67,24 @@ graph TD
         F2["Prometheus<br/>指标查询"]
         F3["Loki<br/>日志搜索"]
         F4["Jaeger<br/>链路追踪"]
+        F5["禅道 / GitLab / Jira<br/>内网系统 (经桥接可达)"]
     end
 
     %% ===== 连线规范：实线=同步调用，虚线=异步/跨层 =====
     A1 --> B3
     A2 --> B3
+    A1 --> B5
+    A3 -.->|"fetch() 无 CORS"| F5
     B1 --> B2
     B2 --> B3
     B3 --> D1
     B3 --> C1
     B3 --> C4
     B4 --> C3
+    B5 --> BR3
+    BR3 --> BR1
+    BR1 -->|"桥接激活"| BR3
+    BR1 -->|"桥接未激活"| BR2
     D1 --> C2
     D1 --> D2
     D3 -.-> D2
@@ -79,19 +97,22 @@ graph TD
     C2 -.-> F2
     C2 -.-> F3
     C2 -.-> F4
+    BR2 -.-> F5
 
     %% ===== Glass Layer Styles (distinct transparent glass per layer) =====
     style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
     style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style BridgeLayer fill:#14b8a6,stroke:#14b8a6,stroke-width:2px,color:#5eead4
     style Service fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
     style AI fill:#22c55e,stroke:#22c55e,stroke-width:2px,color:#86efac
     style Data fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
     style Infra fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
 
     %% ===== 应用颜色类 =====
-    class A1,A2 client
-    class B1,B2,B3,B4 api
+    class A1,A2,A3 client
+    class B1,B2,B3,B4,B5 api
+    class BR1,BR2,BR3 bridge
     class C1,C2,C3,C4 service
     class D1,D2,D3 ai
     class E1,E2,E3,E4 storage
-    class F1,F2,F3,F4 external
+    class F1,F2,F3,F4,F5 external
