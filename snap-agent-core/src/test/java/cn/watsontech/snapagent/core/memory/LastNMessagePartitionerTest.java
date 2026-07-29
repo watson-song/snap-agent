@@ -23,43 +23,44 @@ class LastNMessagePartitionerTest {
     }
 
     @Test
-    @DisplayName("非空历史 + 用户消息 → 历史 + 用户消息")
-    void nonEmptyHistoryReturnsHistoryPlusUserMessage() {
+    @DisplayName("非空历史 + 用户消息 → 用户消息在前 + 历史")
+    void nonEmptyHistoryReturnsUserMessageBeforeHistory() {
         MessagePartitioner partitioner = new LastNMessagePartitioner();
         List<Message> history = Arrays.asList(
-                Message.user("first"),
-                Message.assistant("response")
+                Message.assistant("response"),
+                Message.toolResult("tu-1", "data")
         );
-        List<Message> result = partitioner.partition(history, "second");
+        List<Message> result = partitioner.partition(history, "query");
         assertThat(result).hasSize(3);
-        assertThat(result.get(0).getContent()).isEqualTo("first");
+        assertThat(result.get(0).getContent()).isEqualTo("query");
+        assertThat(result.get(0).getRole()).isEqualTo("user");
         assertThat(result.get(1).getContent()).isEqualTo("response");
-        assertThat(result.get(2).getContent()).isEqualTo("second");
+        assertThat(result.get(2).getContent()).isEqualTo("data");
     }
 
     @Test
-    @DisplayName("maxMessages=2 时截断最旧消息")
+    @DisplayName("maxMessages=2 时截断最旧历史消息（用户消息在前）")
     void maxMessagesTruncatesOldest() {
         MessagePartitioner partitioner = new LastNMessagePartitioner(2);
         List<Message> history = Arrays.asList(
-                Message.user("old1"),
                 Message.assistant("resp1"),
-                Message.user("old2"),
+                Message.toolResult("tu-1", "old1"),
                 Message.assistant("resp2"),
-                Message.user("recent")
+                Message.toolResult("tu-2", "recent")
         );
         List<Message> result = partitioner.partition(history, "current");
+        // user message + last 2 history messages = 3
         assertThat(result).hasSize(3);
-        assertThat(result.get(0).getContent()).isEqualTo("resp2");
-        assertThat(result.get(1).getContent()).isEqualTo("recent");
-        assertThat(result.get(2).getContent()).isEqualTo("current");
+        assertThat(result.get(0).getContent()).isEqualTo("current");
+        assertThat(result.get(1).getContent()).isEqualTo("resp2");
+        assertThat(result.get(2).getContent()).isEqualTo("recent");
     }
 
     @Test
-    @DisplayName("空用户消息 → 不添加用户消息")
+    @DisplayName("空用户消息 → 不添加用户消息，仅返回历史")
     void emptyUserMessageOmitted() {
         MessagePartitioner partitioner = new LastNMessagePartitioner();
-        List<Message> history = Collections.singletonList(Message.user("prev"));
+        List<Message> history = Collections.singletonList(Message.assistant("prev"));
         List<Message> result = partitioner.partition(history, "");
         assertThat(result).hasSize(1);
         assertThat(result.get(0).getContent()).isEqualTo("prev");

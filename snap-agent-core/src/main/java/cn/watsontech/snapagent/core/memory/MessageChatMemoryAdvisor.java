@@ -27,15 +27,16 @@ import java.util.List;
  *
  * <p><b>afterNode</b>: persists messages in ReAct-loop order:
  * <ul>
- *   <li><b>entry</b> — saves the user message (Layer 2 — User Input)</li>
  *   <li><b>agent</b> — saves the assistant turn as {@code Message.assistant(thought, toolUseBlocks)},
  *       including tool_use blocks so subsequent tool_result messages have a
  *       matching tool_use id (required by provider APIs)</li>
  *   <li><b>tools</b> — saves each tool_result as {@code Message.toolResult(toolUseId, content)},
  *       matching the tool_use id from {@code state["tool_use_blocks"]} by index</li>
  * </ul>
- * This produces the correct conversation ordering:
- * {@code [user, assistant(thought_1, toolUses_1), tool_result_1, assistant(thought_2, toolUses_2), ...]}.
+ * The user message (Layer 2) is NOT persisted to ChatMemory — it is
+ * injected into the messages list by the {@link MessagePartitioner} on each
+ * agent turn. This avoids duplication in the ReAct loop where the same user
+ * message is present on every turn.
  * </p>
  */
 public class MessageChatMemoryAdvisor implements Advisor {
@@ -107,9 +108,6 @@ public class MessageChatMemoryAdvisor implements Advisor {
 
         try {
             switch (nodeName) {
-                case "entry":
-                    persistUserMessage(state, conversationId);
-                    break;
                 case "agent":
                     persistAssistantTurn(state, conversationId);
                     break;
@@ -126,19 +124,6 @@ public class MessageChatMemoryAdvisor implements Advisor {
         }
 
         return state;
-    }
-
-    /**
-     * Save the user message to ChatMemory (Layer 2 — User Input).
-     * Called after the entry node, which assembles the user message from
-     * task inputs. The user message is saved ONCE here; subsequent ReAct
-     * turns read it back from memory without re-saving.
-     */
-    private void persistUserMessage(GraphState state, String conversationId) {
-        String userMessage = state.get(StateKeys.USER_MESSAGE);
-        if (userMessage != null && !userMessage.isEmpty()) {
-            chatMemory.add(conversationId, Message.user(userMessage));
-        }
     }
 
     /**

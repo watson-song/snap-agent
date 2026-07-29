@@ -36,10 +36,8 @@ import java.util.Map;
  *   <li><b>Tools</b> — filtered by skill's declared tool list (UC-20)</li>
  *   <li><b>Short-term Notes</b> — conversation history from
  *       {@code memory.messages} (loaded by {@code MessageChatMemoryAdvisor}).
- *       When non-empty, used directly as the messages list (includes user
- *       message, previous assistant turns with tool_use blocks, and
- *       tool_result messages). When empty (first turn), the partitioner
- *       assembles [user message] from {@code user.message}.</li>
+ *       Combined with the current user message via {@link MessagePartitioner}
+ *       which prepends the user message (Layer 2) before the history.</li>
  * </ul>
  */
 public class AgentNode implements Node {
@@ -85,24 +83,14 @@ public class AgentNode implements Node {
         // --- Layer 2: User Input ---
         String userMessage = state.get(StateKeys.USER_MESSAGE);
 
-        // --- Build messages list ---
-        // Layer 5: Short-term Notes — conversation history from ChatMemory.
-        // When the MessageChatMemoryAdvisor is wired, beforeNode loads the full
-        // conversation history (user + assistant turns with tool_use blocks +
-        // tool_result messages) into memory.messages. We use it directly.
-        // When memory is empty (first turn, or advisor not wired), fall back
-        // to the partitioner which appends the current user message.
+        // --- Layer 2 + Layer 5: User Input + Short-term Notes ---
+        // The partitioner combines the current user message (Layer 2) with
+        // conversation history from ChatMemory (Layer 5) into the final
+        // messages list. When the MessageChatMemoryAdvisor is wired,
+        // beforeNode loads history (assistant turns with tool_use blocks +
+        // tool_result messages). The partitioner prepends the user message.
         List<Message> history = state.get(StateKeys.MEMORY_MESSAGES);
-        List<Message> messages;
-        if (history != null && !history.isEmpty()) {
-            // Full conversation history loaded by MessageChatMemoryAdvisor —
-            // includes the current user message, previous assistant turns
-            // (with tool_use blocks), and tool_result messages. Use as-is.
-            messages = new ArrayList<>(history);
-        } else {
-            // First turn or no memory advisor — partition history + user message
-            messages = new ArrayList<>(messagePartitioner.partition(history, userMessage));
-        }
+        List<Message> messages = messagePartitioner.partition(history, userMessage);
 
         // --- Layer 4: Tools (filtered by skill declaration) ---
         List<ToolDef> toolDefs = new ArrayList<>();

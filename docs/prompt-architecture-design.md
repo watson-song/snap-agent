@@ -19,7 +19,7 @@
 | 2 | **User Input** | `<user_inputs>` 标签包裹的 JSON 键值对 | `EntryNode` |
 | 3 | **Retrieved Facts** | RAG 检索结果 → `<retrieved_facts>` 块注入 system prompt | `RetrievalAugmentationAdvisor` → `AgentNode` |
 | 4 | **Tools** | 按 skill 声明的 tools 过滤，`@Tool/@ToolParam` 反射生成 JSON Schema | `AgentNode` |
-| 5 | **Short-term Notes** | 对话历史 `memory.messages` 注入到 messages 列表前部；超窗时摘要压缩 | `MessageChatMemoryAdvisor` → `AgentNode` |
+| 5 | **Short-term Notes** | 对话历史 `memory.messages`（不含当前 user message）通过 `MessagePartitioner` 与 user message 组合，user message 前置 | `MessageChatMemoryAdvisor` → `AgentNode` |
 | 6 | **Long-term Memory** | `UserProfileStore` + `ProjectFactsStore` SPI 存储稳定事实，`LongTermMemoryAdvisor` 按需注入 | `LongTermMemoryAdvisor` (order=150) |
 | 7 | **Output Format** | skill frontmatter 声明 `output-format` → `<output_format>` 块 | `EntryNode` |
 
@@ -60,7 +60,7 @@ Advisor 按 `getOrder()` 排序，在 Node 执行前后注入 context：
 |-------|---------|-----|------|
 | 10 | `ProjectContextAdvisor` | 1 | 在 entry 后追加项目结构摘要（Maven 模块、Java 文件计数、关键目录，max 1500 字符） |
 | 50 | `SafeGuardAdvisor` | — | 前置过滤敏感词，后置过滤 LLM 输出中的敏感信息 |
-| 100 | `MessageChatMemoryAdvisor` | 5 | 前置加载对话历史到 `memory.messages`；后置持久化 user/assistant 消息 |
+| 100 | `MessageChatMemoryAdvisor` | 5 | 前置加载对话历史到 `memory.messages`（不含当前 user message）；后置持久化 assistant turn（含 tool_use blocks）和 tool_result messages |
 | 150 | `LongTermMemoryAdvisor` | 6 | 前置加载用户偏好 + 项目事实，注入 system prompt 的 `<user_profile>` 和 `<project_facts>` 块 |
 | 200 | `RetrievalAugmentationAdvisor` | 3 | 前置执行 RAG 管线 → `rag.context` |
 
@@ -194,7 +194,8 @@ output-format: |
 │     [10]  ProjectContextAdvisor → append project structure      │
 │     [50]  SafeGuardAdvisor → sanitize user.query               │
 │     [100] MessageChatMemoryAdvisor → load memory.messages      │
-│           (SummarizingChatMemory: 超窗时摘要替代丢弃)            │
+│           (历史不含当前 user message；仅含 assistant turns +     │
+│            tool_result messages)                                │
 │     [150] LongTermMemoryAdvisor → load UserProfile + ProjFacts │
 │           → <user_profile> + <project_facts> 注入 system prompt │
 │     [200] RetrievalAugmentationAdvisor → RAG → rag.context     │
@@ -203,7 +204,9 @@ output-format: |
 │     systemPrompt = state["system.prompt"]  (already includes    │
 │                    <user_profile> + <project_facts> from LTM)  │
 │     systemPrompt += <retrieved_facts>  (from rag.context)      │
-│     messages = messagePartitioner.partition(memory.messages, userMessage) │
+│     messages = messagePartitioner.partition(memory.messages,    │
+│                                          userMessage)           │
+│           → [user_message, assistant_1, tool_result_1, ...]     │
 │     toolDefs = registry filtered by skill.tools                │
 │     → LlmRequest(systemPrompt, messages, toolDefs, ...)        │
 │                                                                  │
@@ -211,9 +214,16 @@ output-format: |
 │     Anthropic: system as top-level string                       │
 │     OpenAI:    system as first message with role=system        │
 │                                                                  │
-│  5. AdvisorNode (after "agent")                                 │
-│     [100] Memory → persist user msg + assistant thought        │
+│  5. AdvisorNode (after each node)                               │
+│     [100] Memory:                                               │
+│           after "agent"  → persist assistant turn               │
+│                            (thought + tool_use blocks)          │
+│           after "tools" → persist tool_result messages         │
+│                            (matched to tool_use ids by index)   │
 │     [50]  SafeGuard → sanitize LLM output                      │
+│                                                                  │
+│  Note: user message is NOT persisted to ChatMemory.            │
+│  The MessagePartitioner prepends it on each agent turn.        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

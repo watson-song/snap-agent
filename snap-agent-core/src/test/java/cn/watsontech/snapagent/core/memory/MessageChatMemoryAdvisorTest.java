@@ -27,10 +27,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p>The advisor persists in ReAct-loop order:
  * <ul>
- *   <li><b>entry</b> → saves user message</li>
  *   <li><b>agent</b> → saves assistant turn WITH tool_use blocks</li>
  *   <li><b>tools</b> → saves tool_result messages with proper toolUseId</li>
  * </ul>
+ * The user message is NOT persisted to ChatMemory — it is injected by the
+ * {@link MessagePartitioner} on each agent turn.
  * </p>
  */
 @DisplayName("MessageChatMemoryAdvisor — history injection + per-node persistence")
@@ -165,11 +166,11 @@ class MessageChatMemoryAdvisorTest {
         assertThat(history).isEmpty();
     }
 
-    // ---- afterNode: entry node → saves user message ----
+    // ---- afterNode: entry node → no-op (user message not persisted) ----
 
     @Test
-    @DisplayName("afterNode: entry node saves user.message to ChatMemory")
-    void shouldSaveUserMessageAfterEntryNode() throws InterruptException {
+    @DisplayName("afterNode: entry node → no-op (user message not persisted to ChatMemory)")
+    void shouldNotPersistAnythingAfterEntryNode() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
@@ -180,24 +181,8 @@ class MessageChatMemoryAdvisorTest {
 
         advisor.afterNode("entry", state, null);
 
-        List<Message> saved = memory.get("conv-1", 10);
-        assertThat(saved).hasSize(1);
-        assertThat(saved.get(0).getRole()).isEqualTo("user");
-        assertThat(saved.get(0).getContent()).isEqualTo("what is the weather?");
-    }
-
-    @Test
-    @DisplayName("afterNode: entry node with no user.message → nothing saved")
-    void shouldNotSaveWhenNoUserMessageAfterEntry() throws InterruptException {
-        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
-        ChatMemory memory = new MessageWindowChatMemory(repo);
-
-        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
-        GraphState state = GraphState.empty("thread-1")
-            .with("conversation.id", "conv-1");
-
-        advisor.afterNode("entry", state, null);
-
+        // Entry node should NOT persist anything — user message is injected
+        // by the MessagePartitioner in AgentNode, not stored in ChatMemory
         assertThat(memory.get("conv-1", 10)).isEmpty();
     }
 
@@ -400,22 +385,22 @@ class MessageChatMemoryAdvisorTest {
     // ---- afterNode: conversation ID fallback ----
 
     @Test
-    @DisplayName("afterNode: no conversation.id → saves under threadId fallback")
-    void shouldSaveUnderThreadIdWhenNoConversationIdAfterEntryNode() throws InterruptException {
+    @DisplayName("afterNode: no conversation.id → saves under threadId fallback (agent node)")
+    void shouldSaveUnderThreadIdWhenNoConversationIdAfterAgentNode() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
         // threadId set but no conversation.id
         GraphState state = GraphState.empty("thread-1")
-            .with("user.message", "hello");
+            .with(StateKeys.THOUGHT, "hello response");
 
-        advisor.afterNode("entry", state, null);
+        advisor.afterNode("agent", state, null);
 
         // Advisor falls back to threadId, so it saves under threadId
         List<Message> saved = memory.get("thread-1", 10);
         assertThat(saved).hasSize(1);
-        assertThat(saved.get(0).getContent()).isEqualTo("hello");
+        assertThat(saved.get(0).getContent()).isEqualTo("hello response");
     }
 
     @Test
@@ -427,9 +412,9 @@ class MessageChatMemoryAdvisorTest {
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
         // Both conversation.id and threadId are null
         GraphState state = GraphState.empty(null)
-            .with("user.message", "hello");
+            .with(StateKeys.THOUGHT, "hello response");
 
-        GraphState result = advisor.afterNode("entry", state, null);
+        GraphState result = advisor.afterNode("agent", state, null);
 
         // No messages saved
         assertThat(repo.size()).isEqualTo(0);
@@ -458,15 +443,10 @@ class MessageChatMemoryAdvisorTest {
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(throwingMemory);
         GraphState state = GraphState.empty("thread-1")
             .with("conversation.id", "conv-1")
-            .with("user.message", "hello")
-            .with("thought", "response");
+            .with(StateKeys.THOUGHT, "response");
 
-        // Should not throw
-        GraphState result = advisor.afterNode("entry", state, null);
-        assertThat(result).isEqualTo(state);
-
-        // Agent node should also not throw
-        result = advisor.afterNode("agent", state, null);
+        // Agent node should not throw
+        GraphState result = advisor.afterNode("agent", state, null);
         assertThat(result).isEqualTo(state);
     }
 
@@ -500,22 +480,16 @@ class MessageChatMemoryAdvisorTest {
         assertThat(advisor).isInstanceOf(Advisor.class);
     }
 
-    // ---- Round-trip: entry → agent → tools → beforeNode loads full history ----
+    // ---- Round-trip: agent → tools → beforeNode loads history → partitioner prepends user ----
 
     @Test
-    @DisplayName("round-trip: entry+agent+tools persist, beforeNode loads full history next turn")
+    @DisplayName("round-trip: agent+tools persist, beforeNode loads history, partitioner prepends user message")
     void shouldRoundTripSaveAndLoadAcrossReActTurns() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory, 20, "conversation.id");
 
-        // --- Turn 1: entry → agent → tools ---
-
-        // entry: saves user message
-        GraphState entryState = GraphState.empty("thread-1")
-            .with("conversation.id", "conv-1")
-            .with("user.message", "what is the database size?");
-        advisor.afterNode("entry", entryState, null);
+        // --- Turn 1: agent → tools (entry does NOT persist user message) ---
 
         // agent: saves assistant turn with tool_use blocks
         List<ToolUseBlock> toolUses = Collections.singletonList(
@@ -538,7 +512,7 @@ class MessageChatMemoryAdvisorTest {
             .with(StateKeys.TOOL_RESULTS, toolResults);
         advisor.afterNode("tools", toolsState, null);
 
-        // --- Turn 2: beforeNode should load the full ReAct history ---
+        // --- Turn 2: beforeNode loads history [assistant, tool_result] ---
         GraphState turn2 = GraphState.empty("thread-1")
             .with("conversation.id", "conv-1")
             .with("user.message", "what is the database size?");
@@ -547,22 +521,27 @@ class MessageChatMemoryAdvisorTest {
 
         @SuppressWarnings("unchecked")
         List<Message> history = (List<Message>) beforeTurn2.get("memory.messages");
-        // [user, assistant(thought, toolUses), tool_result]
-        assertThat(history).hasSize(3);
+        // Memory contains [assistant(thought, toolUses), tool_result] — NO user message
+        assertThat(history).hasSize(2);
 
-        // 1. User message
-        assertThat(history.get(0).getRole()).isEqualTo("user");
-        assertThat(history.get(0).getContent()).isEqualTo("what is the database size?");
+        // 1. Assistant turn WITH tool_use blocks
+        assertThat(history.get(0).getRole()).isEqualTo("assistant");
+        assertThat(history.get(0).getContent()).isEqualTo("Let me check the database size.");
+        assertThat(history.get(0).hasToolUses()).isTrue();
+        assertThat(history.get(0).getToolUses().get(0).getId()).isEqualTo("tu-1");
 
-        // 2. Assistant turn WITH tool_use blocks
-        assertThat(history.get(1).getRole()).isEqualTo("assistant");
-        assertThat(history.get(1).getContent()).isEqualTo("Let me check the database size.");
-        assertThat(history.get(1).hasToolUses()).isTrue();
-        assertThat(history.get(1).getToolUses().get(0).getId()).isEqualTo("tu-1");
+        // 2. Tool result referencing the tool_use id
+        assertThat(history.get(1).getRole()).isEqualTo("tool");
+        assertThat(history.get(1).getContent()).isEqualTo("42 tables");
+        assertThat(history.get(1).getToolUseId()).isEqualTo("tu-1");
 
-        // 3. Tool result referencing the tool_use id
-        assertThat(history.get(2).getRole()).isEqualTo("tool");
-        assertThat(history.get(2).getContent()).isEqualTo("42 tables");
-        assertThat(history.get(2).getToolUseId()).isEqualTo("tu-1");
+        // The partitioner prepends the user message → [user, assistant, tool_result]
+        MessagePartitioner partitioner = new LastNMessagePartitioner();
+        List<Message> messages = partitioner.partition(history, "what is the database size?");
+        assertThat(messages).hasSize(3);
+        assertThat(messages.get(0).getRole()).isEqualTo("user");
+        assertThat(messages.get(0).getContent()).isEqualTo("what is the database size?");
+        assertThat(messages.get(1).getRole()).isEqualTo("assistant");
+        assertThat(messages.get(2).getRole()).isEqualTo("tool");
     }
 }

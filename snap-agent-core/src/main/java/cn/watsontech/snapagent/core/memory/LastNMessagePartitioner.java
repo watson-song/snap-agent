@@ -6,14 +6,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Default {@link MessagePartitioner} that keeps all history messages
- * and appends the current user message.
+ * Default {@link MessagePartitioner} for the ReAct loop.
  *
- * <p>This preserves the pre-extraction behavior of {@code AgentNode}:
- * {@code messages.addAll(history); messages.add(userMessage);}.</p>
+ * <p>Prepends the current user message before the conversation history,
+ * producing the correct message order for ReAct loops:
+ * {@code [user_message, assistant_1(thought, toolUses), tool_result_1, ...]}.</p>
  *
- * <p>When a maximum message count is configured, the oldest messages
- * are dropped to stay within the limit. With {@code maxMessages = 0}
+ * <p>When a maximum message count is configured, the oldest history
+ * messages are dropped to stay within the limit. With {@code maxMessages = 0}
  * (default), all messages are kept.</p>
  */
 public class LastNMessagePartitioner implements MessagePartitioner {
@@ -39,15 +39,17 @@ public class LastNMessagePartitioner implements MessagePartitioner {
     @Override
     public List<Message> partition(List<Message> history, String userMessage) {
         List<Message> result = new ArrayList<>();
+        // User message goes first (Layer 2 — User Input)
+        if (userMessage != null && !userMessage.isEmpty()) {
+            result.add(Message.user(userMessage));
+        }
+        // Then conversation history (Layer 5 — Short-term Notes)
         if (history != null && !history.isEmpty()) {
             if (maxMessages > 0 && history.size() > maxMessages) {
                 result.addAll(history.subList(history.size() - maxMessages, history.size()));
             } else {
                 result.addAll(history);
             }
-        }
-        if (userMessage != null && !userMessage.isEmpty()) {
-            result.add(Message.user(userMessage));
         }
         return result;
     }
