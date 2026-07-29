@@ -18,7 +18,6 @@ import cn.watsontech.snapagent.core.memory.MessagePartitioner;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
-import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
@@ -36,8 +35,11 @@ import java.util.Map;
  *       separate {@code <retrieved_facts>} block (not mixed into user message)</li>
  *   <li><b>Tools</b> — filtered by skill's declared tool list (UC-20)</li>
  *   <li><b>Short-term Notes</b> — conversation history from
- *       {@code memory.messages} prepended to the messages list</li>
- *   <li><b>User Input</b> — the user message from {@code user.message}</li>
+ *       {@code memory.messages} (loaded by {@code MessageChatMemoryAdvisor}).
+ *       When non-empty, used directly as the messages list (includes user
+ *       message, previous assistant turns with tool_use blocks, and
+ *       tool_result messages). When empty (first turn), the partitioner
+ *       assembles [user message] from {@code user.message}.</li>
  * </ul>
  */
 public class AgentNode implements Node {
@@ -84,36 +86,22 @@ public class AgentNode implements Node {
         String userMessage = state.get(StateKeys.USER_MESSAGE);
 
         // --- Build messages list ---
-        // Layer 5: Short-term Notes — partition conversation history + user message
+        // Layer 5: Short-term Notes — conversation history from ChatMemory.
+        // When the MessageChatMemoryAdvisor is wired, beforeNode loads the full
+        // conversation history (user + assistant turns with tool_use blocks +
+        // tool_result messages) into memory.messages. We use it directly.
+        // When memory is empty (first turn, or advisor not wired), fall back
+        // to the partitioner which appends the current user message.
         List<Message> history = state.get(StateKeys.MEMORY_MESSAGES);
-        List<Message> messages = new ArrayList<>(
-            messagePartitioner.partition(history, userMessage));
-
-        // --- ReAct loop memory: append previous turn's thought + tool results ---
-        // When AgentNode is called after ToolsNode (second+ turn), the state
-        // carries THOUGHT, TOOL_USE_BLOCKS, and TOOL_RESULTS from the previous
-        // turn. Without appending these to the messages, the LLM has no context
-        // about what it already did and keeps repeating the same tool call.
-        @SuppressWarnings("unchecked")
-        List<ToolUseBlock> prevToolUses = state.get(StateKeys.TOOL_USE_BLOCKS);
-        @SuppressWarnings("unchecked")
-        List<ToolResult> prevToolResults = state.get(StateKeys.TOOL_RESULTS);
-        if (prevToolUses != null && !prevToolUses.isEmpty()) {
-            String prevThought = state.get(StateKeys.THOUGHT);
-            messages.add(Message.assistant(
-                prevThought != null ? prevThought : "",
-                prevToolUses
-            ));
-            if (prevToolResults != null) {
-                for (int i = 0; i < prevToolUses.size() && i < prevToolResults.size(); i++) {
-                    ToolUseBlock toolUse = prevToolUses.get(i);
-                    ToolResult result = prevToolResults.get(i);
-                    String content = result.getContent() != null ? result.getContent()
-                        : (result.getError() != null ? "Error: " + result.getError()
-                        : "No output");
-                    messages.add(Message.toolResult(toolUse.getId(), content));
-                }
-            }
+        List<Message> messages;
+        if (history != null && !history.isEmpty()) {
+            // Full conversation history loaded by MessageChatMemoryAdvisor —
+            // includes the current user message, previous assistant turns
+            // (with tool_use blocks), and tool_result messages. Use as-is.
+            messages = new ArrayList<>(history);
+        } else {
+            // First turn or no memory advisor — partition history + user message
+            messages = new ArrayList<>(messagePartitioner.partition(history, userMessage));
         }
 
         // --- Layer 4: Tools (filtered by skill declaration) ---

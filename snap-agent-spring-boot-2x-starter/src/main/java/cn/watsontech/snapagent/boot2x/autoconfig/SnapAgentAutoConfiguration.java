@@ -13,6 +13,11 @@ import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.cost.CostTracker;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.memory.ChatMemory;
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
+import cn.watsontech.snapagent.core.memory.InMemoryChatMemoryRepository;
+import cn.watsontech.snapagent.core.memory.MessageChatMemoryAdvisor;
+import cn.watsontech.snapagent.core.memory.MessageWindowChatMemory;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.slf4j.Logger;
@@ -131,6 +136,37 @@ public class SnapAgentAutoConfiguration {
         String baseDir = props.getUploadSkillsDir();
         log.info("Using FileConversationStore with base dir: {}", baseDir);
         return new FileConversationStore(baseDir);
+    }
+
+    // ---- ChatMemory (ReAct loop conversation history) ----
+    // In-memory chat memory repository for single-node deployments.
+    // Hosts can replace this with a durable implementation (Redis, DB) by
+    // declaring their own ChatMemoryRepository bean.
+    @Bean
+    @ConditionalOnMissingBean
+    public ChatMemoryRepository chatMemoryRepository() {
+        log.info("Using InMemoryChatMemoryRepository for ReAct loop memory");
+        return new InMemoryChatMemoryRepository();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ChatMemory chatMemory(ChatMemoryRepository chatMemoryRepository) {
+        log.info("Using MessageWindowChatMemory (maxMessages={})",
+                MessageWindowChatMemory.DEFAULT_MAX_MESSAGES);
+        return new MessageWindowChatMemory(chatMemoryRepository);
+    }
+
+    // ---- MessageChatMemoryAdvisor (Layer 5 — Short-term Notes) ----
+    // Persists user message (after entry), assistant turns with tool_use
+    // blocks (after agent), and tool_result messages (after tools) to
+    // ChatMemory. On the next ReAct turn, beforeNode loads the full
+    // history into state["memory.messages"] for AgentNode to use directly.
+    @Bean
+    @ConditionalOnMissingBean
+    public MessageChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
+        log.info("MessageChatMemoryAdvisor assembled (order=100)");
+        return new MessageChatMemoryAdvisor(chatMemory);
     }
 
     // ---- SkillRegistry ----

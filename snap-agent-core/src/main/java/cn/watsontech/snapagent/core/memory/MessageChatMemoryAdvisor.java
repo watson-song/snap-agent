@@ -5,6 +5,8 @@ import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.llm.ToolUseBlock;
+import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,16 +15,28 @@ import java.util.List;
 
 /**
  * Advisor that injects conversation history from {@link ChatMemory} into the
- * graph state before each node, and persists new messages after the agent node.
+ * graph state before each node, and persists new messages after each node.
  *
  * <p>Order: 100 (runs after SafeGuard(50), before RAG(200)).</p>
  *
- * <p>beforeNode: loads the last N messages from ChatMemory and writes them
- * to state["memory.messages"]. The AgentNode can read these and prepend
- * them to the LLM request messages list.</p>
+ * <p><b>beforeNode</b>: loads the last N messages from ChatMemory and writes
+ * them to {@code state["memory.messages"]}. The AgentNode reads these and uses
+ * them directly as the LLM request messages list (the full history including
+ * the current user message, previous assistant turns with tool_use blocks,
+ * and tool_result messages).</p>
  *
- * <p>afterNode: when the agent node completes, saves the user message and
- * the assistant response (thought + stop_reason) to ChatMemory.</p>
+ * <p><b>afterNode</b>: persists messages in ReAct-loop order:
+ * <ul>
+ *   <li><b>entry</b> — saves the user message (Layer 2 — User Input)</li>
+ *   <li><b>agent</b> — saves the assistant turn as {@code Message.assistant(thought, toolUseBlocks)},
+ *       including tool_use blocks so subsequent tool_result messages have a
+ *       matching tool_use id (required by provider APIs)</li>
+ *   <li><b>tools</b> — saves each tool_result as {@code Message.toolResult(toolUseId, content)},
+ *       matching the tool_use id from {@code state["tool_use_blocks"]} by index</li>
+ * </ul>
+ * This produces the correct conversation ordering:
+ * {@code [user, assistant(thought_1, toolUses_1), tool_result_1, assistant(thought_2, toolUses_2), ...]}.
+ * </p>
  */
 public class MessageChatMemoryAdvisor implements Advisor {
 
@@ -86,44 +100,97 @@ public class MessageChatMemoryAdvisor implements Advisor {
 
     @Override
     public GraphState afterNode(String nodeName, GraphState state, Object ctx) throws InterruptException {
-        // Only persist after the agent node (where LLM responses are generated)
-        if (!"agent".equals(nodeName)) {
-            return state;
-        }
-
         String conversationId = resolveConversationId(state);
         if (conversationId == null) {
             return state;
         }
 
         try {
-            // Save the user message if present
-            String userMessage = state.get(StateKeys.USER_MESSAGE);
-            if (userMessage != null && !userMessage.isEmpty()) {
-                chatMemory.add(conversationId, Message.user(userMessage));
-            }
-
-            // Save the assistant response (thought)
-            String thought = state.get(StateKeys.THOUGHT);
-            String stopReason = state.get(StateKeys.STOP_REASON);
-            if (thought != null && !thought.isEmpty()) {
-                chatMemory.add(conversationId, Message.assistant(thought));
-            }
-
-            // Save tool results if present
-            List<cn.watsontech.snapagent.core.tool.ToolResult> toolResults = state.get(StateKeys.TOOL_RESULTS);
-            if (toolResults != null && !toolResults.isEmpty()) {
-                for (cn.watsontech.snapagent.core.tool.ToolResult result : toolResults) {
-                    if (result != null) {
-                        chatMemory.add(conversationId, Message.toolResult(null, result.getContent()));
-                    }
-                }
+            switch (nodeName) {
+                case "entry":
+                    persistUserMessage(state, conversationId);
+                    break;
+                case "agent":
+                    persistAssistantTurn(state, conversationId);
+                    break;
+                case "tools":
+                    persistToolResults(state, conversationId);
+                    break;
+                default:
+                    // No persistence for other nodes
+                    break;
             }
         } catch (RuntimeException e) {
-            log.warn("Failed to persist chat memory for conversation {}: {}", conversationId, e.getMessage());
+            log.warn("Failed to persist chat memory for conversation {}: {}",
+                    conversationId, e.getMessage());
         }
 
         return state;
+    }
+
+    /**
+     * Save the user message to ChatMemory (Layer 2 — User Input).
+     * Called after the entry node, which assembles the user message from
+     * task inputs. The user message is saved ONCE here; subsequent ReAct
+     * turns read it back from memory without re-saving.
+     */
+    private void persistUserMessage(GraphState state, String conversationId) {
+        String userMessage = state.get(StateKeys.USER_MESSAGE);
+        if (userMessage != null && !userMessage.isEmpty()) {
+            chatMemory.add(conversationId, Message.user(userMessage));
+        }
+    }
+
+    /**
+     * Save the assistant turn to ChatMemory, including tool_use blocks.
+     *
+     * <p>Provider APIs (Anthropic, OpenAI) require that a subsequent
+     * {@code tool_result} message references a {@code tool_use} id from
+     * the preceding assistant message. Saving {@code Message.assistant(thought)}
+     * without the tool_use blocks would orphan the tool_result messages
+     * saved by {@link #persistToolResults}, causing API rejections.</p>
+     */
+    private void persistAssistantTurn(GraphState state, String conversationId) {
+        String thought = state.get(StateKeys.THOUGHT);
+        List<ToolUseBlock> toolUseBlocks = state.get(StateKeys.TOOL_USE_BLOCKS);
+        boolean hasThought = thought != null && !thought.isEmpty();
+        boolean hasToolUses = toolUseBlocks != null && !toolUseBlocks.isEmpty();
+        if (hasThought || hasToolUses) {
+            String text = hasThought ? thought : "";
+            chatMemory.add(conversationId, Message.assistant(text, toolUseBlocks));
+        }
+    }
+
+    /**
+     * Save tool_result messages to ChatMemory, matching each result to the
+     * corresponding tool_use id by index.
+     *
+     * <p>Called after the tools node. Reads {@code state["tool_use_blocks"]}
+     * (written by AgentNode) and {@code state["tool_results"]} (written by
+     * ToolsNode) and zips them by index to produce properly-referenced
+     * {@code Message.toolResult(toolUseId, content)} messages.</p>
+     */
+    private void persistToolResults(GraphState state, String conversationId) {
+        List<ToolUseBlock> toolUseBlocks = state.get(StateKeys.TOOL_USE_BLOCKS);
+        List<ToolResult> toolResults = state.get(StateKeys.TOOL_RESULTS);
+        if (toolResults == null || toolResults.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < toolResults.size(); i++) {
+            ToolResult result = toolResults.get(i);
+            if (result == null) {
+                continue;
+            }
+            // Match by index with tool_use blocks to get the tool_use id
+            String toolUseId = result.getToolUseId();
+            if (toolUseId == null && toolUseBlocks != null && i < toolUseBlocks.size()) {
+                toolUseId = toolUseBlocks.get(i).getId();
+            }
+            String content = result.getContent() != null ? result.getContent()
+                    : (result.getError() != null ? "Error: " + result.getError()
+                    : "No output");
+            chatMemory.add(conversationId, Message.toolResult(toolUseId, content));
+        }
     }
 
     /**

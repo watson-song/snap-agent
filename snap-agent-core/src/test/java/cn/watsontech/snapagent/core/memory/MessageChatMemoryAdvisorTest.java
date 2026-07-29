@@ -5,6 +5,7 @@ import cn.watsontech.snapagent.core.graph.StateKeys;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
 import cn.watsontech.snapagent.core.graph.hitl.InterruptException;
 import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.llm.ToolUseBlock;
 import cn.watsontech.snapagent.core.tool.ToolResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -12,17 +13,27 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Tests for the {@link MessageChatMemoryAdvisor} — verifies order,
- * beforeNode history injection, afterNode persistence, exception isolation,
- * and conversation-id fallback logic.
+ * beforeNode history injection, afterNode persistence (per-node),
+ * exception isolation, and conversation-id fallback logic.
+ *
+ * <p>The advisor persists in ReAct-loop order:
+ * <ul>
+ *   <li><b>entry</b> → saves user message</li>
+ *   <li><b>agent</b> → saves assistant turn WITH tool_use blocks</li>
+ *   <li><b>tools</b> → saves tool_result messages with proper toolUseId</li>
+ * </ul>
+ * </p>
  */
-@DisplayName("MessageChatMemoryAdvisor — history injection + persistence")
+@DisplayName("MessageChatMemoryAdvisor — history injection + per-node persistence")
 class MessageChatMemoryAdvisorTest {
 
     // ---- Constructor validation ----
@@ -154,11 +165,221 @@ class MessageChatMemoryAdvisorTest {
         assertThat(history).isEmpty();
     }
 
-    // ---- afterNode: persistence ----
+    // ---- afterNode: entry node → saves user message ----
 
     @Test
-    @DisplayName("afterNode: non-agent node → no-op (state unchanged)")
-    void shouldNoOpForNonAgentNode() throws InterruptException {
+    @DisplayName("afterNode: entry node saves user.message to ChatMemory")
+    void shouldSaveUserMessageAfterEntryNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with("user.message", "what is the weather?");
+
+        advisor.afterNode("entry", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getRole()).isEqualTo("user");
+        assertThat(saved.get(0).getContent()).isEqualTo("what is the weather?");
+    }
+
+    @Test
+    @DisplayName("afterNode: entry node with no user.message → nothing saved")
+    void shouldNotSaveWhenNoUserMessageAfterEntry() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1");
+
+        advisor.afterNode("entry", state, null);
+
+        assertThat(memory.get("conv-1", 10)).isEmpty();
+    }
+
+    // ---- afterNode: agent node → saves assistant turn WITH tool_use blocks ----
+
+    @Test
+    @DisplayName("afterNode: agent node saves assistant turn WITH tool_use blocks")
+    void shouldSaveAssistantWithToolUseBlocksAfterAgentNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        Map<String, Object> input1 = new HashMap<>();
+        input1.put("sql", "SELECT 1");
+        Map<String, Object> input2 = new HashMap<>();
+        input2.put("sql", "SELECT 2");
+        List<ToolUseBlock> toolUseBlocks = Arrays.asList(
+            new ToolUseBlock("tool-use-1", "mysql_query", input1),
+            new ToolUseBlock("tool-use-2", "mysql_query", input2)
+        );
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.THOUGHT, "Let me run two queries.")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUseBlocks);
+
+        advisor.afterNode("agent", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getRole()).isEqualTo("assistant");
+        assertThat(saved.get(0).getContent()).isEqualTo("Let me run two queries.");
+        assertThat(saved.get(0).hasToolUses()).isTrue();
+        assertThat(saved.get(0).getToolUses()).hasSize(2);
+        assertThat(saved.get(0).getToolUses().get(0).getId()).isEqualTo("tool-use-1");
+        assertThat(saved.get(0).getToolUses().get(1).getId()).isEqualTo("tool-use-2");
+    }
+
+    @Test
+    @DisplayName("afterNode: agent node saves text-only assistant turn when no tool_use blocks")
+    void shouldSaveTextOnlyAssistantAfterAgentNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.THOUGHT, "The weather is sunny.");
+
+        advisor.afterNode("agent", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getRole()).isEqualTo("assistant");
+        assertThat(saved.get(0).getContent()).isEqualTo("The weather is sunny.");
+        assertThat(saved.get(0).hasToolUses()).isFalse();
+    }
+
+    @Test
+    @DisplayName("afterNode: agent node with no thought and no tool_use → nothing saved")
+    void shouldNotSaveWhenNoThoughtOrToolUseAfterAgentNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with("stop_reason", "end_turn");
+
+        advisor.afterNode("agent", state, null);
+
+        assertThat(memory.get("conv-1", 10)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("afterNode: agent node with tool_use blocks but empty thought → saves assistant with empty text")
+    void shouldSaveAssistantWithToolUseBlocksEvenWhenThoughtIsEmpty() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        List<ToolUseBlock> toolUseBlocks = Collections.singletonList(
+            new ToolUseBlock("tu-1", "mysql_query", Collections.<String, Object>singletonMap("sql", "SELECT 1"))
+        );
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUseBlocks);
+
+        advisor.afterNode("agent", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getRole()).isEqualTo("assistant");
+        assertThat(saved.get(0).getContent()).isEmpty();
+        assertThat(saved.get(0).hasToolUses()).isTrue();
+    }
+
+    // ---- afterNode: tools node → saves tool_result messages with proper toolUseId ----
+
+    @Test
+    @DisplayName("afterNode: tools node saves tool_results matched to tool_use ids by index")
+    void shouldSaveToolResultsAfterToolsNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        List<ToolUseBlock> toolUseBlocks = Arrays.asList(
+            new ToolUseBlock("tool-use-1", "mysql_query", Collections.<String, Object>singletonMap("sql", "SELECT 1")),
+            new ToolUseBlock("tool-use-2", "mysql_query", Collections.<String, Object>singletonMap("sql", "SELECT 2"))
+        );
+        List<ToolResult> toolResults = new ArrayList<>(Arrays.asList(
+            new ToolResult("result-1", 1, false, 10, null),
+            new ToolResult("result-2", 1, false, 10, null)
+        ));
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUseBlocks)
+            .with(StateKeys.TOOL_RESULTS, toolResults);
+
+        advisor.afterNode("tools", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        // 2 tool_result messages
+        assertThat(saved).hasSize(2);
+        assertThat(saved.get(0).getRole()).isEqualTo("tool");
+        assertThat(saved.get(0).getContent()).isEqualTo("result-1");
+        assertThat(saved.get(0).getToolUseId()).isEqualTo("tool-use-1");
+        assertThat(saved.get(1).getRole()).isEqualTo("tool");
+        assertThat(saved.get(1).getContent()).isEqualTo("result-2");
+        assertThat(saved.get(1).getToolUseId()).isEqualTo("tool-use-2");
+    }
+
+    @Test
+    @DisplayName("afterNode: tools node saves error content when ToolResult has error")
+    void shouldSaveErrorContentAfterToolsNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        List<ToolUseBlock> toolUseBlocks = Collections.singletonList(
+            new ToolUseBlock("tu-err", "mysql_query", Collections.<String, Object>singletonMap("sql", "BAD SQL"))
+        );
+        List<ToolResult> toolResults = new ArrayList<>(Collections.singletonList(
+            ToolResult.error("DB connection failed", 100)
+        ));
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUseBlocks)
+            .with(StateKeys.TOOL_RESULTS, toolResults);
+
+        advisor.afterNode("tools", state, null);
+
+        List<Message> saved = memory.get("conv-1", 10);
+        assertThat(saved).hasSize(1);
+        assertThat(saved.get(0).getRole()).isEqualTo("tool");
+        assertThat(saved.get(0).getContent()).isEqualTo("Error: DB connection failed");
+        assertThat(saved.get(0).getToolUseId()).isEqualTo("tu-err");
+    }
+
+    @Test
+    @DisplayName("afterNode: tools node with no tool_results → nothing saved")
+    void shouldNotSaveWhenNoToolResultsAfterToolsNode() throws InterruptException {
+        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
+        ChatMemory memory = new MessageWindowChatMemory(repo);
+
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
+        GraphState state = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1");
+
+        advisor.afterNode("tools", state, null);
+
+        assertThat(memory.get("conv-1", 10)).isEmpty();
+    }
+
+    // ---- afterNode: unknown node → no-op ----
+
+    @Test
+    @DisplayName("afterNode: unknown node name → no-op (state unchanged, nothing saved)")
+    void shouldNoOpForUnknownNode() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
@@ -168,7 +389,7 @@ class MessageChatMemoryAdvisorTest {
             .with("user.message", "hello")
             .with("thought", "response");
 
-        GraphState result = advisor.afterNode("entry", state, null);
+        GraphState result = advisor.afterNode("unknown_node", state, null);
 
         // No messages should have been saved
         assertThat(memory.get("conv-1", 10)).isEmpty();
@@ -176,92 +397,47 @@ class MessageChatMemoryAdvisorTest {
         assertThat(result).isEqualTo(state);
     }
 
-    @Test
-    @DisplayName("afterNode: agent node saves user.message + thought to ChatMemory")
-    void shouldSaveUserMessageAndThoughtAfterAgentNode() throws InterruptException {
-        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
-        ChatMemory memory = new MessageWindowChatMemory(repo);
-
-        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
-        GraphState state = GraphState.empty("thread-1")
-            .with("conversation.id", "conv-1")
-            .with("user.message", "what is the weather?")
-            .with("thought", "The weather is sunny.")
-            .with("stop_reason", "end_turn");
-
-        advisor.afterNode("agent", state, null);
-
-        List<Message> saved = memory.get("conv-1", 10);
-        assertThat(saved).hasSize(2);
-        assertThat(saved.get(0).getRole()).isEqualTo("user");
-        assertThat(saved.get(0).getContent()).isEqualTo("what is the weather?");
-        assertThat(saved.get(1).getRole()).isEqualTo("assistant");
-        assertThat(saved.get(1).getContent()).isEqualTo("The weather is sunny.");
-    }
+    // ---- afterNode: conversation ID fallback ----
 
     @Test
     @DisplayName("afterNode: no conversation.id → saves under threadId fallback")
-    void shouldSaveUnderThreadIdWhenNoConversationIdAfterAgentNode() throws InterruptException {
+    void shouldSaveUnderThreadIdWhenNoConversationIdAfterEntryNode() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
         // threadId set but no conversation.id
         GraphState state = GraphState.empty("thread-1")
-            .with("user.message", "hello")
-            .with("thought", "hi");
+            .with("user.message", "hello");
 
-        advisor.afterNode("agent", state, null);
+        advisor.afterNode("entry", state, null);
 
         // Advisor falls back to threadId, so it saves under threadId
         List<Message> saved = memory.get("thread-1", 10);
-        assertThat(saved).hasSize(2);
+        assertThat(saved).hasSize(1);
         assertThat(saved.get(0).getContent()).isEqualTo("hello");
-        assertThat(saved.get(1).getContent()).isEqualTo("hi");
     }
 
     @Test
-    @DisplayName("afterNode: no user.message and no thought → nothing saved")
-    void shouldNotSaveWhenNoUserMessageOrThought() throws InterruptException {
+    @DisplayName("afterNode: no conversation.id and no threadId → no-op")
+    void shouldNoOpWhenNoConversationIdOrThreadId() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
 
         MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
-        GraphState state = GraphState.empty("thread-1")
-            .with("conversation.id", "conv-1")
-            .with("stop_reason", "end_turn");
+        // Both conversation.id and threadId are null
+        GraphState state = GraphState.empty(null)
+            .with("user.message", "hello");
 
-        advisor.afterNode("agent", state, null);
+        GraphState result = advisor.afterNode("entry", state, null);
 
-        assertThat(memory.get("conv-1", 10)).isEmpty();
+        // No messages saved
+        assertThat(repo.size()).isEqualTo(0);
+        // State unchanged
+        assertThat(result).isEqualTo(state);
     }
 
-    @Test
-    @DisplayName("afterNode: saves tool_results if present")
-    void shouldSaveToolResultsAfterAgentNode() throws InterruptException {
-        InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
-        ChatMemory memory = new MessageWindowChatMemory(repo);
-
-        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory);
-        List<ToolResult> toolResults = new ArrayList<>(Arrays.asList(
-            new ToolResult("result-1", 0, false, 0, null),
-            new ToolResult("result-2", 0, false, 0, null)
-        ));
-        GraphState state = GraphState.empty("thread-1")
-            .with("conversation.id", "conv-1")
-            .with(StateKeys.USER_MESSAGE, "run query")
-            .with(StateKeys.THOUGHT, "executing query")
-            .with(StateKeys.TOOL_RESULTS, toolResults);
-
-        advisor.afterNode("agent", state, null);
-
-        List<Message> saved = memory.get("conv-1", 10);
-        // user + thought + 2 tool results = 4 messages
-        assertThat(saved).hasSize(4);
-        assertThat(saved.get(2).getRole()).isEqualTo("tool");
-        assertThat(saved.get(2).getContent()).isEqualTo("result-1");
-        assertThat(saved.get(3).getContent()).isEqualTo("result-2");
-    }
+    // ---- afterNode: exception isolation ----
 
     @Test
     @DisplayName("afterNode: ChatMemory.add() throws → no exception propagates")
@@ -286,7 +462,11 @@ class MessageChatMemoryAdvisorTest {
             .with("thought", "response");
 
         // Should not throw
-        GraphState result = advisor.afterNode("agent", state, null);
+        GraphState result = advisor.afterNode("entry", state, null);
+        assertThat(result).isEqualTo(state);
+
+        // Agent node should also not throw
+        result = advisor.afterNode("agent", state, null);
         assertThat(result).isEqualTo(state);
     }
 
@@ -320,34 +500,69 @@ class MessageChatMemoryAdvisorTest {
         assertThat(advisor).isInstanceOf(Advisor.class);
     }
 
-    // ---- Round-trip: before + after ----
+    // ---- Round-trip: entry → agent → tools → beforeNode loads full history ----
 
     @Test
-    @DisplayName("round-trip: afterNode saves, beforeNode loads in next turn")
-    void shouldRoundTripSaveAndLoadAcrossTurns() throws InterruptException {
+    @DisplayName("round-trip: entry+agent+tools persist, beforeNode loads full history next turn")
+    void shouldRoundTripSaveAndLoadAcrossReActTurns() throws InterruptException {
         InMemoryChatMemoryRepository repo = new InMemoryChatMemoryRepository();
         ChatMemory memory = new MessageWindowChatMemory(repo);
-        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory, 10, "conversation.id");
+        MessageChatMemoryAdvisor advisor = new MessageChatMemoryAdvisor(memory, 20, "conversation.id");
 
-        // Turn 1: user asks, agent responds
-        GraphState turn1 = GraphState.empty("thread-1")
+        // --- Turn 1: entry → agent → tools ---
+
+        // entry: saves user message
+        GraphState entryState = GraphState.empty("thread-1")
             .with("conversation.id", "conv-1")
-            .with("user.message", "what is 2+2?")
-            .with("thought", "2+2 = 4");
+            .with("user.message", "what is the database size?");
+        advisor.afterNode("entry", entryState, null);
 
-        advisor.afterNode("agent", turn1, null);
+        // agent: saves assistant turn with tool_use blocks
+        List<ToolUseBlock> toolUses = Collections.singletonList(
+            new ToolUseBlock("tu-1", "mysql_query",
+                Collections.<String, Object>singletonMap("sql", "SELECT COUNT(*) FROM information_schema.TABLES"))
+        );
+        GraphState agentState = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.THOUGHT, "Let me check the database size.")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUses);
+        advisor.afterNode("agent", agentState, null);
 
-        // Turn 2: beforeNode should load the history from turn 1
+        // tools: saves tool_result with matching toolUseId
+        List<ToolResult> toolResults = new ArrayList<>(Collections.singletonList(
+            new ToolResult("42 tables", 1, false, 50, null)
+        ));
+        GraphState toolsState = GraphState.empty("thread-1")
+            .with("conversation.id", "conv-1")
+            .with(StateKeys.TOOL_USE_BLOCKS, toolUses)
+            .with(StateKeys.TOOL_RESULTS, toolResults);
+        advisor.afterNode("tools", toolsState, null);
+
+        // --- Turn 2: beforeNode should load the full ReAct history ---
         GraphState turn2 = GraphState.empty("thread-1")
             .with("conversation.id", "conv-1")
-            .with("user.message", "and 3+3?");
+            .with("user.message", "what is the database size?");
 
         GraphState beforeTurn2 = advisor.beforeNode("agent", turn2, null);
 
         @SuppressWarnings("unchecked")
         List<Message> history = (List<Message>) beforeTurn2.get("memory.messages");
-        assertThat(history).hasSize(2);
-        assertThat(history.get(0).getContent()).isEqualTo("what is 2+2?");
-        assertThat(history.get(1).getContent()).isEqualTo("2+2 = 4");
+        // [user, assistant(thought, toolUses), tool_result]
+        assertThat(history).hasSize(3);
+
+        // 1. User message
+        assertThat(history.get(0).getRole()).isEqualTo("user");
+        assertThat(history.get(0).getContent()).isEqualTo("what is the database size?");
+
+        // 2. Assistant turn WITH tool_use blocks
+        assertThat(history.get(1).getRole()).isEqualTo("assistant");
+        assertThat(history.get(1).getContent()).isEqualTo("Let me check the database size.");
+        assertThat(history.get(1).hasToolUses()).isTrue();
+        assertThat(history.get(1).getToolUses().get(0).getId()).isEqualTo("tu-1");
+
+        // 3. Tool result referencing the tool_use id
+        assertThat(history.get(2).getRole()).isEqualTo("tool");
+        assertThat(history.get(2).getContent()).isEqualTo("42 tables");
+        assertThat(history.get(2).getToolUseId()).isEqualTo("tu-1");
     }
 }
