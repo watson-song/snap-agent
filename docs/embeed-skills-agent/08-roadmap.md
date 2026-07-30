@@ -47,6 +47,41 @@
 | 多 DSN（多环境） | `jdbc.datasources: {sit: ..., uat: ...}`，skill `inputs.env` 选 DSN |
 | 任务历史列表 | `GET /runs?userId=&skillId=&page=`，跨 session 查历史诊断 |
 
+## Phase 4 — 宿主 MCP Server
+
+> 完整设计见 [11-mcp-server.md](11-mcp-server.md)。
+
+**目标**：让宿主应用通过 SnapAgent 暴露自身 `@Tool` 业务能力为 MCP Server，外部 AI Agent（Claude Code / Cursor / Windsurf）可直接发现和调用。
+
+### Phase 4.1 (MVP)
+
+| 项 | 说明 |
+|----|------|
+| `@SnapAgentTools` 注解 + 自动扫描 | 宿主 Service 标注即注册到 ToolCallbackRegistry（11 §4） |
+| `McpServerController` + `McpServerHandler` | MCP 协议端点：`initialize` + `tools/list` + `tools/call`，SSE+POST 传输（11 §5） |
+| Token 认证 | 连接层校验，解析为 `McpCallerContext`（callerId / roles / 数据范围）（11 §6.2） |
+| allowlist/denylist 配置 | 工具可见层过滤，防止意外暴露敏感工具（11 §6.3） |
+| 审计日志 | 所有 MCP 调用记录 caller + tool + args + result 摘要 |
+
+### Phase 4.2 (生产可用)
+
+| 项 | 说明 |
+|----|------|
+| `@ToolVisibility` 注解 | 细粒度工具可见性控制（按角色过滤）（11 §6.3） |
+| `ToolExecutionContext` 注入 | 参数约束层，方法内做数据范围校验（11 §6.4） |
+| `@ToolResultMask` 注解 | 数据返回层字段脱敏（11 §6.5） |
+| 会话管理 | max-sessions 限制 + 超时清理 |
+
+### Phase 4.3 (企业级)
+
+| 项 | 说明 |
+|----|------|
+| OAuth2 / Spring Security 集成 | 连接层企业认证 |
+| 多租户数据范围隔离 | 每个会话独立工具可见性 |
+| 速率限制 + 配额管理 | 按 caller 限流 |
+| `notifications/tools/list_changed` | 动态工具注册/注销通知 |
+| Prometheus 指标 | MCP 调用量 / 延迟 / 错误率 |
+
 ## 不在路线图（明确拒绝）
 
 - **stdio MCP**：Web 容器不 spawn 子进程，K8s 无 Node（决策 #16）。
@@ -62,3 +97,4 @@
 | MVP | 验证项 #1-#5（见 README §8） |
 | Phase 2 | MCP server 桥接 e2e；cancel 能中断进行中的 LLM 流式 |
 | Phase 3 | 3.x 宿主集成 e2e；`OpenAiLlmClient`（extends `AbstractStreamingLlmClient`）工具协议映射正确；热重载无竞态 |
+| Phase 4 | 验证项 #6 宿主 MCP Server 端到端（工具发现/调用/认证/过滤/零影响/双向共存）；验证项 #7 权限链路（allowlist/@ToolVisibility/数据范围/字段脱敏） |

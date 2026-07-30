@@ -23,9 +23,9 @@
           data-en="SnapAgent — Embeddable AI Skill Framework"
           content="SnapAgent — 嵌入式 AI 技能框架">
     <meta property="og:description" id="ogDescription"
-          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算与浏览器网络桥接。"
-          data-en="Give your Spring Boot 2.x app an embedded AI skill agent: natural-language chat, read-only tool calls, page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, cost tracking, and browser network bridge."
-          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算与浏览器网络桥接。">
+          data-zh="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算、浏览器网络桥接与宿主 MCP Server。"
+          data-en="Give your Spring Boot 2.x app an embedded AI skill agent: natural-language chat, read-only tool calls, page-section anchor Q&A, auto-injected business knowledge, code graph, multi-step workflows, issue closure, proactive patrols, cost tracking, browser network bridge, and host MCP Server."
+          content="让 Spring Boot 2.x 应用获得内嵌的 AI 技能能力：自然语言对话、只读工具调用、页面锚点问答、业务知识自动注入、代码图谱、多步工作流、问题闭环、主动巡检、成本核算、浏览器网络桥接与宿主 MCP Server。">
     <meta property="og:url" content="https://watson-song.github.io/snap-agent/">
     <meta property="og:locale" id="ogLocale"
           data-zh="zh_CN" data-en="en_US"
@@ -707,6 +707,15 @@
                 <div class="feature-meta">v2.0 · BridgeHttpExecutor + Chrome Extension (Manifest V3)</div>
             </div>
 
+            <div class="feature-card c-purple">
+                <div class="feature-icon">🔄</div>
+                <h3 data-lang="zh">宿主 MCP Server</h3>
+                <h3 data-lang="en" style="display:none">Host MCP Server</h3>
+                <p data-lang="zh">将宿主 @Tool 业务能力暴露为 MCP Server，外部 AI Agent（Claude Code / Cursor / Windsurf）自动发现并调用，无需人翻译 API 语义。@SnapAgentTools 标注即注册，四层权限模型（连接→可见→参数→返回），mcp.server.enabled=false 时零侵入。</p>
+                <p data-lang="en" style="display:none">Expose host @Tool capabilities as an MCP Server. External AI Agents (Claude Code / Cursor / Windsurf) auto-discover and invoke them without manual API translation. @SnapAgentTools annotation = auto-register. Four-layer security (connection → visibility → parameters → return). Zero intrusion when mcp.server.enabled=false.</p>
+                <div class="feature-meta">v1.2 (设计中) · McpServerController + McpServerHandler + McpServerAuthFilter</div>
+            </div>
+
         </div>
     </div>
 </section>
@@ -939,6 +948,10 @@
 │   │  │  Bridge (可选): BridgeHttpExecutor · DirectHttpExec  │  │    │
 │   │  │  · IssueBridgeService · BridgeController             │  │    │
 │   │  └──────────────────────┬───────────────────────────────┘  │    │
+│   │  ┌──────────────────────────────────────────────────────┐  │    │
+│   │  │  MCP Server (可选): @SnapAgentTools · McpServerCtrl  │  │    │
+│   │  │  · McpServerHandler · McpServerAuthFilter (v1.2)      │  │    │
+│   │  └──────────────────────┬───────────────────────────────┘  │    │
 │   └─────────────────────────┼────────────────────────────────┘    │
 └─────────────────────────────┼────────────────────────────────────┘
                               │
@@ -974,6 +987,7 @@
                                 <li><strong>Workflow Engine</strong> — 多步诊断流水线（v1.0）</li>
                                 <li><strong>Patrol + Alert</strong> — 主动巡检 + 告警收敛（v0.5）</li>
                                 <li><strong>Browser Bridge</strong> — Chrome Extension 网络桥接（v2.0, 可选）</li>
+                                <li><strong>Host MCP Server</strong> — @SnapAgentTools 对外暴露（v1.2, 设计中）</li>
                                 <li><strong>GraphExecutor</strong> · SSE Controller · SecurityGateway</li>
                             </ul>
                         </li>

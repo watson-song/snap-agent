@@ -1,0 +1,81 @@
+graph TD
+    %% ===== Glassmorphism Node Classes =====
+    classDef external fill:#f3e8ff,stroke:#a78bfa,stroke-width:1.5px,stroke-dasharray: 5 5,color:#5b21b6,rx:6px,ry:6px
+    classDef api fill:#e0e7ff,stroke:#818cf8,stroke-width:1.5px,color:#312e81,rx:6px,ry:6px
+    classDef handler fill:#ccfbf1,stroke:#2dd4bf,stroke-width:1.5px,color:#134e4a,rx:6px,ry:6px
+    classDef registry fill:#fef3c7,stroke:#fbbf24,stroke-width:1.5px,color:#78350f,rx:6px,ry:6px
+    classDef host fill:#dbeafe,stroke:#60a5fa,stroke-width:1.5px,color:#1e3a5f,rx:6px,ry:6px
+    classDef security fill:#fee2e2,stroke:#f87171,stroke-width:1.5px,color:#991b1b,rx:6px,ry:6px
+
+    %% ===== L1 外部 AI Agent =====
+    subgraph External ["外部 AI Agent (Claude Code / Cursor / Windsurf)"]
+        direction LR
+        A1["外部 AI 客户端<br/>headers: X-Mcp-Token"]
+        A2["MCP Client<br/>connect SSE + JSON-RPC"]
+    end
+
+    %% ===== L2 连接层 + 认证 =====
+    subgraph Gateway ["连接层与认证 (Connection & Auth)"]
+        direction LR
+        B1["McpServerController<br/>GET /snap-agent/mcp/sse<br/>POST /snap-agent/mcp/messages"]
+        B2["McpServerAuthFilter<br/>Token 校验 → McpCallerContext"]
+    end
+
+    %% ===== L3 MCP 协议处理 =====
+    subgraph Handler ["MCP 协议处理 (Protocol Handler)"]
+        direction LR
+        C1["McpServerHandler<br/>initialize · tools/list · tools/call"]
+        C2["McpSession<br/>sessionId · SseEmitter · callerContext"]
+        C3["ResultPostProcessor<br/>@ToolResultMask 字段脱敏 · 审计日志"]
+    end
+
+    %% ===== L4 工具注册表 =====
+    subgraph Registry ["工具注册表 (ToolCallbackRegistry)"]
+        direction LR
+        D1["内置 @Tool 方法<br/>JdbcQueryTools · RedisReadTools<br/>CodeReader · MetricsQuery"]
+        D2["MCP Client 工具<br/>mcp__{server}__{tool}<br/>(中继其他 MCP Server)"]
+        D3["JAR 插件工具<br/>PluginRegistry 动态加载"]
+        D4["宿主 @SnapAgentTools<br/>InventoryService.queryStock<br/>ReplenishmentService.generate"]
+    end
+
+    %% ===== L5 权限链路 =====
+    subgraph Security ["四层权限 (Security Chain)"]
+        direction LR
+        E1["① 连接层<br/>Token + IP 白名单"]
+        E2["② 可见层<br/>allowlist + @ToolVisibility"]
+        E3["③ 参数层<br/>ToolExecutionContext<br/>数据范围校验"]
+        E4["④ 返回层<br/>@ToolResultMask<br/>字段脱敏"]
+    end
+
+    %% ===== 连线 =====
+    A2 -->|"SSE 连接"| B1
+    A2 -->|"JSON-RPC"| B1
+    B2 -->|"校验 Token"| B1
+    B1 --> C1
+    C1 -->|"tools/list (过滤后)"| A2
+    C1 -->|"tools/call"| C2
+    C2 -->|"execute(args, context)"| D1
+    C2 -->|"execute(args, context)"| D2
+    C2 -->|"execute(args, context)"| D3
+    C2 -->|"execute(args, context)"| D4
+    C1 --> C3
+    C3 -->|"ToolResult"| A2
+
+    B2 -.-> E1
+    C1 -.-> E2
+    C2 -.-> E3
+    C3 -.-> E4
+
+    %% ===== Glass Layer Styles =====
+    style External fill:#a855f7,stroke:#a855f7,stroke-width:2px,color:#c4b5fd
+    style Gateway fill:#6366f1,stroke:#6366f1,stroke-width:2px,color:#a5b4fc
+    style Handler fill:#14b8a6,stroke:#14b8a6,stroke-width:2px,color:#5eead4
+    style Registry fill:#f59e0b,stroke:#f59e0b,stroke-width:2px,color:#fcd34d
+    style Security fill:#ef4444,stroke:#ef4444,stroke-width:2px,color:#fca5a5
+
+    %% ===== 应用颜色类 =====
+    class A1,A2 external
+    class B1,B2 api
+    class C1,C2,C3 handler
+    class D1,D2,D3,D4 registry
+    class E1,E2,E3,E4 security

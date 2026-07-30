@@ -17,6 +17,8 @@
 | 9 | 主动监控架构 Proactive Monitoring Architecture | [中文](proactive/zh/proactive-monitoring-architecture.md) | [English](proactive/en/proactive-monitoring-architecture.md) |
 | 10 | 用户手册 User Manual | [中文](manual/zh/user-manual.md) | [English](manual/en/user-manual.md) |
 | 11 | 锚点问答与内容注入指南 Anchor Q&A + Injection Guide | [中文](integration/zh/anchor-feature-guide.md) | [English](integration/en/anchor-feature-guide.md) |
+| 12 | 浏览器网络桥接架构 Browser Network Bridge | [中文](bridge/zh/bridge-architecture.md) | [English](bridge/en/bridge-architecture.md) |
+| 13 | 宿主 MCP Server 架构 Host MCP Server Architecture | [中文](mcpserver/zh/mcpserver-architecture.md) | [English](mcpserver/en/mcpserver-architecture.md) |
 
 ## 版本 | Version
 

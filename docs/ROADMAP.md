@@ -996,6 +996,10 @@ v0.9          IssueExperienceStore + 问题经验预注入            ← 三源
     │                                                        RetrievalAugmentationAdvisor 完整版
     ▼
 v0.9+         动态 per-turn 注入 + 知识检索工具暴露             ← 编排层完善
+    │
+    ▼
+v1.2          @SnapAgentTools + McpServerController            ← 双向 MCP
+    │                                                        宿主业务能力对外暴露
 ```
 
 每个版本 `RetrievalAugmentationAdvisor` 的行为是渐进增强的：知识源未就绪时自动跳过，不影响已有功能。
@@ -1289,15 +1293,86 @@ snap-agent:
 
 ---
 
+## v1.2 — 宿主 MCP Server（设计中）
+
+**目标**：让宿主应用通过 SnapAgent 暴露自身业务能力为 MCP Server，外部 AI Agent（Claude Code / Cursor / Windsurf）可直接发现和调用，无需人翻译 API 语义。
+
+> 不是给 REST API 套壳 — 核心是把 SnapAgent 已积累的 `@Tool` 工具体系（宿主应用的真实业务能力，非 REST）暴露给外部 AI Agent。
+
+### 对称设计
+
+```
+McpSseClient (已有)  →  连接外部 MCP Server，消费工具
+McpServerController (新增) →  暴露内部工具，供外部消费
+```
+
+两者共用 `ToolCallback` SPI，实现零重复的工具定义和调用逻辑。
+
+完整设计见 [11-mcp-server.md](embeed-skills-agent/11-mcp-server.md)。
+
+### Phase 1 (MVP)
+
+| 项 | 说明 |
+|----|------|
+| `@SnapAgentTools` 注解 + 自动扫描 | 宿主 Service 标注即注册到 ToolCallbackRegistry |
+| `McpServerController` + `McpServerHandler` | MCP 协议端点：`initialize` + `tools/list` + `tools/call`，SSE+POST 传输 |
+| Token 认证 | 连接层校验，解析为 `McpCallerContext`（callerId / roles / 数据范围） |
+| allowlist/denylist 配置 | 工具可见层过滤，防止意外暴露敏感工具（如 `mysql_query`） |
+| 审计日志 | 所有 MCP 调用记录 caller + tool + args + result 摘要 |
+
+### Phase 2 (生产可用)
+
+| 项 | 说明 |
+|----|------|
+| `@ToolVisibility` 注解 | 细粒度工具可见性控制（按角色过滤） |
+| `ToolExecutionContext` 注入 | 参数约束层，方法内做数据范围校验（仓库范围 / 环境隔离 / 读写限制） |
+| `@ToolResultMask` 注解 | 数据返回层字段脱敏（非 finance 角色看不到成本字段） |
+| 会话管理 | max-sessions 限制 + 超时清理 |
+
+### Phase 3 (企业级)
+
+| 项 | 说明 |
+|----|------|
+| OAuth2 / Spring Security 集成 | 连接层企业认证 |
+| 多租户数据范围隔离 | 每个会话独立工具可见性 |
+| 速率限制 + 配额管理 | 按 caller 限流 |
+| `notifications/tools/list_changed` | 动态工具注册/注销通知 |
+| Prometheus 指标 | MCP 调用量 / 延迟 / 错误率 |
+
+### 四层权限模型
+
+```
+① 连接层 — Token 认证 + IP 白名单
+② 可见层 — allowlist/denylist + @ToolVisibility(roles)
+③ 参数层 — ToolExecutionContext 数据范围校验
+④ 返回层 — @ToolResultMask 字段脱敏
+```
+
+### 场景示例
+
+```
+开发者 (Claude Code 连接宿主 MCP):
+  "SKU001 上次补货是什么时候？补了多少？"
+
+  → MCP tools/list 自动发现: query_stock, query_replenishment_history
+  → 自动调用 query_replenishment_history(sku="SKU001")
+  → "SKU001 上次补货是 2026-07-25, 补了 500 件, 来源仓库: 华北总仓"
+```
+
+没有 MCP，开发者要么去看数据库，要么用 Postman 调 API，要么看日志。MCP 让 AI 自主发现和调用，不需要人翻译。
+
+---
+
 1. **嵌入式优先** — 永远是库，不是独立服务。不增加运维负担。
 2. **只读优先** — 内置工具默认只读（可通过 `SkillMode` 枚举切换）。写操作需要自定义 `@Tool` 方法且明确标注风险。
 3. **零影响** — `enabled=false` 时不创建任何 Bean。宿主不感知。
 4. **Skill 驱动** — 新场景 = 新 Markdown 文件，不需要写代码（除非需要新工具）。
-5. **工具可扩展** — `@Tool` 注解 + `@Component` 零配置自动发现，`ToolCallbackRegistry` 自动扫描封装为 `ToolCallback`；v0.5 起支持 JAR 热插拔（PluginRegistry 运行时注册/卸载/启停/设默认）。
-6. **安全内建** — SqlGuard、限流、审计、SecurityGateway，安全不是后加的。
+5. **工具可扩展** — `@Tool` 注解 + `@Component` 零配置自动发现，`ToolCallbackRegistry` 自动扫描封装为 `ToolCallback`；v0.5 起支持 JAR 热插拔（PluginRegistry 运行时注册/卸载/启停/设默认）；v1.2 起支持 `@SnapAgentTools` 标注宿主 Service 自动注册 + MCP Server 对外暴露。
+6. **安全内建** — SqlGuard、限流、审计、SecurityGateway，安全不是后加的；MCP Server 四层权限模型（连接→可见→参数→返回）。
 7. **成本透明** — 从 v1.0 起，每次 LLM 调用的成本可追溯、可预算、可控制。
 8. **知识沉淀** — 诊断不是一次性的，经验自动提取、人工确认、反哺知识库。
 9. **注入优先于路由** — 知识编排不靠意图分类层，而是在 LLM 调用前自动注入相关知识，让 LLM 天然知道该怎么做。预注入通用知识（业务规则、历史经验），按需调用精确工具（代码图谱、深挖检索）。
+10. **双向 MCP** — v1.2 起宿主既是 MCP 消费者（Client 连接外部 Server），也是 MCP 提供者（Server 暴露内部 `@Tool` 方法），共用 `ToolCallbackRegistry`。
 
 ---
 
@@ -1306,6 +1381,7 @@ snap-agent:
 | 缺口ID | 模块 | 描述 | 优先级 | 状态 |
 |--------|------|------|--------|------|
 | GAP-8 | Agent Engine | `task-timeout-minutes`（总时长限制，默认 30 分钟）在 `docs/embeed-skills-agent/03-agent-engine.md` 与 `INTEGRATION.md` 配置示例中已设计，但 `GraphExecutor` 未实现。当前仅有 `max-turns`（轮次限制）和 `max-tokens`（单轮 token 限制）兜底；长时间运行的单轮任务（如超大 SQL）无法被总时长中断。实现时需在 execute 循环中检查 `System.currentTimeMillis() - task.getCreatedAt() >= taskTimeoutMs` 并将 task 标为 `TIMEOUT`。 | P2 | 待实现 |
+| GAP-9 | MCP Server | 宿主 MCP Server 设计完成（`docs/embeed-skills-agent/11-mcp-server.md`），但 `@SnapAgentTools` 注解、`McpServerController`、`McpServerHandler`、`McpServerAuthFilter` 均未实现。Phase 1 MVP 需实现：自动扫描注册 + MCP 协议端点 + Token 认证 + allowlist 过滤 + 审计日志。 | P1 | 设计中 |
 
 ---
 
