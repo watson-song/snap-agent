@@ -187,6 +187,24 @@ class PeerSseRelayTest {
         verify(emitter).complete();
     }
 
+    @Test
+    void shouldShutDownHttpClientOnDestroy() {
+        // Use a dedicated client so destroy() does not affect the shared httpClient
+        OkHttpClient client = new OkHttpClient.Builder()
+                .connectTimeout(2, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS)
+                .build();
+        PeerRouter router = new NoopPeerRouter();
+        PeerSseRelay relay = new PeerSseRelay(router, "secret", "/snap-agent-internal", client);
+
+        relay.destroy();
+
+        // Verify the client's dispatcher executor service is shut down
+        assertThat(client.dispatcher().executorService().isShutdown()).isTrue();
+        // Verify the connection pool has no connections
+        assertThat(client.connectionPool().connectionCount()).isZero();
+    }
+
     /** Serializes an SseEventBuilder to its SSE frame string for assertions. */
     private static String sseFrameToString(SseEmitter.SseEventBuilder builder) {
         StringBuilder sb = new StringBuilder();

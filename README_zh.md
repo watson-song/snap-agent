@@ -23,7 +23,7 @@ SnapAgent 是一个**嵌入式 AI 技能框架**。它让你在任何现有或�
 
 - **Agent 对话能力** — 用户用自然语言提问，Agent 理解意图、调用工具、流式输出结果
 - **技能系统** — 用 Markdown 编写技能文件，定义 Agent 在特定场景下的行为流程，丢进目录即生效
-- **工具生态** — 内置数据库只读查询、Redis 读取等工具；实现 `ToolProvider` 接口即可扩展任意工具
+- **工具生态** — 内置数据库只读查询、Redis 读取等工具；使用 `@Tool` 注解即可扩展任意工具
 - **开箱即用 UI** — Chat 风格 SPA，SSE 实时流式输出，无需前端构建
 - **安全护栏** — `SqlGuard` 强制只读、限流、审计；`SecurityGateway` SPI 对接宿主鉴权
 
@@ -38,7 +38,7 @@ SnapAgent 是一个**嵌入式 AI 技能框架**。它让你在任何现有或�
 | **代码分析** | 开发 `CodeReaderToolProvider`，让 Agent 读懂项目代码，回答"这个接口在哪实现" |
 | **线上监控** | 开发 `MetricsToolProvider`，Agent 实时查 Prometheus/Grafana 指标，分析健康度 |
 | **异常诊断 & Bugfix** | 开发 `LogAnalysisToolProvider`，Agent 分析异常日志，定位根因，推送修复建议 |
-| **任何自定义场景** | 实现 `ToolProvider` + 编写 Skill Markdown，Agent 即刻获得新能力 |
+| **任何自定义场景** | 实现 `@Tool` 方法 + 编写 Skill Markdown，Agent 即刻获得新能力 |
 
 ## 快速开始
 
@@ -164,15 +164,15 @@ public class MySecurityGateway implements SecurityGateway {
 │   │            SnapAgent Framework                  │    │
 │   │                                                  │    │
 │   │   ┌────────────┐    ┌──────────────────┐        │    │
-│   │   │  Web UI    │    │  AgentExecutor   │        │    │
+│   │   │  Web UI    │    │  GraphExecutor   │        │    │
 │   │   │  (SPA+SSE) │────│  (Turn Loop)     │        │    │
 │   │   └────────────┘    └────────┬─────────┘        │    │
-│   │   ┌────────────┐    ┌────────┴─────────┐        │    │
-│   │   │ SkillReg   │    │  LLM Client      │        │    │
-│   │   │ (.md→Skill)│    │  (Streaming)     │        │    │
-│   │   └────────────┘    └──────────────────┘        │    │
+│   │   ┌─────────────┐   ┌────────┴─────────┐        │    │
+│   │   │SkillRegistry│   │  LLM Client      │        │    │
+│   │   │ (.md→Skill) │   │  (Streaming)     │        │    │
+│   │   └─────────────┘   └──────────────────┘        │    │
 │   │   ┌──────────────────────────────────────┐      │    │
-│   │   │       ToolDispatcher (SPI)            │      │    │
+│   │   │    ToolCallbackRegistry              │      │    │
 │   │   │  ┌────────────┐ ┌──────────────┐     │      │    │
 │   │   │  │ JDBC Query │ │ Redis Read   │     │      │    │
 │   │   │  │ + SqlGuard │ │              │     │      │    │
@@ -182,8 +182,8 @@ public class MySecurityGateway implements SecurityGateway {
 │   │   │  │ (planned)  │ │ (planned)    │     │      │    │
 │   │   │  └────────────┘ └──────────────┘     │      │    │
 │   │   │  ┌────────────────────────────────┐  │      │    │
-│   │   │  │  Your Custom ToolProvider     │  │      │    │
-│   │   │  │  (just @Component)            │  │      │    │
+│   │   │  │  Your Custom @Tool Methods     │  │      │    │
+│   │   │  │  (just @Component)              │  │      │    │
 │   │   │  └────────────────────────────────┘  │      │    │
 │   │   └──────────────────────────────────────┘      │    │
 │   │                                                  │    │
@@ -195,8 +195,8 @@ public class MySecurityGateway implements SecurityGateway {
 **核心设计：**
 
 - **Skill（技能）** = Markdown 文件，定义 Agent 在特定场景的行为流程。YAML frontmatter 描述元数据，body 描述步骤。LLM 根据用户问题自动选择匹配的 Skill。
-- **Tool（工具）** = `ToolProvider` SPI 实现，给 Agent 提供与外部系统交互的能力。内置 JDBC/Redis，可无限扩展。
-- **Agent（执行器）** = `AgentExecutor` 多轮循环：LLM 思考 → 调用工具 → 获取结果 → 继续思考 → 输出结论。全程 SSE 流式推送。
+- **Tool（工具）** = `@Tool` 注解方法，给 Agent 提供与外部系统交互的能力。内置 JDBC/Redis，可无限扩展。
+- **Agent（执行器）** = `GraphExecutor` 多轮循环：LLM 思考 → 调用工具 → 获取结果 → 继续思考 → 输出结论。全程 SSE 流式推送。
 - **Framework（框架）** = Starter 自动装配一切：Controller、Filter、线程池、安全适配、跨 Pod 路由。`enabled=false` 时零影响。
 
 ## 核心特性
@@ -204,7 +204,7 @@ public class MySecurityGateway implements SecurityGateway {
 | 特性 | 说明 |
 |------|------|
 | **技能驱动** | 两层：内置 (classpath) + 可上传 (文件系统，重启后持久化)。Markdown 定义 Agent 行为，无需写代码，丢文件即生效 |
-| **工具可扩展** | `ToolProvider` SPI + `@Component` 自动发现，内置 JDBC/Redis |
+| **工具可扩展** | `@Tool` / `@ToolParam` 注解 + `@Component` 自动发现，内置 JDBC/Redis |
 | **SSE 实时流** | token 级推送思考过程，用户看着 Agent 一步步推导 |
 | **安全护栏** | SqlGuard 只读强制 + 限流 + 审计 transcript |
 | **安全适配** | 自动检测 Spring Security / Shiro，或自定义 `PrincipalResolver` |
@@ -262,28 +262,19 @@ snap-agent:
 
 ```java
 @Component
-public class HttpCallToolProvider implements ToolProvider {
-    @Override
-    public String name() { return "http_call"; }
+public class MyCustomTools {
 
-    @Override
-    public String schema() {
-        return "{\"name\":\"http_call\","
-             + "\"description\":\"Calls an HTTP endpoint\","
-             + "\"input_schema\":{\"type\":\"object\","
-             + "\"properties\":{\"url\":{\"type\":\"string\"}},"
-             + "\"required\":[\"url\"]}}";
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        // 你的逻辑
-        return ToolResult.success("result", 0, 42);
+    @Tool(name = "http_call", description = "调用 HTTP 接口")
+    public String httpCall(
+            @ToolParam(description = "请求 URL") String url,
+            @ToolParam(description = "HTTP 方法", required = false) String method) {
+        // 你的逻辑 — 可以调任何服务、查 DB，什么都行
+        return httpClient.execute(url, method != null ? method : "GET");
     }
 }
 ```
 
-工具自动被 `ToolDispatcher` 收集，LLM 可在 Skill 执行中按需调用。
+工具自动被 `ToolCallbackRegistry` 收集，LLM 可在 Skill 执行中按需调用。
 
 ## API 端点
 
@@ -308,7 +299,7 @@ public class HttpCallToolProvider implements ToolProvider {
 
 ### v0.1-alpha
 
-- 嵌入式框架核心：AgentExecutor 多轮循环 + LLM 流式 + SSE 推送
+- 嵌入式框架核心：GraphExecutor 多轮循环 + LLM 流式 + SSE 推送
 - Skill Markdown 系统：YAML frontmatter + 步骤式 body
 - 内置工具：JDBC 只读查询 (SqlGuard) + Redis 只读
 - 安全适配：Spring Security / Shiro 自动检测
@@ -355,7 +346,7 @@ public class HttpCallToolProvider implements ToolProvider {
 - 多环境数据源切换（sit/uat/prod）
 - 任务历史 & 搜索
 - Skill 市场：社区共享 Skill 模板
-- 插件化工具市场：开箱即用的 ToolProvider 扩展包
+- 插件化工具市场：开箱即用的 `@Tool` 扩展包
 
 ## 测试
 

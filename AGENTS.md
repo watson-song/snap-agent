@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-SnapAgent 是一个**嵌入式 AI 技能框架** — 一键为 Spring Boot 应用接入 Agent 能力。用 Markdown 定义技能，用自然语言驱动，内置工具可扩展。当前版本 (v0.1) 以数据库诊断为验证场景，但框架设计是通用的：代码分析、运营诊断、异常监控、Bugfix 推送等都是未来方向（详见 `docs/ROADMAP.md`）。
+SnapAgent 是一个**嵌入式 AI 技能框架** — 一键为 Spring Boot 应用接入 Agent 能力。用 Markdown 定义技能，用自然语言驱动，内置工具可扩展。当前版本 (v0.5) 以数据库诊断为验证场景，但框架设计是通用的：代码分析、运营诊断、异常监控、Bugfix 推送等都是未来方向（详见 `docs/ROADMAP.md`）。
 
 ## 模块结构
 

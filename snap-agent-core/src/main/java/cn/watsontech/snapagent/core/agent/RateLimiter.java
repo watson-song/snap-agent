@@ -65,7 +65,7 @@ public class RateLimiter {
             int current = concurrent.get();
             if (current >= maxConcurrentPerUser) {
                 // Roll back hourly increment since concurrency check failed
-                hourly.decrementAndGet();
+                hourly.updateAndGet(n -> Math.max(0, n - 1));
                 return false;
             }
             if (concurrent.compareAndSet(current, current + 1)) {
@@ -81,7 +81,7 @@ public class RateLimiter {
         }
         AtomicInteger concurrent = concurrentCounts.get(userId);
         if (concurrent != null) {
-            concurrent.decrementAndGet();
+            concurrent.updateAndGet(n -> Math.max(0, n - 1));
         }
     }
 
@@ -97,11 +97,11 @@ public class RateLimiter {
         }
         AtomicInteger concurrent = concurrentCounts.get(userId);
         if (concurrent != null) {
-            concurrent.decrementAndGet();
+            concurrent.updateAndGet(n -> Math.max(0, n - 1));
         }
         AtomicInteger hourly = hourlyCounts.get(userId);
         if (hourly != null) {
-            hourly.decrementAndGet();
+            hourly.updateAndGet(n -> Math.max(0, n - 1));
         }
     }
 

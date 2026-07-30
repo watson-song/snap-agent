@@ -136,7 +136,9 @@ public class AgentTask {
                 transcript.add(event);
             }
         }
-        this.updatedAt = System.currentTimeMillis();
+        synchronized (this) {
+            this.updatedAt = System.currentTimeMillis();
+        }
         streamQueue.offer(event);
     }
 

@@ -538,4 +538,27 @@ class SkillRegistryTest {
         assertThat(meta.getAvailability()).isEqualTo(SkillAvailability.AVAILABLE);
         assertThat(meta.getTools()).isEmpty();
     }
+
+    @Test
+    void shouldPreserveModeWhenValidateContractDowngradesToUnavailable() {
+        // Create a SkillMeta with READ_WRITE mode and a missing tool so that
+        // validateContract downgrades availability to UNAVAILABLE.
+        SkillMeta meta = new SkillMeta("mode-skill", "desc",
+                Arrays.asList("mysql_query", "nonexistent_tool"),
+                Collections.<InputSpec>emptyList(),
+                Collections.<Shortcut>emptyList(), "body",
+                "", // outputFormat
+                SkillAvailability.AVAILABLE, null,
+                "builtin", false,
+                "", // requiredPermission
+                SkillMode.READ_WRITE);
+
+        SkillRegistry registry = new SkillRegistry(null,
+                Collections.singletonList(meta), toolRegistry);
+
+        SkillMeta result = registry.get("mode-skill");
+        assertThat(result).isNotNull();
+        assertThat(result.getAvailability()).isEqualTo(SkillAvailability.UNAVAILABLE);
+        assertThat(result.getMode()).isEqualTo(SkillMode.READ_WRITE);
+    }
 }

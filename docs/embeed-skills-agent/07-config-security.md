@@ -282,7 +282,7 @@ required-permission: snap-agent:db-query   # 运行此 skill 需要的权限码
 
 **安全语义：**
 - `required-permission` 为空 → 继承全局 `security.required-permission`（向后兼容）
-- `required-permission` 非空 → 覆盖全局权限，仅检查 skill 级别权限码
+- `required-permission` 非空 → 用户需**同时**拥有全局权限和 skill 级权限码（AND 语义，与代码实现一致）
 - 宿主可同时配置全局和 skill 级权限：用户需同时拥有全局 access 权限 + 具体 skill 权限
 
 **运行时检查：** `POST /runs` 时，Controller 从 SkillRegistry 获取 skill，如果 skill 声明了 `required-permission` 且用户无此权限 → 返回 403。
@@ -307,7 +307,7 @@ public FilterRegistrationBean<SnapAgentFilter> snapAgentFilter(...) {
 ```
 
 ### filter-order 说明与 reconciliation 注
-> **设计 reconciliation（来自计划评审）**：原计划 YAML 写 `filter-order: -2147483638`，注释 `# LOWEST_PRECEDENCE-10`。两者冲突 —— Spring `Ordered.LOWEST_PRECEDENCE = Integer.MAX_VALUE = 2147483647`，`LOWEST_PRECEDENCE - 10 = 2147483637`（**低优先级 = 高 order 值 = 后执行**，落在宿主 auth 之后，符合决策 #4「宿主 auth 之后」的意图）。而 `-2147483638`（=`Integer.MIN_VALUE+10`）是**高优先级 = 先执行**，会在宿主 auth 之前跑，principal 尚未填充，违背意图。本设计采用**符号常量 `Ordered.LOWEST_PRECEDENCE - 10`（=2147483637）**以契合意图。**请确认此修正。**
+> **设计 reconciliation（来自计划评审）**：原计划 YAML 写 `filter-order: -2147483638`，注释 `# LOWEST_PRECEDENCE-10`。两者冲突 —— Spring `Ordered.LOWEST_PRECEDENCE = Integer.MAX_VALUE = 2147483647`，`LOWEST_PRECEDENCE - 10 = 2147483637`（**低优先级 = 高 order 值 = 后执行**，落在宿主 auth 之后，符合决策 #4「宿主 auth 之后」的意图）。而 `-2147483638`（=`Integer.MIN_VALUE+10`）是**高优先级 = 先执行**，会在宿主 auth 之前跑，principal 尚未填充，违背意图。本设计采用**符号常量 `Ordered.LOWEST_PRECEDENCE - 10`（=2147483637）**以契合意图。
 
 ### 为什么放在宿主 auth 之后
 - 宿主安全过滤器链（Spring Security `FilterChainProxy` 默认 order `-100`；Shiro `ShiroFilterFactoryBean` 类似）先跑，填充 `SecurityContextHolder` / `Subject`。

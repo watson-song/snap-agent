@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
@@ -996,6 +997,84 @@ class SnapAgentControllerTest {
         // "off" mode delegates to AnchorOrchestrator.executeWithAnchor (no tools)
         verify(mockOrchestrator).executeWithAnchor(
                 any(), any(), any(), any());
+    }
+
+    // ---- Bug-fix coverage: Zip Slip path traversal protection ----
+
+    @Test
+    void shouldRejectZipWithPathTraversalEntries() throws Exception {
+        java.nio.file.Path tempDir = java.nio.file.Files.createTempDirectory("skill-zip-test");
+        properties.setUploadSkillsDir(tempDir.toString());
+
+        // Build an in-memory zip containing a malicious path-traversal entry.
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream zos = new java.util.zip.ZipOutputStream(baos)) {
+            java.util.zip.ZipEntry evil = new java.util.zip.ZipEntry("../../etc/passwd");
+            zos.putNextEntry(evil);
+            zos.write("root:x:0:0".getBytes());
+            zos.closeEntry();
+        }
+        MockMultipartFile zipFile = new MockMultipartFile("file", "evil.zip",
+                "application/zip", baos.toByteArray());
+
+        try {
+            mockMvc.perform(multipart("/snap-agent/skills/upload").file(zipFile))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.error").value("INVALID_ZIP"));
+
+            // Compute exactly where the traversal entry would have landed if written,
+            // mirroring the controller's own resolve().normalize() logic.
+            java.nio.file.Path traversalTarget = tempDir.resolve("evil")
+                    .resolve("../../etc/passwd").normalize();
+            assertThat(java.nio.file.Files.exists(traversalTarget))
+                    .as("path traversal entry must not be written outside the skills dir")
+                    .isFalse();
+        } finally {
+            deleteRecursively(tempDir);
+        }
+    }
+
+    // ---- Bug-fix coverage: null SecurityGateway returns 503 ----
+
+    @Test
+    void shouldReturn503WhenSecurityGatewayIsNull() throws Exception {
+        // Construct a controller with securityGateway = null
+        SnapAgentController nullSecurityController = new SnapAgentController(
+                skillRegistry, agentExecutor, taskStore, toolDispatcher,
+                properties, null, rateLimiter, taskExecutor,
+                null, llmClient, null, null, auditStore);
+        MockMvc nullSecurityMockMvc =
+                MockMvcBuilders.standaloneSetup(nullSecurityController).build();
+
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("skillId", "test-skill");
+
+        nullSecurityMockMvc.perform(post("/snap-agent/runs")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.error").value("NO_SECURITY_FRAMEWORK"));
+    }
+
+    // ---- Bug-fix coverage: listModels() result is cached ----
+
+    @Test
+    void shouldCacheListModelsResult() throws Exception {
+        when(llmClient.listModels()).thenReturn(
+                Arrays.asList("claude-sonnet-4-6", "claude-haiku-4-6"));
+
+        // First call: cache miss -> fetches from the LLM API and caches the result
+        mockMvc.perform(get("/snap-agent/models"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed[0]").value("claude-sonnet-4-6"))
+                .andExpect(jsonPath("$.allowed[1]").value("claude-haiku-4-6"));
+
+        // Second call: cache hit -> served from cache without hitting the LLM API again
+        mockMvc.perform(get("/snap-agent/models"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowed[0]").value("claude-sonnet-4-6"));
+
+        verify(llmClient, atMost(1)).listModels();
     }
 
     private void deleteRecursively(java.nio.file.Path path) {

@@ -111,7 +111,7 @@ public DataSource snapAgentReadOnlyDataSource(
     ds.setUsername(user);
     ds.setPassword(pass);
     ds.setReadOnly(true);                 // 连接级只读
-    ds.setMaximumPoolSize(2);             # 小池子，agent 用量不大
+    ds.setMaximumPoolSize(2);             // 小池子，agent 用量不大
     return ds;
 }
 ```
@@ -398,7 +398,9 @@ SnapAgent 需要从 SecurityContext 的 principal 对象中解析出用户标识
 public class AppPrincipalResolver implements PrincipalResolver {
     @Override
     public String resolve(Object principal) {
-        if (principal instanceof AppUserDetails u) return u.getEmpNo();
+        if (principal instanceof AppUserDetails) {
+            return ((AppUserDetails) principal).getEmpNo();
+        }
         return null;
     }
 }
@@ -414,8 +416,12 @@ snap-agent:
 @Bean
 public PrincipalResolver snapAgentPrincipalResolver() {
     return principal -> {
-        if (principal instanceof LoginUser u) return u.getUserName();
-        if (principal instanceof String s) return s;
+        if (principal instanceof LoginUser) {
+            return ((LoginUser) principal).getUserName();
+        }
+        if (principal instanceof String) {
+            return (String) principal;
+        }
         return null;
     };
 }

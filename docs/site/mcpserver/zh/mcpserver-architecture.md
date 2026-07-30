@@ -4,7 +4,7 @@
 
 ## 1. 概述
 
-SnapAgent 宿主 MCP Server 让宿主应用通过 SnapAgent 暴露自身 `@Tool` 业务能力为 MCP Server，外部 AI Agent（Claude Code / Cursor / Windsurf）可直接发现和调用，无需人翻译 API 语义。
+SnapAgent 宿主 MCP Server 让宿主应用通过 SnapAgent 暴露自身 `@Tool` 业务能力为 MCP Server，外部 AI Agent（Claude Code / Cursor / Windsurf）可直接发现和调用，无需人工翻译 API 语义。
 
 ### 核心定位
 

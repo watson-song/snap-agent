@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import javax.annotation.PreDestroy;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -57,6 +59,13 @@ public class PeerSseRelay {
         this.internalToken = internalToken;
         this.internalPath = internalPath;
         this.httpClient = httpClient;
+    }
+
+    @PreDestroy
+    public void destroy() {
+        // Release connection pool and thread resources on application shutdown
+        this.httpClient.dispatcher().executorService().shutdown();
+        this.httpClient.connectionPool().evictAll();
     }
 
     /**

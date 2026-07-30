@@ -23,7 +23,7 @@ SnapAgent is an **embedded AI skill framework**. Add one Maven dependency + a fe
 
 - **Agent conversational ability** — Users ask questions in natural language; the Agent understands intent, calls tools, streams results
 - **Skill system** — Write skill files in Markdown defining Agent behavior for specific scenarios. Drop into a directory and it's live
-- **Tool ecosystem** — Built-in read-only database queries, Redis reads; implement `ToolProvider` to extend with any tool
+- **Tool ecosystem** — Built-in read-only database queries, Redis reads; use `@Tool` annotation to extend with any tool
 - **Out-of-the-box UI** — Chat-style SPA with SSE real-time streaming, no frontend build step
 - **Safety guardrails** — `SqlGuard` enforces read-only, rate limiting, audit; `SecurityGateway` SPI integrates with host authentication
 
@@ -38,7 +38,7 @@ SnapAgent is an **embedded AI skill framework**. Add one Maven dependency + a fe
 | **Code analysis** | Develop `CodeReaderToolProvider` so the Agent reads project source, answers "where is this interface implemented?" |
 | **Online monitoring** | Develop `MetricsToolProvider` for the Agent to query Prometheus/Grafana metrics in real time |
 | **Anomaly diagnosis & bugfix** | Develop `LogAnalysisToolProvider` for log pattern analysis, root cause, fix suggestions |
-| **Any custom scenario** | Implement `ToolProvider` + write a Skill Markdown — the Agent instantly gains new capabilities |
+| **Any custom scenario** | Implement `@Tool` methods + write a Skill Markdown — the Agent instantly gains new capabilities |
 
 ## Quick Start
 
@@ -164,15 +164,15 @@ Without a `SecurityGateway`, `anchor.js` silently renders no icons. Full setup (
 │   │            SnapAgent Framework                  │    │
 │   │                                                  │    │
 │   │   ┌────────────┐    ┌──────────────────┐        │    │
-│   │   │  Web UI    │    │  AgentExecutor   │        │    │
+│   │   │  Web UI    │    │  GraphExecutor   │        │    │
 │   │   │  (SPA+SSE) │────│  (Turn Loop)     │        │    │
 │   │   └────────────┘    └────────┬─────────┘        │    │
-│   │   ┌────────────┐    ┌────────┴─────────┐        │    │
-│   │   │ SkillReg   │    │  LLM Client      │        │    │
-│   │   │ (.md→Skill)│    │  (Streaming)     │        │    │
-│   │   └────────────┘    └──────────────────┘        │    │
+│   │   ┌─────────────┐   ┌────────┴─────────┐        │    │
+│   │   │SkillRegistry│   │  LLM Client      │        │    │
+│   │   │ (.md→Skill) │   │  (Streaming)     │        │    │
+│   │   └─────────────┘   └──────────────────┘        │    │
 │   │   ┌──────────────────────────────────────┐      │    │
-│   │   │       ToolDispatcher (SPI)            │      │    │
+│   │   │    ToolCallbackRegistry              │      │    │
 │   │   │  ┌────────────┐ ┌──────────────┐     │      │    │
 │   │   │  │ JDBC Query │ │ Redis Read   │     │      │    │
 │   │   │  │ + SqlGuard │ │              │     │      │    │
@@ -182,8 +182,8 @@ Without a `SecurityGateway`, `anchor.js` silently renders no icons. Full setup (
 │   │   │  │ (planned)  │ │ (planned)    │     │      │    │
 │   │   │  └────────────┘ └──────────────┘     │      │    │
 │   │   │  ┌────────────────────────────────┐  │      │    │
-│   │   │  │  Your Custom ToolProvider     │  │      │    │
-│   │   │  │  (just @Component)            │  │      │    │
+│   │   │  │  Your Custom @Tool Methods     │  │      │    │
+│   │   │  │  (just @Component)              │  │      │    │
 │   │   │  └────────────────────────────────┘  │      │    │
 │   │   └──────────────────────────────────────┘      │    │
 │   │                                                  │    │
@@ -195,8 +195,8 @@ Without a `SecurityGateway`, `anchor.js` silently renders no icons. Full setup (
 **Core Design:**
 
 - **Skill** = Markdown file defining Agent behavior for a specific scenario. YAML frontmatter for metadata, body for steps. The LLM auto-selects the matching Skill based on the user's question.
-- **Tool** = `ToolProvider` SPI implementation giving the Agent abilities to interact with external systems. Built-in JDBC/Redis, infinitely extensible.
-- **Agent** = `AgentExecutor` multi-turn loop: LLM thinks → calls tools → gets results → thinks more → outputs conclusion. SSE streaming throughout.
+- **Tool** = `@Tool` annotated methods giving the Agent abilities to interact with external systems. Built-in JDBC/Redis, infinitely extensible.
+- **Agent** = `GraphExecutor` multi-turn loop: LLM thinks → calls tools → gets results → thinks more → outputs conclusion. SSE streaming throughout.
 - **Framework** = Starter auto-configures everything: Controller, Filter, thread pool, security adapter, cross-pod routing. `enabled=false` = zero impact.
 
 ## Key Features
@@ -204,7 +204,7 @@ Without a `SecurityGateway`, `anchor.js` silently renders no icons. Full setup (
 | Feature | Description |
 |---------|-------------|
 | **Skill-driven** | Two-tier: built-in (classpath) + uploadable (filesystem, persists across restarts). Markdown defines Agent behavior — no code needed, drop a file and it's live |
-| **Tool-extensible** | `ToolProvider` SPI + `@Component` auto-discovery; built-in JDBC/Redis |
+| **Tool-extensible** | `@Tool` / `@ToolParam` annotation + `@Component` auto-discovery; built-in JDBC/Redis |
 | **SSE real-time streaming** | Token-level push of the thinking process — watch the Agent reason step by step |
 | **Safety guardrails** | SqlGuard read-only enforcement + rate limiting + audit transcript |
 | **Security adapter** | Auto-detects Spring Security / Shiro, or custom `PrincipalResolver` |
@@ -262,28 +262,19 @@ snap-agent:
 
 ```java
 @Component
-public class HttpCallToolProvider implements ToolProvider {
-    @Override
-    public String name() { return "http_call"; }
+public class MyCustomTools {
 
-    @Override
-    public String schema() {
-        return "{\"name\":\"http_call\","
-             + "\"description\":\"Calls an HTTP endpoint\","
-             + "\"input_schema\":{\"type\":\"object\","
-             + "\"properties\":{\"url\":{\"type\":\"string\"}},"
-             + "\"required\":[\"url\"]}}";
-    }
-
-    @Override
-    public ToolResult execute(Map<String, Object> args, ToolContext ctx) {
-        // your logic
-        return ToolResult.success("result", 0, 42);
+    @Tool(name = "http_call", description = "Call an HTTP endpoint")
+    public String httpCall(
+            @ToolParam(description = "URL to call") String url,
+            @ToolParam(description = "HTTP method", required = false) String method) {
+        // your logic — call any service, query DB, anything
+        return httpClient.execute(url, method != null ? method : "GET");
     }
 }
 ```
 
-The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skill execution as needed.
+The tool is auto-discovered by `ToolCallbackRegistry`. The LLM can call it during Skill execution as needed.
 
 ## API Endpoints
 
@@ -308,7 +299,7 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 
 ### v0.1-alpha
 
-- Embedded framework core: AgentExecutor multi-turn loop + LLM streaming + SSE push
+- Embedded framework core: GraphExecutor multi-turn loop + LLM streaming + SSE push
 - Skill Markdown system: YAML frontmatter + step-based body
 - Built-in tools: JDBC read-only queries (SqlGuard) + Redis read-only
 - Security adapter: Spring Security / Shiro auto-detection
@@ -357,7 +348,7 @@ The tool is auto-discovered by `ToolDispatcher`. The LLM can call it during Skil
 - Multi-environment datasource switching (sit/uat/prod)
 - Task history & search
 - Skill marketplace: community-shared Skill templates
-- Plugin tool marketplace: ready-to-use ToolProvider extension packs
+- Plugin tool marketplace: ready-to-use `@Tool` extension packs
 
 ## Testing
 

@@ -150,7 +150,13 @@ public class InternalTaskController {
             // if no token configured, internal endpoint is disabled
             return false;
         }
-        return internalToken.equals(token);
+        if (token == null) {
+            return false;
+        }
+        // Constant-time comparison to prevent timing attacks
+        return java.security.MessageDigest.isEqual(
+                internalToken.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     private boolean isTerminal(TaskStatus status) {

@@ -16,7 +16,7 @@ SnapAgent 已实现 MCP 客户端能力（见 [04-tools-and-mcp.md](04-tools-and
 ```
 
 - `McpSseClient` 连接外部 MCP Server，发现工具，代理调用。
-- `McpTools` 把外部工具包装为 `ToolCallback`，注册到 `PluginRegistry`。
+- `McpTools` 把外部工具包装为 `ToolCallback`，注册到 `ToolCallbackRegistry`。
 - 工具命名 `mcp__{server}__{tool}`，与 Claude Code 约定一致。
 
 ### 1.2 缺失能力：没有 MCP Server 端
@@ -104,7 +104,7 @@ public @interface ToolParam {
 
 ### 3.2 反射注册
 
-`ToolCallbacks.from(bean)` 扫描 `getMethods()` 找 `@Tool` 注解 → 每个方法生成一个匿名 `ToolCallback`（含自动生成的 JSON Schema）→ 注册到 `PluginRegistry`。
+`ToolCallbacks.from(bean)` 扫描 `getMethods()` 找 `@Tool` 注解 → 每个方法生成一个匿名 `ToolCallback`（含自动生成的 JSON Schema）→ 注册到 `ToolCallbackRegistry`。
 
 ### 3.3 运行时调用
 
@@ -148,10 +148,7 @@ for (String name : beanNames) {
 for (Object tools : toolsBeans) {
     ToolCallback[] callbacks = ToolCallbacks.from(tools);
     for (ToolCallback cb : callbacks) {
-        PluginDescriptor desc = new PluginDescriptor(
-            cb.getName(), cb.getName(), cb.getName(), "", "host",
-            true, true, true, new ToolCallback[]{cb}, null, null, null);
-        registry.register(desc);
+        registry.register(cb);
     }
 }
 ```

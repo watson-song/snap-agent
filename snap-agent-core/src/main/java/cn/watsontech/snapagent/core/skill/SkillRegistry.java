@@ -323,7 +323,7 @@ public class SkillRegistry {
                     meta.getOutputFormat(),
                     SkillAvailability.UNAVAILABLE,
                     "tool registry not configured", meta.getSource(),
-                    meta.isOverridesBuiltin(), meta.getRequiredPermission());
+                    meta.isOverridesBuiltin(), meta.getRequiredPermission(), meta.getMode());
         }
         List<String> missing = new ArrayList<String>();
         for (String tool : meta.getTools()) {
@@ -339,6 +339,6 @@ public class SkillRegistry {
                 meta.getOutputFormat(),
                 SkillAvailability.UNAVAILABLE,
                 "tool(s) not available: " + missing, meta.getSource(),
-                meta.isOverridesBuiltin(), meta.getRequiredPermission());
+                meta.isOverridesBuiltin(), meta.getRequiredPermission(), meta.getMode());
     }
 }

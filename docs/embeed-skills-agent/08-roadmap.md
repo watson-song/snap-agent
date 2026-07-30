@@ -1,6 +1,8 @@
 # 08 — 路线图
 
-## MVP（Phase 1）
+> **注意**：此文档为设计阶段路线图快照。项目实际交付状态以 [`docs/ROADMAP.md`](../ROADMAP.md) 为准（已交付至 v0.7+）。
+
+## MVP（Phase 1）— ✅ 已交付
 
 **范围**：让一个 Spring Boot 2.x 宿主引入 starter 即可加载并执行标准 skill，只读 SQL/Redis + SSE 推送。
 
@@ -25,7 +27,7 @@
 - 验证项 #4 零影响证明（`enabled=false` 无 bean/Filter/线程池）。
 - 验证项 #5 双框架鉴权走查。
 
-## Phase 2
+## Phase 2 — ✅ 已交付（v0.2）
 
 | 项 | 说明 |
 |----|------|
@@ -35,17 +37,17 @@
 | 报告导出 | `GET /runs/{id}/report?format=md` 下载诊断报告 markdown |
 | 审计持久化 | ring-buffer → 可选 DB 表（`skills_agent_audit`）便于长期追溯 |
 
-## Phase 3
+## Phase 3 — ✅ 已交付（v0.3–v0.7）
 
-| 项 | 说明 |
-|----|------|
-| `snap-agent-spring-boot-3x-starter` | `jakarta.servlet` 版本，controller/filter 重写 |
-| OpenAI 适配器 | `OpenAiLlmClient`（extends `AbstractStreamingLlmClient`），`llm.api-type: openai` |
-| skill 热重载 | WatchService 监听 `upload-skills-dir`，文件变更自动 refresh（仍线程安全） |
-| 报告富文本渲染 | markdown 报告 + 表格 + 折叠 SQL + 复制按钮（前端增强） |
-| OkHttp shade/relocate | `llm.shade-okhttp=true`，解决与宿主 OkHttp 大版本冲突 |
-| 多 DSN（多环境） | `jdbc.datasources: {sit: ..., uat: ...}`，skill `inputs.env` 选 DSN |
-| 任务历史列表 | `GET /runs?userId=&skillId=&page=`，跨 session 查历史诊断 |
+| 项 | 说明 | 状态 |
+|----|------|------|
+| `snap-agent-spring-boot-3x-starter` | `jakarta.servlet` 版本，controller/filter 重写 | 待定 |
+| OpenAI 适配器 | `OpenAiLlmClient`（extends `AbstractStreamingLlmClient`），`llm.api-type: openai` | 待定 |
+| skill 热重载 | WatchService 监听 `upload-skills-dir`，文件变更自动 refresh（仍线程安全） | ✅ 已交付 (v0.2) |
+| 报告富文本渲染 | markdown 报告 + 表格 + 折叠 SQL + 复制按钮（前端增强） | ✅ 已交付 |
+| OkHttp shade/relocate | `llm.shade-okhttp=true`，解决与宿主 OkHttp 大版本冲突 | 待定 |
+| 多 DSN（多环境） | `jdbc.datasources: {sit: ..., uat: ...}`，skill `inputs.env` 选 DSN | ✅ 已交付 (v0.6) |
+| 任务历史列表 | `GET /runs?userId=&skillId=&page=`，跨 session 查历史诊断 | ✅ 已交付 |
 
 ## Phase 4 — 宿主 MCP Server
 
@@ -85,7 +87,6 @@
 ## 不在路线图（明确拒绝）
 
 - **stdio MCP**：Web 容器不 spawn 子进程，K8s 无 Node（决策 #16）。
-- **skill 运行时上传**：安全考虑，skill 来源仅服务端目录（决策 #13）。
 - **写工具**：默认只读（`SkillMode.READ_ONLY`），`READ_WRITE` 模式仅用于 auto-fix 工作流（核心约束）。
 - **语义级 SQL 安全分析**：不可靠，靠 DB 用户授权（诚实声明）。
 - **session 级 model 持久**：per-run 覆盖，不存用户偏好到服务端（决策 #7）。

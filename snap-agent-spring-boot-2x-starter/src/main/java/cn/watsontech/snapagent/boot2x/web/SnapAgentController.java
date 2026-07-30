@@ -144,6 +144,11 @@ public class SnapAgentController {
     private AnchorOrchestrator anchorOrchestrator;
     private AnchorInjectionOrchestrator injectionOrchestrator;
 
+    // Cached model list from LLM API (5-minute TTL to avoid per-request HTTP calls)
+    private volatile List<String> cachedApiModels = null;
+    private volatile long cachedApiModelsTimestamp = 0L;
+    private static final long MODEL_CACHE_TTL_MS = 5L * 60L * 1000L;
+
     public SnapAgentController(SkillRegistry skillRegistry,
                                 AgentService agentService,
                                 TaskStore taskStore,
@@ -422,6 +427,10 @@ public class SnapAgentController {
                     "skillId or workflowId is required");
         }
 
+        if (securityGateway == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "NO_SECURITY_FRAMEWORK",
+                    "no SecurityGateway configured");
+        }
         String userId = securityGateway.currentUserId();
 
         try {
@@ -584,7 +593,7 @@ public class SnapAgentController {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         List<String> models = new ArrayList<String>();
         if (llmClient != null) {
-            List<String> apiModels = llmClient.listModels();
+            List<String> apiModels = getCachedApiModels();
             if (!apiModels.isEmpty()) {
                 models = apiModels;
             }
@@ -719,7 +728,13 @@ public class SnapAgentController {
                     Enumeration<? extends ZipEntry> entries = zipFile.entries();
                     while (entries.hasMoreElements()) {
                         ZipEntry entry = entries.nextElement();
-                        Path destPath = destDir.resolve(entry.getName());
+                        Path destPath = destDir.resolve(entry.getName()).normalize();
+                        // Zip Slip protection: reject entries that escape destDir
+                        if (!destPath.startsWith(destDir)) {
+                            Files.deleteIfExists(tempFile);
+                            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_ZIP",
+                                    "zip entry escapes target directory: " + entry.getName());
+                        }
                         if (entry.isDirectory()) {
                             Files.createDirectories(destPath);
                         } else {
@@ -842,6 +857,10 @@ public class SnapAgentController {
     // ---- POST /runs ----
     @PostMapping("/runs")
     public ResponseEntity<Object> createRun(@RequestBody Map<String, Object> body) {
+        if (securityGateway == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "NO_SECURITY_FRAMEWORK",
+                    "no SecurityGateway configured (set snap-agent.security.framework or provide a SecurityGateway bean)");
+        }
         String userId = securityGateway.currentUserId();
         if (userId == null) {
             return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
@@ -918,7 +937,7 @@ public class SnapAgentController {
         if (model != null && !model.isEmpty()) {
             List<String> allowed = properties.getLlm().getAllowedModels();
             if (llmClient != null) {
-                List<String> apiModels = llmClient.listModels();
+                List<String> apiModels = getCachedApiModels();
                 if (!apiModels.isEmpty()) {
                     allowed = apiModels;
                 }
@@ -1220,6 +1239,10 @@ public class SnapAgentController {
     // ---- GET /runs/{id} ----
     @GetMapping("/runs/{id}")
     public ResponseEntity<Object> getRun(@PathVariable String id) {
+        if (securityGateway == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "NO_SECURITY_FRAMEWORK",
+                    "no SecurityGateway configured");
+        }
         String userId = securityGateway.currentUserId();
         if (userId == null) {
             return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
@@ -1244,6 +1267,10 @@ public class SnapAgentController {
     // ---- GET /runs/{id}/transcript ----
     @GetMapping("/runs/{id}/transcript")
     public ResponseEntity<Object> getTranscript(@PathVariable String id) {
+        if (securityGateway == null) {
+            return errorResponse(HttpStatus.SERVICE_UNAVAILABLE, "NO_SECURITY_FRAMEWORK",
+                    "no SecurityGateway configured");
+        }
         String userId = securityGateway.currentUserId();
         if (userId == null) {
             return errorResponse(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "not authenticated");
@@ -1320,7 +1347,7 @@ public class SnapAgentController {
             }
         }
         if (userId == null) {
-            userId = securityGateway.currentUserId();
+            userId = securityGateway != null ? securityGateway.currentUserId() : null;
         }
         if (userId == null) {
             try {
@@ -2850,6 +2877,25 @@ public class SnapAgentController {
     /** Returns the current authenticated user id, or null. */
     private String currentUserId() {
         return securityGateway != null ? securityGateway.currentUserId() : null;
+    }
+
+    /** Returns cached LLM API model list with a 5-minute TTL to avoid per-request HTTP calls. */
+    private List<String> getCachedApiModels() {
+        long now = System.currentTimeMillis();
+        if (cachedApiModels != null && (now - cachedApiModelsTimestamp) < MODEL_CACHE_TTL_MS) {
+            return cachedApiModels;
+        }
+        try {
+            List<String> models = llmClient.listModels();
+            if (models != null && !models.isEmpty()) {
+                cachedApiModels = models;
+                cachedApiModelsTimestamp = now;
+            }
+            return models != null ? models : java.util.Collections.<String>emptyList();
+        } catch (Exception e) {
+            log.warn("Failed to fetch model list from LLM API: {}", e.getMessage());
+            return cachedApiModels != null ? cachedApiModels : java.util.Collections.<String>emptyList();
+        }
     }
 
     /** Records an audit event if an audit logger is configured. */

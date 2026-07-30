@@ -296,4 +296,23 @@ class AgentTaskTest {
         int expected = threadCount * perThread;
         assertThat(allIds).hasSize(expected);
     }
+
+    // ---- Bug fix: updatedAt updated atomically with transcript event ----
+
+    @Test
+    void shouldUpdateTimestampAtomicallyWithTranscriptEvent() {
+        AgentTask task = AgentTask.create("u", "s", null, "m");
+        long initialUpdatedAt = task.getUpdatedAt();
+
+        task.addTranscriptEvent(TranscriptEvent.thought("test event"));
+
+        // updatedAt should be >= initial updatedAt
+        assertThat(task.getUpdatedAt()).isGreaterThanOrEqualTo(initialUpdatedAt);
+
+        // updatedAt should be set within synchronized block — verify it is recent
+        // (within the last second of now)
+        long now = System.currentTimeMillis();
+        assertThat(task.getUpdatedAt()).isGreaterThanOrEqualTo(now - 1000);
+        assertThat(task.getUpdatedAt()).isLessThanOrEqualTo(now + 1000);
+    }
 }

@@ -55,7 +55,7 @@ SkillRegistry            GraphExecutor             ToolCallbackRegistry
   │                       ToolsNode→ShouldContinue;
   │                       system=SkillMode前缀+     ├─► JdbcQueryTools(只读DSN, SQL guard)
   │                       skill正文+工具清单;       ├─► RedisReadTools(只读)
-  │                       tool_use→ToolsNode→       └─► McpToolProvider(Phase2, SSE)
+  │                       tool_use→ToolsNode→       └─► McpSseClient(Phase2, SSE)
   │                       回填→直到end_turn)
   │                         │
   ▼                         ▼

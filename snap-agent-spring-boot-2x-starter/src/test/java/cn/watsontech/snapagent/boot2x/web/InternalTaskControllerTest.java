@@ -11,6 +11,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -161,5 +163,14 @@ class InternalTaskControllerTest {
         String body = result.getResponse().getContentAsString();
         assertThat(body).doesNotContain("FORBIDDEN");
         assertThat(body).contains("event:done");
+    }
+
+    @Test
+    void shouldRejectNullTokenWith401() {
+        // Verify that when token parameter is null, the controller returns 401.
+        // This tests the added null check in tokenValid().
+        seedTask("task-1", "user-1", TaskStatus.RUNNING);
+        ResponseEntity<Object> response = controller.probe("task-1", null);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 }

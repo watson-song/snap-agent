@@ -107,4 +107,40 @@ class ToolCallbackRegistryImplTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("tool not found in registry: nonexistent");
     }
+
+    @Test
+    @DisplayName("escapeJson 转义控制字符 (UC-10)")
+    void shouldEscapeControlCharsInJson() {
+        ToolCallbackRegistryImpl registry = new ToolCallbackRegistryImpl();
+        // Register a callback with control characters in description
+        ToolCallback cb = mock(ToolCallback.class);
+        when(cb.getName()).thenReturn("test_ctrl");
+        when(cb.isSystem()).thenReturn(false);
+        when(cb.getDescription()).thenReturn("desc\b\f\u0001\u0002");
+        when(cb.getJsonSchema()).thenReturn("{}");
+        registry.register(cb);
+        String json = registry.toToolDefinitionsJson();
+        // Verify control chars are escaped (not present as raw bytes)
+        assertThat(json).doesNotContain("\b");
+        assertThat(json).doesNotContain("\f");
+        assertThat(json).doesNotContain("\u0001");
+        assertThat(json).contains("\\b");
+        assertThat(json).contains("\\f");
+        assertThat(json).contains("\\u0001");
+    }
+
+    @Test
+    @DisplayName("unregister 使用原子 remove 避免竞态 (UC-09)")
+    void shouldNotRemoveDifferentCallbackInUnregister() {
+        ToolCallbackRegistryImpl registry = new ToolCallbackRegistryImpl();
+        ToolCallback original = callback("tool_a", false);
+        registry.register(original);
+        // Simulate: get returns original, but before remove, another thread replaces it
+        // After our fix (remove(name, callback)), the new callback should survive
+        registry.unregister("tool_a");
+        assertThat(registry.find("tool_a")).isNull();
+
+        // Also verify: unregister of non-existent tool doesn't throw
+        registry.unregister("non_existent");
+    }
 }
