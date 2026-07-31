@@ -60,7 +60,7 @@
 
 | 增强 | 说明 |
 |------|------|
-| SystemPromptExtender SPI | 新增单方法 SPI，启动时注入项目结构摘要到 system prompt |
+| SystemPromptExtender SPI (now Advisor) | 新增单方法 SPI，启动时注入项目结构摘要到 system prompt |
 | ProjectContextExtender | 启动时扫描模块/Java文件数/关键目录，缓存摘要注入 LLM |
 | CodePathGuard | 路径安全守卫，project-root 限制 + 扩展名白名单 + 大小限制 |
 | code-analysis 内置 skill | 引导 LLM 五阶段分析代码（理解→定位→读取→追溯→结论） |

@@ -93,23 +93,23 @@ git commit -m "docs: system architecture documentation (bilingual)"
 - Create: `docs/site/search/zh/knowledge-search.md`
 - Create: `docs/site/search/en/knowledge-search.md`
 - Reference: `snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/knowledge/SimpleKeywordSearcher.java`
-- Reference: `snap-agent-core/src/main/java/cn/watsontech/snapagent/core/knowledge/{KnowledgeBase,KnowledgeSearcher,KnowledgeFragment,KnowledgeSource,SearchResult}.java`
-- Reference: `snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/knowledge/{MarkdownKnowledgeSource,KnowledgeInjector}.java`
+- Reference: `snap-agent-core/src/main/java/cn/watsontech/snapagent/core/knowledge/{KnowledgeBase,KnowledgeSearcher,KnowledgeFragment,KnowledgeSource,SearchResult}.java` (v0.7 names; now VectorStore/DocumentRetriever/Document/DocumentReader)
+- Reference: `snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/knowledge/{MarkdownKnowledgeSource,KnowledgeInjector}.java` (v0.7 names; now DocumentReader/RetrievalAugmentationAdvisor)
 - Reference: `snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/web/KnowledgeController.java`
 
 - [ ] **Step 1: Write Chinese version**
 
 Content sections:
-1. 架构概览 (KnowledgeBase → KnowledgeSource → KnowledgeSearcher SPI)
+1. 架构概览 (KnowledgeBase → KnowledgeSource → KnowledgeSearcher SPI; now VectorStore → DocumentReader → DocumentRetriever)
 2. 分词算法 (Latin空格分割+CJK 2-gram bigram, 混合文本处理, 代码示例)
 3. 打分公式 (`score = (titleHits×2 + contentHits) / (queryTokenCount×2)`, clamp [0,1])
 4. 检索示例 ("数据库"→1.0+0.33, "snapagent"→1.0+0.50, "zzzzzz"→0)
-5. minScore 阈值机制 (配置项, KnowledgeBase.search() 过滤, 历史bug: 硬编码0.0已修复)
+5. minScore 阈值机制 (配置项, KnowledgeBase.search() 过滤 (now VectorStore.similaritySearch), 历史bug: 硬编码0.0已修复)
 6. searchWithScores() 方法 (SearchResult类, 返回分数用于UI展示)
-7. KnowledgeInjector 自动注入流程 (SystemPromptExtender SPI → 检索top-K → 注入system prompt)
+7. KnowledgeInjector (now RetrievalAugmentationAdvisor) 自动注入流程 (SystemPromptExtender (now Advisor) SPI → 检索top-K → 注入system prompt)
 8. REST API (GET /knowledge/status, GET /knowledge/search?q=xxx)
 9. 已知限制 (英文大小写敏感, 无语义搜索, 无向量嵌入, 计划v0.7.2)
-10. 扩展点 (自定义KnowledgeSearcher, 自定义KnowledgeSource)
+10. 扩展点 (自定义KnowledgeSearcher (now DocumentRetriever), 自定义KnowledgeSource (now DocumentReader))
 
 - [ ] **Step 2: Write English version**
 
@@ -137,7 +137,7 @@ Content sections:
 1. 5步快速接入 (pom → yml → 只读DataSource → 安全放行 → 可选PrincipalResolver)
 2. 完整配置参考 (snap-agent.* 全量配置树, 每个字段说明)
 3. 安全适配 (Spring Security/Shiro自动检测, 自定义SecurityGateway, 权限坑: principal vs GrantedAuthority)
-4. 自定义扩展 (ToolProvider @Component, SystemPromptExtender, KnowledgeSearcher, CodeGraphBuilder, IssueTracker, CostStore, ConversationStore)
+4. 自定义扩展 (ToolProvider @Component, SystemPromptExtender (now Advisor), KnowledgeSearcher (now DocumentRetriever), CodeGraphBuilder, IssueTracker, CostStore, ConversationStore (now ChatMemoryRepository))
 5. 多环境数据源配置 (datasources Map, env参数)
 6. Skill 编写指南 (frontmatter, body, inputs, tools契约, availability)
 7. 故障排查 (常见问题+解决方案)
@@ -268,7 +268,7 @@ Content sections:
 1. Core SPI (IssueStatus状态机, IssueClosure不可变值对象+withXxx方法, IssueStore持久化SPI, IssueTracker外部跟踪器SPI)
 2. Starter实现 (FileIssueStore JSON存储, NoopIssueTracker默认空实现, KnowledgeSedimentationExtractor知识提取)
 3. IssueClosureService 编排服务 (proposeSolution→createExternalIssue→verify→close 4阶段)
-4. 知识沉淀闭环 (诊断→方案→修复→验证→提取知识→存入KnowledgeBase→反馈循环)
+4. 知识沉淀闭环 (诊断→方案→修复→验证→提取知识→存入KnowledgeBase (now VectorStore)→反馈循环)
 5. REST API (POST /runs/{id}/solution, POST /runs/{id}/issue, GET /issues/{id}, POST /issues/{id}/verify, POST /issues/{id}/close)
 6. 内置skills (solution-suggest.md, verify-fix.md)
 7. 配置参考 (snap-agent.issue-closure.{enabled,system-user-id,storage-dir,tracker-type})
@@ -357,12 +357,12 @@ Content sections (Part 1 — 运维用户指南):
 
 Content sections (Part 2 — 开发者指南):
 1. 自定义ToolProvider开发 (完整代码示例)
-2. 自定义SystemPromptExtender
+2. 自定义SystemPromptExtender (now Advisor)
 3. 实现IssueTracker (Jira/GitHub, createIssue/updateStatus/getIssueUrl)
 4. 实现CostStore (DB-backed)
 5. 编写Workflow YAML (步骤定义, 条件语法, 输入引用, 失败策略, full-diagnose示例)
 6. MCP集成 (外部工具服务器)
-7. 自定义KnowledgeSource
+7. 自定义KnowledgeSource (now DocumentReader)
 8. ConversationStore替换 (DB-backed)
 9. 自定义EventSource (Kafka/RabbitMQ异常事件)
 10. 自定义PushChannel (钉钉/Jira/邮件)

@@ -31,11 +31,18 @@ public class CodeGraphTools {
     private final CodeGraphIndex index;
     private final int defaultMaxDepth;
     private final int defaultMaxImpactDepth;
+    private final CodeGraphMessages messages;
 
     public CodeGraphTools(CodeGraphIndex index, int defaultMaxDepth, int defaultMaxImpactDepth) {
+        this(index, defaultMaxDepth, defaultMaxImpactDepth, new ChineseCodeGraphMessages());
+    }
+
+    public CodeGraphTools(CodeGraphIndex index, int defaultMaxDepth, int defaultMaxImpactDepth,
+                         CodeGraphMessages messages) {
         this.index = index;
         this.defaultMaxDepth = defaultMaxDepth;
         this.defaultMaxImpactDepth = defaultMaxImpactDepth;
+        this.messages = messages != null ? messages : new ChineseCodeGraphMessages();
     }
 
     public CodeGraphTools(CodeGraphIndex index) {
@@ -76,20 +83,20 @@ public class CodeGraphTools {
 
     private String handleCallChain(String query, int maxDepth) {
         if (query == null || query.isEmpty()) {
-            return "未找到匹配的节点。";
+            return messages.notFound();
         }
         List<CodeGraphNode> targets = resolveNodes(query);
         if (targets.isEmpty()) {
-            return "未找到匹配 '" + query + "' 的方法节点。";
+            return messages.notFoundQuery(query);
         }
 
         StringBuilder sb = new StringBuilder();
         for (CodeGraphNode target : targets) {
             if (target.getType() != CodeGraphNode.NodeType.METHOD) continue;
-            sb.append("正向调用链 (").append(target.getId()).append("):\n");
+            sb.append(messages.forwardCallChain(target.getId())).append("\n");
             List<CodeGraphNode> chain = index.findCallChain(target.getId(), maxDepth);
             if (chain.isEmpty()) {
-                sb.append("  (无下游调用)\n");
+                sb.append(messages.noDownstreamCalls()).append("\n");
             } else {
                 for (int i = 0; i < chain.size(); i++) {
                     CodeGraphNode n = chain.get(i);
@@ -105,20 +112,20 @@ public class CodeGraphTools {
 
     private String handleReverseChain(String query, int maxDepth) {
         if (query == null || query.isEmpty()) {
-            return "未找到匹配的节点。";
+            return messages.notFound();
         }
         List<CodeGraphNode> targets = resolveNodes(query);
         if (targets.isEmpty()) {
-            return "未找到匹配 '" + query + "' 的方法节点。";
+            return messages.notFoundQuery(query);
         }
 
         StringBuilder sb = new StringBuilder();
         for (CodeGraphNode target : targets) {
             if (target.getType() != CodeGraphNode.NodeType.METHOD) continue;
-            sb.append("反向调用链 (谁调用了 ").append(target.getId()).append("):\n");
+            sb.append(messages.reverseCallChain(target.getId())).append("\n");
             List<CodeGraphNode> chain = index.findReverseCallChain(target.getId(), maxDepth);
             if (chain.isEmpty()) {
-                sb.append("  (无调用方)\n");
+                sb.append(messages.noCallers()).append("\n");
             } else {
                 for (int i = 0; i < chain.size(); i++) {
                     CodeGraphNode n = chain.get(i);
@@ -134,19 +141,19 @@ public class CodeGraphTools {
 
     private String handleImpactAnalysis(String query, int maxDepth) {
         if (query == null || query.isEmpty()) {
-            return "未找到匹配的节点。";
+            return messages.notFound();
         }
         List<CodeGraphNode> targets = resolveNodes(query);
         if (targets.isEmpty()) {
-            return "未找到匹配 '" + query + "' 的节点。";
+            return messages.notFoundQuery(query);
         }
 
         StringBuilder sb = new StringBuilder();
         for (CodeGraphNode target : targets) {
-            sb.append("变更影响范围 (").append(target.getId()).append("):\n");
+            sb.append(messages.impactScope(target.getId())).append("\n");
             List<CodeGraphNode> impacted = index.findImpactScope(target.getId(), maxDepth);
             if (impacted.isEmpty()) {
-                sb.append("  (无受影响节点)\n");
+                sb.append(messages.noImpactedNodes()).append("\n");
             } else {
                 for (int i = 0; i < impacted.size(); i++) {
                     CodeGraphNode n = impacted.get(i);
@@ -163,23 +170,23 @@ public class CodeGraphTools {
 
     private String handleFind(String pattern) {
         if (pattern == null || pattern.isEmpty()) {
-            return "未找到名称匹配的节点。";
+            return messages.notFound();
         }
         List<CodeGraphNode> nodes = index.findByName(pattern);
         if (nodes.isEmpty()) {
-            return "未找到名称匹配 '" + pattern + "' 的节点。";
+            return messages.notFoundQuery(pattern);
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("匹配节点 (").append(nodes.size()).append(" 个):\n");
+        sb.append(messages.matchingNodes(nodes.size())).append("\n");
         for (int i = 0; i < nodes.size(); i++) {
             CodeGraphNode n = nodes.get(i);
             sb.append(i + 1).append(". [").append(nodeTypeLabel(n)).append("] ")
               .append(n.getId()).append("\n");
-            sb.append("   文件: ").append(n.getFilePath())
+            sb.append("   ").append(messages.fileLabel()).append(": ").append(n.getFilePath())
               .append(":").append(n.getLineNumber()).append("\n");
             if (n.getReturnType() != null && !n.getReturnType().isEmpty()) {
-                sb.append("   类型: ").append(n.getReturnType()).append("\n");
+                sb.append("   ").append(messages.typeLabel()).append(": ").append(n.getReturnType()).append("\n");
             }
         }
         return sb.toString();
@@ -202,9 +209,9 @@ public class CodeGraphTools {
 
     private String nodeTypeLabel(CodeGraphNode node) {
         switch (node.getType()) {
-            case CLASS: return "类";
-            case METHOD: return "方法";
-            case FIELD: return "字段";
+            case CLASS: return messages.classLabel();
+            case METHOD: return messages.methodLabel();
+            case FIELD: return messages.fieldLabel();
             default: return "?";
         }
     }

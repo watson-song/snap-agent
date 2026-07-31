@@ -1,6 +1,6 @@
 # SnapAgent Knowledge Search Algorithm Design
 
-> Version: v1.1 | Updated: 2026-07-20
+> Version: v1.2 | Updated: 2026-07-31
 
 ## 1. Architecture Overview
 
@@ -9,42 +9,63 @@ SnapAgent knowledge base uses a three-layer SPI architecture, achieving full dec
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                    VectorStore                           │
-│   (manages all KnowledgeSource, delegates to Retriever)  │
-│   - search(query, topK, minScore) → List<KnowledgeFragment>     │
+│   (manages all documents, delegates to                  │
+│    VectorStoreDocumentRetriever)                        │
+│   - search(query, topK, minScore) → List<Document>       │
 │   - searchWithScores(query, topK, minScore) → List<SearchResult>│
 │   - reload() / size()                                   │
 └──────────────┬───────────────────────────┬──────────────┘
                │                           │
    ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   KnowledgeSource      │   │  KnowledgeSearcher   │
-   │   (knowledge source SPI)│   │  (search algorithm SPI)│
-   │   - load() → List<KF>  │   │  - score(query, KF)  │
-   │   - reload() / type()  │   │    → double [0,1]     │
-   └───────────────────────┘   └──────────────────────┘
+   │   DocumentReader       │   │  DocumentRetriever  │
+   │   (file reader SPI,    │   │  (search algorithm  │
+   │    formerly             │   │   SPI, formerly     │
+   │    KnowledgeSource)    │   │    KnowledgeSearcher)│
+   │   - read(Path) → Docs  │   │  - retrieve(query,  │
+   │   - supportedExtension()│   │      topK) → Docs  │
+   └───────────┬───────────┘   └──────────────────────┘
+               │
+   ┌───────────▼───────────┐
+   │   Chunker              │
+   │   (document chunking   │
+   │    SPI)                │
+   │   - chunk(Document)    │
+   │     → List<Document>   │
+   │   - strategy()         │
+   └───────────────────────┘
 ```
+
+> **Naming note**: In v2.x, `KnowledgeSource` was split into `DocumentReader` + `KnowledgeSourceConfig`, `KnowledgeSearcher` became `DocumentRetriever`, and `KnowledgeFragment` became `Document`. See `docs/glossary.md`.
 
 ### Core Interfaces
 
-**`KnowledgeSearcher`** (core SPI):
+**`DocumentRetriever`** (core SPI, formerly `KnowledgeSearcher`):
 ```java
-public interface KnowledgeSearcher {
-    double score(String query, KnowledgeFragment fragment);
-    // Returns [0.0, 1.0]: 0.0 = no relevance, 1.0 = perfect match
+public interface DocumentRetriever {
+    List<Document> retrieve(String query, int topK);
+    // Replaces KnowledgeSearcher.score(query, fragment); now returns ranked Documents
 }
 ```
 
-**`KnowledgeSource`** (core SPI):
+**`DocumentReader`** (core SPI, formerly `KnowledgeSource`):
 ```java
-public interface KnowledgeSource {
-    List<KnowledgeFragment> load();  // Load knowledge fragments
-    void reload();                    // Hot reload
-    String type();                    // Source type identifier
+public interface DocumentReader {
+    List<Document> read(Path file);     // Read raw documents from file
+    String supportedExtension();         // Supported file extension (e.g. "md")
 }
 ```
 
-**`KnowledgeFragment`** (core, immutable):
+**`Chunker`** (core SPI, ETL chunking):
 ```java
-public final class KnowledgeFragment {
+public interface Chunker {
+    List<Document> chunk(Document document);  // Split document into chunks
+    String strategy();                         // Chunking strategy name (e.g. "heading")
+}
+```
+
+**`Document`** (core, immutable, formerly `KnowledgeFragment`):
+```java
+public final class Document {
     private final String title;
     private final String content;
     private final String source;     // e.g. "business-overview.md:section-2"
@@ -55,7 +76,7 @@ public final class KnowledgeFragment {
 **`SearchResult`** (core, immutable):
 ```java
 public final class SearchResult {
-    private final KnowledgeFragment fragment;
+    private final Document fragment;
     private final double score;
 }
 ```
@@ -72,7 +93,7 @@ public final class SearchResult {
 
 ## 2. Tokenization (SimpleKeywordSearcher)
 
-`SimpleKeywordSearcher` is the default `KnowledgeSearcher` implementation, using a **hybrid tokenization strategy** for mixed Chinese/English text.
+`SimpleKeywordSearcher` is the default `DocumentRetriever` implementation (formerly `KnowledgeSearcher`), using a **hybrid tokenization strategy** for mixed Chinese/English text.
 
 ### 2.1 Tokenization Rules
 
@@ -164,7 +185,7 @@ score = (titleHits × 2 + contentHits) / (queryTokenCount × 2)
 ### 3.2 Scoring Code
 
 ```java
-public double score(String query, KnowledgeFragment fragment) {
+public double score(String query, Document fragment) {
     if (query == null || query.isEmpty() || fragment == null) {
         return 0.0;
     }
@@ -237,7 +258,7 @@ snap-agent:
 
 ```java
 // Bug: hardcoded 0.0
-List<KnowledgeFragment> fragments = vectorStore.search(q, searchTopK, 0.0);
+List<Document> fragments = vectorStore.search(q, searchTopK, 0.0);
 // Fix: use configured minScore
 List<SearchResult> results = vectorStore.searchWithScores(q, searchTopK, minScore);
 ```
@@ -349,17 +370,60 @@ Underlying implementation: `VectorStore.listAll()` returns
 
 ---
 
-## 7. Knowledge Sources
+## 7. Knowledge Sources & ETL Pipeline
 
-### 7.1 MarkdownKnowledgeSource (built-in)
+### 7.1 ETL Pipeline (KnowledgeETLPipeline)
 
-- Splits Markdown by `##` headings; each section becomes a `KnowledgeFragment`
-- H1 title becomes `metadata.category`
-- Supports `classpath:/` and filesystem paths
+`KnowledgeETLPipeline` orchestrates the full knowledge ingestion flow:
 
-### 7.2 Custom Knowledge Source
+```
+DocumentReader.read(file) → Chunker.chunk(doc) → EmbeddingModel.embed(text) → VectorStore.add(docs)
+```
 
-Implement `KnowledgeSource` + `@Component` for auto-discovery (database, external API, Confluence, etc.).
+- **DocumentReader**: Reads file content into raw `Document` list (with metadata)
+- **Chunker**: Splits raw documents into smaller, semantically coherent chunks
+- **EmbeddingModel**: Generates vector embeddings for each chunk (optional; skipped if no EmbeddingModel)
+- **VectorStore**: Persists chunks to the vector store
+- **Failure isolation**: A single chunk write failure only logs a WARN; remaining chunks continue
+
+### 7.2 Built-in Implementations
+
+| SPI | Default Implementation | Description |
+|-----|----------------------|-------------|
+| `DocumentReader` | `MarkdownDocumentReader` | Reads .md files; extracts H1 title as `metadata.category` |
+| `Chunker` | `HeadingChunker` | Splits by `##` headings; files without headings become a single chunk |
+
+### 7.3 Custom Knowledge Source
+
+Implement `DocumentReader` + `@Component` for auto-discovery:
+
+```java
+@Component
+public class PdfDocumentReader implements DocumentReader {
+    @Override
+    public List<Document> read(Path file) {
+        String content = pdfExtractor.extract(file);
+        return Collections.singletonList(new Document(content, metadata));
+    }
+    @Override
+    public String supportedExtension() { return "pdf"; }
+}
+```
+
+Implement `Chunker` for custom chunking strategies:
+
+```java
+@Component
+public class FixedSizeChunker implements Chunker {
+    @Override
+    public List<Document> chunk(Document document) {
+        // Split by fixed character count (e.g. 500 chars per chunk)
+        return splitBySize(document, 500);
+    }
+    @Override
+    public String strategy() { return "fixed-size"; }
+}
+```
 
 ---
 
@@ -370,7 +434,7 @@ Implement `KnowledgeSource` + `@Component` for auto-discovery (database, externa
 | Case-sensitive English | `SnapAgent` ≠ `snapagent` in HashSet matching | Fix planned |
 | No semantic search | Pure keyword overlap, no synonym/understanding | v0.7.2 vector embeddings |
 | No vector embeddings | No embedding similarity search | v0.7.2 |
-| Coarse Chinese segmentation | 2-gram bigrams can't handle domain terms | Custom KnowledgeSearcher |
+| Coarse Chinese segmentation | 2-gram bigrams can't handle domain terms | Custom DocumentRetriever (formerly KnowledgeSearcher) |
 | No relevance feedback | Users can't mark results as useful/useless | v0.7.1 planned |
 
 ---
@@ -379,23 +443,40 @@ Implement `KnowledgeSource` + `@Component` for auto-discovery (database, externa
 
 ### Custom Search Algorithm
 
-Implement `KnowledgeSearcher` interface and register as Spring Bean:
+Implement `DocumentRetriever` interface (formerly `KnowledgeSearcher`) and register as Spring Bean:
 
 ```java
 @Component
-public class SemanticSearcher implements KnowledgeSearcher {
+public class SemanticSearcher implements DocumentRetriever {
     @Override
-    public double score(String query, KnowledgeFragment fragment) {
+    public List<Document> retrieve(String query, int topK) {
         // Use vector embeddings for cosine similarity
         double[] queryVec = embed(query);
-        double[] fragVec = embed(fragment.getContent());
-        return cosineSimilarity(queryVec, fragVec);
+        // ...
+        return topKDocuments;
     }
 }
 ```
 
-Registered via `@ConditionalOnMissingBean` — replaces default `SimpleKeywordSearcher`.
+Registered via `@ConditionalOnMissingBean` — replaces default `VectorStoreDocumentRetriever` (which delegates to `VectorStore.similaritySearch`).
 
 ### Custom Knowledge Source
 
-Implement `KnowledgeSource` interface for any data source (database, Confluence, API, etc.).
+Implement `DocumentReader` (see section 7.3) to read any file format, or implement `Chunker` for custom chunking strategies. Supports loading knowledge from any data source: database, external API, Confluence, etc.
+
+---
+
+## Naming Convention
+
+> v2.x renamed several knowledge subsystem SPIs/classes. See `docs/glossary.md` for the full mapping.
+
+| Old Name (v0.7) | Current Name (v2.x) | Notes |
+|-----------------|---------------------|-------|
+| KnowledgeBase | VectorStore | Renamed in 2.x refactor |
+| KnowledgeFragment | Document | Unified with vector store model |
+| KnowledgeSearcher | DocumentRetriever | RAG pipeline integration |
+| KnowledgeInjector | RetrievalAugmentationAdvisor | Advisor pattern |
+| KnowledgeSource | DocumentReader | Split into file reader SPI (`read(Path)`, `supportedExtension()`) |
+| MarkdownKnowledgeSource | MarkdownDocumentReader + HeadingChunker | ETL pipeline split into Reader + Chunker |
+| SimpleKeywordSearcher | VectorStoreDocumentRetriever | Default DocumentRetriever |
+| SystemPromptExtender | Advisor | Generalized |

@@ -41,6 +41,10 @@ graph TD
         C2["ToolCallbackRegistry<br/>@Tool 方法扫描与路由"]
         C3["Advisor SPI<br/>上下文注入 项目+知识"]
         C4["ChatMemoryRepository<br/>会话历史持久化"]
+        C5["CodeGraphIndex<br/>调用链/影响分析"]
+        C6["CodeGraphHotReloader<br/>WatchService 热重建"]
+        C7["KnowledgeETLPipeline<br/>DocumentReader→Chunker→VectorStore"]
+        C8["SedimentationReviewer<br/>知识沉淀质量门控"]
     end
 
     %% ===== L4 AI 引擎层 =====
@@ -58,6 +62,7 @@ graph TD
         E2[("Redis<br/>缓存只读")]
         E3["File Storage<br/>Skill/会话/Issue JSON"]
         E4[("In-Memory TaskStore<br/>任务状态 每Pod独立")]
+        E5[("H2 File<br/>代码图谱持久化")]
     end
 
     %% ===== L6 基础设施与外部系统 =====
@@ -98,6 +103,12 @@ graph TD
     C2 -.-> F3
     C2 -.-> F4
     BR2 -.-> F5
+    C2 --> C5
+    C5 --> E5
+    C6 -.->|"文件变更触发"| C5
+    B4 --> C7
+    C7 --> E3
+    C8 -.->|"质量门控"| C7
 
     %% ===== Glass Layer Styles (distinct transparent glass per layer) =====
     style Client fill:#3b82f6,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
@@ -112,7 +123,7 @@ graph TD
     class A1,A2,A3 client
     class B1,B2,B3,B4,B5 api
     class BR1,BR2,BR3 bridge
-    class C1,C2,C3,C4 service
+    class C1,C2,C3,C4,C5,C6,C7,C8 service
     class D1,D2,D3 ai
-    class E1,E2,E3,E4 storage
+    class E1,E2,E3,E4,E5 storage
     class F1,F2,F3,F4,F5 external

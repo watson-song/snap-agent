@@ -101,10 +101,10 @@ cn.watsontech.snapagent.core/
 ├── security/     SecurityGateway, PrincipalResolver, UserInfo, AuditStore, SecurityAuditLogger
 ├── advisor/      Advisor (取代 SystemPromptExtender，提供上下文注入 + 拦截)
 ├── memory/       ChatMemory, ChatMemoryRepository (会话历史 SPI)
-├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer (RAG 管道命名类)
-├── vectorstore/  VectorStore, EmbeddingModel (向量存储 SPI)
+├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer, DocumentReader, Chunker, QueryAugmenter (RAG 管道 + ETL SPI)
+├── vectorstore/  VectorStore, EmbeddingModel, Document (向量存储 SPI + 值对象)
 ├── codegraph/    CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphNode, CodeGraphEdge
-├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner
+├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner, SedimentationReviewer
 ├── cost/         CostTracker, CostStore, CostRecord, CostSummary
 ├── workflow/     WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus (引擎实现可插拔)
 └── patrol/       AlertConverger, AnomalyEvent, AnomalyEventListener, PatrolScheduler, PatrolTask, BugfixSuggester
@@ -129,9 +129,9 @@ cn.watsontech.snapagent.boot2x/
 │                 CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
 │                 TimeRangeParser, ToolCallbackRegistry, mcp/McpBootstrap, mcp/McpToolCallback
 ├── advisor/      ProjectContextAdvisor, KnowledgeAdvisor (取代 ProjectContextExtender / KnowledgeInjector)
-├── knowledge/    MarkdownKnowledgeSource, VectorStoreDocumentRetriever, IdentityQueryTransformer
-├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphTool
-├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationExtractor,
+├── knowledge/    MarkdownDocumentReader, HeadingChunker, KnowledgeETLPipeline, KnowledgeSedimentationService, VectorStoreDocumentRetriever, IdentityQueryTransformer
+├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, H2CodeGraphIndex, AsyncCodeGraphIndex, CodeGraphHotReloader, CodeGraphTools, CodeGraphCli
+├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationService, AcceptAllSedimentationReviewer,
 │                 TemplateSolutionSuggester, SimpleVerificationRunner
 ├── cost/         FileCostStore, BudgetEnforcer, DefaultCostTracker, CostTrackingLlmClient, CostSummaryService, CostCalculator
 ├── workflow/     YamlWorkflowLoader, SimpleWorkflowEngine
@@ -299,26 +299,38 @@ public interface PrincipalResolver {
 - **权限检查**：`hasPermission` 遍历 `GrantedAuthority` 做精确匹配（非通配符）
 - **扩展点**：宿主声明自定义 `SecurityGateway` Bean 即可替换（`@ConditionalOnMissingBean`）
 
-### 3.5 RAG 管道 — VectorStore / VectorStoreDocumentRetriever / IdentityQueryTransformer
+### 3.5 RAG 管道 — VectorStore / DocumentReader / Chunker / VectorStoreDocumentRetriever
 
-知识检索由 `VectorStore`、`EmbeddingModel` 两个 SPI + `VectorStoreDocumentRetriever`、`IdentityQueryTransformer` 两个命名类组成 RAG 管道：
+知识检索由 `VectorStore`、`EmbeddingModel` 两个 SPI + `DocumentReader`、`Chunker`、`VectorStoreDocumentRetriever`、`IdentityQueryTransformer` 组成 RAG 管道：
 
 ```java
 public interface VectorStore {
-    List<KnowledgeFragment> search(String query, int topK);  // 向量相似度检索
-    void add(List<KnowledgeFragment> fragments);             // 写入向量
+    List<Document> search(String query, int topK);  // 向量相似度检索
+    void add(List<Document> documents);             // 写入向量（旧名 KnowledgeFragment）
     void reload();                                            // 重新加载
-    int size();                                               // 缓存片段总数
+    int size();                                               // 缓存文档总数
 }
 
 public interface EmbeddingModel {
     float[] embed(String text);  // 文本 → 向量嵌入
 }
+
+public interface DocumentReader {
+    List<Document> read(Path file);     // 从文件读取原始文档
+    String supportedExtension();         // 支持的文件扩展名 (如 "md")
+}
+
+public interface Chunker {
+    List<Document> chunk(Document document);  // 文档分块
+    String strategy();                         // 分块策略名 (如 "heading")
+}
 ```
 
-- **默认实现**：`VectorStoreDocumentRetriever`（基于 Markdown 文档分段 + 向量检索）、`IdentityQueryTransformer`（原样透传用户查询）
-- **管道流程**：`IdentityQueryTransformer` 变换查询 → `EmbeddingModel` 嵌入 → `VectorStoreDocumentRetriever` 检索 → 返回 `KnowledgeFragment` 列表
-- **扩展点**：自定义 `VectorStore`（Pinecone/Milvus/PGVector）或 `EmbeddingModel`（OpenAI/智谱 Embedding）
+- **ETL 管道**：`KnowledgeETLPipeline` 编排 `DocumentReader → Chunker → EmbeddingModel → VectorStore` 流程，支持单文件处理和目录批量导入
+- **默认实现**：`MarkdownDocumentReader`（读取 .md 文件）、`HeadingChunker`（按 `##` 标题分块）、`VectorStoreDocumentRetriever`（关键词检索）、`IdentityQueryTransformer`（原样透传用户查询）
+- **检索流程**：`IdentityQueryTransformer` 变换查询 → `EmbeddingModel` 嵌入 → `VectorStoreDocumentRetriever` 检索 → 返回 `Document` 列表（旧名 `KnowledgeFragment`，v0.7）
+- **Token 估算**：`DefaultQueryAugmenter.estimateTokens()` 提供 CJK 感知的 token 估算（中文字符 1:1，英文单词 1:1），替代粗略的 `chars / 3.5` 启发式
+- **扩展点**：自定义 `VectorStore`（Pinecone/Milvus/PGVector）、`EmbeddingModel`（OpenAI/智谱 Embedding）、`DocumentReader`（PDF/HTML）、`Chunker`（固定大小/句子分块）
 
 ### 3.6 CodeGraph / CodeGraphBuilder / CodeGraphIndex — 代码知识图谱
 
@@ -337,13 +349,20 @@ public interface CodeGraphIndex {
     List<CodeGraphNode> findImpactScope(String nodeId, int maxDepth);      // 影响范围分析
     CodeGraphNode getNode(String id);
     int nodeCount();
+    void rebuild(CodeGraphBuilder builder);  // 热重建（WatchService 触发）
 }
 ```
 
-- **默认实现**：`SimpleCodeGraphBuilder`（正则解析 Java 源码）、`InMemoryCodeGraphIndex`（双向邻接表）
+- **默认实现**：
+  - `SimpleCodeGraphBuilder`（正则解析 Java 源码）
+  - `InMemoryCodeGraphIndex`（双向邻接表，纯内存，默认）
+  - `H2CodeGraphIndex`（H2 文件持久化，支持跨进程重启加载，适用于 K8s/CI 部署）
+  - `AsyncCodeGraphIndex`（异步构建包装器，daemon 线程构建不阻塞启动）
+  - `CodeGraphHotReloader`（WatchService 监听 `.java` 变更，自动触发 `rebuild()`）
 - **节点类型**：CLASS / METHOD / FIELD
 - **边类型**：CALLS / IMPLEMENTS / EXTENDS / DEPENDS_ON / OVERRIDES / REFERENCES
-- **扩展点**：实现 `CodeGraphBuilder` 用 JavaParser AST 解析；实现 `CodeGraphIndex` 用 SQLite/H2 持久化
+- **持久化模式**：`persistence=memory`（默认，纯内存）或 `persistence=h2`（H2 文件持久化）
+- **CI/CD 集成**：`CodeGraphCli` 提供 CLI 入口，CI 阶段预构建 H2 文件并打入 Docker 镜像，K8s 启动时直接加载（详见集成指南）
 
 ### 3.7 IssueStore / IssueTracker — 问题闭环
 
@@ -781,7 +800,7 @@ public class SnapAgentProperties {
     private ConfigRead configRead; // 配置读取
     private Patrol patrol;      // 巡检 (enabled, schedule)
     private Knowledge knowledge; // 知识库 (enabled, sources, max-fragments, min-score)
-    private CodeGraph codeGraph; // 代码图谱 (enabled, scan-packages, max-depth)
+    private CodeGraph codeGraph; // 代码图谱 (enabled, scan-packages, max-depth, persistence, h2-url, hot-reload-enabled)
     private IssueClosure issueClosure; // 问题闭环 (enabled, system-user-id)
     private Cost cost;          // 成本核算 (enabled, pricing, budgets)
     private Workflows workflows; // 工作流 (enabled, dir)
@@ -807,7 +826,7 @@ public class SnapAgentProperties {
 | 配置读取 | `snap-agent.config-read` | false | `@ConditionalOnProperty` |
 | 巡检 | `snap-agent.patrol` | false | `@ConditionalOnProperty` |
 | 知识库 | `snap-agent.knowledge` | false | `@ConditionalOnProperty` |
-| 代码图谱 | `snap-agent.code-graph` | false | `@ConditionalOnProperty` + `@ConditionalOnBean(CodePathGuard)` |
+| 代码图谱 | `snap-agent.code-graph` | false | `@ConditionalOnProperty` + `@ConditionalOnBean(CodePathGuard)`，`persistence=h2` 时启用 H2 持久化，`hot-reload-enabled=true` 时启用热重建 |
 | 问题闭环 | `snap-agent.issue-closure` | false | `@ConditionalOnProperty` |
 | 成本核算 | `snap-agent.cost` | false | `@ConditionalOnProperty` |
 | 工作流 | `snap-agent.workflows` | false | `@ConditionalOnProperty` |
@@ -889,7 +908,7 @@ public GraphExecutor graphExecutor(
 | v0.6 | 平台化 | DataSourceRegistry (多环境), SkillMeta.requiredPermission (skill 级权限), snap-agent-client REST SDK |
 | v0.7 | 嵌入式业务知识库 | VectorStore, EmbeddingModel, VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeAdvisor (Advisor 多 advisor) |
 | v0.8 | 代码知识图谱 | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphTool |
-| v0.9 | 问题问答闭环 | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
+| v0.9 | 问题问答闭环 | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationService, SedimentationReviewer |
 | v1.0 | 工作流 + 成本核算 + 注解化工具 | WorkflowDefinition, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage(), @Tool/@ToolParam, ToolCallback |
 | v1.1 | 主动监控 SPI 化 + 锚点问答 | PatrolReportStore 接口化 (InMemoryPatrolReportStore), PatrolLockProvider (多 Pod 协调), AlertPushChannel (Webhook+Email 默认实现), VectorStore.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (页面区域锚点问答 + 智能技能路由 + 预摘要缓存) |
 | v1.2 | Graph runtime + 架构重构 | StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys, MessagePartitioner, AbstractStreamingLlmClient, 8 领域 @Configuration 拆分, ChatMemory/ChatMemoryRepository, CheckpointStore, StructuredOutputConverter |
@@ -905,7 +924,7 @@ public GraphExecutor graphExecutor(
 | 仅内存状态 | TaskStore 基于 ConcurrentHashMap，进程重启丢失所有任务和 transcript |
 | Java 8 + Spring Boot 2.x | 使用 javax.servlet，不支持 Spring Boot 3.x (jakarta.servlet) |
 | 向量搜索需配置 EmbeddingModel | 默认 RAG 管道使用关键词检索；接入 EmbeddingModel 后才有向量语义检索 |
-| 正则解析代码图谱 | SimpleCodeGraphBuilder 基于正则，注释可能假阳性，不区分重载，lambda 可能遗漏 |
+| 正则解析代码图谱 | SimpleCodeGraphBuilder 基于正则，注释可能假阳性，不区分重载，lambda 可能遗漏；H2 持久化模式下可通过 CI 预构建解决 K8s 无源码问题 |
 | 无 Spring Cloud 依赖 | 跨 Pod 路由自实现 K8s API/DNS 探测，不依赖服务发现框架 |
 | SSE 限制 | EventSource 不支持自定义 header，SSE 端点需 permitAll + token query param |
 | 精确权限匹配 | SpringSecurityAdapter.hasPermission() 精确匹配 authority，不支持通配符/角色继承 |
@@ -922,9 +941,12 @@ public GraphExecutor graphExecutor(
 | `Advisor` | ProjectContextAdvisor / KnowledgeAdvisor | 实现 `Advisor` + `@Component`（自定义上下文注入与拦截） |
 | `VectorStore` | VectorStoreDocumentRetriever | 实现 `VectorStore` + `@Component`（Pinecone/Milvus/PGVector） |
 | `EmbeddingModel` | 内置关键词匹配（无向量） | 实现 `EmbeddingModel` + `@Component`（OpenAI/智谱 Embedding） |
+| `DocumentReader` | MarkdownDocumentReader | 实现 `DocumentReader` + `@Component`（PDF/HTML 等格式） |
+| `Chunker` | HeadingChunker | 实现 `Chunker` + `@Component`（固定大小/句子分块等策略） |
+| `SedimentationReviewer` | AcceptAllSedimentationReviewer | 实现 `SedimentationReviewer`（LLM 质量检查/人工审核门控） |
 | `ChatMemoryRepository` | FileChatMemoryRepository | 实现 `ChatMemoryRepository` + `@Component`（数据库存储） |
 | `CodeGraphBuilder` | SimpleCodeGraphBuilder | 实现 `CodeGraphBuilder` + `@Component`（JavaParser AST） |
-| `CodeGraphIndex` | InMemoryCodeGraphIndex | 实现 `CodeGraphIndex` + `@Component`（SQLite/H2 持久化） |
+| `CodeGraphIndex` | InMemoryCodeGraphIndex / H2CodeGraphIndex | 实现 `CodeGraphIndex` + `@Component`（自定义持久化后端） |
 | `IssueStore` | FileIssueStore | 实现 `IssueStore` + `@Component`（数据库存储） |
 | `IssueTracker` | NoopIssueTracker | 实现 `IssueTracker` + `@Component`（Jira/GitHub Issues） |
 | `CostStore` | FileCostStore | 实现 `CostStore` + `@Component`（数据库存储） |

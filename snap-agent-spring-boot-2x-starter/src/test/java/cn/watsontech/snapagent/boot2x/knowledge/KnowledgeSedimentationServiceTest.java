@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.knowledge;
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
 import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.SedimentationReviewer;
 import cn.watsontech.snapagent.core.issue.SolutionOption;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.vectorstore.Document;
@@ -148,5 +149,41 @@ class KnowledgeSedimentationServiceTest {
         service.sediment(issue);
 
         assertThat(store.size()).isEqualTo(1);
+    }
+
+    // P1-7: SedimentationReviewer rejects → skip
+    @Test
+    @DisplayName("reviewer rejects → 不写入 VectorStore + 不调用 embed")
+    void shouldSkipWhenReviewerRejects() {
+        SedimentationReviewer rejectingReviewer = mock(SedimentationReviewer.class);
+        when(rejectingReviewer.review(any(Document.class), any(IssueClosure.class))).thenReturn(false);
+        when(rejectingReviewer.name()).thenReturn("reject-all");
+
+        service = new KnowledgeSedimentationService(store, embeddingModel, rejectingReviewer);
+        IssueClosure issue = createIssue("issue-reject", "query", "root cause", "solution");
+
+        service.sediment(issue);
+
+        assertThat(store.size()).isEqualTo(0);
+        verify(rejectingReviewer).review(any(Document.class), any(IssueClosure.class));
+        verify(embeddingModel, never()).embed(anyString());
+    }
+
+    // P1-7: SedimentationReviewer accepts → sediment normally
+    @Test
+    @DisplayName("reviewer accepts → 正常写入 VectorStore")
+    void shouldSedimentWhenReviewerAccepts() {
+        SedimentationReviewer acceptingReviewer = mock(SedimentationReviewer.class);
+        when(acceptingReviewer.review(any(Document.class), any(IssueClosure.class))).thenReturn(true);
+        when(acceptingReviewer.name()).thenReturn("accept-all");
+
+        service = new KnowledgeSedimentationService(store, embeddingModel, acceptingReviewer);
+        IssueClosure issue = createIssue("issue-accept", "query", "root cause", "solution");
+
+        service.sediment(issue);
+
+        assertThat(store.size()).isEqualTo(1);
+        verify(acceptingReviewer).review(any(Document.class), any(IssueClosure.class));
+        verify(embeddingModel).embed(anyString());
     }
 }

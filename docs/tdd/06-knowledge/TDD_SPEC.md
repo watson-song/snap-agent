@@ -912,6 +912,9 @@ Mock: VectorStore(匿名实现), EmbeddingModel(lambda), QueryTransformer/Docume
 - `snap-agent-spring-boot-2x-starter/.../knowledge/` (KnowledgeETLPipeline, KnowledgeSedimentationService — 2.x 新增)
 
 ### 12.3 术语表
+
+> 完整命名映射见 `docs/glossary.md`。
+
 | 术语 | 定义 |
 |------|------|
 | VectorStore | 向量库 SPI (add/delete/similaritySearch)，替代旧 KnowledgeBase |

@@ -336,7 +336,7 @@ curl -u user:pass 'http://localhost:8080/snap-agent/knowledge/search?q=database'
 
 ### 5.4 Adding knowledge
 
-Drop `.md` files into `snap-agent.knowledge.sources[].dir` (default `classpath:/docs/knowledge/`). Each `##` heading's content becomes one `KnowledgeFragment`; the H1 heading becomes `metadata.category`; a file without `##` is treated as one fragment. After editing, call `VectorStore.reload()` or restart.
+Drop `.md` files into `snap-agent.knowledge.sources[].dir` (default `classpath:/docs/knowledge/`). Each `##` heading's content becomes one `Document` (formerly `KnowledgeFragment`); the H1 heading becomes `metadata.category`; a file without `##` is treated as one fragment. After editing, call `VectorStore.reload()` or restart.
 
 ```yaml
 snap-agent:

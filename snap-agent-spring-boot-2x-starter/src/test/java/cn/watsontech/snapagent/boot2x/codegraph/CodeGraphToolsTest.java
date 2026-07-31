@@ -186,4 +186,26 @@ class CodeGraphToolsTest {
         ToolResult result = findByName("find").execute(args(""), null);
         assertThat(result.getContent()).contains("未找到");
     }
+
+    // ---- P2-18: i18n support — English messages ----
+
+    @Test
+    void shouldReturnEnglishMessagesWhenConfigured() {
+        CodeGraphTools englishTools = new CodeGraphTools(index, 5, 3, new EnglishCodeGraphMessages());
+        ToolCallback[] englishCallbacks = ToolCallbacks.from(englishTools);
+
+        ToolCallback callChainCb = null;
+        for (ToolCallback cb : englishCallbacks) {
+            if (cb.getName().equals("call_chain")) {
+                callChainCb = cb;
+                break;
+            }
+        }
+        assertThat(callChainCb).isNotNull();
+
+        ToolResult result = callChainCb.execute(args("com.test.A#a()"), null);
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).contains("Forward call chain");
+        assertThat(result.getContent()).doesNotContain("正向调用链");
+    }
 }

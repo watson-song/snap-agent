@@ -1458,6 +1458,32 @@ public class SnapAgentProperties {
         /** Maximum depth for impact analysis queries. */
         private int maxImpactDepth = 3;
 
+        /**
+         * Persistence mode: {@code memory} (default) or {@code h2}.
+         * When {@code h2}, the code graph is persisted to an H2 file database
+         * so it survives process restarts. In k8s/CI deployments, the H2 file
+         * can be pre-built and baked into the image.
+         */
+        private String persistence = "memory";
+
+        /**
+         * H2 JDBC URL for persistent code graph. Only used when {@code persistence=h2}.
+         * Default: {@code jdbc:h2:file:./data/codegraph} (relative to working dir).
+         * Use {@code jdbc:h2:mem:snapagent-codegraph} for in-memory (non-persistent).
+         */
+        private String h2Url = "jdbc:h2:file:./data/codegraph";
+
+        /**
+         * Whether to enable hot reload via WatchService. When true, a daemon
+         * thread watches the project source root for {@code .java} file changes
+         * and rebuilds the graph incrementally. Only effective when the source
+         * tree is available (local development).
+         */
+        private boolean hotReloadEnabled = false;
+
+        /** Poll interval in ms for the hot reload watch service. */
+        private long hotReloadPollMs = 2000;
+
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public List<String> getScanPackages() { return scanPackages; }
@@ -1466,6 +1492,14 @@ public class SnapAgentProperties {
         public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
         public int getMaxImpactDepth() { return maxImpactDepth; }
         public void setMaxImpactDepth(int maxImpactDepth) { this.maxImpactDepth = maxImpactDepth; }
+        public String getPersistence() { return persistence; }
+        public void setPersistence(String persistence) { this.persistence = persistence; }
+        public String getH2Url() { return h2Url; }
+        public void setH2Url(String h2Url) { this.h2Url = h2Url; }
+        public boolean isHotReloadEnabled() { return hotReloadEnabled; }
+        public void setHotReloadEnabled(boolean hotReloadEnabled) { this.hotReloadEnabled = hotReloadEnabled; }
+        public long getHotReloadPollMs() { return hotReloadPollMs; }
+        public void setHotReloadPollMs(long hotReloadPollMs) { this.hotReloadPollMs = hotReloadPollMs; }
     }
 
     /**

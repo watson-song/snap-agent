@@ -621,18 +621,18 @@
                 <div class="feature-icon">📖</div>
                 <h3 data-lang="zh">业务知识库</h3>
                 <h3 data-lang="en" style="display:none">Business Knowledge Base</h3>
-                <p data-lang="zh">Markdown 文件按 ## 标题分段，混合中英文分词（Latin + CJK 2-gram），相关度评分 + minScore 阈值。RetrievalAugmentationAdvisor (order=200) 编排 3 阶段 RAG 管线：QueryTransformer 改写查询 → DocumentRetriever 向量检索 topK → QueryAugmenter 格式化为 Markdown。检索结果注入 system prompt 的 &lt;retrieved_facts&gt; 块（Layer 3），与 user message（Layer 2）独立分离。</p>
-                <p data-lang="en" style="display:none">Markdown files split by ## headings, hybrid tokenization (Latin + CJK 2-gram), relevance scoring + minScore threshold. RetrievalAugmentationAdvisor (order=200) orchestrates a 3-stage RAG pipeline: QueryTransformer rewrites query → DocumentRetriever vector search topK → QueryAugmenter formats as Markdown. Results injected into system prompt's &lt;retrieved_facts&gt; block (Layer 3), separated from user message (Layer 2).</p>
-                <div class="feature-meta">v0.7 · VectorStore + EmbeddingModel SPI + RAG Advisor (order=200)</div>
+                <p data-lang="zh">ETL 管道（DocumentReader → Chunker → EmbeddingModel → VectorStore）支持可插拔文件格式和分块策略。Markdown 文件按 ## 标题分段，混合中英文分词（Latin + CJK 2-gram），相关度评分 + minScore 阈值。RetrievalAugmentationAdvisor (order=200) 编排 3 阶段 RAG 管线：QueryTransformer 改写查询 → DocumentRetriever 向量检索 topK → QueryAugmenter 格式化为 Markdown。检索结果注入 system prompt 的 &lt;retrieved_facts&gt; 块（Layer 3），与 user message（Layer 2）独立分离。</p>
+                <p data-lang="en" style="display:none">ETL pipeline (DocumentReader → Chunker → EmbeddingModel → VectorStore) supports pluggable file formats and chunking strategies. Markdown files split by ## headings, hybrid tokenization (Latin + CJK 2-gram), relevance scoring + minScore threshold. RetrievalAugmentationAdvisor (order=200) orchestrates a 3-stage RAG pipeline: QueryTransformer rewrites query → DocumentRetriever vector search topK → QueryAugmenter formats as Markdown. Results injected into system prompt's &lt;retrieved_facts&gt; block (Layer 3), separated from user message (Layer 2).</p>
+                <div class="feature-meta">v0.7 · VectorStore + EmbeddingModel + DocumentReader + Chunker SPI · RAG Advisor (order=200)</div>
             </div>
 
             <div class="feature-card c-blue">
                 <div class="feature-icon">🗺️</div>
                 <h3 data-lang="zh">代码知识图谱</h3>
                 <h3 data-lang="en" style="display:none">Code Knowledge Graph</h3>
-                <p data-lang="zh">扫描 Java 源码构建调用图谱：调用链 / 反向调用链 / 影响范围分析。LLM 不再"瞎猜"，而是沿着真实调用边追溯。</p>
-                <p data-lang="en" style="display:none">Scans Java sources to build a call graph: call chain / reverse chain / impact analysis. The LLM traces real call edges instead of guessing.</p>
-                <div class="feature-meta">v0.3 · CodeGraph SPI</div>
+                <p data-lang="zh">扫描 Java 源码构建调用图谱：调用链 / 反向调用链 / 影响范围分析。LLM 不再"瞎猜"，而是沿着真实调用边追溯。支持 H2 文件持久化（CI 预构建 + K8s 秒级加载）和 WatchService 热重建。</p>
+                <p data-lang="en" style="display:none">Scans Java sources to build a call graph: call chain / reverse chain / impact analysis. The LLM traces real call edges instead of guessing. Supports H2 file persistence (CI pre-build + K8s instant load) and WatchService hot reload.</p>
+                <div class="feature-meta">v0.3 · CodeGraph SPI · H2 持久化 + 热重建</div>
             </div>
 
             <div class="feature-card c-purple">
@@ -648,9 +648,9 @@
                 <div class="feature-icon">🐛</div>
                 <h3 data-lang="zh">问题闭环</h3>
                 <h3 data-lang="en" style="display:none">Issue Closure Loop</h3>
-                <p data-lang="zh">诊断 → 建议方案 → 创建外部 Issue → 修复 → 验证 → 关闭 → 知识沉淀。每次闭环都把经验回灌到知识库，越用越聪明。</p>
-                <p data-lang="en" style="display:none">Diagnose → suggest → create external issue → fix → verify → close → sediment knowledge. Each loop feeds lessons back into the knowledge base.</p>
-                <div class="feature-meta">v0.9 · IssueStore / IssueTracker SPI</div>
+                <p data-lang="zh">诊断 → 建议方案 → 创建外部 Issue → 修复 → 验证 → 关闭 → 知识沉淀。SedimentationReviewer 质量门控确保只有高质量经验进入知识库。每次闭环都把经验回灌到知识库，越用越聪明。</p>
+                <p data-lang="en" style="display:none">Diagnose → suggest → create external issue → fix → verify → close → sediment knowledge. SedimentationReviewer quality gate ensures only high-quality lessons enter the knowledge base. Each loop feeds lessons back into the knowledge base.</p>
+                <div class="feature-meta">v0.9 · IssueStore / IssueTracker / SedimentationReviewer SPI</div>
             </div>
 
             <div class="feature-card c-orange">

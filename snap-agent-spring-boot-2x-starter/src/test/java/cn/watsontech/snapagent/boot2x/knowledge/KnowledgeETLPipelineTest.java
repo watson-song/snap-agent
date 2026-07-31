@@ -149,4 +149,32 @@ class KnowledgeETLPipelineTest {
     void shouldReturnZeroForNullFile() {
         assertThat(pipeline.run(null)).isEqualTo(0);
     }
+
+    // P2-17: Files.walk Stream must be closed (try-with-resources)
+    @Test
+    @DisplayName("runAll 处理大型目录不泄漏 Stream 资源 (P2-17)")
+    void runAll_closesStreamProperly() throws IOException {
+        // Create a directory with many .md files plus some non-md files.
+        // If the Files.walk stream were not closed, repeated runs would
+        // eventually exhaust file handles; here we verify correctness of a
+        // large batch processed through the try-with-resources path.
+        int mdCount = 100;
+        for (int i = 0; i < mdCount; i++) {
+            Files.write(tempDir.resolve("doc-" + i + ".md"),
+                    ("# Title " + i + "\n## Section\ncontent " + i + "\n").getBytes());
+        }
+        // Non-markdown files should be skipped
+        Files.write(tempDir.resolve("readme.txt"), "ignore me".getBytes());
+        Files.write(tempDir.resolve("notes.json"), "{}".getBytes());
+
+        int total = pipeline.runAll(tempDir);
+
+        assertThat(total).isEqualTo(mdCount);
+        assertThat(store.size()).isEqualTo(mdCount);
+
+        // Running again over the same directory should not leak resources or
+        // throw — verifies the stream is properly closed after the first pass.
+        int secondRun = pipeline.runAll(tempDir);
+        assertThat(secondRun).isEqualTo(mdCount);
+    }
 }

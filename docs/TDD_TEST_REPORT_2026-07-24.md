@@ -59,7 +59,7 @@ Total: 1686 tests, 0 failures, 0 errors, 4 skipped
 |---|---------|------|------|---------|
 | 15 | `shouldKeepStatusUnchangedWhenNoopTrackerReturnsNull` | IssueClosureServiceTest.java | 08 | NoopIssueTracker.createIssue 返回 null → 不抛异常, externalIssueId=null |
 | 16 | `shouldCallRateLimiterWithResolvedUserIdOnApiAccess` | SnapAgentControllerSecurityTest.java | 10 | PrincipalResolver 返回 "user-001" → RateLimiter.tryAcquire("user-001") 被调用 + audit 记录 userId |
-| 17 | `shouldCreateKnowledgeInjectorWhenKnowledgeEnabled` | SnapAgentAutoConfigurationTest.java | 11 | knowledge.enabled=true → KnowledgeBase + KnowledgeInjector (SystemPromptExtender) bean 均创建 |
+| 17 | `shouldCreateKnowledgeInjectorWhenKnowledgeEnabled` | SnapAgentAutoConfigurationTest.java | 11 | knowledge.enabled=true → KnowledgeBase + KnowledgeInjector (SystemPromptExtender) bean 均创建 (now VectorStore + RetrievalAugmentationAdvisor + Advisor) |
 | 18 | `shouldCompleteFullInjectionLifecycle` | SnapAgentControllerInjectTest.java | 05 | E2E: 首次注入 cached=false → 同用户 cached=true → 不同用户 cached=false |
 
 ### 2.5 E2E 测试 (2 个)

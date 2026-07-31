@@ -57,6 +57,9 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
     private static final Pattern PACKAGE_PATTERN =
             Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
 
+    private static final Pattern IMPORT_PATTERN =
+            Pattern.compile("^\\s*import\\s+(?:static\\s+)?([\\w.]+\\.(\\w+))(?:\\s*;.*)?$", Pattern.MULTILINE);
+
     private static final Pattern CLASS_PATTERN =
             Pattern.compile("(?:public|protected|private)?\\s*(?:abstract\\s+)?(?:final\\s+)?"
                     + "(class|interface|enum)\\s+(\\w+)"
@@ -104,23 +107,37 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         }
 
         Path root = pathGuard.getProjectRoot();
-        List<CodeGraphNode> nodes = new ArrayList<CodeGraphNode>();
-        List<CodeGraphEdge> edges = new ArrayList<CodeGraphEdge>();
 
-        // Map from className → ClassNode ID for cross-referencing
-        Map<String, String> classNameToId = new HashMap<String, String>();
-
+        List<Path> javaFiles = new ArrayList<Path>();
         try (Stream<Path> stream = Files.walk(root)) {
-            List<Path> javaFiles = new ArrayList<Path>();
             stream.filter(Files::isRegularFile)
                     .filter(p -> p.toString().toLowerCase().endsWith(".java"))
                     .forEach(javaFiles::add);
-
-            for (Path javaFile : javaFiles) {
-                parseFile(javaFile, root, nodes, edges, classNameToId);
-            }
         } catch (IOException e) {
             log.error("Failed to walk project root for code graph: {}", e.getMessage());
+            return new CodeGraph(new ArrayList<CodeGraphNode>(), new ArrayList<CodeGraphEdge>());
+        }
+
+        // Parse files in parallel — each thread accumulates into its own ParseResult,
+        // then results are merged on the calling thread to avoid shared-state races.
+        final List<ParseResult> results = new ArrayList<ParseResult>();
+        final Path rootFinal = root;
+        javaFiles.parallelStream().forEach(javaFile -> {
+            ParseResult result = new ParseResult();
+            parseFile(javaFile, rootFinal, result.nodes, result.edges, result.classNameToId);
+            synchronized (results) {
+                results.add(result);
+            }
+        });
+
+        // Merge per-file results into a single graph
+        List<CodeGraphNode> nodes = new ArrayList<CodeGraphNode>();
+        List<CodeGraphEdge> edges = new ArrayList<CodeGraphEdge>();
+        Map<String, String> classNameToId = new HashMap<String, String>();
+        for (ParseResult r : results) {
+            nodes.addAll(r.nodes);
+            edges.addAll(r.edges);
+            classNameToId.putAll(r.classNameToId);
         }
 
         log.info("SimpleCodeGraphBuilder built graph: {} nodes, {} edges (from {} files)",
@@ -152,6 +169,15 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
             packageName = pkgMatcher.group(1);
         }
 
+        // Extract imports for cross-package type resolution
+        Map<String, String> imports = new HashMap<String, String>();
+        Matcher importMatcher = IMPORT_PATTERN.matcher(content);
+        while (importMatcher.find()) {
+            String fqn = importMatcher.group(1);
+            String simpleName = importMatcher.group(2);
+            imports.put(simpleName, fqn);
+        }
+
         // Filter by scan-packages
         if (!scanPackages.isEmpty() && !packageName.isEmpty()) {
             boolean matches = false;
@@ -175,14 +201,14 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
 
             // EXTENDS edge
             if (cls.extendsClass != null && !cls.extendsClass.isEmpty()) {
-                String parentId = resolveClassName(cls.extendsClass, packageName);
+                String parentId = resolveClassName(cls.extendsClass, packageName, imports);
                 edges.add(new CodeGraphEdge(classId, parentId,
                         CodeGraphEdge.EdgeType.EXTENDS, relativePath + ":" + cls.lineNumber));
             }
             // IMPLEMENTS edges
             if (cls.implementsList != null) {
                 for (String impl : cls.implementsList) {
-                    String implId = resolveClassName(impl.trim(), packageName);
+                    String implId = resolveClassName(impl.trim(), packageName, imports);
                     edges.add(new CodeGraphEdge(classId, implId,
                             CodeGraphEdge.EdgeType.IMPLEMENTS, relativePath + ":" + cls.lineNumber));
                 }
@@ -198,7 +224,7 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
                 bodyEnd = classes.get(i + 1).matchStart;
             }
             parseMethodsAndFields(content, cls, bodyEnd, relativePath, packageName,
-                    nodes, edges, classNameToId);
+                    nodes, edges, classNameToId, imports);
         }
     }
 
@@ -231,7 +257,8 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
                                         String filePath, String packageName,
                                         List<CodeGraphNode> nodes,
                                         List<CodeGraphEdge> edges,
-                                        Map<String, String> classNameToId) {
+                                        Map<String, String> classNameToId,
+                                        Map<String, String> imports) {
         // Get the class body (from class declaration end to next class or EOF)
         int bodyStart = cls.matchEnd;
 
@@ -261,7 +288,7 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
                     if (param.isEmpty()) continue;
                     String paramType = extractType(param);
                     if (paramType != null && !isJavaBuiltin(paramType)) {
-                        String depId = resolveClassName(paramType, packageName);
+                        String depId = resolveClassName(paramType, packageName, imports);
                         edges.add(new CodeGraphEdge(cls.fqcn, depId,
                                 CodeGraphEdge.EdgeType.DEPENDS_ON,
                                 filePath + ":" + lineNumber));
@@ -310,7 +337,7 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
 
             // DEPENDS_ON edge from class to field type
             if (!isJavaBuiltin(fieldType)) {
-                String depId = resolveClassName(fieldType, packageName);
+                String depId = resolveClassName(fieldType, packageName, imports);
                 edges.add(new CodeGraphEdge(cls.fqcn, depId,
                         CodeGraphEdge.EdgeType.DEPENDS_ON,
                         filePath + ":" + lineNumber));
@@ -341,13 +368,18 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         return content.length();
     }
 
-    private String resolveClassName(String type, String packageName) {
+    private String resolveClassName(String type, String packageName, Map<String, String> imports) {
         // Strip generics and array brackets
         String cleaned = type.replaceAll("<[^>]+>", "").replaceAll("\\[\\]", "").trim();
         if (cleaned.contains(".")) {
             return cleaned;
         }
-        // Simple name → assume same package
+        // Check imports first for cross-package type resolution
+        String resolved = imports.get(cleaned);
+        if (resolved != null) {
+            return resolved;
+        }
+        // Fallback: assume same package
         if (packageName.isEmpty()) {
             return cleaned;
         }
@@ -434,5 +466,16 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
             this.matchStart = matchStart;
             this.matchEnd = matchEnd;
         }
+    }
+
+    /**
+     * Per-file accumulation buffer used by the parallel build phase. Each
+     * worker thread populates its own {@code ParseResult}; the results are
+     * merged on the calling thread after all files have been parsed.
+     */
+    private static class ParseResult {
+        final List<CodeGraphNode> nodes = new ArrayList<CodeGraphNode>();
+        final List<CodeGraphEdge> edges = new ArrayList<CodeGraphEdge>();
+        final Map<String, String> classNameToId = new HashMap<String, String>();
     }
 }

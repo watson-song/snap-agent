@@ -434,10 +434,13 @@ public VerificationResult verify(IssueClosure issue) {
    ├─ 未找到 → 返回 null
    └─ 找到 → 继续
 
-2. KnowledgeFragment fragment = sedimentationExtractor.extract(issue)
-   // 抽取知识片段 (见第 5 节)
+2. Document fragment = sedimentationService.extract(issue)
+   // 抽取知识片段 (旧名 KnowledgeFragment, 现 Document) — 见第 5 节
 
-3. vectorStore != null → vectorStore.reload()
+3. reviewer != null → reviewer.review(fragment, issue)
+   // P1-7: 质量门控 — 审查通过才继续; 返回 false 则跳过沉淀, 记录 WARN
+
+4. vectorStore != null → vectorStore.reload()
    // 重载知识库, 使新片段可被检索
 
 4. issue.withKnowledgeEntry("sedimentation:" + issueId, now)
@@ -454,7 +457,7 @@ public VerificationResult verify(IssueClosure issue) {
 
 ### 5.1 沉淀机制
 
-当 issue 关闭时, `KnowledgeSedimentationExtractor.extract()` 从 `IssueClosure` 抽取一个 `KnowledgeFragment`, 经验以结构化 Markdown 形式沉淀回 `VectorStore`:
+当 issue 关闭时, `KnowledgeSedimentationExtractor.extract()` (现 `KnowledgeSedimentationService`) 从 `IssueClosure` 抽取一个 `Document` (旧名 `KnowledgeFragment`), 经验以结构化 Markdown 形式沉淀回 `VectorStore`:
 
 ```
 IssueClosure (CLOSED)
@@ -475,7 +478,36 @@ VectorStore.reload()
     → 通过 Advisor 注入 system prompt → LLM 可参考历史经验
 ```
 
-### 5.2 抽取的知识片段格式
+### 5.2 质量门控 (SedimentationReviewer)
+
+`SedimentationReviewer` 是知识沉淀的质量门控 SPI，在 `extract()` 之后、`embed()` + `VectorStore.add()` 之前执行：
+
+```java
+public interface SedimentationReviewer {
+    boolean review(Document document, IssueClosure issue);  // true=接受, false=拒绝
+    String name();  // 审查器名称
+}
+```
+
+- **默认实现**：`AcceptAllSedimentationReviewer`（始终返回 true，保持向后兼容）
+- **调用时机**：`KnowledgeSedimentationService.sediment()` 在 `extract(issue)` 之后调用 `reviewer.review(doc, issue)`
+- **拒绝行为**：返回 false 时跳过 embedding 和 VectorStore 写入，记录 WARN 日志
+- **扩展场景**：LLM 质量检查、人工审核流程、关键字段完整性校验等
+
+```java
+@Component
+public class LlmQualityReviewer implements SedimentationReviewer {
+    @Override
+    public boolean review(Document document, IssueClosure issue) {
+        // 使用 LLM 检查根因和方案是否合理
+        return llmClient.checkQuality(document.getContent());
+    }
+    @Override
+    public String name() { return "llm-quality-check"; }
+}
+```
+
+### 5.3 抽取的知识片段格式
 
 ```markdown
 ## 问题
@@ -495,7 +527,7 @@ passed: true
 {verificationResult.summary}
 ```
 
-### 5.3 完整示例
+### 5.4 完整示例
 
 假设一个已关闭的 issue:
 
@@ -505,7 +537,7 @@ passed: true
 - `verificationResult.passed`: true
 - `verificationResult.summary`: "补货策略已生成, 验证通过"
 
-抽取的 `KnowledgeFragment`:
+抽取的 `Document` (旧名 `KnowledgeFragment`):
 
 ```
 title:   "问题: SKU-001 为什么没生成补货策略？"
@@ -756,7 +788,7 @@ snap-agent:
 |------|------|------|---------|
 | `FileIssueStore` | `IssueStore` | `@ConditionalOnMissingBean(IssueStore.class)` | 声明自定义 `IssueStore` bean |
 | `NoopIssueTracker` | `IssueTracker` | `@ConditionalOnMissingBean(IssueTracker.class)` | 声明自定义 `IssueTracker` bean |
-| `KnowledgeSedimentationExtractor` | — | `@ConditionalOnMissingBean` | 声明自定义 bean |
+| `KnowledgeSedimentationService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` 可空, `ObjectProvider<SedimentationReviewer>` 可空 | 声明自定义 bean |
 | `TemplateSolutionSuggester` | `SolutionSuggester` | `@ConditionalOnMissingBean(SolutionSuggester.class)` | 声明自定义 `SolutionSuggester` bean |
 | `SimpleVerificationRunner` | `VerificationRunner` | `@ConditionalOnMissingBean(VerificationRunner.class)` | 声明自定义 `VerificationRunner` bean |
 | `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` 可空 | — |
@@ -865,4 +897,4 @@ public class MetricBasedVerificationRunner implements VerificationRunner {
 | GitHub IssueTracker | v0.9.1 | GitHub Issues API 实现 |
 | 自动 PR 创建 | v0.9.1 | 验证通过后自动创建 Pull Request |
 | 定时回归验证 | v0.9.2 | 定期重新验证已关闭 issue, 防止复发 |
-| ConversationKnowledgeSource | v0.7.1 | 从历史对话提取 Q&A 知识 |
+| ConversationKnowledgeSource (现 DocumentReader) | v0.7.1 | 从历史对话提取 Q&A 知识 |

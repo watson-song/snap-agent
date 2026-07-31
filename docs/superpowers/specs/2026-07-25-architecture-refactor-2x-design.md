@@ -480,6 +480,7 @@ PeerSseRelay, PeerRouter, RateLimiter, SecurityGateway, CodeGraph, LlmClient, Sk
 
 ## References
 
+- Naming convention glossary (old → new): `docs/glossary.md`
 - LangGraph vs SnapAgent comparison: `docs/research/langgraph-vs-snapagent-comparison.md`
 - Spring AI vs SnapAgent comparison: `docs/research/spring-ai-vs-snapagent-comparison.md`
 - LangGraph docs: https://langchain-ai.github.io/langgraph/

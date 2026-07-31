@@ -438,11 +438,14 @@ The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`,
    ├─ Not found → return null
    └─ Found → continue
 
-2. KnowledgeFragment fragment = sedimentationExtractor.extract(issue)
-   // Extract knowledge fragment (see Section 5)
+2. Document fragment = sedimentationService.extract(issue)
+   // Extract knowledge fragment (formerly KnowledgeFragment, now Document) — see Section 5
 
-3. knowledgeBase != null → knowledgeBase.reload()
-   // Reload knowledge base so new fragment becomes searchable
+3. reviewer != null → reviewer.review(fragment, issue)
+   // P1-7: Quality gate — only proceeds if review returns true; false skips sedimentation with WARN log
+
+4. vectorStore != null → vectorStore.reload()
+   // Reload vector store (formerly KnowledgeBase) so new fragment becomes searchable
 
 4. issue.withKnowledgeEntry("sedimentation:" + issueId, now)
       .withStatus(CLOSED, now)
@@ -458,7 +461,7 @@ The core orchestrator, connecting `GraphExecutor`, `IssueStore`, `IssueTracker`,
 
 ### 5.1 Sedimentation Mechanism
 
-When an issue is closed, `KnowledgeSedimentationExtractor.extract()` extracts a `KnowledgeFragment` from the `IssueClosure`. The experience is sedimented back into the v0.7 `VectorStore` as structured Markdown:
+When an issue is closed, `KnowledgeSedimentationExtractor.extract()` (now `KnowledgeSedimentationService`) extracts a `Document` (formerly `KnowledgeFragment`) from the `IssueClosure`. The experience is sedimented back into the `VectorStore` as structured Markdown:
 
 ```
 IssueClosure (CLOSED)
@@ -479,7 +482,36 @@ Future diagnoses: VectorStoreDocumentRetriever retrieves this fragment
     → injects into system prompt → LLM can reference historical experience
 ```
 
-### 5.2 Extracted Knowledge Fragment Format
+### 5.2 Quality Gate (SedimentationReviewer)
+
+`SedimentationReviewer` is the quality gate SPI for knowledge sedimentation, executed after `extract()` but before `embed()` + `VectorStore.add()`:
+
+```java
+public interface SedimentationReviewer {
+    boolean review(Document document, IssueClosure issue);  // true=accept, false=reject
+    String name();  // reviewer name
+}
+```
+
+- **Default implementation**: `AcceptAllSedimentationReviewer` (always returns true, preserves backward compatibility)
+- **Invocation point**: `KnowledgeSedimentationService.sediment()` calls `reviewer.review(doc, issue)` after `extract(issue)`
+- **Rejection behavior**: When returning false, embedding and VectorStore write are skipped with a WARN log
+- **Extension scenarios**: LLM quality check, human review workflow, required-field completeness validation, etc.
+
+```java
+@Component
+public class LlmQualityReviewer implements SedimentationReviewer {
+    @Override
+    public boolean review(Document document, IssueClosure issue) {
+        // Use LLM to check if root cause and solution are reasonable
+        return llmClient.checkQuality(document.getContent());
+    }
+    @Override
+    public String name() { return "llm-quality-check"; }
+}
+```
+
+### 5.3 Extracted Knowledge Fragment Format
 
 ```markdown
 ## 问题
@@ -499,7 +531,7 @@ passed: true
 {verificationResult.summary}
 ```
 
-### 5.3 Complete Example
+### 5.4 Complete Example
 
 Assume a closed issue:
 
@@ -509,7 +541,7 @@ Assume a closed issue:
 - `verificationResult.passed`: true
 - `verificationResult.summary`: "Replenishment strategy generated, verification passed"
 
-Extracted `KnowledgeFragment`:
+Extracted `Document` (formerly `KnowledgeFragment`):
 
 ```
 title:   "问题: SKU-001 为什么没生成补货策略？"
@@ -760,7 +792,7 @@ All issue beans are assembled when `snap-agent.issue-closure.enabled=true` (`@Co
 |------|------|-----------|-------------|
 | `FileIssueStore` | `IssueStore` | `@ConditionalOnMissingBean(IssueStore.class)` | Declare custom `IssueStore` bean |
 | `NoopIssueTracker` | `IssueTracker` | `@ConditionalOnMissingBean(IssueTracker.class)` | Declare custom `IssueTracker` bean |
-| `KnowledgeSedimentationExtractor` | — | `@ConditionalOnMissingBean` | Declare custom bean |
+| `KnowledgeSedimentationService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` nullable, `ObjectProvider<SedimentationReviewer>` nullable | Declare custom bean |
 | `TemplateSolutionSuggester` | `SolutionSuggester` | `@ConditionalOnMissingBean(SolutionSuggester.class)` | Declare custom `SolutionSuggester` bean |
 | `SimpleVerificationRunner` | `VerificationRunner` | `@ConditionalOnMissingBean(VerificationRunner.class)` | Declare custom `VerificationRunner` bean |
 | `IssueClosureService` | — | `@ConditionalOnMissingBean`, `ObjectProvider<VectorStore>` nullable | — |
@@ -869,4 +901,4 @@ public class MetricBasedVerificationRunner implements VerificationRunner {
 | GitHub IssueTracker | v0.9.1 | GitHub Issues API implementation |
 | Auto PR creation | v0.9.1 | Auto-create Pull Request after verification passes |
 | Scheduled regression verification | v0.9.2 | Periodically re-verify closed issues to detect recurrence |
-| ConversationKnowledgeSource | v0.7.1 | Extract Q&A knowledge from conversation history |
+| ConversationKnowledgeSource (now DocumentReader) | v0.7.1 | Extract Q&A knowledge from conversation history |

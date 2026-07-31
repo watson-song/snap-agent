@@ -382,6 +382,156 @@ env:
 
 并确保 `/snap-agent-internal/**` 路径在 Service 和 Ingress 中可被 Pod 间访问。
 
+## 代码图谱持久化（CI/CD 集成）
+
+代码图谱（Code Graph）通过扫描 `.java` 源码构建调用链和影响分析。在 K8s 容器中通常没有源码，需要 CI 阶段预构建图谱并打入镜像。
+
+### 背景
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `memory`（默认） | 每次启动全量扫描源码，结果存内存 | 本地开发，有源码 |
+| `h2` | 持久化到 H2 文件，启动直接加载 | K8s/CI 部署，无源码 |
+
+### 第一步：CI 阶段预构建图谱
+
+在 CI 流水线中（有源码的阶段），用 `CodeGraphCli` 预构建 H2 文件：
+
+```bash
+# 确保已安装 snap-agent JAR 到本地 Maven 仓库
+mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+
+# 构建 H2 图谱文件
+java -cp "$(mvn dependency:build-classpath -pl snap-agent-spring-boot-2x-starter -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout):snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-0.6.0-SNAPSHOT.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+  --project-root . \
+  --scan-packages com.yourcompany \
+  --output ./data/codegraph
+```
+
+构建完成后，`./data/codegraph.mv.db` 文件包含完整的代码图谱。
+
+**验证 H2 文件构建成功：**
+
+```bash
+# 检查文件存在且大小合理（通常 10MB~500MB，取决于项目规模）
+ls -lh ./data/codegraph.mv.db
+
+# 如果文件为 0 字节或不存在，检查 CI 日志中的错误信息
+# 常见问题：
+#   - "H2 database driver not found" → classpath 缺少 h2.jar
+#   - "project root does not exist" → --project-root 路径错误
+#   - 文件存在但 nodeCount=0 → scan-packages 过滤掉了所有文件
+```
+
+### 第二步：将 H2 文件打入 Docker 镜像
+
+```dockerfile
+# Dockerfile 多阶段构建
+FROM maven:3.9-openjdk-8 AS codegraph-builder
+COPY src/ /app/src/
+COPY pom.xml /app/
+COPY lib/ /app/lib/   # 如果用 lib/ 本地仓库方式
+WORKDIR /app
+# 构建图谱
+RUN java -cp "lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/0.6.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-0.6.0-SNAPSHOT.jar:lib/cn/watsontech/snapagent/snap-agent-core/0.6.0-SNAPSHOT/snap-agent-core-0.6.0-SNAPSHOT.jar:lib/com/h2database/h2/1.4.200/h2-1.4.200.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+  --project-root /app \
+  --scan-packages com.yourcompany \
+  --output /app/data/codegraph
+
+FROM openjdk:8-jre-slim
+COPY --from=codegraph-builder /app/data/codegraph.mv.db /app/data/codegraph.mv.db
+COPY target/your-app.jar /app/app.jar
+WORKDIR /app
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+> **注意**：H2 文件放在 `/app/data/` 目录下，确保运行时 `h2-url` 指向此路径。如果用了 PVC，可以将 `data/` 挂载到 PVC 上，但通常不需要——图谱是 build-time 产物，不会在运行期变化（除非开启了热重建）。
+
+### 第三步：配置 K8s Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: your-app
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: your-registry/your-app:latest
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          volumeMounts:
+            - name: codegraph-data
+              mountPath: /app/data
+      volumes:
+        - name: codegraph-data
+          emptyDir: {}  # 或者用 PVC 持久化
+```
+
+> 如果 H2 文件已打入镜像（推荐），不需要 PVC。`emptyDir` 仅用于运行期 H2 临时写入（如热重建）。
+
+### 第四步：配置 application.yml
+
+```yaml
+snap-agent:
+  code-graph:
+    enabled: true
+    scan-packages:
+      - com.yourcompany           # 你的项目包名
+    persistence: h2               # 使用 H2 持久化
+    h2-url: jdbc:h2:file:/app/data/codegraph
+    hot-reload-enabled: false     # K8s 中无源码，关闭热重建
+    hot-reload-poll-ms: 2000
+```
+
+### 启动验证清单
+
+启动后检查以下日志确认图谱加载成功：
+
+| 日志关键字 | 含义 | 异常处理 |
+|-----------|------|----------|
+| `H2 code graph loaded from disk: N nodes` | 成功从 H2 文件加载 | 正常 |
+| `H2 code graph DB is empty, triggering initial build...` | H2 文件为空，正在构建 | K8s 中不应出现，说明镜像中 H2 文件缺失 |
+| `H2 code graph build complete: N nodes` | 首次构建完成 | K8s 中不应出现（应在 CI 阶段完成） |
+| `H2 code graph build failed: ...` | 构建失败 | 检查 H2 驱动是否在 classpath 中 |
+| `CodeGraphHotReloader assembled` | 热重建已启用 | K8s 中应设置 `hot-reload-enabled: false` |
+
+**API 验证：**
+
+```bash
+# 验证图谱已加载（应返回非零节点数）
+curl -s -u demo:demo http://localhost:8080/snap-agent/api/codegraph/node-count
+
+# 搜索节点（应返回结果）
+curl -s -u demo:demo "http://localhost:8080/snap-agent/api/codegraph/search?name=YourService"
+```
+
+### 本地开发 vs K8s 部署对比
+
+| 配置项 | 本地开发 | K8s 部署 |
+|--------|---------|---------|
+| `persistence` | `memory`（默认）或 `h2` | `h2` |
+| `h2-url` | `jdbc:h2:file:./data/codegraph` | `jdbc:h2:file:/app/data/codegraph` |
+| `hot-reload-enabled` | `true`（改代码自动重建） | `false`（无源码） |
+| H2 文件来源 | 首次启动自动构建 | CI 预构建，打入镜像 |
+| 启动时间 | 首次 ~20s，重启 ~2s（H2） | ~2s（直接加载 H2） |
+| H2 驱动 | pom.xml 需添加 `h2` 依赖 | 镜像中需包含 H2 驱动 |
+
+> **H2 驱动依赖**：`snap-agent-spring-boot-2x-starter` 将 H2 声明为 `<optional>true</optional>`，宿主项目必须显式添加：
+> ```xml
+> <dependency>
+>     <groupId>com.h2database</groupId>
+>     <artifactId>h2</artifactId>
+> </dependency>
+> ```
+
 ## 自定义工具
 
 使用 `@Tool` 和 `@ToolParam` 注解声明工具方法，注册为 `@Component`，由 `ToolCallbackRegistry` 自动发现：

@@ -1,6 +1,6 @@
 # SnapAgent 知识搜索算法设计
 
-> 版本：v1.1 | 更新日期：2026-07-20
+> 版本：v1.2 | 更新日期：2026-07-31
 
 ## 1. 架构概览
 
@@ -9,45 +9,60 @@ SnapAgent 知识库采用三层 SPI 架构，实现知识源的加载、评分�
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                    VectorStore                           │
-│   (管理所有 KnowledgeSource, 委托 VectorStoreDocumentRetriever 检索)│
-│   - search(query, topK, minScore) → List<KnowledgeFragment>     │
+│   (管理所有文档, 委托 VectorStoreDocumentRetriever 检索)  │
+│   - search(query, topK, minScore) → List<Document>       │
 │   - searchWithScores(query, topK, minScore) → List<SearchResult>│
 │   - reload() / size()                                   │
 └──────────────┬───────────────────────────┬──────────────┘
                │                           │
    ┌───────────▼───────────┐   ┌──────────▼──────────┐
-   │   KnowledgeSource      │   │  KnowledgeSearcher   │
-   │   (知识源 SPI)          │   │  (检索算法 SPI)       │
-   │   - load() → List<KF>  │   │  - score(query, KF)  │
-   │   - reload() / type()  │   │    → double [0,1]     │
-   └───────────────────────┘   └──────────────────────┘
+   │   DocumentReader       │   │  DocumentRetriever  │
+   │   (文件读取 SPI,        │   │  (检索算法 SPI,     │
+   │    旧名 KnowledgeSource)│   │   旧名 KnowledgeSearcher)│
+   │   - read(Path) → Docs  │   │  - retrieve(query,  │
+   │   - supportedExtension()│   │      topK) → Docs  │
+   └───────────┬───────────┘   └──────────────────────┘
+               │
+   ┌───────────▼───────────┐
+   │   Chunker              │
+   │   (文档分块 SPI)        │
+   │   - chunk(Document)    │
+   │     → List<Document>   │
+   │   - strategy()         │
+   └───────────────────────┘
 ```
+
+> **命名说明**：v2.x 中 `KnowledgeSource` 拆分为 `DocumentReader` + `KnowledgeSourceConfig`，`KnowledgeSearcher` 改为 `DocumentRetriever`，`KnowledgeFragment` 改为 `Document`。详见 `docs/glossary.md`。
 
 ### 核心接口
 
-**`KnowledgeSearcher`** (core SPI):
+**`DocumentRetriever`** (core SPI, 旧名 `KnowledgeSearcher`):
 ```java
-public interface KnowledgeSearcher {
-    /**
-     * 评分：查询与知识片段的相关度
-     * @return [0.0, 1.0]，0.0=无相关，1.0=完美匹配
-     */
-    double score(String query, KnowledgeFragment fragment);
+public interface DocumentRetriever {
+    List<Document> retrieve(String query, int topK);
+    // 替代 KnowledgeSearcher.score(query, fragment)，现返回排序后的 Document 列表
 }
 ```
 
-**`KnowledgeSource`** (core SPI):
+**`DocumentReader`** (core SPI, 旧名 `KnowledgeSource`):
 ```java
-public interface KnowledgeSource {
-    List<KnowledgeFragment> load();  // 加载知识片段
-    void reload();                    // 重新加载（热重载）
-    String type();                    // 源类型标识
+public interface DocumentReader {
+    List<Document> read(Path file);     // 从文件读取原始文档
+    String supportedExtension();         // 支持的文件扩展名（如 "md"）
 }
 ```
 
-**`KnowledgeFragment`** (core, 不可变值对象):
+**`Chunker`** (core SPI, ETL 分块):
 ```java
-public final class KnowledgeFragment {
+public interface Chunker {
+    List<Document> chunk(Document document);  // 文档分块
+    String strategy();                         // 分块策略名（如 "heading"）
+}
+```
+
+**`Document`** (core, 不可变值对象, 旧名 `KnowledgeFragment`):
+```java
+public final class Document {
     private final String title;
     private final String content;
     private final String source;     // 来源标识，如 "business-overview.md:section-2"
@@ -58,7 +73,7 @@ public final class KnowledgeFragment {
 **`SearchResult`** (core, 不可变值对象):
 ```java
 public final class SearchResult {
-    private final KnowledgeFragment fragment;
+    private final Document fragment;
     private final double score;
 }
 ```
@@ -73,7 +88,7 @@ public List<SearchResult> searchWithScores(String query, int topK, double minSco
     }
     // 2. 对每个片段评分 + 过滤
     List<ScoredFragment> scored = new ArrayList<>();
-    for (KnowledgeFragment f : allFragments) {
+    for (Document f : allFragments) {
         double s = searcher.score(query, f);
         if (s >= minScore) {        // 低于阈值的被排除
             scored.add(new ScoredFragment(f, s));
@@ -94,7 +109,7 @@ public List<SearchResult> searchWithScores(String query, int topK, double minSco
 
 ## 2. 分词算法 (SimpleKeywordSearcher)
 
-`SimpleKeywordSearcher` 是 `KnowledgeSearcher` 的默认实现，采用**混合分词策略**处理中英文文本。
+`SimpleKeywordSearcher` 是 `DocumentRetriever`（旧名 `KnowledgeSearcher`）的默认实现，采用**混合分词策略**处理中英文文本。
 
 ### 2.1 分词规则
 
@@ -186,7 +201,7 @@ score = (titleHits × 2 + contentHits) / (queryTokenCount × 2)
 ### 3.2 打分代码
 
 ```java
-public double score(String query, KnowledgeFragment fragment) {
+public double score(String query, Document fragment) {
     if (query == null || query.isEmpty() || fragment == null) {
         return 0.0;
     }
@@ -271,7 +286,7 @@ snap-agent:
 
 ```java
 // Bug: 硬编码 0.0
-List<KnowledgeFragment> fragments = vectorStore.search(q, searchTopK, 0.0);
+List<Document> fragments = vectorStore.search(q, searchTopK, 0.0);
 // Fix: 使用配置的 minScore
 List<SearchResult> results = vectorStore.searchWithScores(q, searchTopK, minScore);
 ```
@@ -415,37 +430,59 @@ snap-agent:
 
 ---
 
-## 7. 知识源
+## 7. 知识源与 ETL 管道
 
-### 7.1 MarkdownKnowledgeSource（内置实现）
+### 7.1 ETL 管道 (KnowledgeETLPipeline)
 
-从 Markdown 文件加载知识，自动分段：
+`KnowledgeETLPipeline` 编排完整的知识导入流程：
 
-- 按 `##` 标题分段，每个 `##` 标题下的内容作为一个 `KnowledgeFragment`
-- H1 标题作为 `metadata.category`
-- 无 `##` 标题的文件，整文件作为一个 fragment
-- 支持解析 `classpath:/` 和文件系统路径
+```
+DocumentReader.read(file) → Chunker.chunk(doc) → EmbeddingModel.embed(text) → VectorStore.add(docs)
+```
 
-### 7.2 扩展知识源
+- **DocumentReader**：读取文件内容为原始 `Document` 列表（含 metadata）
+- **Chunker**：将原始文档分块为更小的语义单元
+- **EmbeddingModel**：为每个分块生成向量嵌入（可选，无 EmbeddingModel 时跳过）
+- **VectorStore**：持久化分块到向量存储
+- **失败隔离**：单个分块写入失败只记 WARN 日志，不影响其他分块
 
-实现 `KnowledgeSource` 接口 + `@Component` 注解即可被自动发现：
+### 7.2 内置实现
+
+| SPI | 默认实现 | 说明 |
+|-----|---------|------|
+| `DocumentReader` | `MarkdownDocumentReader` | 读取 .md 文件，提取 H1 标题作为 `metadata.category` |
+| `Chunker` | `HeadingChunker` | 按 `##` 标题分块，无标题的整文件作为一个分块 |
+
+### 7.3 扩展知识源
+
+实现 `DocumentReader` 接口 + `@Component` 注解即可被自动发现：
 
 ```java
 @Component
-public class DatabaseKnowledgeSource implements KnowledgeSource {
+public class PdfDocumentReader implements DocumentReader {
     @Override
-    public List<KnowledgeFragment> load() {
-        // 从数据库加载业务知识
-        return jdbcTemplate.query("SELECT title, content FROM knowledge_base",
-            (rs, i) -> new KnowledgeFragment(
-                rs.getString("title"),
-                rs.getString("content"),
-                "db:" + rs.getString("id"),
-                null
-            ));
+    public List<Document> read(Path file) {
+        // 从 PDF 文件提取文本
+        String content = pdfExtractor.extract(file);
+        return Collections.singletonList(new Document(content, metadata));
     }
     @Override
-    public String type() { return "database"; }
+    public String supportedExtension() { return "pdf"; }
+}
+```
+
+实现 `Chunker` 接口自定义分块策略：
+
+```java
+@Component
+public class FixedSizeChunker implements Chunker {
+    @Override
+    public List<Document> chunk(Document document) {
+        // 按固定字符数分块（如每 500 字符一个分块）
+        return splitBySize(document, 500);
+    }
+    @Override
+    public String strategy() { return "fixed-size"; }
 }
 ```
 
@@ -458,7 +495,7 @@ public class DatabaseKnowledgeSource implements KnowledgeSource {
 | 英文大小写敏感 | `SnapAgent` ≠ `snapagent`（Latin 分词转小写，但内容匹配是大小写敏感的 HashSet） | 未来修复 |
 | 无语义搜索 | 纯关键词重叠，不理解同义词/上下文 | v0.7.2 向量嵌入 |
 | 无向量嵌入 | 不支持 embedding 相似度检索 | v0.7.2 引入 |
-| 中文分词粗糙 | 2-gram bigram 无法处理专业术语/实体名 | 可自定义 KnowledgeSearcher |
+| 中文分词粗糙 | 2-gram bigram 无法处理专业术语/实体名 | 可自定义 DocumentRetriever（旧名 KnowledgeSearcher） |
 | 无相关性反馈 | 用户无法标记结果是否有用 | v0.7.1 计划 |
 
 ---
@@ -467,17 +504,17 @@ public class DatabaseKnowledgeSource implements KnowledgeSource {
 
 ### 自定义检索算法
 
-实现 `KnowledgeSearcher` 接口，替换默认的 `SimpleKeywordSearcher`：
+实现 `DocumentRetriever` 接口（旧名 `KnowledgeSearcher`），替换默认的 `VectorStoreDocumentRetriever`：
 
 ```java
 @Component
-public class SemanticSearcher implements KnowledgeSearcher {
+public class SemanticSearcher implements DocumentRetriever {
     @Override
-    public double score(String query, KnowledgeFragment fragment) {
+    public List<Document> retrieve(String query, int topK) {
         // 使用向量嵌入计算余弦相似度
         double[] queryVec = embed(query);
-        double[] fragVec = embed(fragment.getContent());
-        return cosineSimilarity(queryVec, fragVec);
+        // ...
+        return topKDocuments;
     }
 }
 ```
@@ -486,4 +523,21 @@ public class SemanticSearcher implements KnowledgeSearcher {
 
 ### 自定义知识源
 
-实现 `KnowledgeSource` 接口（见 7.2 节），支持从任意数据源加载知识：数据库、外部 API、Confluence/语雀等。
+实现 `DocumentReader` 接口（见 7.3 节）读取任意格式文件，或实现 `Chunker` 接口自定义分块策略，支持从任意数据源加载知识：数据库、外部 API、Confluence/语雀等。
+
+---
+
+## 命名约定
+
+> v2.x 重命名了多个知识子系统 SPI/类。完整映射见 `docs/glossary.md`。
+
+| 旧名 (v0.7) | 当前名 (v2.x) | 说明 |
+|--------------|---------------|------|
+| KnowledgeBase | VectorStore | 2.x 重构重命名 |
+| KnowledgeFragment | Document | 统一向量库模型 |
+| KnowledgeSearcher | DocumentRetriever | RAG 管道集成 |
+| KnowledgeInjector | RetrievalAugmentationAdvisor | Advisor 模式 |
+| KnowledgeSource | DocumentReader | 拆分为文件读取 SPI（`read(Path)`, `supportedExtension()`）|
+| MarkdownKnowledgeSource | MarkdownDocumentReader + HeadingChunker | ETL 管道拆分为 Reader + Chunker |
+| SimpleKeywordSearcher | VectorStoreDocumentRetriever | 默认 DocumentRetriever |
+| SystemPromptExtender | Advisor | 泛化 |

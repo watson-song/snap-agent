@@ -223,4 +223,85 @@ class SimpleCodeGraphBuilderTest {
         assertThat(graph.getNodes()).anyMatch(n ->
                 n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("MyEnum"));
     }
+
+    // ---- Fix 1 (P1-5): import statements for cross-package type resolution ----
+
+    @Test
+    void shouldResolveImportedTypes() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        Files.createDirectories(srcDir);
+        // A class that imports java.util.List and uses it as a field type.
+        // Note: List is a java.util builtin so isJavaBuiltin skips it — use a
+        // non-builtin imported type instead.
+        Files.write(srcDir.resolve("Importer.java"), (
+                "package com.test;\n\n"
+                + "import org.external.Service;\n\n"
+                + "public class Importer {\n"
+                + "    private Service service;\n"
+                + "}\n").getBytes());
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        // DEPENDS_ON edge should point to org.external.Service (from import),
+        // NOT com.test.Service (same-package fallback).
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.Importer")
+                && e.getToId().equals("org.external.Service"));
+        assertThat(graph.getEdges()).noneMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getToId().equals("com.test.Service"));
+    }
+
+    @Test
+    void shouldResolveCustomImportedTypes() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        Files.createDirectories(srcDir);
+        // A class in com.test that imports a type from com.other and uses it as
+        // a method parameter. The DEPENDS_ON edge must point to com.other.Helper.
+        Files.write(srcDir.resolve("Worker.java"), (
+                "package com.test;\n\n"
+                + "import com.other.Helper;\n\n"
+                + "public class Worker {\n"
+                + "    public void run(Helper helper) {\n"
+                + "    }\n"
+                + "}\n").getBytes());
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.Worker")
+                && e.getToId().equals("com.other.Helper"));
+    }
+
+    // ---- Fix 2 (P2-11): parallel build ----
+
+    @Test
+    void shouldBuildInParallel() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/parallel");
+        Files.createDirectories(srcDir);
+        // Create 50+ temp .java files so parallelStream() uses the common pool.
+        for (int i = 0; i < 60; i++) {
+            Files.write(srcDir.resolve("Class" + i + ".java"), (
+                    "package com.parallel;\n\n"
+                    + "public class Class" + i + " {\n"
+                    + "    public void method" + i + "() {\n"
+                    + "    }\n"
+                    + "}\n").getBytes());
+        }
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        // 60 classes + 60 methods = 120 nodes
+        assertThat(graph.nodeCount()).isEqualTo(120);
+        // No edges expected (no calls, no dependencies, no extends)
+        assertThat(graph.edgeCount()).isZero();
+    }
 }

@@ -45,8 +45,43 @@ public final class Document {
         return (T) metadata.get(key);
     }
 
+    /**
+     * Convenience accessor for the {@code version} metadata key.
+     *
+     * @return the version string, or {@code null} if not set
+     */
+    public String getVersion() {
+        Object v = metadata.get("version");
+        return v != null ? v.toString() : null;
+    }
+
+    /**
+     * Convenience accessor for the {@code provenance} metadata key.
+     *
+     * @return the provenance string, or {@code null} if not set
+     */
+    public String getProvenance() {
+        Object v = metadata.get("provenance");
+        return v != null ? v.toString() : null;
+    }
+
     public Document withEmbedding(float[] embedding) {
         return new Document(id, content, metadata, embedding);
+    }
+
+    /**
+     * Return a new Document with an additional metadata entry. The original
+     * document is unchanged (immutable). Allows chaining:
+     * {@code doc.withMetadata("k", v).withMetadata("k2", v2)}.
+     *
+     * @param key   metadata key to add or overwrite
+     * @param value metadata value
+     * @return a new Document with the updated metadata
+     */
+    public Document withMetadata(String key, Object value) {
+        Map<String, Object> newMeta = new LinkedHashMap<String, Object>(this.metadata);
+        newMeta.put(key, value);
+        return new Document(id, content, newMeta, embedding);
     }
 
     @Override

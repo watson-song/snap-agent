@@ -167,7 +167,7 @@ snap-agent:
 | `trace.*` | TraceSearchTools（Jaeger 链路追踪） | 04 §5 |
 | `config-read.*` | ConfigReadTools（本地配置 + Nacos） | 04 §5 |
 | `mcp.*` | McpToolProvider（Phase 2） | 04 §4 |
-| `knowledge.*` | KnowledgeBase / VectorStoreDocumentRetriever / IdentityQueryTransformer / KnowledgeInjector | §12 |
+| `knowledge.*` | VectorStore / VectorStoreDocumentRetriever / IdentityQueryTransformer / RetrievalAugmentationAdvisor (formerly KnowledgeBase / KnowledgeInjector) | §12 |
 | `anchor.*` | AnchorOrchestrator / AnchorSkillClassifier / AnchorSummaryCache / anchor.js | §13 |
 | `security.framework` | SecurityGateway Adapter 选择 | §3 |
 | `security.required-permission` | Controller 鉴权 | §3 |
@@ -527,7 +527,7 @@ snap-agent:
 
 ### 知识加载与分段
 
-`MarkdownKnowledgeSource` 从指定目录递归扫描 `.md` 文件，按 `## ` 标题自动分段：
+`MarkdownKnowledgeSource` (now a `DocumentReader`) 从指定目录递归扫描 `.md` 文件，按 `## ` 标题自动分段：
 - 文件级 `# ` 标题 → 存为每个片段的 `category` 元数据
 - `## ` 之前的内容 → 一个 "概述" 片段
 - 每个 `## ` 标题 → 一个独立知识片段（标题=片段标题，正文=片段内容）
@@ -542,22 +542,22 @@ snap-agent:
 
 ### 知识注入
 
-`KnowledgeInjector` 实现 `RetrievalAugmentationAdvisor`，与 v0.3 的 `ProjectContextExtender` 并行生效：
+`RetrievalAugmentationAdvisor`（formerly `KnowledgeInjector`）实现 `Advisor`，与 v0.3 的 `ProjectContextExtender`（now `ProjectContextAdvisor`）并行生效：
 - 运行时从 `AgentTask` 的输入值构建查询
-- 调用 `KnowledgeBase.search(query, maxFragments, minScore)` 检索相关片段
+- 调用 `VectorStore.similaritySearch(query, maxFragments, minScore)` 检索相关片段（formerly `KnowledgeBase.search`）
 - 将匹配片段格式化为 Markdown 注入 system prompt
 - 无匹配时返回空字符串（不影响 LLM）
 
 ### 自定义知识源
 
-宿主可实现 `KnowledgeSource` SPI 接入 Confluence / 语雀 / 自定义 API：
+宿主可实现 `DocumentReader` SPI（formerly `KnowledgeSource`）接入 Confluence / 语雀 / 自定义 API：
 
 ```java
 @Component
-public class ConfluenceKnowledgeSource implements KnowledgeSource {
+public class ConfluenceDocumentReader implements DocumentReader {
     @Override
-    public List<KnowledgeFragment> load() {
-        // 从 Confluence API 加载文档，分割为片段
+    public List<Document> load() {
+        // 从 Confluence API 加载文档，分割为片段（formerly KnowledgeFragment）
         return fetchAndSplit();
     }
     @Override
@@ -567,7 +567,7 @@ public class ConfluenceKnowledgeSource implements KnowledgeSource {
 }
 ```
 
-自定义 `KnowledgeSource` bean 会被 `KnowledgeBase` 自动收集。
+自定义 `DocumentReader` bean 会被 `VectorStore`（formerly `KnowledgeBase`）自动收集。
 
 ## 13. 页面区域锚点问答配置（v1.1）
 

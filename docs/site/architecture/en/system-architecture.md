@@ -101,10 +101,10 @@ cn.watsontech.snapagent.core/
 ├── security/     SecurityGateway, PrincipalResolver, UserInfo, AuditStore, SecurityAuditLogger
 ├── advisor/      Advisor (replaces SystemPromptExtender, provides context injection + interception)
 ├── memory/       ChatMemory, ChatMemoryRepository (session history SPI)
-├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer (named RAG pipeline classes)
-├── vectorstore/  VectorStore, EmbeddingModel (vector store SPI)
+├── rag/          VectorStoreDocumentRetriever, IdentityQueryTransformer, DocumentReader, Chunker, QueryAugmenter (RAG pipeline + ETL SPI)
+├── vectorstore/  VectorStore, EmbeddingModel, Document (vector store SPI + value object)
 ├── codegraph/    CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphNode, CodeGraphEdge
-├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner
+├── issue/        IssueStore, IssueTracker, IssueClosure, IssueStatus, SolutionSuggester, VerificationRunner, SedimentationReviewer
 ├── cost/         CostTracker, CostStore, CostRecord, CostSummary
 ├── workflow/     WorkflowDefinition, WorkflowStep, WorkflowResult, WorkflowStatus (engine impl pluggable)
 └── patrol/       AlertConverger, AnomalyEvent, AnomalyEventListener, PatrolScheduler, PatrolTask, BugfixSuggester
@@ -129,9 +129,9 @@ cn.watsontech.snapagent.boot2x/
 │                 CodePathGuard, SqlGuard, DataSourceRegistry, ObservabilityHttpClient,
 │                 TimeRangeParser, ToolCallbackRegistry, mcp/McpBootstrap, mcp/McpToolCallback
 ├── advisor/      ProjectContextAdvisor, KnowledgeAdvisor (replacing ProjectContextExtender / KnowledgeInjector)
-├── knowledge/    MarkdownKnowledgeSource, VectorStoreDocumentRetriever, IdentityQueryTransformer
-├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, CodeGraphTool
-├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationExtractor,
+├── knowledge/    MarkdownDocumentReader, HeadingChunker, KnowledgeETLPipeline, KnowledgeSedimentationService, VectorStoreDocumentRetriever, IdentityQueryTransformer
+├── codegraph/    SimpleCodeGraphBuilder, InMemoryCodeGraphIndex, H2CodeGraphIndex, AsyncCodeGraphIndex, CodeGraphHotReloader, CodeGraphTools, CodeGraphCli
+├── issue/        FileIssueStore, NoopIssueTracker, IssueClosureService, KnowledgeSedimentationService, AcceptAllSedimentationReviewer,
 │                 TemplateSolutionSuggester, SimpleVerificationRunner
 ├── cost/         FileCostStore, BudgetEnforcer, DefaultCostTracker, CostTrackingLlmClient, CostSummaryService, CostCalculator
 ├── workflow/     YamlWorkflowLoader, SimpleWorkflowEngine
@@ -299,26 +299,38 @@ public interface PrincipalResolver {
 - **Permission check**: `hasPermission` iterates `GrantedAuthority` for exact matching (no wildcards)
 - **Extension point**: Host declares a custom `SecurityGateway` Bean to replace (`@ConditionalOnMissingBean`)
 
-### 3.5 RAG Pipeline — VectorStore / VectorStoreDocumentRetriever / IdentityQueryTransformer
+### 3.5 RAG Pipeline — VectorStore / DocumentReader / Chunker / VectorStoreDocumentRetriever
 
-Knowledge retrieval is composed of two SPIs (`VectorStore`, `EmbeddingModel`) plus two named classes (`VectorStoreDocumentRetriever`, `IdentityQueryTransformer`) forming the RAG pipeline:
+Knowledge retrieval is composed of `VectorStore` + `EmbeddingModel` SPIs and `DocumentReader`, `Chunker`, `VectorStoreDocumentRetriever`, `IdentityQueryTransformer` forming the RAG pipeline:
 
 ```java
 public interface VectorStore {
-    List<KnowledgeFragment> search(String query, int topK);  // Vector similarity search
-    void add(List<KnowledgeFragment> fragments);             // Write vectors
+    List<Document> search(String query, int topK);  // Vector similarity search
+    void add(List<Document> documents);             // Write vectors (formerly KnowledgeFragment)
     void reload();                                            // Reload
-    int size();                                               // Total cached fragments
+    int size();                                               // Total cached documents
 }
 
 public interface EmbeddingModel {
     float[] embed(String text);  // Text → embedding vector
 }
+
+public interface DocumentReader {
+    List<Document> read(Path file);     // Read raw documents from file
+    String supportedExtension();         // Supported file extension (e.g. "md")
+}
+
+public interface Chunker {
+    List<Document> chunk(Document document);  // Split document into chunks
+    String strategy();                         // Chunking strategy name (e.g. "heading")
+}
 ```
 
-- **Default implementations**: `VectorStoreDocumentRetriever` (Markdown document segmentation + vector search), `IdentityQueryTransformer` (passes user query through unchanged)
-- **Pipeline flow**: `IdentityQueryTransformer` transforms query → `EmbeddingModel` embeds → `VectorStoreDocumentRetriever` retrieves → returns `KnowledgeFragment` list
-- **Extension point**: Custom `VectorStore` (Pinecone/Milvus/PGVector) or `EmbeddingModel` (OpenAI/Zhipu Embedding)
+- **ETL Pipeline**: `KnowledgeETLPipeline` orchestrates `DocumentReader → Chunker → EmbeddingModel → VectorStore` flow, supporting single-file and directory batch processing
+- **Default implementations**: `MarkdownDocumentReader` (reads .md files), `HeadingChunker` (splits by `##` headings), `VectorStoreDocumentRetriever` (keyword search), `IdentityQueryTransformer` (passes query through unchanged)
+- **Retrieval flow**: `IdentityQueryTransformer` transforms query → `EmbeddingModel` embeds → `VectorStoreDocumentRetriever` retrieves → returns `Document` list (formerly `KnowledgeFragment` in v0.7)
+- **Token estimation**: `DefaultQueryAugmenter.estimateTokens()` provides CJK-aware token estimation (CJK chars 1:1, English words 1:1), replacing the crude `chars / 3.5` heuristic
+- **Extension points**: Custom `VectorStore` (Pinecone/Milvus/PGVector), `EmbeddingModel` (OpenAI/Zhipu Embedding), `DocumentReader` (PDF/HTML), `Chunker` (fixed-size/sentence-based)
 
 ### 3.6 CodeGraph / CodeGraphBuilder / CodeGraphIndex — Code Knowledge Graph
 
@@ -337,13 +349,20 @@ public interface CodeGraphIndex {
     List<CodeGraphNode> findImpactScope(String nodeId, int maxDepth);      // Impact scope analysis
     CodeGraphNode getNode(String id);
     int nodeCount();
+    void rebuild(CodeGraphBuilder builder);  // Hot rebuild (triggered by WatchService)
 }
 ```
 
-- **Default implementations**: `SimpleCodeGraphBuilder` (regex-based Java source parsing), `InMemoryCodeGraphIndex` (bidirectional adjacency list)
+- **Default implementations**:
+  - `SimpleCodeGraphBuilder` (regex-based Java source parsing)
+  - `InMemoryCodeGraphIndex` (bidirectional adjacency list, in-memory, default)
+  - `H2CodeGraphIndex` (H2 file persistence, survives process restarts, for K8s/CI deployment)
+  - `AsyncCodeGraphIndex` (async build wrapper, daemon thread build does not block startup)
+  - `CodeGraphHotReloader` (WatchService watches `.java` changes, auto-triggers `rebuild()`)
 - **Node types**: CLASS / METHOD / FIELD
 - **Edge types**: CALLS / IMPLEMENTS / EXTENDS / DEPENDS_ON / OVERRIDES / REFERENCES
-- **Extension point**: Implement `CodeGraphBuilder` with JavaParser AST; implement `CodeGraphIndex` with SQLite/H2 persistence
+- **Persistence mode**: `persistence=memory` (default, in-memory) or `persistence=h2` (H2 file persistence)
+- **CI/CD integration**: `CodeGraphCli` provides a CLI entry point for pre-building H2 files in CI pipelines; K8s loads directly from disk on startup (see Integration Guide)
 
 ### 3.7 IssueStore / IssueTracker — Issue Closure Loop
 
@@ -782,7 +801,7 @@ public class SnapAgentProperties {
     private ConfigRead configRead; // Config reading
     private Patrol patrol;      // Patrol (enabled, schedule)
     private Knowledge knowledge; // Knowledge base (enabled, sources, max-fragments, min-score)
-    private CodeGraph codeGraph; // Code graph (enabled, scan-packages, max-depth)
+    private CodeGraph codeGraph; // Code graph (enabled, scan-packages, max-depth, persistence, h2-url, hot-reload-enabled)
     private IssueClosure issueClosure; // Issue closure (enabled, system-user-id)
     private Cost cost;          // Cost accounting (enabled, pricing, budgets)
     private Workflows workflows; // Workflows (enabled, dir)
@@ -808,7 +827,7 @@ Each feature is independently controlled via `@ConditionalOnProperty`:
 | Config Read | `snap-agent.config-read` | false | `@ConditionalOnProperty` |
 | Patrol | `snap-agent.patrol` | false | `@ConditionalOnProperty` |
 | Knowledge Base | `snap-agent.knowledge` | false | `@ConditionalOnProperty` |
-| Code Graph | `snap-agent.code-graph` | false | `@ConditionalOnProperty` + `@ConditionalOnBean(CodePathGuard)` |
+| Code Graph | `snap-agent.code-graph` | false | `@ConditionalOnProperty` + `@ConditionalOnBean(CodePathGuard)`, `persistence=h2` enables H2 persistence, `hot-reload-enabled=true` enables hot reload |
 | Issue Closure | `snap-agent.issue-closure` | false | `@ConditionalOnProperty` |
 | Cost Accounting | `snap-agent.cost` | false | `@ConditionalOnProperty` |
 | Workflows | `snap-agent.workflows` | false | `@ConditionalOnProperty` |
@@ -890,7 +909,7 @@ public GraphExecutor graphExecutor(
 | v0.6 | Platform | DataSourceRegistry (multi-env), SkillMeta.requiredPermission (skill-level permissions), snap-agent-client REST SDK |
 | v0.7 | Embedded knowledge base | VectorStore, EmbeddingModel, VectorStoreDocumentRetriever, IdentityQueryTransformer, KnowledgeAdvisor (multi-Advisor) |
 | v0.8 | Code knowledge graph | CodeGraph, CodeGraphBuilder, CodeGraphIndex, CodeGraphTool |
-| v0.9 | Issue closure loop | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationExtractor |
+| v0.9 | Issue closure loop | IssueStore, IssueTracker, IssueClosureService, KnowledgeSedimentationService, SedimentationReviewer |
 | v1.0 | Workflows + cost + annotated tools | WorkflowDefinition, CostTracker, CostTrackingLlmClient, LlmEventSink.onUsage(), @Tool/@ToolParam, ToolCallback |
 | v1.1 | Proactive monitoring SPI + Anchor Q&A | PatrolReportStore interface (InMemoryPatrolReportStore), PatrolLockProvider (multi-Pod), AlertPushChannel (Webhook+Email defaults), VectorStore.listAll()/`GET /knowledge/fragments`, ObservabilityHttpClient.httpPost(), AnchorOrchestrator (page-section anchor Q&A + smart skill routing + pre-summary cache) |
 | v1.2 | Graph runtime + architecture refactor | StateGraph, ReActGraphFactory, EntryNode, AgentNode, ToolsNode, StateKey<T>, StateKeys, MessagePartitioner, AbstractStreamingLlmClient, 8 domain @Configuration split, ChatMemory/ChatMemoryRepository, CheckpointStore, StructuredOutputConverter |
@@ -906,7 +925,7 @@ public GraphExecutor graphExecutor(
 | In-memory only | TaskStore is backed by ConcurrentHashMap; all tasks and transcripts are lost on process restart |
 | Java 8 + Spring Boot 2.x | Uses javax.servlet; does not support Spring Boot 3.x (jakarta.servlet) |
 | Vector search requires EmbeddingModel | Default RAG pipeline uses keyword search; vector semantic search only available after plugging in an EmbeddingModel |
-| Regex-based code graph | SimpleCodeGraphBuilder uses regex; comments may cause false positives, overloads are not distinguished, lambdas may be missed |
+| Regex-based code graph | SimpleCodeGraphBuilder uses regex; comments may cause false positives, overloads are not distinguished, lambdas may be missed; H2 persistence + CI pre-build solves K8s no-source-code issue |
 | No Spring Cloud dependency | Cross-pod routing self-implements K8s API/DNS discovery; does not depend on a service discovery framework |
 | SSE limitation | EventSource does not support custom headers; SSE endpoint requires permitAll + token query param |
 | Exact permission matching | SpringSecurityAdapter.hasPermission() matches authorities exactly; no wildcard/role inheritance support |
@@ -923,9 +942,12 @@ public GraphExecutor graphExecutor(
 | `Advisor` | ProjectContextAdvisor / KnowledgeAdvisor | Implement `Advisor` + `@Component` (custom context injection and interception) |
 | `VectorStore` | VectorStoreDocumentRetriever | Implement `VectorStore` + `@Component` (Pinecone/Milvus/PGVector) |
 | `EmbeddingModel` | Built-in keyword matching (no vectors) | Implement `EmbeddingModel` + `@Component` (OpenAI/Zhipu Embedding) |
+| `DocumentReader` | MarkdownDocumentReader | Implement `DocumentReader` + `@Component` (PDF/HTML formats) |
+| `Chunker` | HeadingChunker | Implement `Chunker` + `@Component` (fixed-size/sentence chunking strategies) |
+| `SedimentationReviewer` | AcceptAllSedimentationReviewer | Implement `SedimentationReviewer` (LLM quality check / human review gate) |
 | `ChatMemoryRepository` | FileChatMemoryRepository | Implement `ChatMemoryRepository` + `@Component` (database storage) |
 | `CodeGraphBuilder` | SimpleCodeGraphBuilder | Implement `CodeGraphBuilder` + `@Component` (JavaParser AST) |
-| `CodeGraphIndex` | InMemoryCodeGraphIndex | Implement `CodeGraphIndex` + `@Component` (SQLite/H2 persistence) |
+| `CodeGraphIndex` | InMemoryCodeGraphIndex / H2CodeGraphIndex | Implement `CodeGraphIndex` + `@Component` (custom persistence backend) |
 | `IssueStore` | FileIssueStore | Implement `IssueStore` + `@Component` (database storage) |
 | `IssueTracker` | NoopIssueTracker | Implement `IssueTracker` + `@Component` (Jira/GitHub Issues) |
 | `CostStore` | FileCostStore | Implement `CostStore` + `@Component` (database storage) |

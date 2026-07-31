@@ -283,6 +283,10 @@ SnapAgent 的内置技能 Markdown 打包在 Starter JAR 的 `classpath:/docs/sk
 | `scan-packages` | `[]` | 扫描包前缀（空=扫描 project-root 下所有 .java） |
 | `max-depth` | `5` | 调用链查询最大深度 |
 | `max-impact-depth` | `3` | 影响分析查询最大深度 |
+| `persistence` | `memory` | 持久化模式：`memory`（纯内存）或 `h2`（H2 文件持久化，支持 K8s/CI 部署） |
+| `h2-url` | `jdbc:h2:file:./data/codegraph` | H2 JDBC URL，仅 `persistence=h2` 时生效。K8s 部署用 CI 预构建的 H2 文件路径 |
+| `hot-reload-enabled` | `false` | 是否启用 WatchService 热重建（本地开发推荐开启，K8s 部署关闭） |
+| `hot-reload-poll-ms` | `2000` | 热重建轮询间隔（毫秒） |
 
 ### 3.12 主动监控配置
 

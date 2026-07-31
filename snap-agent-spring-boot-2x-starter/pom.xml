@@ -145,6 +145,18 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- JavaParser (optional): used by AstCodeGraphBuilder for AST-based
+             Java source parsing. Version 3.25.10 is the last Java 8 compatible
+             release; 3.26.x+ requires Java 11+. Optional so host apps that only
+             use SimpleCodeGraphBuilder (regex) do not pull in the transitive
+             dependencies (guava, javassist). -->
+        <dependency>
+            <groupId>com.github.javaparser</groupId>
+            <artifactId>javaparser-symbol-solver-core</artifactId>
+            <version>3.25.10</version>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>
@@ -176,10 +188,14 @@
             <artifactId>spring-boot-starter-web</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- H2 database (optional, for H2CodeGraphIndex persistent code graph).
+             Available at compile/test scope so H2CodeGraphIndex can reference
+             org.h2.Driver directly; consumers must add H2 themselves if they
+             want to use the persistent index. -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>test</scope>
+            <optional>true</optional>
         </dependency>
     </dependencies>
 

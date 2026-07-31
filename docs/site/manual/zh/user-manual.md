@@ -337,7 +337,7 @@ curl -u user:pass 'http://localhost:8080/snap-agent/knowledge/search?q=%E6%95%B0
 
 ### 5.4 添加知识
 
-把 `.md` 文件放到 `snap-agent.knowledge.sources[].dir`（默认 `classpath:/docs/knowledge/`）。每个 `##` 标题下的内容成为一个 `KnowledgeFragment`，H1 标题作为 `metadata.category`；无 `##` 的文件整文件作为一个片段。修改后调 `VectorStore.reload()` 或重启生效。
+把 `.md` 文件放到 `snap-agent.knowledge.sources[].dir`（默认 `classpath:/docs/knowledge/`）。每个 `##` 标题下的内容成为一个 `Document`（旧名 `KnowledgeFragment`），H1 标题作为 `metadata.category`；无 `##` 的文件整文件作为一个片段。修改后调 `VectorStore.reload()` 或重启生效。
 
 ```yaml
 snap-agent:

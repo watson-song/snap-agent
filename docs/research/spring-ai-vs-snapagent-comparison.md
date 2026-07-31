@@ -15,11 +15,11 @@
 | **工具调用** | ToolCallingAdvisor 自动管理生命周期，@Tool 声明式 | `@Tool`/`@ToolParam` 注解 + `ToolCallbackRegistry` 自动发现 | P1 |
 | **Agent 循环** | Recursive Advisors（自递归实现 ReAct/self-refinement） | 硬编码 for 循环 ReAct | P1 |
 | **记忆管理** | ChatMemory + 滑动窗口 + JDBC/Cassandra 持久化 | ConversationStore（文件 JSON），无滑动窗口 | P1 |
-| **向量存储** | VectorStore 抽象，20+ 实现（PgVector/Redis/Milvus 等） | KnowledgeBase（内存关键词搜索） | P0 |
+| **向量存储** | VectorStore 抽象，20+ 实现（PgVector/Redis/Milvus 等） | KnowledgeBase（内存关键词搜索）(now VectorStore) | P0 |
 | **Embedding** | EmbeddingModel SPI（OpenAI/Ollama/ONNX 等） | 无 | P0 |
 | **ETL 管道** | DocumentReader → Transformer → Writer | 无 | P1 |
 | **结构化输出** | BeanOutputConverter + .entity(MyType.class) + JSON Schema | 无 | P1 |
-| **RAG** | QuestionAnswerAdvisor + RetrievalAugmentationAdvisor（模块化） | KnowledgeInjector（简单关键词匹配 + 注入） | P0 |
+| **RAG** | QuestionAnswerAdvisor + RetrievalAugmentationAdvisor（模块化） | KnowledgeInjector（简单关键词匹配 + 注入）(now RetrievalAugmentationAdvisor) | P0 |
 | **可观测性** | Micrometer 深度集成（metrics + tracing） | AuditStore（自定义审计） | P1 |
 | **评估框架** | RelevancyEvaluator + FactCheckingEvaluator + LLM-as-Judge | 无 | P2 |
 | **多模态** | 图片/音频/视频 + 多模态 Embedding | 无 | P2 |
@@ -64,7 +64,7 @@ ChatClient chatClient = ChatClient.builder(chatModel)
 - `Advisor` / `CallAdvisor` / `StreamAdvisor` 接口
 - `AdvisorChain` — 链式调用机制
 - `RecursiveAdvisor` — 自递归实现循环和迭代
-- 将现有 `Advisor` SPI、KnowledgeInjector、AuditCallback 重构为 Advisor
+- 将现有 `Advisor` SPI、KnowledgeInjector (now RetrievalAugmentationAdvisor)、AuditCallback 重构为 Advisor
 
 ---
 
@@ -91,17 +91,17 @@ List<Document> docs = vectorStore.similaritySearch(
 ```
 
 **SnapAgent 现状:**
-- `KnowledgeBase` 是内存 Map，用 `SimpleKeywordSearcher` 做简单关键词匹配
+- `KnowledgeBase`（now VectorStore） 是内存 Map，用 `SimpleKeywordSearcher` 做简单关键词匹配
 - 无向量数据库支持
 - 无 Embedding 模型抽象
 - 无 ETL 管道（知识文件直接加载到内存）
-- `KnowledgeInjector` 做的是关键词匹配 + 文本注入，不是语义检索
+- `KnowledgeInjector`（now RetrievalAugmentationAdvisor） 做的是关键词匹配 + 文本注入，不是语义检索
 
 **缺少的组件:**
 - `VectorStore` SPI + 至少一个实现（Redis/PgVector）
 - `EmbeddingModel` SPI + 至少一个实现（OpenAI/Ollama）
 - `DocumentReader` / `DocumentTransformer` / `DocumentWriter` ETL 管道
-- 将 KnowledgeBase 从关键词搜索升级为向量语义搜索
+- 将 KnowledgeBase（now VectorStore） 从关键词搜索升级为向量语义搜索
 
 ---
 
@@ -133,7 +133,7 @@ Advisor advisor = RetrievalAugmentationAdvisor.builder()
 ```
 
 **SnapAgent 现状:**
-- `KnowledgeInjector` 是唯一的 RAG 机制
+- `KnowledgeInjector`（now RetrievalAugmentationAdvisor） 是唯一的 RAG 机制
 - 流程：构建查询 → 关键词搜索 → 取 top-K → 拼接到 system prompt
 - 无查询重写、无多变体扩展、无空上下文处理策略
 
@@ -205,7 +205,7 @@ ChatClient.create(chatModel)
 - 工具定义需要手动构建 JSON Schema
 - 工具分发通过 `ToolCallbackRegistry` 自动发现，在 `GraphExecutor` 的 `ToolsNode` 中执行
 - 没有声明式注解，没有自动 JSON Schema 生成
-- `PluginRegistry` 做插件管理（热加载、默认插件），但这是插件层而非工具声明层
+- `PluginRegistry`（now ToolCallbackRegistry） 做插件管理（热加载、默认插件），但这是插件层而非工具声明层
 
 **缺少的组件:**
 - `@Tool` / `@ToolParam` 注解
@@ -346,7 +346,7 @@ ChatClient chatClient = ChatClient.builder(chatModel)
 | 能力 | 文件 | 说明 |
 |------|------|------|
 | **嵌入式 Skill 系统** | `SkillRegistry.java` | Markdown skill 文件热加载，skill body 即 prompt 模板 |
-| **插件热加载** | `PluginRegistry.java`, `PluginUploader.java` | 运行时 JAR 上传 + 隔离 classloader |
+| **插件热加载** | `PluginRegistry.java` (now ToolCallbackRegistry), `PluginUploader.java` | 运行时 JAR 上传 + 隔离 classloader |
 | **SSE 跨 Pod 中继** | `PeerSseRelay.java`, `PeerRouter.java` | K8s/DNS peer discovery + 代理流 |
 | **Anchor 注入** | `AnchorOrchestrator.java` | 页面上下文摘要 + 分类 + RAG 注入 |
 | **Patrol 调度** | `PatrolScheduler.java` | cron 自主巡检 + 告警收敛 |
@@ -366,7 +366,7 @@ ChatClient chatClient = ChatClient.builder(chatModel)
 | **持久化** | SqliteSaver/RedisSaver | JDBC ChatMemoryRepository | 文件 JSON |
 | **HITL** | interrupt() + resume() | 无原生支持 | cancel only |
 | **多 Agent** | Supervisor-Worker + Subgraph | Orchestrator-Workers pattern | 无 |
-| **RAG** | 需自行实现 | QuestionAnswerAdvisor + RetrievalAugmentationAdvisor | KnowledgeInjector（简单） |
+| **RAG** | 需自行实现 | QuestionAnswerAdvisor + RetrievalAugmentationAdvisor | KnowledgeInjector（简单）(now RetrievalAugmentationAdvisor) |
 | **向量存储** | 需自行实现 | 20+ VectorStore 实现 | 无 |
 | **工具调用** | 需自行实现 | @Tool + ToolCallingAdvisor | `@Tool`/`@ToolParam` + `ToolCallbackRegistry` |
 | **可观测性** | 需自行实现 | Micrometer 深度集成 | AuditStore |
@@ -383,19 +383,19 @@ ChatClient chatClient = ChatClient.builder(chatModel)
 1.1 Advisor 拦截器链
     ├── Advisor / CallAdvisor / StreamAdvisor 接口
     ├── AdvisorChain 链式调用
-    ├── 将 `Advisor` SPI / KnowledgeInjector / AuditCallback 重构为 Advisor
+    ├── 将 `Advisor` SPI / KnowledgeInjector (now RetrievalAugmentationAdvisor) / AuditCallback 重构为 Advisor
     └── RecursiveAdvisor 支持自递归（agent 循环基础）
 
 1.2 向量存储 + Embedding
     ├── VectorStore SPI + Redis 实现
     ├── EmbeddingModel SPI + OpenAI 实现
-    └── 将 KnowledgeBase 从关键词升级为语义搜索
+    └── 将 KnowledgeBase（now VectorStore） 从关键词升级为语义搜索
 
 1.3 模块化 RAG
     ├── QueryTransformer — LLM 重写查询
     ├── DocumentRetriever SPI
     ├── QueryAugmenter — 上下文注入
-    └── 替换 KnowledgeInjector 为 RetrievalAugmentationAdvisor
+    └── 替换 KnowledgeInjector（now RetrievalAugmentationAdvisor） 为 RetrievalAugmentationAdvisor
 ```
 
 ### Phase 2 (P1): 开发体验 + 生产质量
@@ -474,16 +474,18 @@ ChatClient chatClient = ChatClient.builder(chatModel)
 |----------------|----------|---------------------|
 | GraphExecutor | `snap-agent-core/.../agent/GraphExecutor.java` | ChatClient + ToolCallingAdvisor |
 | Advisor SPI | `snap-agent-core/.../agent/Advisor.java` | Advisor |
-| KnowledgeBase | `snap-agent-core/.../knowledge/KnowledgeBase.java` | VectorStore + EmbeddingModel |
-| KnowledgeInjector | `snap-agent-core/.../knowledge/KnowledgeInjector.java` | RetrievalAugmentationAdvisor |
-| KnowledgeSearcher | `snap-agent-core/.../knowledge/KnowledgeSearcher.java` | DocumentRetriever |
+| KnowledgeBase (now VectorStore) | `snap-agent-core/.../knowledge/KnowledgeBase.java` | VectorStore + EmbeddingModel |
+| KnowledgeInjector (now RetrievalAugmentationAdvisor) | `snap-agent-core/.../knowledge/KnowledgeInjector.java` | RetrievalAugmentationAdvisor |
+| KnowledgeSearcher (now DocumentRetriever) | `snap-agent-core/.../knowledge/KnowledgeSearcher.java` | DocumentRetriever |
 | `@Tool`/`@ToolParam`/`ToolCallback` | `snap-agent-core/.../tool/ToolCallback.java` | @Tool / ToolCallback |
 | ToolCallbackRegistry | `snap-agent-core/.../tool/ToolCallbackRegistry.java` | ToolCallingAdvisor |
-| PluginRegistry | `snap-agent-core/.../tool/PluginRegistry.java` | ToolCallbackProvider |
-| ConversationStore | `snap-agent-core/.../conversation/ConversationStore.java` | ChatMemoryRepository |
-| SimpleWorkflowEngine | `snap-agent-spring-boot-2x-starter/.../workflow/SimpleWorkflowEngine.java` | Agentic Patterns |
+| PluginRegistry (now ToolCallbackRegistry) | `snap-agent-core/.../tool/PluginRegistry.java` | ToolCallbackProvider |
+| ConversationStore (now ChatMemoryRepository) | `snap-agent-core/.../conversation/ConversationStore.java` | ChatMemoryRepository |
+| SimpleWorkflowEngine (now StateGraph) | `snap-agent-spring-boot-2x-starter/.../workflow/SimpleWorkflowEngine.java` | Agentic Patterns |
 | AuditStore | `snap-agent-core/.../audit/AuditStore.java` | Micrometer Observation |
 | LlmClient | `snap-agent-core/.../llm/LlmClient.java` | ChatModel |
+
+> **Naming note**: The 2.x refactor renamed several components. Old names map to new names as follows: `KnowledgeBase` → `VectorStore`, `KnowledgeInjector` → `RetrievalAugmentationAdvisor`, `KnowledgeSearcher` → `DocumentRetriever`, `PluginRegistry` → `ToolCallbackRegistry`, `ConversationStore` → `ChatMemoryRepository`, `SimpleWorkflowEngine` → `StateGraph`. See `docs/glossary.md`.
 
 ---
 

@@ -76,4 +76,15 @@ public interface CodeGraphIndex {
      * Total number of nodes in the index.
      */
     int nodeCount();
+
+    /**
+     * Rebuild the index from a fresh {@link CodeGraphBuilder#build()} result.
+     * Implementations should replace all existing data atomically.
+     *
+     * <p>This method is used by {@code CodeGraphHotReloader} to incrementally
+     * update the graph when source files change.</p>
+     *
+     * @param builder the builder to invoke {@code build()} on
+     */
+    void rebuild(CodeGraphBuilder builder);
 }

@@ -59,4 +59,64 @@ public class DefaultQueryAugmenter implements QueryAugmenter {
     public boolean isAllowEmptyContext() {
         return allowEmptyContext;
     }
+
+    /**
+     * CJK-aware token estimator (P2-16).
+     *
+     * <p>Replaces the crude {@code chars / 3.5} heuristic with a smarter rule:
+     * <ul>
+     *   <li>Each CJK character (CJK Unified Ideographs, Hiragana, Katakana,
+     *       Hangul) counts as 1 token.</li>
+     *   <li>Each run of ASCII letters/digits (an English word) counts as 1 token.</li>
+     *   <li>Standalone punctuation/symbols count as 1 token each.</li>
+     * </ul>
+     *
+     * <p>This is significantly more accurate for Chinese text, where one
+     * character ≈ one token, while still giving a reasonable estimate for
+     * English (one word ≈ one token).</p>
+     *
+     * @param text input text (may be null/empty)
+     * @return estimated token count
+     */
+    public int estimateTokens(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        int tokens = 0;
+        int i = 0;
+        int len = text.length();
+        while (i < len) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)) {
+                i++;
+            } else if (isCjk(c)) {
+                tokens++;
+                i++;
+            } else if (Character.isLetterOrDigit(c)) {
+                // Consume a run of letters/digits (one English word token).
+                while (i < len) {
+                    char ch = text.charAt(i);
+                    if (Character.isLetterOrDigit(ch) && !isCjk(ch)) {
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+                tokens++;
+            } else {
+                // Punctuation or symbol — count as a single token.
+                tokens++;
+                i++;
+            }
+        }
+        return tokens;
+    }
+
+    private static boolean isCjk(char c) {
+        return (c >= 0x4E00 && c <= 0x9FFF)   // CJK Unified Ideographs
+                || (c >= 0x3400 && c <= 0x4DBF)  // CJK Extension A
+                || (c >= 0xF900 && c <= 0xFAFF)  // CJK Compatibility Ideographs
+                || (c >= 0x3040 && c <= 0x30FF)  // Hiragana + Katakana
+                || (c >= 0xAC00 && c <= 0xD7AF); // Hangul Syllables
+    }
 }

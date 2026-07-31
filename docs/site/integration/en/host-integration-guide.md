@@ -284,6 +284,10 @@ All properties are prefixed with `snap-agent` and bound by `SnapAgentProperties`
 | `scan-packages` | `[]` | Package prefixes to scan (empty = scan all .java under project-root) |
 | `max-depth` | `5` | Max depth for call chain queries (forward and reverse) |
 | `max-impact-depth` | `3` | Max depth for impact analysis queries |
+| `persistence` | `memory` | Persistence mode: `memory` (in-memory) or `h2` (H2 file persistence, for K8s/CI deployment) |
+| `h2-url` | `jdbc:h2:file:./data/codegraph` | H2 JDBC URL, only used when `persistence=h2`. K8s uses CI pre-built H2 file path |
+| `hot-reload-enabled` | `false` | Enable WatchService hot reload (recommended for local dev, disable for K8s) |
+| `hot-reload-poll-ms` | `2000` | Hot reload poll interval in milliseconds |
 
 ### 3.12 Proactive Monitoring Configuration
 

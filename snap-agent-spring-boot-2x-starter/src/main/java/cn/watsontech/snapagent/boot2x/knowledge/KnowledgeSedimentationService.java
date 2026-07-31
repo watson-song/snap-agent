@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.boot2x.knowledge;
 
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.issue.IssueClosure;
+import cn.watsontech.snapagent.core.issue.SedimentationReviewer;
 import cn.watsontech.snapagent.core.issue.SolutionOption;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
@@ -33,10 +34,30 @@ public class KnowledgeSedimentationService {
 
     private final VectorStore vectorStore;
     private final EmbeddingModel embeddingModel;
+    private final SedimentationReviewer reviewer;
 
     public KnowledgeSedimentationService(VectorStore vectorStore, EmbeddingModel embeddingModel) {
+        this(vectorStore, embeddingModel, null);
+    }
+
+    /**
+     * Constructor with a {@link SedimentationReviewer} quality gate.
+     *
+     * <p>P1-7: if a reviewer is provided, {@code sediment()} calls
+     * {@link SedimentationReviewer#review} after extraction but before
+     * embedding/storage. If the reviewer returns {@code false}, the document
+     * is skipped with a WARN log. If the reviewer is {@code null}, all
+     * documents are accepted (backward compatible).</p>
+     *
+     * @param vectorStore    the target vector store
+     * @param embeddingModel the embedding model
+     * @param reviewer       the sedimentation reviewer (nullable — null = accept all)
+     */
+    public KnowledgeSedimentationService(VectorStore vectorStore, EmbeddingModel embeddingModel,
+                                         SedimentationReviewer reviewer) {
         this.vectorStore = vectorStore;
         this.embeddingModel = embeddingModel;
+        this.reviewer = reviewer;
     }
 
     /**
@@ -97,6 +118,12 @@ public class KnowledgeSedimentationService {
     public void sediment(IssueClosure issue) {
         Document doc = extract(issue);
         if (doc == null) return;
+
+        // P1-7: review gate — if reviewer rejects, skip embedding + storage
+        if (reviewer != null && !reviewer.review(doc, issue)) {
+            log.warn("issue {} rejected by reviewer '{}'", issue.getIssueId(), reviewer.name());
+            return;
+        }
 
         if (embeddingModel != null) {
             try {

@@ -63,7 +63,7 @@ Covers the complete v1.0 system architecture:
    - Why split: javax/jakarta binary incompatibility
 2. Component inventory (all v0.1-v1.0 components):
    - Core: AgentExecutor, SkillRegistry/SkillLoader/SkillMeta, ToolDispatcher/ToolProvider, LlmClient/LlmRequest/LlmEventSink, SecurityGateway/PrincipalResolver, RateLimiter, TaskStore/AgentTask
-   - Starter: AnthropicLlmClient, SnapAgentController/SnapAgentFilter, SpringSecurityAdapter/ShiroAdapter, JdbcQueryToolProvider/RedisReadToolProvider, all v0.3-v1.0 tool providers, KnowledgeBase/KnowledgeInjector, CodeGraph, IssueClosure, CostTracker, WorkflowEngine, ToolPluginRegistry, PeerRouter/PeerSseRelay
+   - Starter: AnthropicLlmClient, SnapAgentController/SnapAgentFilter, SpringSecurityAdapter/ShiroAdapter, JdbcQueryToolProvider/RedisReadToolProvider, all v0.3-v1.0 tool providers, KnowledgeBase/KnowledgeInjector (now VectorStore/RetrievalAugmentationAdvisor), CodeGraph, IssueClosure, CostTracker, WorkflowEngine, ToolPluginRegistry (now ToolCallbackRegistry), PeerRouter/PeerSseRelay
 3. Data flow: user input → skill selection → LLM loop → tool dispatch → SSE streaming → report
 4. AutoConfiguration conditional assembly (enabled=false zero-impact proof)
 5. SPI extension points (all interfaces with their purpose)
@@ -77,7 +77,7 @@ Covers the complete v1.0 system architecture:
 
 Covers the search engine design and algorithm:
 
-1. Architecture: KnowledgeBase → KnowledgeSource → KnowledgeSearcher SPI
+1. Architecture: KnowledgeBase → KnowledgeSource → KnowledgeSearcher SPI (now VectorStore → DocumentReader → DocumentRetriever)
 2. SimpleKeywordSearcher tokenization:
    - Latin: split on whitespace/punctuation, lowercase, drop <2 char tokens
    - CJK: overlapping 2-char bigrams (e.g. "数据库" → ["数据", "据库", "库"])
@@ -87,19 +87,19 @@ Covers the search engine design and algorithm:
    - Example walkthroughs: "数据库" → 1.0, "snapagent" → 1.0 + 0.50
 4. minScore threshold:
    - Config: `snap-agent.knowledge.min-score` (default 0.1)
-   - KnowledgeBase.search() filters `score >= minScore`
+   - KnowledgeBase.search() filters `score >= minScore` (now VectorStore.similaritySearch)
    - KnowledgeController.search() uses config minScore (was hardcoded 0.0 — bug fixed)
 5. searchWithScores() — returns SearchResult(fragment, score) for UI display
-6. KnowledgeInjector auto-injection flow:
-   - SystemPromptExtender SPI → KnowledgeInjector implementation
+6. KnowledgeInjector auto-injection flow (now RetrievalAugmentationAdvisor):
+   - SystemPromptExtender SPI (now Advisor) → KnowledgeInjector implementation (now RetrievalAugmentationAdvisor)
    - Per-skill-query: extract keywords from user input → search top-K → inject to system prompt
-   - AgentExecutor multi-extender: List<SystemPromptExtender>, ordered stream
+   - AgentExecutor multi-extender: List<SystemPromptExtender> (now List<Advisor>), ordered stream
 7. Known limitations:
    - Case-sensitive English matching (SnapAgent ≠ snapagent)
    - No semantic search (keyword overlap only)
    - No vector embeddings (planned for v0.7.2)
    - Single-token queries now supported (was blocked by 2-token minimum — bug fixed)
-8. Extension points: implement KnowledgeSearcher for custom scoring, KnowledgeSource for custom sources
+8. Extension points: implement KnowledgeSearcher (now DocumentRetriever) for custom scoring, KnowledgeSource (now DocumentReader) for custom sources
 
 ### Document 3: Host Integration Guide
 
@@ -133,8 +133,8 @@ Covers everything a host developer needs to integrate SnapAgent:
    - Common pitfall: permissions in principal vs GrantedAuthority
 4. Custom extensions:
    - ToolProvider: @Component, name/schema/execute
-   - SystemPromptExtender: extend(skillMeta, agentTask) → String
-   - KnowledgeSearcher: custom scoring algorithm
+   - SystemPromptExtender (now Advisor): extend(skillMeta, agentTask) → String
+   - KnowledgeSearcher (now DocumentRetriever): custom scoring algorithm
    - CodeGraphBuilder: AST-based code analysis
    - IssueTracker: Jira/GitHub integration
    - CostStore: DB-backed cost storage
@@ -244,12 +244,12 @@ Covers the v0.9 issue closure loop design:
 2. Starter implementation (`boot2x/issue/`):
    - FileIssueStore: JSON file storage in {upload-skills-dir}/issues/{issueId}.json
    - NoopIssueTracker: default empty implementation
-   - KnowledgeSedimentationExtractor: extracts KnowledgeFragment from IssueClosure (title="问题: "+truncate(query,60), content=##问题/##根因/##解决方案/##验证结果, source="sedimentation:"+issueId, metadata={category:"经验沉淀"})
+   - KnowledgeSedimentationExtractor: extracts KnowledgeFragment (now Document) from IssueClosure (title="问题: "+truncate(query,60), content=##问题/##根因/##解决方案/##验证结果, source="sedimentation:"+issueId, metadata={category:"经验沉淀"})
    - IssueClosureService: orchestration service
      - proposeSolution(taskId): run solution-suggest skill → extract solutions
      - createExternalIssue(taskId): call IssueTracker.createIssue()
      - verify(issueId): run verify-fix skill → check if issue resolved
-     - close(issueId): extract knowledge → store in KnowledgeBase → set status CLOSED
+     - close(issueId): extract knowledge → store in KnowledgeBase (now VectorStore) → set status CLOSED
 3. REST endpoints: POST /runs/{id}/solution, POST /runs/{id}/issue, GET /issues/{id}, POST /issues/{id}/verify, POST /issues/{id}/close
 4. Knowledge sedimentation flow: diagnosis → solution → fix → verify → sediment to knowledge base → feedback loop
 5. Configuration: `snap-agent.issue-closure.{enabled,system-user-id,storage-dir,tracker-type}`
@@ -330,7 +330,7 @@ Two-part manual covering both user types:
 
 **Part 2 — Developer Guide:**
 1. Writing custom ToolProvider (full example with @Component)
-2. Writing custom SystemPromptExtender
+2. Writing custom SystemPromptExtender (now Advisor)
 3. Implementing IssueTracker for Jira/GitHub (createIssue, updateStatus, getIssueUrl)
 4. Implementing CostStore with DB-backed storage
 5. Writing workflow YAML — step-by-step guide:
@@ -340,7 +340,7 @@ Two-part manual covering both user types:
    - Failure handling strategies (STOP/SKIP/RETRY)
    - Example: full-diagnose.yml walkthrough
 6. MCP integration (external tool servers)
-7. Knowledge source extension (custom KnowledgeSource implementation)
+7. Knowledge source extension (custom KnowledgeSource (now DocumentReader) implementation)
 8. ConversationStore replacement (DB-backed)
 9. Implementing custom EventSource (Kafka/RabbitMQ anomaly events)
 10. Implementing custom PushChannel (DingTalk, Jira, email)
