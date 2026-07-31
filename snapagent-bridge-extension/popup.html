@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapAgent Bridge</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <h2>SnapAgent Bridge</h2>
+        <label class="toggle-row">
+            <span>Master Switch</span>
+            <input type="checkbox" id="masterToggle">
+        </label>
+        <div class="separator"></div>
+        <div class="services">
+            <label class="toggle-row">
+                <span>Issue Tracker</span>
+                <input type="checkbox" id="serviceIssueTracker">
+            </label>
+            <label class="toggle-row">
+                <span>VCS</span>
+                <input type="checkbox" id="serviceVcs">
+            </label>
+        </div>
+        <div class="separator"></div>
+        <div class="status" id="status">Loading...</div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
