@@ -108,10 +108,21 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
             return;
         }
 
-        // Zentao REST API v1 does not have a /comments sub-resource;
-        // comments are added via PUT on the bug with a "comment" field.
         String url = baseUrl + "/api.php/v1/bugs/" + externalIssueId;
+
+        // Fetch current bug to preserve all fields when adding comment
+        JsonNode bug = jsonRequest(url, "GET", header("Token", token), null);
+
         Map<String, Object> body = new LinkedHashMap<String, Object>();
+        if (bug != null) {
+            // Preserve existing fields to avoid unintended edits
+            if (bug.has("title")) body.put("title", bug.get("title").asText());
+            if (bug.has("steps")) body.put("steps", bug.get("steps").asText());
+            if (bug.has("severity")) body.put("severity", bug.get("severity").asInt());
+            if (bug.has("pri")) body.put("pri", bug.get("pri").asInt());
+            if (bug.has("type")) body.put("type", bug.get("type").asText());
+            if (bug.has("openedBuild")) body.put("openedBuild", bug.get("openedBuild").asText());
+        }
         body.put("comment", comment != null ? comment : "");
 
         jsonRequest(url, "PUT", header("Token", token), body);

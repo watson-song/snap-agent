@@ -43,10 +43,12 @@ public class BridgeHttpExecutor implements HttpExecutor {
     public HttpResponse execute(String url, String method,
                                 Map<String, String> headers, Object body) {
         if (bridgeService.isBridgeActive(serviceType)) {
-            log.debug("Bridge active for [{}], proxying {} [{}]",
+            log.info("Bridge active for [{}], proxying {} [{}]",
                       serviceType, method, url);
             return bridgeService.proxyRequest(serviceType, url, method, headers, body);
         }
+        log.info("Bridge not active for [{}], using direct HTTP {} [{}]",
+                  serviceType, method, url);
         return directExecutor.execute(url, method, headers, body);
     }
 

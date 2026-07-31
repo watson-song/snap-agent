@@ -96,9 +96,22 @@ public class AgentNode implements Node {
         List<ToolDef> toolDefs = new ArrayList<>();
         if (toolRegistry != null) {
             List<String> skillTools = skill.getTools();
-            for (ToolCallback callback : toolRegistry.getAll()) {
-                if (skillTools == null || skillTools.isEmpty()
-                        || skillTools.contains(callback.getName())) {
+            // skillTools == null means "all tools" (legacy behavior)
+            // skillTools.isEmpty() means "no tools" (explicit empty list)
+            // skillTools non-empty means "only these tools"
+            if (skillTools != null) {
+                for (ToolCallback callback : toolRegistry.getAll()) {
+                    if (skillTools.contains(callback.getName())) {
+                        toolDefs.add(new ToolDef(
+                            callback.getName(),
+                            callback.getDescription(),
+                            callback.getJsonSchema()
+                        ));
+                    }
+                }
+            } else {
+                // Legacy: include all tools when skillTools is null
+                for (ToolCallback callback : toolRegistry.getAll()) {
                     toolDefs.add(new ToolDef(
                         callback.getName(),
                         callback.getDescription(),

@@ -267,6 +267,79 @@ public class IssueClosureService {
     }
 
     /**
+     * Create an external issue with explicit title, description, severity, and priority
+     * from structured data (e.g. from create-issue skill output).
+     *
+     * @param taskId the task ID to associate with the issue
+     * @param title the issue title
+     * @param description the issue description
+     * @param severity severity level (1-4), or null for default
+     * @param pri priority level (1-4), or null for default
+     * @return the updated issue closure, or {@code null} if the task is not found
+     */
+    public IssueClosure createExternalIssueWithDetails(String taskId, String title,
+            String description, Integer severity, Integer pri) {
+        IssueClosure issue = findByTaskId(taskId);
+
+        // Auto-create IssueClosure if it doesn't exist
+        if (issue == null) {
+            log.info("No IssueClosure found for task {}; auto-proposing solution", taskId);
+            issue = proposeSolution(taskId);
+            if (issue == null) {
+                log.warn("Failed to auto-propose solution for task {}", taskId);
+                return null;
+            }
+            // Re-fetch to ensure we have the latest state
+            issue = findByTaskId(taskId);
+        }
+
+        // Status guard: only create from SOLUTION_PROPOSED or FIX_IN_PROGRESS
+        IssueStatus status = issue.getStatus();
+        if (status != IssueStatus.SOLUTION_PROPOSED && status != IssueStatus.FIX_IN_PROGRESS) {
+            log.warn("Cannot create external issue for task {}: status is {} (only SOLUTION_PROPOSED or FIX_IN_PROGRESS allowed)",
+                    taskId, status);
+            return null;
+        }
+
+        // Idempotency: skip if external issue already exists
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            log.info("External issue {} already exists for task {}; skipping creation",
+                    issue.getExternalIssueId(), taskId);
+            return issue;
+        }
+
+        String selectedSolution = issue.getSolution() != null ? issue.getSolution().getRecommendedOptionId() : null;
+
+        // Build title and description
+        String finalTitle = (title != null && !title.trim().isEmpty()) ? title.trim() : buildIssueTitle(issue, taskId);
+        String finalDesc = description != null ? description : (issue.getRootCause() != null ? issue.getRootCause() : "");
+
+        // Create the external issue
+        String externalIssueId = issueTracker.createIssue(finalTitle, finalDesc, null);
+        String trackerType = issueTracker.type();
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withExternalIssue(externalIssueId, trackerType,
+                selectedSolution, IssueStatus.FIX_IN_PROGRESS, now);
+        issueStore.save(updated);
+        log.info("Created external issue {} (source={}) for issue {} with custom title",
+                externalIssueId, trackerType, issue.getIssueId());
+
+        // Add initial comment
+        if (externalIssueId != null && !externalIssueId.isEmpty()) {
+            try {
+                issueTracker.addComment(externalIssueId,
+                        buildCreationComment(issue, selectedSolution));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add creation comment to external issue {}: {}",
+                        externalIssueId, e.getMessage());
+            }
+        }
+
+        return updated;
+    }
+
+    /**
      * Verify the fix for an issue.
      *
      * <p>When a {@link VerificationRunner} is configured, it is invoked first.
@@ -333,12 +406,19 @@ public class IssueClosureService {
 
         // Push verification comment to external issue
         if (updated.getExternalIssueId() != null && !updated.getExternalIssueId().isEmpty()) {
+            String comment = buildVerificationComment(updated, result);
+            log.info("Adding verification comment to external issue {} (source: {})",
+                    updated.getExternalIssueId(), updated.getExternalIssueSource());
             try {
-                issueTracker.addComment(updated.getExternalIssueId(),
-                        buildVerificationComment(updated, result));
+                issueTracker.addComment(updated.getExternalIssueId(), comment);
+                log.info("Verification comment added successfully to external issue {}",
+                        updated.getExternalIssueId());
             } catch (RuntimeException e) {
-                log.warn("Failed to add verification comment: {}", e.getMessage());
+                log.warn("Failed to add verification comment to external issue {}: {}",
+                        updated.getExternalIssueId(), e.getMessage(), e);
             }
+        } else {
+            log.info("Skipping verification comment: no external issue ID for {}", issueId);
         }
 
         return updated;

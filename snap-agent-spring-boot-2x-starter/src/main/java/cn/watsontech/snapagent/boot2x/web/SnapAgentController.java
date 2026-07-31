@@ -2178,7 +2178,7 @@ public class SnapAgentController {
     // ---- POST /runs/{taskId}/issue (v0.9 issue closure) ----
     @PostMapping("/runs/{taskId}/issue")
     public ResponseEntity<Object> createIssue(@PathVariable String taskId,
-                                               @RequestBody Map<String, String> body) {
+                                               @RequestBody(required = false) Map<String, Object> body) {
         ResponseEntity<Object> authError = requireAuth();
         if (authError != null) return authError;
 
@@ -2187,8 +2187,25 @@ public class SnapAgentController {
                     "issue-closure not enabled");
         }
 
-        String selectedSolution = body != null ? body.get("selected_solution") : null;
-        IssueClosure issue = issueClosureService.createExternalIssue(taskId, selectedSolution);
+        // Check if structured data is provided from create-issue skill
+        @SuppressWarnings("unchecked")
+        Map<String, Object> structuredData = body != null ? (Map<String, Object>) body.get("structuredData") : null;
+
+        IssueClosure issue;
+        if (structuredData != null && structuredData.containsKey("title")) {
+            // Create issue directly from structured data
+            String title = (String) structuredData.get("title");
+            String description = (String) structuredData.get("description");
+            Integer severity = structuredData.get("severity") != null ? ((Number) structuredData.get("severity")).intValue() : null;
+            Integer pri = structuredData.get("pri") != null ? ((Number) structuredData.get("pri")).intValue() : null;
+
+            issue = issueClosureService.createExternalIssueWithDetails(taskId, title, description, severity, pri);
+        } else {
+            // Legacy flow: auto-propose solution then create
+            String selectedSolution = body != null ? (String) body.get("selected_solution") : null;
+            issue = issueClosureService.createExternalIssue(taskId, selectedSolution);
+        }
+
         if (issue == null) {
             return errorResponse(HttpStatus.NOT_FOUND, "ISSUE_NOT_FOUND",
                     "no issue closure found for task: " + taskId);

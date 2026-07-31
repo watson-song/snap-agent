@@ -99,14 +99,82 @@ public class SimpleVerificationRunner implements VerificationRunner {
 
         // A fix is considered verified only when:
         // 1. The re-run task SUCCEEDED (skill executed without errors), AND
-        // 2. The report does not still describe the original error/symptom.
+        // 2. The report contains actual diagnostic content (not just questions), AND
+        // 3. The report does not still describe the original error/symptom.
         // Skill SUCCEEDED alone is NOT sufficient — the skill succeeding just
-        // means it ran, not that the problem is fixed. We also check that the
-        // report doesn't contain the original error indicators.
+        // means it ran, not that the problem is fixed.
         boolean taskSucceeded = TaskStatus.SUCCEEDED.equals(verifyTask.getStatus());
-        boolean passed = taskSucceeded && !reportIndicatesOngoingIssue(summary, issue);
+        boolean hasMeaningfulContent = reportContainsMeaningfulDiagnosis(summary);
+        boolean noOngoingIssue = !reportIndicatesOngoingIssue(summary, issue);
+        boolean passed = taskSucceeded && hasMeaningfulContent && noOngoingIssue;
+
+        if (!passed) {
+            if (!taskSucceeded) {
+                log.info("Verification failed: task status is {} (not SUCCEEDED)", afterStatus);
+            } else if (!hasMeaningfulContent) {
+                log.info("Verification failed: report lacks meaningful diagnostic content (may only contain questions)");
+            } else if (!noOngoingIssue) {
+                log.info("Verification failed: report indicates ongoing issue");
+            }
+        }
 
         return new VerificationResult(passed, summary, beforeStatus, afterStatus, now);
+    }
+
+    /**
+     * Check if the report contains actual diagnostic content rather than just
+     * clarifying questions or requests for more information.
+     *
+     * <p>A meaningful diagnosis should contain at least one of:
+     * <ul>
+     *   <li>Specific findings (table names, error codes, SQL queries)</li>
+     *   <li>Root cause analysis</li>
+     *   <li>Concrete recommendations</li>
+     * </ul>
+     *
+     * <p>Reports that only ask questions ("请提供 skuCode", "需要确认环境") or
+     * give generic advice without specifics are not meaningful diagnoses.</p>
+     */
+    private static boolean reportContainsMeaningfulDiagnosis(String report) {
+        if (report == null || report.isEmpty()) {
+            return false;
+        }
+
+        String lower = report.toLowerCase();
+
+        // Check for question-heavy content (asking for info rather than diagnosing)
+        long questionMarks = report.chars().filter(c -> c == '?' || c == '？').count();
+        long lines = report.split("\n").length;
+        double questionRatio = lines > 0 ? (double) questionMarks / lines : 0;
+
+        // If more than 30% of lines are questions, likely just asking for info
+        if (questionRatio > 0.3 && questionMarks > 3) {
+            return false;
+        }
+
+        // Check for common "need more info" patterns
+        boolean askingForInfo = lower.contains("请提供") || lower.contains("需要您补充")
+                || lower.contains("未提供") && lower.contains("必需")
+                || lower.contains("missing required") || lower.contains("please provide");
+
+        // Check for actual diagnostic content indicators
+        boolean hasDiagnosticContent = lower.contains("根因") || lower.contains("root cause")
+                || lower.contains("发现") || lower.contains("found")
+                || lower.contains("排查") || lower.contains("investigat")
+                || lower.contains("查询") || lower.contains("query")
+                || lower.contains("select ") || lower.contains("from ")
+                || lower.contains("table") || lower.contains("表")
+                || lower.contains("数据") || lower.contains("data")
+                || lower.contains("错误") || lower.contains("error")
+                || lower.contains("异常") || lower.contains("exception");
+
+        // If asking for info AND no diagnostic content, not meaningful
+        if (askingForInfo && !hasDiagnosticContent) {
+            return false;
+        }
+
+        // Must have at least some diagnostic content
+        return hasDiagnosticContent || report.length() > 200;
     }
 
     /**

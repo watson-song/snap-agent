@@ -1158,6 +1158,14 @@ function subscribeStream(taskId, skillName) {
                 }
             }
             saveConversationToBackend(skillName);
+
+            // If this is a create-issue task, parse JSON and show confirmation
+            if (streamState.isCreateIssue && status === 'SUCCEEDED' && streamState.allText) {
+                var issueData = extractIssueJson(streamState.allText);
+                if (issueData) {
+                    showIssueConfirmation(issueData, streamState.taskId);
+                }
+            }
         } catch (doneErr) {
             console.error('[SSE] done handler error:', doneErr);
         } finally {
@@ -1655,22 +1663,216 @@ document.getElementById('chatMessages').addEventListener('click', async function
     }
 
     if (action === 'create-issue') {
-        // Creating an issue requires a solution first; auto-propose if not yet done.
-        // The button stays disabled with "处理中..." text across both calls.
-        btn.disabled = true;
-        btn.textContent = '处理中...';
-        var issueState = getTaskIssueState(skillName, taskId);
-        if (!issueState.solutionProposed) {
-            var proposeOk = await perMessageActionCall(btn, skillName, taskId, BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', null, 'propose-auto');
-            if (!proposeOk) {
-                // perMessageActionCall already restored the button on error
-                return;
+        // Extract diagnostic content from the current message
+        var msgEl = btn.closest('.msg');
+        var contentEl = msgEl ? msgEl.querySelector('.msg-content') : null;
+        var diagnosticContent = contentEl ? (contentEl.innerText || contentEl.textContent || '') : '';
+
+        // Find the user's original query from the conversation
+        var state = skillChatState[skillName];
+        var originalQuery = '';
+        if (state && state.conversationMessages) {
+            for (var i = state.conversationMessages.length - 1; i >= 0; i--) {
+                if (state.conversationMessages[i].role === 'user') {
+                    originalQuery = state.conversationMessages[i].content;
+                    break;
+                }
             }
         }
-        await perMessageActionCall(btn, skillName, taskId, BASE + '/runs/' + encodeURIComponent(taskId) + '/issue', '{}', 'issue');
+
+        // Show "processing" state
+        btn.disabled = true;
+        btn.textContent = '生成 Issue 数据中...';
+
+        // Add a user message to show what's happening
+        appendTranscript(skillName, {
+            type: 'user',
+            content: '请根据以上诊断结果创建 Issue（根因分析已自动提取）',
+            timestamp: Date.now()
+        });
+
+        // Run create-issue skill inline (don't navigate)
+        try {
+            var resp = await fetch(BASE + '/runs', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    skillId: 'create-issue',
+                    inputs: {
+                        root_cause: diagnosticContent.substring(0, 3000),
+                        original_query: originalQuery,
+                        task_id: taskId
+                    },
+                    model: document.getElementById('modelSelect').value,
+                    history: []
+                })
+            });
+            var data = await resp.json();
+            if (resp.ok && data.taskId) {
+                // Subscribe to the stream and show output in current chat
+                subscribeStream(data.taskId, skillName);
+                // Mark this as a create-issue task for confirmation handling
+                var st = getSkillState(skillName);
+                if (st.stream) st.stream.isCreateIssue = true;
+            } else {
+                appendTranscript(skillName, {
+                    type: 'error',
+                    content: '创建 Issue 失败: ' + (data.error || resp.status),
+                    timestamp: Date.now()
+                });
+                btn.disabled = false;
+                btn.textContent = '🐛 创建 Issue';
+            }
+        } catch (e) {
+            appendTranscript(skillName, {
+                type: 'error',
+                content: '请求异常: ' + e.message,
+                timestamp: Date.now()
+            });
+            btn.disabled = false;
+            btn.textContent = '🐛 创建 Issue';
+        }
         return;
     }
 });
+
+// ===== Extract complete JSON object from text (handles nested braces) =====
+function extractIssueJson(text) {
+    // Find the last occurrence of a JSON block that contains "title"
+    // by scanning backwards and tracking brace depth
+    var startIdx = -1;
+    for (var i = text.length - 1; i >= 0; i--) {
+        if (text[i] === '}') {
+            var depth = 0;
+            var j = i;
+            while (j >= 0) {
+                if (text[j] === '}') depth++;
+                else if (text[j] === '{') {
+                    depth--;
+                    if (depth === 0) {
+                        // Check if this block contains "title"
+                        var block = text.substring(j, i + 1);
+                        if (block.indexOf('"title"') >= 0 || block.indexOf("'title'") >= 0) {
+                            try {
+                                return JSON.parse(block);
+                            } catch (e) {}
+                        }
+                        break;
+                    }
+                }
+                j--;
+            }
+        }
+    }
+    return null;
+}
+
+// ===== Show Issue Confirmation Dialog =====
+function showIssueConfirmation(issueData, taskId) {
+    var chatMessages = document.getElementById('chatMessages');
+
+    var confirmHtml = '<div class="msg" style="margin-top:16px;">' +
+        '<div class="msg-role" style="color:var(--accent);font-weight:600;">Issue 确认</div>' +
+        '<div class="msg-content" style="background:var(--bg-card);padding:12px;border-radius:8px;border:1px solid var(--border);">' +
+        '<div style="margin-bottom:8px;"><strong>标题:</strong> <input type="text" id="confirmTitle" value="' + escapeHtml(issueData.title || '') + '" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;"></div>' +
+        '<div style="margin-bottom:8px;"><strong>描述:</strong><textarea id="confirmDesc" rows="6" style="width:100%;padding:4px 8px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;font-family:monospace;">' + escapeHtml(issueData.description || '') + '</textarea></div>' +
+        '<div style="margin-bottom:8px;display:flex;gap:16px;">' +
+        '<div><strong>Severity:</strong> <select id="confirmSeverity" style="padding:2px 6px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);">' +
+        [1,2,3,4].map(function(v) { return '<option value="'+v+'"'+(v===(issueData.severity||3)?' selected':'')+'>'+v+'</option>'; }).join('') +
+        '</select></div>' +
+        '<div><strong>Priority:</strong> <select id="confirmPri" style="padding:2px 6px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);">' +
+        [1,2,3,4].map(function(v) { return '<option value="'+v+'"'+(v===(issueData.pri||3)?' selected':'')+'>'+v+'</option>'; }).join('') +
+        '</select></div>' +
+        '</div>';
+
+    if (issueData.acceptance_criteria && issueData.acceptance_criteria.length > 0) {
+        confirmHtml += '<div style="margin-bottom:8px;"><strong>验收标准:</strong></div>';
+        issueData.acceptance_criteria.forEach(function(ac, idx) {
+            confirmHtml += '<div style="margin-left:16px;margin-bottom:4px;font-size:12px;">' +
+                '<input type="text" value="' + escapeHtml(ac.description || '') + '" style="width:60%;padding:2px 6px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:11px;" data-ac-desc="' + idx + '">' +
+                '<code style="margin-left:8px;font-size:10px;color:var(--text-secondary);">' + escapeHtml(ac.tool || '') + ': ' + escapeHtml(ac.verification || '') + ' → ' + escapeHtml(ac.expected || '') + '</code>' +
+                '</div>';
+        });
+    }
+
+    confirmHtml += '<div style="margin-top:12px;display:flex;gap:8px;">' +
+        '<button id="confirmCreateBtn" style="padding:6px 16px;background:var(--green);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:13px;">确认创建</button>' +
+        '<button id="confirmCancelBtn" style="padding:6px 16px;background:var(--bg-input);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:13px;">取消</button>' +
+        '</div>' +
+        '<div id="confirmStatus" style="font-size:11px;color:var(--text-muted);margin-top:8px;"></div>' +
+        '</div></div>';
+
+    chatMessages.insertAdjacentHTML('beforeend', confirmHtml);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // Attach handlers
+    document.getElementById('confirmCreateBtn').addEventListener('click', async function() {
+        var btn = this;
+        var cancelBtn = document.getElementById('confirmCancelBtn');
+        var statusEl = document.getElementById('confirmStatus');
+        btn.disabled = true;
+        btn.textContent = '创建中...';
+        statusEl.textContent = '';
+
+        // Collect edited data
+        var editedData = {
+            title: document.getElementById('confirmTitle').value,
+            description: document.getElementById('confirmDesc').value,
+            severity: parseInt(document.getElementById('confirmSeverity').value),
+            pri: parseInt(document.getElementById('confirmPri').value),
+            acceptance_criteria: issueData.acceptance_criteria || []
+        };
+
+        // Update acceptance criteria descriptions from edited inputs
+        document.querySelectorAll('[data-ac-desc]').forEach(function(input) {
+            var idx = parseInt(input.dataset.acDesc);
+            if (editedData.acceptance_criteria[idx]) {
+                editedData.acceptance_criteria[idx].description = input.value;
+            }
+        });
+
+        // Append acceptance criteria to description for Zentao
+        if (editedData.acceptance_criteria.length > 0) {
+            editedData.description += '\n\n## 验收标准\n';
+            editedData.acceptance_criteria.forEach(function(ac) {
+                editedData.description += '- [' + (ac.tool || '') + '] ' + (ac.description || '') + ' → ' + (ac.expected || '') + '\n';
+            });
+        }
+
+        try {
+            // Create the issue via backend
+            var resp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/issue', {
+                method: 'POST',
+                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                    structuredData: editedData
+                })
+            });
+            var data = await resp.json();
+            if (resp.ok) {
+                statusEl.style.color = 'var(--green)';
+                statusEl.textContent = '✓ Issue 已创建: ' + (data.issueId || data.id || '');
+                btn.textContent = '✓ 已创建';
+                // Hide cancel button after successful creation
+                if (cancelBtn) cancelBtn.style.display = 'none';
+            } else {
+                statusEl.style.color = 'var(--red)';
+                statusEl.textContent = '创建失败: ' + (data.error || resp.status);
+                btn.disabled = false;
+                btn.textContent = '重试';
+            }
+        } catch (e) {
+            statusEl.style.color = 'var(--red)';
+            statusEl.textContent = '请求异常: ' + e.message;
+            btn.disabled = false;
+            btn.textContent = '重试';
+        }
+    });
+
+    document.getElementById('confirmCancelBtn').addEventListener('click', function() {
+        this.closest('.msg').remove();
+    });
+}
 
 async function perMessageActionCall(btn, skillName, taskId, url, body, mode) {
     var origText = btn.textContent;
@@ -2443,20 +2645,73 @@ async function showIssuesModal() {
             try {
                 var url, method = 'POST', reqBody = null;
                 if (action === 'create-issue') {
-                    // Full flow: auto-propose solution then create external issue.
-                    // Check if solution is already proposed to avoid duplicate issue closures.
-                    var proposeResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/solution', { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }) });
-                    var proposeData = await proposeResp.json();
-                    if (!proposeResp.ok) {
-                        btn.textContent = '失败';
-                        btn.style.background = 'var(--red-light)';
-                        alert('建议方案生成失败: ' + (proposeData.error || proposeData.message || proposeResp.status));
-                        setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
+                    // Run create-issue skill inline without navigation
+                    btn.textContent = '生成中...';
+
+                    // Fetch task details to get original query
+                    var taskResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId), { headers: authHeaders() });
+                    var originalQuery = '';
+                    if (taskResp.ok) {
+                        var taskData = await taskResp.json();
+                        if (taskData.inputs && taskData.inputs._user_message) {
+                            originalQuery = taskData.inputs._user_message;
+                        } else if (taskData.inputs && taskData.inputs.message) {
+                            originalQuery = taskData.inputs.message;
+                        }
+                    }
+
+                    // Fetch the task report
+                    var reportResp = await fetch(BASE + '/runs/' + encodeURIComponent(taskId) + '/report', { headers: authHeaders() });
+                    var diagnosticContent = '';
+                    if (reportResp.ok) {
+                        diagnosticContent = await reportResp.text();
+                    }
+
+                    // Close the modal
+                    var modal = document.getElementById('featureModal');
+                    if (modal) modal.remove();
+
+                    // Run create-issue skill in the current active chat
+                    var currentSkillName = activeSkillName;
+                    if (!currentSkillName) {
+                        alert('请先选择一个 Skill');
+                        btn.disabled = false;
+                        btn.textContent = origText;
                         return;
                     }
-                    // Now create external issue (backend is idempotent: won't create duplicate if externalIssueId already set)
-                    url = BASE + '/runs/' + encodeURIComponent(taskId) + '/issue';
-                    reqBody = '{}';
+
+                    try {
+                        var resp = await fetch(BASE + '/runs', {
+                            method: 'POST',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({
+                                skillId: 'create-issue',
+                                inputs: {
+                                    root_cause: diagnosticContent.substring(0, 3000),
+                                    original_query: originalQuery,
+                                    task_id: taskId
+                                },
+                                model: document.getElementById('modelSelect').value,
+                                history: []
+                            })
+                        });
+                        var data = await resp.json();
+                        if (resp.ok && data.taskId) {
+                            subscribeStream(data.taskId, currentSkillName);
+                            // Mark this as a create-issue task for confirmation handling
+                            var st = getSkillState(currentSkillName);
+                            if (st.stream) st.stream.isCreateIssue = true;
+                        } else {
+                            alert('创建 Issue 失败: ' + (data.error || resp.status));
+                            btn.disabled = false;
+                            btn.textContent = origText;
+                        }
+                    } catch (e) {
+                        alert('请求异常: ' + e.message);
+                        btn.disabled = false;
+                        btn.textContent = origText;
+                    }
+                    return;
                 } else if (action === 'create-external') {
                     url = BASE + '/runs/' + encodeURIComponent(taskId) + '/issue';
                     reqBody = '{}';
@@ -2892,8 +3147,29 @@ async function showPatrolModal() {
                 catch (e) { statusDiv.textContent = '输入参数不是合法 JSON'; return; }
             }
 
-            // Name and keywords are auto-filled via LLM inference on blur.
-            // If still empty, the backend will auto-generate a name.
+            // If name or keywords are still empty, infer them via LLM before submitting
+            if (!patrolName || !alertKeywords) {
+                statusDiv.textContent = '正在通过 LLM 推断名称和关键词...';
+                try {
+                    var inferText = textMode ? textInput.value.trim() : jsonInput.value.trim();
+                    var inferResp = await fetch(BASE + '/patrol/infer', {
+                        method: 'POST',
+                        headers: authHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify({ instruction: inferText, skillName: skillName })
+                    });
+                    if (inferResp.ok) {
+                        var inferData = await inferResp.json();
+                        if (!patrolName && inferData.name) {
+                            patrolName = inferData.name;
+                            nameInput.value = inferData.name;
+                        }
+                        if (!alertKeywords && inferData.keywords) {
+                            alertKeywords = inferData.keywords;
+                            alertKwInput.value = inferData.keywords;
+                        }
+                    }
+                } catch (e) { /* inference is best-effort */ }
+            }
 
             submitBtn.disabled = true;
             submitBtn.textContent = '创建中...';
