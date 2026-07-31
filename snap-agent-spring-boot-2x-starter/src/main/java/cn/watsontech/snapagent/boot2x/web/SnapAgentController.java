@@ -570,7 +570,12 @@ public class SnapAgentController {
             dto.put("description", node.path("description").asText(""));
             com.fasterxml.jackson.databind.JsonNode inputSchema = node.path("input_schema");
             if (inputSchema.isMissingNode() || inputSchema.isNull()) {
-                inputSchema = node.path("parameters");
+                // The schema might be the input schema itself (has "properties" at root)
+                if (node.has("properties")) {
+                    inputSchema = node;
+                } else {
+                    inputSchema = node.path("parameters");
+                }
             }
             dto.put("parameters", inputSchema.isMissingNode()
                     ? new LinkedHashMap<String, Object>()
@@ -3111,6 +3116,8 @@ public class SnapAgentController {
         dto.put("issueId", issue.getIssueId());
         dto.put("externalIssueId", issue.getExternalIssueId());
         dto.put("externalIssueSource", issue.getExternalIssueSource());
+        dto.put("externalIssueUrl", issueClosureService != null && issue.getExternalIssueId() != null
+                ? issueClosureService.getExternalIssueUrl(issue.getExternalIssueId()) : null);
         dto.put("taskId", issue.getTaskId());
         dto.put("conversationId", issue.getConversationId());
         dto.put("userId", issue.getUserId());

@@ -1874,14 +1874,20 @@ async function showToolsModal() {
         html += '</div>';
 
         html += '<div>';
-        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">工具插件 (' + plugins.length + ')</div>';
-        if (plugins.length === 0) {
-            html += featureEmpty('无已注册插件');
+        // Only show non-system (uploaded/external) plugins; built-in tools are already listed above
+        var externalPlugins = plugins.filter(function(p) { return !p.system; });
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">外部插件 (' + externalPlugins.length + ')</div>';
+        if (externalPlugins.length === 0) {
+            html += '<div style="padding:10px;color:var(--text-muted);font-size:12px;">暂无外部插件。可通过上传 JAR 注册自定义工具插件。</div>';
         } else {
             html += '<table class="feature-table"><thead><tr><th>名称</th><th>版本</th><th>工具</th><th>描述</th></tr></thead><tbody>';
-            plugins.forEach(function(p) {
-                html += '<tr><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.version || '') + '</td><td>' +
-                    escapeHtml((p.toolNames || []).join(', ')) + '</td><td>' + escapeHtml(p.description || '') + '</td></tr>';
+            externalPlugins.forEach(function(p) {
+                var name = escapeHtml(p.displayName || p.pluginId || p.name || '');
+                var ver = escapeHtml(p.version || '');
+                var tool = escapeHtml(p.toolType || (p.toolNames || []).join(', ') || '');
+                var desc = escapeHtml(p.description || '');
+                html += '<tr><td>' + name + '</td><td>' + ver + '</td><td>' +
+                    tool + '</td><td>' + desc + '</td></tr>';
             });
             html += '</tbody></table>';
         }
@@ -2218,6 +2224,25 @@ async function showCostModal() {
 
 // --- Issues (Problem Closure) ---
 
+// Returns a small icon image for an external issue source type
+function externalIssueIcon(source) {
+    var iconMap = {
+        'zentao': BASE + '/assets/icons/icon_zendao.webp',
+        'github': BASE + '/assets/icons/icon_github.jpeg',
+        'jira':   BASE + '/assets/icons/icon_jira.jpeg'
+    };
+    var src = iconMap[source || ''] || null;
+    if (!src) return '';
+    return '<img src="' + src + '" alt="' + (source || '') + '" style="height:16px;vertical-align:middle;border-radius:2px;">';
+}
+
+// Returns the bug-view URL for an external issue (from backend DTO)
+function externalIssueUrl(source, externalId, dtoUrl) {
+    // The backend provides the full URL in the externalIssueUrl field of the DTO
+    if (dtoUrl) return dtoUrl;
+    return null;
+}
+
 // Build action buttons for an issue based on its status (used in 已记录问题 list)
 function buildIssueActions(issue) {
     if (!issue) return '';
@@ -2232,8 +2257,8 @@ function buildIssueActions(issue) {
     if (s === 'SOLUTION_PROPOSED' || s === 'DIAGNOSED') {
         acts += '<button class="feature-action-btn" data-action="create-external" data-task-id="' + taskId + '" data-issue-id="' + issueId + '">创建外部 Issue</button> ';
     }
-    // FIX_IN_PROGRESS → 验证修复 (advance to VERIFIED)
-    if (s === 'FIX_IN_PROGRESS') {
+    // FIX_IN_PROGRESS, FIX_SUBMITTED, or FAILED → 验证修复 (advance to VERIFIED or re-verify after failure)
+    if (s === 'FIX_IN_PROGRESS' || s === 'FIX_SUBMITTED' || s === 'FAILED') {
         acts += '<button class="feature-action-btn" data-action="verify" data-task-id="' + taskId + '" data-issue-id="' + issueId + '">验证修复</button> ';
     }
     // VERIFIED → 关闭问题 (advance to CLOSED)
@@ -2252,6 +2277,15 @@ function buildIssueDetail(run) {
     }
     if (i.userId) {
         html += '<div><strong>创建人:</strong> ' + escapeHtml(i.userId) + '</div>';
+    }
+    if (i.externalIssueId) {
+        var extLabel = escapeHtml(i.externalIssueSource || 'external') + ' #' + escapeHtml(i.externalIssueId);
+        var extUrl = externalIssueUrl(i.externalIssueSource, i.externalIssueId, i.externalIssueUrl);
+        if (extUrl) {
+            html += '<div style="margin-top:6px;"><strong>外部 Issue:</strong> ' + externalIssueIcon(i.externalIssueSource) + ' <a href="' + escapeHtml(extUrl) + '" target="_blank" style="color:var(--accent);text-decoration:none;">' + extLabel + ' ↗</a></div>';
+        } else {
+            html += '<div style="margin-top:6px;"><strong>外部 Issue:</strong> ' + externalIssueIcon(i.externalIssueSource) + ' <span class="feature-badge">' + extLabel + '</span></div>';
+        }
     }
     if (i.userQuery) {
         html += '<div style="margin-top:6px;"><strong>用户问题:</strong> ' + escapeHtml(i.userQuery) + '</div>';
@@ -2333,8 +2367,12 @@ async function showIssuesModal() {
                 var statusBadge = (i.status === 'CLOSED' || i.status === 'VERIFIED') ? 'green' : 'orange';
                 var rootSummary = (i.rootCause || '').substring(0, 60);
                 var updated = i.updatedAt ? new Date(i.updatedAt).toLocaleString() : '';
+                var extIcon = '';
+                if (i.externalIssueId) {
+                    extIcon = ' <span title="' + escapeHtml(i.externalIssueSource || 'external') + '#' + escapeHtml(i.externalIssueId) + '" style="cursor:default;font-size:12px;">' + externalIssueIcon(i.externalIssueSource) + '</span>';
+                }
                 html += '<tr class="issue-row" data-issue-id="' + escapeHtml(i.issueId || '') + '" data-task-id="' + escapeHtml(r.taskId || '') + '" style="cursor:pointer;">' +
-                    '<td><code>' + escapeHtml(i.issueId || '') + '</code><br><code style="font-size:10px;color:var(--text-secondary);">' + escapeHtml(r.taskId || '') + '</code></td>' +
+                    '<td><code>' + escapeHtml(i.issueId || '') + '</code>' + extIcon + '<br><code style="font-size:10px;color:var(--text-secondary);">' + escapeHtml(r.taskId || '') + '</code></td>' +
                     '<td><span class="feature-badge ' + statusBadge + '">' + escapeHtml(i.status || '') + '</span></td>' +
                     '<td style="font-size:12px;">' + escapeHtml(rootSummary) + '</td>' +
                     '<td style="font-size:11px;">' + escapeHtml(updated) + '</td>' +
@@ -2381,6 +2419,9 @@ async function showIssuesModal() {
             }
         });
 
+        // In-flight tracking for create-external to prevent duplicate issue creation
+        var pendingExternalCreates = {};
+
         // Action button handler (delegated)
         body.addEventListener('click', async function(ev) {
             var btn = ev.target.closest('[data-action]');
@@ -2388,9 +2429,17 @@ async function showIssuesModal() {
             var action = btn.dataset.action;
             var taskId = btn.dataset.taskId;
             var issueId = btn.dataset.issueId;
+            // Guard: prevent concurrent create-external for the same task
+            if (action === 'create-external' && taskId && pendingExternalCreates[taskId]) {
+                ev.preventDefault();
+                return;
+            }
             var origText = btn.textContent;
             btn.disabled = true;
             btn.textContent = '处理中...';
+            if (action === 'create-external' && taskId) {
+                pendingExternalCreates[taskId] = true;
+            }
             try {
                 var url, method = 'POST', reqBody = null;
                 if (action === 'create-issue') {
@@ -2477,6 +2526,10 @@ async function showIssuesModal() {
                 btn.style.background = 'var(--red-light)';
                 setTimeout(function() { btn.disabled = false; btn.textContent = origText; btn.style.cssText = ''; }, 2500);
                 alert('请求异常: ' + e.message);
+            } finally {
+                if (action === 'create-external' && taskId) {
+                    delete pendingExternalCreates[taskId];
+                }
             }
         });
     } catch (e) {

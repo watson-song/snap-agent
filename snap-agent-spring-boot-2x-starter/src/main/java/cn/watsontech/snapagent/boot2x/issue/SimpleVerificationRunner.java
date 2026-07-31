@@ -95,9 +95,35 @@ public class SimpleVerificationRunner implements VerificationRunner {
                 ? originalTask.getStatus().name() : null;
         String afterStatus = verifyTask.getStatus() != null
                 ? verifyTask.getStatus().name() : null;
-        boolean passed = TaskStatus.SUCCEEDED.equals(verifyTask.getStatus());
         String summary = verifyTask.getReport();
 
+        // A fix is considered verified only when:
+        // 1. The re-run task SUCCEEDED (skill executed without errors), AND
+        // 2. The report does not still describe the original error/symptom.
+        // Skill SUCCEEDED alone is NOT sufficient — the skill succeeding just
+        // means it ran, not that the problem is fixed. We also check that the
+        // report doesn't contain the original error indicators.
+        boolean taskSucceeded = TaskStatus.SUCCEEDED.equals(verifyTask.getStatus());
+        boolean passed = taskSucceeded && !reportIndicatesOngoingIssue(summary, issue);
+
         return new VerificationResult(passed, summary, beforeStatus, afterStatus, now);
+    }
+
+    /**
+     * Heuristic check: does the verification report still indicate the original
+     * issue is present? If the report mentions "error", "fail", "异常", "失败",
+     * or "未修复" in a diagnostic context, the issue is likely not resolved.
+     */
+    private static boolean reportIndicatesOngoingIssue(String report, IssueClosure issue) {
+        if (report == null || report.isEmpty()) {
+            // Empty report from a succeeded task is ambiguous — treat as not
+            // indicating an ongoing issue (let the pass stand).
+            return false;
+        }
+        String lower = report.toLowerCase();
+        // Check for explicit "not fixed" / "still failing" indicators
+        return lower.contains("未修复") || lower.contains("问题仍存在")
+                || lower.contains("still failing") || lower.contains("not fixed")
+                || lower.contains("问题未解决");
     }
 }

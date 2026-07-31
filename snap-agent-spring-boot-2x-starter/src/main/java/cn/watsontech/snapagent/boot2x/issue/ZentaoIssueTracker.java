@@ -51,7 +51,7 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
 
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("title", title != null ? title : "");
-        body.put("desc", description != null ? description : "");
+        body.put("steps", description != null ? description : "");
         body.put("severity", 3);   // 1-4, 3 = normal
         body.put("pri", 3);         // 1-4, 3 = medium
         body.put("type", "codeerror");
@@ -108,11 +108,13 @@ public class ZentaoIssueTracker extends AbstractHttpIssueTracker implements Issu
             return;
         }
 
-        String url = baseUrl + "/api.php/v1/bugs/" + externalIssueId + "/comments";
+        // Zentao REST API v1 does not have a /comments sub-resource;
+        // comments are added via PUT on the bug with a "comment" field.
+        String url = baseUrl + "/api.php/v1/bugs/" + externalIssueId;
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("comment", comment != null ? comment : "");
 
-        jsonRequest(url, "POST", header("Token", token), body);
+        jsonRequest(url, "PUT", header("Token", token), body);
     }
 
     /**

@@ -122,16 +122,28 @@ public class IssueBridgeService {
                     "No bridge client connected; cannot proxy request to " + url);
         }
 
+        // Send to only the first connected emitter to avoid duplicate execution
+        // when multiple browser tabs are open. Each tab has its own SSE connection,
+        // and broadcasting would cause the request to be executed N times.
+        boolean sent = false;
         for (SseEmitter emitter : emitters) {
             try {
                 emitter.send(SseEmitter.event()
                         .id(requestId)
                         .name("proxy-request")
                         .data(jsonData));
+                sent = true;
+                break;
             } catch (Exception e) {
                 log.warn("Failed to send SSE to emitter: {}", e.getMessage());
                 emitters.remove(emitter);
             }
+        }
+
+        if (!sent) {
+            pending.remove(requestId);
+            throw new AbstractHttpIssueTracker.TrackerException("bridge",
+                    "Failed to send proxy request to any connected emitter for " + url);
         }
 
         try {

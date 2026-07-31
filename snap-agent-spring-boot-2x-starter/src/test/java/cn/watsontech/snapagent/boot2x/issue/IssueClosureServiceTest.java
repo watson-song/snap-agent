@@ -368,7 +368,7 @@ class IssueClosureServiceTest {
 
         doAnswer(invocation -> {
             AgentTask task = invocation.getArgument(0);
-            task.setReport("Verification passed: pool size now adequate");
+            task.setReport("检查项:\n1. 连接池状态 -> 正常\n2. 超时错误 -> 未再出现\n验证结果: pass\n结论: 修复有效");
             task.setStatus(TaskStatus.SUCCEEDED);
             return null;
         }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
@@ -378,7 +378,7 @@ class IssueClosureServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.getVerificationResult()).isNotNull();
         assertThat(result.getVerificationResult().isPassed()).isTrue();
-        assertThat(result.getVerificationResult().getSummary()).contains("Verification passed");
+        assertThat(result.getVerificationResult().getSummary()).contains("验证结果: pass");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
         verify(issueStore).save(any(IssueClosure.class));
     }
@@ -599,7 +599,7 @@ class IssueClosureServiceTest {
 
         doAnswer(invocation -> {
             AgentTask task = invocation.getArgument(0);
-            task.setReport("verify-fix skill: 通过");
+            task.setReport("检查项:\n1. 连接池状态 -> 正常\n2. 超时错误 -> 未再出现\n验证结果: pass\n结论: 修复有效, 问题已解决");
             task.setStatus(TaskStatus.SUCCEEDED);
             return null;
         }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
@@ -609,7 +609,7 @@ class IssueClosureServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.getVerificationResult()).isNotNull();
         assertThat(result.getVerificationResult().isPassed()).isTrue();
-        assertThat(result.getVerificationResult().getSummary()).contains("通过");
+        assertThat(result.getVerificationResult().getSummary()).contains("验证结果: pass");
         assertThat(result.getStatus()).isEqualTo(IssueStatus.VERIFIED);
         verify(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
         verify(issueStore).save(any(IssueClosure.class));

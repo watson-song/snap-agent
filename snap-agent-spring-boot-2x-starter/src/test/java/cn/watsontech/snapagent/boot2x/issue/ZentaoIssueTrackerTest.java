@@ -111,9 +111,9 @@ class ZentaoIssueTrackerTest {
 
             MockHttpServer.RecordedRequest req = server.findRequest("POST", "/products/1/bugs");
             assertThat(req).isNotNull();
-            assertThat(req.header("Authorization")).isEqualTo("Token zentao-token");
+            assertThat(req.header("Token")).isEqualTo("zentao-token");
             assertThat(req.body).contains("\"title\":\"测试Bug\"");
-            assertThat(req.body).contains("\"desc\":\"描述内容\"");
+            assertThat(req.body).contains("\"steps\":\"描述内容\"");
             assertThat(req.body).contains("\"severity\":3");
             assertThat(req.body).contains("\"pri\":3");
             assertThat(req.body).contains("\"type\":\"codeerror\"");
@@ -214,17 +214,17 @@ class ZentaoIssueTrackerTest {
     }
 
     @Test
-    void addComment_postsToCommentsEndpoint() throws Exception {
+    void addComment_putsToBugEndpoint() throws Exception {
         try (MockHttpServer server = new MockHttpServer()) {
-            server.when("/api.php/v1/bugs/123/comments", "POST", 200, "")
+            server.when("/api.php/v1/bugs/123", "PUT", 200, "")
                     .start();
 
             ZentaoIssueTracker tracker = createTracker(server.getBaseUrl(), "zentao-token");
             tracker.addComment("123", "修复完成");
 
-            MockHttpServer.RecordedRequest req = server.findRequest("POST", "/comments");
+            MockHttpServer.RecordedRequest req = server.findRequest("PUT", "/bugs/123");
             assertThat(req).isNotNull();
-            assertThat(req.header("Authorization")).isEqualTo("Token zentao-token");
+            assertThat(req.header("Token")).isEqualTo("zentao-token");
             assertThat(req.body).contains("\"comment\":\"修复完成\"");
         }
     }

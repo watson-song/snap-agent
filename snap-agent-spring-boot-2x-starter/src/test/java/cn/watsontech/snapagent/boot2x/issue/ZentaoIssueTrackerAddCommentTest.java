@@ -37,9 +37,9 @@ class ZentaoIssueTrackerAddCommentTest {
     }
 
     @Test
-    void addComment_successPostsCommentBodyWithTokenHeader() throws Exception {
+    void addComment_successPutsCommentBodyWithTokenHeader() throws Exception {
         try (MockHttpServer server = new MockHttpServer()) {
-            server.when("/api.php/v1/bugs/456/comments", "POST", 200, "")
+            server.when("/api.php/v1/bugs/456", "PUT", 200, "")
                     .start();
 
             SnapAgentProperties.IssueClosure.ZentaoTracker cfg = new SnapAgentProperties.IssueClosure.ZentaoTracker();
@@ -50,9 +50,9 @@ class ZentaoIssueTrackerAddCommentTest {
 
             tracker.addComment("456", "已修复，请验证");
 
-            MockHttpServer.RecordedRequest req = server.findRequest("POST", "/bugs/456/comments");
+            MockHttpServer.RecordedRequest req = server.findRequest("PUT", "/bugs/456");
             assertThat(req).isNotNull();
-            assertThat(req.header("Authorization")).isEqualTo("Token my-token");
+            assertThat(req.header("Token")).isEqualTo("my-token");
             assertThat(req.body).contains("\"comment\":\"已修复，请验证\"");
         }
     }

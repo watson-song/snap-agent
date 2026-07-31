@@ -31,6 +31,8 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 // Public: static resources (SPA shell + anchor showcase)
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                         "/snap-agent/*.css", "/*.html").permitAll()
+                // Public: static assets (issue source icons, etc.)
+                .antMatchers("/snap-agent/assets/**").permitAll()
                 // Public: SSE stream (EventSource sends cookies automatically;
                 // controller verifies task ownership)
                 .antMatchers("/snap-agent/runs/*/stream").permitAll()

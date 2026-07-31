@@ -235,8 +235,11 @@ public class IssueClosureService {
             return null;
         }
 
-        String title = issue.getRootCause() != null
-                ? truncate(issue.getRootCause(), 80) : "Issue for task " + taskId;
+        // Build a meaningful title: prefer the first meaningful line of the
+        // root cause (the diagnostic conclusion), falling back to userQuery.
+        // Using userQuery directly is unreliable — it's raw user input like
+        // "继续, local" which is not a meaningful issue title.
+        String title = buildIssueTitle(issue, taskId);
         String description = buildIssueDescription(issue, selectedSolution);
         String assignee = issue.getUserId();
         String externalIssueId = issueTracker.createIssue(title, description, assignee);
@@ -281,6 +284,18 @@ public class IssueClosureService {
         IssueClosure issue = issueStore.load(issueId);
         if (issue == null) {
             log.warn("Issue not found for verify: {}", issueId);
+            return null;
+        }
+
+        // Status guard: only allow verification when a fix has been initiated
+        // (FIX_IN_PROGRESS, FIX_SUBMITTED, or FAILED for re-verification).
+        // Verifying a DIAGNOSED or SOLUTION_PROPOSED issue makes no sense.
+        IssueStatus currentStatus = issue.getStatus();
+        if (currentStatus != IssueStatus.FIX_IN_PROGRESS
+                && currentStatus != IssueStatus.FIX_SUBMITTED
+                && currentStatus != IssueStatus.FAILED) {
+            log.warn("Cannot verify issue {}: status is {} (only {}, {} or {} allowed)",
+                    issueId, currentStatus, IssueStatus.FIX_IN_PROGRESS, IssueStatus.FIX_SUBMITTED, IssueStatus.FAILED);
             return null;
         }
 
@@ -331,8 +346,12 @@ public class IssueClosureService {
 
     /**
      * Fallback: runs the "verify-fix" skill and builds a {@link VerificationResult}
-     * from its report. The fix is considered passed when the report mentions
-     * "通过" or "pass" (case-insensitive).
+     * from its report.
+     *
+     * <p>The fix is considered passed only when the report contains an explicit
+     * verification conclusion line starting with "验证结果" or "Verification result"
+     * followed by "pass" or "通过". This prevents false positives from LLM
+     * reports that merely mention "通过" in passing during analysis.</p>
      *
      * @return the verification result, or {@code null} if the skill is not registered
      */
@@ -356,12 +375,53 @@ public class IssueClosureService {
         agentService.execute(verifyTask, skill);
 
         String report = verifyTask.getReport();
-        boolean passed = report != null
-                && (report.contains("通过") || report.toLowerCase().contains("pass"));
+        boolean passed = determineVerificationPassed(report);
         String beforeStatus = issue.getStatus() != null ? issue.getStatus().name() : null;
         String afterStatus = verifyTask.getStatus() != null ? verifyTask.getStatus().name() : null;
         return new VerificationResult(passed, report, beforeStatus, afterStatus,
                 System.currentTimeMillis());
+    }
+
+    /**
+     * Determines whether the verify-fix report indicates a passed verification.
+     *
+     * <p>Looks for an explicit conclusion line containing "验证结果" or
+     * "Verification result" followed by "pass" or "通过". This is stricter
+     * than a simple substring match, preventing false positives where the
+     * LLM mentions "通过" in analysis text without an actual pass verdict.</p>
+     */
+    private static boolean determineVerificationPassed(String report) {
+        if (report == null || report.isEmpty()) {
+            return false;
+        }
+        String lower = report.toLowerCase();
+        // Check for explicit conclusion patterns
+        // Pattern 1: "验证结果: pass" or "验证结果：通过"
+        // Pattern 2: "Verification result: pass"
+        // Pattern 3: The report ends with a clear "pass" or "通过" verdict line
+        String[] lines = report.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim().toLowerCase();
+            if (trimmed.startsWith("验证结果") || trimmed.startsWith("verification result")) {
+                // This is the conclusion line — check for pass verdict
+                return trimmed.contains("pass") || trimmed.contains("通过");
+            }
+        }
+        // Fallback: check last non-empty line for explicit pass/fail verdict
+        String lastLine = null;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String trimmed = lines[i].trim();
+            if (!trimmed.isEmpty()) {
+                lastLine = trimmed.toLowerCase();
+                break;
+            }
+        }
+        if (lastLine != null) {
+            // Only pass if the last line is an explicit verdict
+            return (lastLine.equals("pass") || lastLine.equals("通过")
+                    || lastLine.contains("验证通过") || lastLine.contains("verification passed"));
+        }
+        return false;
     }
 
     /**
@@ -447,6 +507,16 @@ public class IssueClosureService {
      */
     public IssueClosure findByTaskId(String taskId) {
         return issueStore.findByTaskId(taskId);
+    }
+
+    /**
+     * Returns the web URL for an external issue, or {@code null} if not available.
+     */
+    public String getExternalIssueUrl(String externalIssueId) {
+        if (externalIssueId == null || externalIssueId.isEmpty()) {
+            return null;
+        }
+        return issueTracker.getIssueUrl(externalIssueId);
     }
 
     /**
@@ -646,6 +716,38 @@ public class IssueClosureService {
     }
 
     // ---- helpers ----
+
+    /**
+     * Builds a concise, meaningful title for the external issue.
+     *
+     * <p>Preference order:</p>
+     * <ol>
+     *   <li>First non-empty, non-markdown-header line of rootCause (diagnostic conclusion)</li>
+     *   <li>User query (truncated)</li>
+     *   <li>Fallback: "Issue for task {taskId}"</li>
+     * </ol>
+     */
+    private String buildIssueTitle(IssueClosure issue, String taskId) {
+        // Try to extract a meaningful summary from rootCause
+        if (issue.getRootCause() != null && !issue.getRootCause().isEmpty()) {
+            for (String line : issue.getRootCause().split("\n")) {
+                String trimmed = line.trim();
+                // Skip empty lines, markdown headers, horizontal rules, and code blocks
+                if (trimmed.isEmpty()) continue;
+                if (trimmed.startsWith("#")) continue;
+                if (trimmed.startsWith("---")) continue;
+                if (trimmed.startsWith("```")) continue;
+                if (trimmed.startsWith("|")) continue;
+                // This is a meaningful first line — use it as the title
+                return truncate(trimmed, 80);
+            }
+        }
+        // Fallback to userQuery if rootCause has no meaningful lines
+        if (issue.getUserQuery() != null && !issue.getUserQuery().isEmpty()) {
+            return truncate(issue.getUserQuery(), 80);
+        }
+        return "Issue for task " + taskId;
+    }
 
     /**
      * Builds a rich description for the external issue from the issue closure's
