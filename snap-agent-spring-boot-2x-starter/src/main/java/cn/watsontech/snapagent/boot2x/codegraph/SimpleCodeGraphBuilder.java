@@ -52,6 +52,8 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
 
     private final CodePathGuard pathGuard;
     private final List<String> scanPackages;
+    private final String scanMode;
+    private final Set<String> skillKeywords;
 
     // Regex patterns for Java source parsing
     private static final Pattern PACKAGE_PATTERN =
@@ -95,8 +97,15 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
             "implements", "this", "super"));
 
     public SimpleCodeGraphBuilder(CodePathGuard pathGuard, List<String> scanPackages) {
+        this(pathGuard, scanPackages, "all", new HashSet<String>());
+    }
+
+    public SimpleCodeGraphBuilder(CodePathGuard pathGuard, List<String> scanPackages,
+                                   String scanMode, Set<String> skillKeywords) {
         this.pathGuard = pathGuard;
         this.scanPackages = scanPackages != null ? scanPackages : new ArrayList<String>();
+        this.scanMode = scanMode != null ? scanMode : "all";
+        this.skillKeywords = skillKeywords != null ? skillKeywords : new HashSet<String>();
     }
 
     @Override
@@ -116,6 +125,17 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         } catch (IOException e) {
             log.error("Failed to walk project root for code graph: {}", e.getMessage());
             return new CodeGraph(new ArrayList<CodeGraphNode>(), new ArrayList<CodeGraphEdge>());
+        }
+
+        // Filter files based on scan mode
+        if ("skills".equalsIgnoreCase(scanMode) && !skillKeywords.isEmpty()) {
+            javaFiles = filterFilesBySkills(javaFiles);
+            log.info("Code graph scan mode 'skills': filtered from {} to {} files",
+                    javaFiles.size(), javaFiles.size());
+        } else if ("packages".equalsIgnoreCase(scanMode) && !scanPackages.isEmpty()) {
+            javaFiles = filterFilesByPackages(javaFiles);
+            log.info("Code graph scan mode 'packages': filtered from {} to {} files",
+                    javaFiles.size(), javaFiles.size());
         }
 
         // Parse files in parallel — each thread accumulates into its own ParseResult,
@@ -148,6 +168,60 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
     @Override
     public String type() {
         return "regex";
+    }
+
+    /**
+     * Filter Java files to only include those that contain keywords from skills.
+     * This significantly reduces the code graph size by only scanning files
+     * that are likely relevant to the skills.
+     */
+    private List<Path> filterFilesBySkills(List<Path> javaFiles) {
+        if (skillKeywords.isEmpty()) {
+            return javaFiles;
+        }
+        List<Path> filtered = new ArrayList<Path>();
+        for (Path file : javaFiles) {
+            try {
+                String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                for (String keyword : skillKeywords) {
+                    if (content.contains(keyword)) {
+                        filtered.add(file);
+                        break;
+                    }
+                }
+            } catch (IOException e) {
+                // Skip unreadable files
+            }
+        }
+        return filtered;
+    }
+
+    /**
+     * Filter Java files to only include those matching the configured package prefixes.
+     */
+    private List<Path> filterFilesByPackages(List<Path> javaFiles) {
+        if (scanPackages.isEmpty()) {
+            return javaFiles;
+        }
+        List<Path> filtered = new ArrayList<Path>();
+        for (Path file : javaFiles) {
+            try {
+                String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                Matcher pkgMatcher = PACKAGE_PATTERN.matcher(content);
+                if (pkgMatcher.find()) {
+                    String packageName = pkgMatcher.group(1);
+                    for (String pkg : scanPackages) {
+                        if (packageName.equals(pkg) || packageName.startsWith(pkg + ".")) {
+                            filtered.add(file);
+                            break;
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                // Skip unreadable files
+            }
+        }
+        return filtered;
     }
 
     private void parseFile(Path javaFile, Path root, List<CodeGraphNode> nodes,

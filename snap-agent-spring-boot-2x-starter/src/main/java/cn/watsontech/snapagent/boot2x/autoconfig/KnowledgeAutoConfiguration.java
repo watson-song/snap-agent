@@ -39,6 +39,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * Knowledge, RAG, and code graph auto-configuration.
@@ -142,10 +144,30 @@ public class KnowledgeAutoConfiguration {
     public CodeGraphBuilder simpleCodeGraphBuilder(
             CodePathGuard codePathGuard,
             SnapAgentProperties props) {
-        log.info("SimpleCodeGraphBuilder assembled (scanPackages={})",
-                props.getCodeGraph().getScanPackages());
+        String scanMode = props.getCodeGraph().getScanMode();
+        log.info("SimpleCodeGraphBuilder assembled (scanMode={}, scanPackages={})",
+                scanMode, props.getCodeGraph().getScanPackages());
+
+        // Extract keywords from skills for 'skills' scan mode
+        Set<String> skillKeywords = new HashSet<String>();
+        if ("skills".equalsIgnoreCase(scanMode)) {
+            skillKeywords = extractSkillKeywords(props);
+        }
+
         return new SimpleCodeGraphBuilder(
-                codePathGuard, props.getCodeGraph().getScanPackages());
+                codePathGuard, props.getCodeGraph().getScanPackages(),
+                scanMode, skillKeywords);
+    }
+
+    /**
+     * Extract keywords from all skill files for smart code graph filtering.
+     * Only scans Java files that contain these keywords.
+     */
+    private Set<String> extractSkillKeywords(SnapAgentProperties props) {
+        Set<String> keywords = new HashSet<String>();
+        // TODO: Implement keyword extraction from skill files
+        // For now, return empty set which means no filtering
+        return keywords;
     }
 
     /**

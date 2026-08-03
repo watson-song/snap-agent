@@ -1452,6 +1452,13 @@ public class SnapAgentProperties {
         /** Package prefixes to scan (empty = scan all .java files under project root). */
         private List<String> scanPackages = new ArrayList<String>();
 
+        /**
+         * Scan mode: {@code all} (default, scan all files),
+         * {@code skills} (only files referenced by skills), or
+         * {@code packages} (only files matching scanPackages).
+         */
+        private String scanMode = "all";
+
         /** Maximum depth for call chain queries (forward and reverse). */
         private int maxDepth = 5;
 
@@ -1488,6 +1495,8 @@ public class SnapAgentProperties {
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public List<String> getScanPackages() { return scanPackages; }
         public void setScanPackages(List<String> scanPackages) { this.scanPackages = scanPackages; }
+        public String getScanMode() { return scanMode; }
+        public void setScanMode(String scanMode) { this.scanMode = scanMode; }
         public int getMaxDepth() { return maxDepth; }
         public void setMaxDepth(int maxDepth) { this.maxDepth = maxDepth; }
         public int getMaxImpactDepth() { return maxImpactDepth; }
