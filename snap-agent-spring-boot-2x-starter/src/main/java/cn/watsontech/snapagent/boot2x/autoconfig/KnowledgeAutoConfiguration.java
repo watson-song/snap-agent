@@ -35,12 +35,19 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Knowledge, RAG, and code graph auto-configuration.
@@ -162,12 +169,187 @@ public class KnowledgeAutoConfiguration {
     /**
      * Extract keywords from all skill files for smart code graph filtering.
      * Only scans Java files that contain these keywords.
+     *
+     * <p>Extracts:
+     * <ul>
+     *   <li>Java class names (CamelCase identifiers like {@code AllocationPlanService})</li>
+     *   <li>Method names (camelCase identifiers)</li>
+     *   <li>Package names (dot-separated like {@code com.example.service})</li>
+     *   <li>Table names (snake_case like {@code drp_allocation_plan})</li>
+     *   <li>Column names from SQL examples</li>
+     * </ul>
      */
     private Set<String> extractSkillKeywords(SnapAgentProperties props) {
         Set<String> keywords = new HashSet<String>();
-        // TODO: Implement keyword extraction from skill files
-        // For now, return empty set which means no filtering
+        List<String> skillDirs = new ArrayList<String>();
+
+        // Add builtin skills directory
+        String builtinDir = props.getBuiltinSkillsDir();
+        if (builtinDir != null && !builtinDir.isEmpty()) {
+            skillDirs.add(builtinDir);
+        }
+
+        // Add upload skills directory
+        String uploadDir = props.getUploadSkillsDir();
+        if (uploadDir != null && !uploadDir.isEmpty()) {
+            skillDirs.add(uploadDir);
+        }
+
+        // Scan each directory for .md files
+        for (String dir : skillDirs) {
+            if (dir.startsWith("classpath")) {
+                // Handle classpath resources
+                extractFromClasspath(dir, keywords);
+            } else {
+                // Handle filesystem paths
+                extractFromFilesystem(dir, keywords);
+            }
+        }
+
+        log.info("Extracted {} keywords from skill files for code graph filtering", keywords.size());
         return keywords;
+    }
+
+    /**
+     * Extract keywords from skill files on the filesystem.
+     */
+    private void extractFromFilesystem(String dirPath, Set<String> keywords) {
+        Path dir = Paths.get(dirPath);
+        if (!Files.exists(dir) || !Files.isDirectory(dir)) {
+            log.debug("Skill directory not found: {}", dirPath);
+            return;
+        }
+
+        try (Stream<Path> stream = Files.walk(dir)) {
+            stream.filter(Files::isRegularFile)
+                    .filter(p -> p.toString().endsWith(".md"))
+                    .forEach(file -> {
+                        try {
+                            String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                            extractKeywordsFromContent(content, keywords);
+                        } catch (IOException e) {
+                            log.debug("Failed to read skill file: {}", file);
+                        }
+                    });
+        } catch (IOException e) {
+            log.warn("Failed to scan skill directory: {}", dirPath);
+        }
+    }
+
+    /**
+     * Extract keywords from skill files on the classpath.
+     */
+    private void extractFromClasspath(String classpathPattern, Set<String> keywords) {
+        ResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        try {
+            Resource[] resources = resolver.getResources(classpathPattern);
+            for (Resource resource : resources) {
+                try {
+                    InputStream is = resource.getInputStream();
+                    byte[] bytes = new byte[is.available()];
+                    int offset = 0;
+                    while (offset < bytes.length) {
+                        int read = is.read(bytes, offset, bytes.length - offset);
+                        if (read == -1) break;
+                        offset += read;
+                    }
+                    is.close();
+                    String content = new String(bytes, StandardCharsets.UTF_8);
+                    extractKeywordsFromContent(content, keywords);
+                } catch (IOException e) {
+                    log.debug("Failed to read classpath resource: {}", resource);
+                }
+            }
+        } catch (IOException e) {
+            log.warn("Failed to scan classpath pattern: {}", classpathPattern);
+        }
+    }
+
+    /**
+     * Extract keywords from skill markdown content.
+     * Extracts class names, method names, package names, table names, and column names.
+     */
+    private void extractKeywordsFromContent(String content, Set<String> keywords) {
+        // Pattern 1: Java class names (CamelCase, typically 3+ chars, starts with uppercase)
+        // Examples: AllocationPlanService, DrpAllocationPlan, SimpleCodeGraphBuilder
+        Matcher classMatcher = Pattern.compile("\\b([A-Z][a-z]+(?:[A-Z][a-z]+){1,})\\b").matcher(content);
+        while (classMatcher.find()) {
+            String word = classMatcher.group(1);
+            // Filter out common non-class words
+            if (!isCommonWord(word) && word.length() >= 3) {
+                keywords.add(word);
+            }
+        }
+
+        // Pattern 2: Method names (camelCase, typically 2+ words)
+        // Examples: getAllocationPlan, checkStatus, updateRecord
+        Matcher methodMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:[A-Z][a-z0-9]+){1,})\\b").matcher(content);
+        while (methodMatcher.find()) {
+            String word = methodMatcher.group(1);
+            if (!isCommonMethodWord(word) && word.length() >= 4) {
+                keywords.add(word);
+            }
+        }
+
+        // Pattern 3: Table names (snake_case, typically 3+ parts)
+        // Examples: drp_allocation_plan, sys_batch_log, dws_alg_allocation_output
+        Matcher tableMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:_[a-z0-9]+){2,})\\b").matcher(content);
+        while (tableMatcher.find()) {
+            String word = tableMatcher.group(1);
+            if (word.length() >= 8) {
+                keywords.add(word);
+            }
+        }
+
+        // Pattern 4: Column names (snake_case, typically 2+ parts)
+        // Examples: sku_code, batch_id, generate_date
+        Matcher colMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\\b").matcher(content);
+        while (colMatcher.find()) {
+            String word = colMatcher.group(1);
+            if (word.length() >= 5) {
+                keywords.add(word);
+            }
+        }
+
+        // Pattern 5: Package names (dot-separated, 3+ parts)
+        // Examples: com.watsontech.snapagent, cn.watsontech.snapagent.boot2x
+        Matcher pkgMatcher = Pattern.compile("\\b([a-z][a-z0-9]+\\.[a-z][a-z0-9]+(?:\\.[a-z][a-z0-9]+)+)\\b").matcher(content);
+        while (pkgMatcher.find()) {
+            String word = pkgMatcher.group(1);
+            if (word.length() >= 10) {
+                keywords.add(word);
+            }
+        }
+    }
+
+    /**
+     * Filter out common English words that are not class names.
+     */
+    private boolean isCommonWord(String word) {
+        Set<String> commonWords = new HashSet<String>(Arrays.asList(
+                "The", "This", "That", "When", "Where", "What", "How", "Why", "Which", "Who",
+                "After", "Before", "During", "While", "Some", "Many", "All", "Each",
+                "Use", "Used", "Using", "Check", "Make", "Made", "Take", "Need",
+                "Show", "Find", "Get", "Set", "Run", "Stop", "Start", "Read", "Write",
+                "Parse", "Build", "Data", "Date", "Time", "Name", "Type", "Code",
+                "Id", "Key", "Value", "Item", "List", "Map", "Test", "Test"
+        ));
+        return commonWords.contains(word);
+    }
+
+    /**
+     * Filter out common method names that are too generic.
+     */
+    private boolean isCommonMethodWord(String word) {
+        Set<String> commonMethods = new HashSet<String>(Arrays.asList(
+                "toString", "hashCode", "equals", "compareTo", "valueOf",
+                "parseInt", "parseFloat", "parseLong", "getString", "getValue",
+                "getName", "getId", "setType", "setValue", "setName", "setId",
+                "isEnabled", "isEmpty", "isNull", "hasNext", "iterator",
+                "contains", "indexOf", "length", "append", "insert", "delete",
+                "update", "select", "query", "execute", "process"
+        ));
+        return commonMethods.contains(word);
     }
 
     /**
