@@ -17,11 +17,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Tests for {@link CodeGraphTools} — verifies the 2.x @Tool annotation pattern
- * where ToolCallbacks.from() discovers 4 tool methods and wraps them as
+ * where ToolCallbacks.from() discovers 5 tool methods and wraps them as
  * ToolCallback[] registered to ToolCallbackRegistry.
  *
  * <p>Covers TDD spec 12-codegraph US-10 (AC17~AC24): @Tool reflection,
- * call_chain/reverse_chain/impact_analysis/find tool execution, maxDepth,
+ * call_chain/reverse_chain/impact_analysis/find/render_call_graph tool execution, maxDepth,
  * no-match, and ToolCallbackRegistry integration.</p>
  */
 class CodeGraphToolsTest {
@@ -70,15 +70,16 @@ class CodeGraphToolsTest {
         return map;
     }
 
-    // ---- AC17: ToolCallbacks.from() discovers 4 @Tool methods ----
+    // ---- AC17: ToolCallbacks.from() discovers 5 @Tool methods ----
 
     @Test
-    void shouldReflectFourToolMethods() {
-        assertThat(callbacks).hasSize(4);
+    void shouldReflectFiveToolMethods() {
+        assertThat(callbacks).hasSize(5);
         assertThat(findByName("call_chain")).isNotNull();
         assertThat(findByName("reverse_chain")).isNotNull();
         assertThat(findByName("impact_analysis")).isNotNull();
         assertThat(findByName("find")).isNotNull();
+        assertThat(findByName("render_call_graph")).isNotNull();
     }
 
     @Test
@@ -185,6 +186,48 @@ class CodeGraphToolsTest {
     void find_emptyQuery_returnsNotFound() {
         ToolResult result = findByName("find").execute(args(""), null);
         assertThat(result.getContent()).contains("未找到");
+    }
+
+    // ---- render_call_graph tool ----
+
+    @Test
+    void renderCallGraph_shouldGenerateHtmlFile() {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("query", "com.test.A#a()");
+        map.put("graphType", "call_chain");
+        ToolResult result = findByName("render_call_graph").execute(map, null);
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).contains("Call graph rendered");
+        assertThat(result.getContent()).contains(".html");
+        assertThat(result.getContent()).contains("Nodes:");
+        assertThat(result.getContent()).contains("Edges:");
+    }
+
+    @Test
+    void renderCallGraph_noMatch_returnsNotFound() {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("query", "NonExistent#method()");
+        map.put("graphType", "call_chain");
+        ToolResult result = findByName("render_call_graph").execute(map, null);
+        assertThat(result.getContent()).contains("未找到");
+    }
+
+    @Test
+    void renderCallGraph_noRelationships_returnsNoRelationships() {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("query", "com.test.C#c()");
+        map.put("graphType", "call_chain");
+        ToolResult result = findByName("render_call_graph").execute(map, null);
+        assertThat(result.getContent()).contains("No relationships found");
+    }
+
+    @Test
+    void renderCallGraph_invalidType_returnsError() {
+        Map<String, Object> map = new HashMap<String, Object>();
+        map.put("query", "com.test.A#a()");
+        map.put("graphType", "invalid_type");
+        ToolResult result = findByName("render_call_graph").execute(map, null);
+        assertThat(result.getContent()).contains("Unsupported graph type");
     }
 
     // ---- P2-18: i18n support — English messages ----

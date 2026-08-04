@@ -363,6 +363,11 @@ public interface CodeGraphIndex {
 - **Edge types**: CALLS / IMPLEMENTS / EXTENDS / DEPENDS_ON / OVERRIDES / REFERENCES
 - **Persistence mode**: `persistence=memory` (default, in-memory) or `persistence=h2` (H2 file persistence)
 - **CI/CD integration**: `CodeGraphCli` provides a CLI entry point for pre-building H2 files in CI pipelines; K8s loads directly from disk on startup (see Integration Guide)
+- **Module Architecture**: `ModuleArchitectureTools` provides two tools:
+  - `generate_module_arch` — scans package structure, generates module dependency diagrams (Mermaid + HTML)
+  - `store_as_knowledge` — stores architecture diagrams in VectorStore as knowledge documents, retrieved via RAG during diagnosis for module-level context. Supports automatic version management (re-storing with same title auto-increments version)
+- **Visualization**: `render_call_graph` tool renders call chains / impact scope as interactive HTML with Mermaid.js, supporting zoom, node search, and SVG export
+- **REST API**: `KnowledgeRestController` provides REST endpoints for knowledge base and code graph (`/knowledge/status`, `/knowledge/search`, `/knowledge/fragments`, `/knowledge/codegraph/status`, `/knowledge/codegraph/search`, `/knowledge/codegraph/render`). The frontend knowledge modal uses tabs to display knowledge documents and code graph separately
 
 ### 3.7 IssueStore / IssueTracker — Issue Closure Loop
 

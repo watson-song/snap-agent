@@ -1,6 +1,6 @@
 # SnapAgent Knowledge Search Algorithm Design
 
-> Version: v1.2 | Updated: 2026-07-31
+> Version: v1.3 | Updated: 2026-08-04
 
 ## 1. Architecture Overview
 

@@ -3346,24 +3346,50 @@ async function showKnowledgeModal() {
     var modal = openFeatureModal('知识库', _first ? '<div class="feature-empty">加载中...</div>' : null);
     var body = modal.querySelector('.history-modal-body');
     try {
+        // Load both knowledge status and codegraph status in parallel
         var resp = await fetch(BASE + '/knowledge/status', { headers: authHeaders() });
+        var cgResp = await fetch(BASE + '/knowledge/codegraph/status', { headers: authHeaders() });
         if (!resp.ok) {
             body.innerHTML = featureEmpty('知识库未启用 (HTTP ' + resp.status + ')');
             return;
         }
         var data = await resp.json();
+        var cgData = cgResp.ok ? await cgResp.json() : { enabled: false, nodeCount: 0 };
 
-        // Status stats — the "知识片段" card is clickable to expand the full fragment list
-        var html = '<div class="feature-stat-row">';
+        // ---- Tab bar ----
+        var html = '<div style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">';
+        html += '<button class="knowledge-tab active" data-tab="knowledge" style="padding:8px 20px;font-size:13px;font-weight:600;background:none;border:none;cursor:pointer;color:var(--accent);border-bottom:2px solid var(--accent);margin-bottom:-2px;">📚 知识库</button>';
+        html += '<button class="knowledge-tab" data-tab="codegraph" style="padding:8px 20px;font-size:13px;font-weight:600;background:none;border:none;cursor:pointer;color:var(--text-muted);border-bottom:2px solid transparent;margin-bottom:-2px;">🔗 代码图谱</button>';
+        html += '</div>';
+
+        // ---- Tab 1: Knowledge Base ----
+        html += '<div id="knowledgeTabContent">';
+
+        // Status stats
+        html += '<div class="feature-stat-row">';
         html += '<div class="feature-stat" id="knowledgeStatFragments" style="cursor:pointer;transition:background 0.15s;" title="点击查看所有知识点">';
         html += '<div class="feature-stat-value">' + data.fragmentCount + '</div><div class="feature-stat-label">知识片段 (点击展开)</div></div>';
         html += '<div class="feature-stat"><div class="feature-stat-value">' + data.maxFragments + '</div><div class="feature-stat-label">注入上限</div></div>';
         html += '<div class="feature-stat"><div class="feature-stat-value">' + data.minScore + '</div><div class="feature-stat-label">最低分数</div></div>';
         html += '</div>';
-        // Fragment list container — populated lazily on stat-card click
         html += '<div id="knowledgeFragmentsList" style="display:none;margin:12px 0;"></div>';
 
-        // Action bar: reload + upload
+        // Source classification
+        var sources = data.sources || [];
+        html += '<div style="margin:12px 0;"><div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">数据源 (' + sources.length + ')</div>';
+        if (sources.length > 0) {
+            html += '<table class="feature-table"><thead><tr><th>类型</th><th>路径</th><th>可写</th></tr></thead><tbody>';
+            sources.forEach(function(s) {
+                html += '<tr><td>' + escapeHtml(s.type) + '</td><td><code>' + escapeHtml(s.dir) + '</code></td>' +
+                    '<td>' + (s.writable ? '<span class="feature-badge green">是</span>' : '<span class="feature-badge">否</span>') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += '<div style="padding:8px;color:var(--text-muted);font-size:12px;">暂无数据源配置</div>';
+        }
+        html += '</div>';
+
+        // Action bar
         html += '<div style="display:flex;gap:8px;align-items:center;margin:12px 0;padding:8px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);">';
         html += '<button class="feature-action-btn" id="knowledgeReloadBtn">🔄 刷新知识库</button>';
         html += '<label class="feature-action-btn" style="cursor:pointer;display:inline-block;">' +
@@ -3372,16 +3398,6 @@ async function showKnowledgeModal() {
             '</label>';
         html += '<span id="knowledgeActionStatus" style="font-size:11px;color:var(--text-muted);"></span>';
         html += '</div>';
-
-        // Sources
-        var sources = data.sources || [];
-        html += '<div style="margin:12px 0;"><div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">数据源 (' + sources.length + ')</div>';
-        html += '<table class="feature-table"><thead><tr><th>类型</th><th>路径</th><th>可写</th></tr></thead><tbody>';
-        sources.forEach(function(s) {
-            html += '<tr><td>' + escapeHtml(s.type) + '</td><td><code>' + escapeHtml(s.dir) + '</code></td>' +
-                '<td>' + (s.writable ? '<span class="feature-badge green">是</span>' : '<span class="feature-badge">否</span>') + '</td></tr>';
-        });
-        html += '</tbody></table></div>';
 
         // Search box
         html += '<div style="margin:16px 0;">';
@@ -3394,9 +3410,78 @@ async function showKnowledgeModal() {
         html += '<div id="knowledgeSearchResults"></div>';
         html += '</div>';
 
+        html += '</div>'; // end knowledgeTabContent
+
+        // ---- Tab 2: Code Graph ----
+        html += '<div id="codegraphTabContent" style="display:none;">';
+        html += '<div class="feature-stat-row">';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + cgData.nodeCount + '</div><div class="feature-stat-label">节点数</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + (cgData.persistence || 'memory') + '</div><div class="feature-stat-label">存储模式</div></div>';
+        html += '<div class="feature-stat"><div class="feature-stat-value">' + (cgData.hotReloadEnabled ? 'ON' : 'OFF') + '</div><div class="feature-stat-label">热加载</div></div>';
+        html += '</div>';
+
+        if (!cgData.enabled) {
+            html += '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">' +
+                '代码图谱未启用。设置 <code>snap-agent.code-graph.enabled=true</code> 开启。</div>';
+        } else {
+            // Scan mode info
+            var scanPkgs = cgData.scanPackages || [];
+            html += '<div style="margin:12px 0;padding:8px 12px;background:var(--bg-card);border-radius:8px;border:1px solid var(--border);font-size:12px;color:var(--text-secondary);">';
+            html += '<strong>扫描模式:</strong> ' + escapeHtml(cgData.scanMode || 'all');
+            if (scanPkgs.length > 0) {
+                html += ' | <strong>包:</strong> ' + escapeHtml(scanPkgs.join(', '));
+            }
+            html += '</div>';
+
+            // Search
+            html += '<div style="margin:16px 0;">';
+            html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">搜索代码节点</div>';
+            html += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+            html += '<input type="text" id="codegraphSearchInput" placeholder="输入类名或方法名，如 InventoryService..." ' +
+                'style="flex:1;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;">';
+            html += '<button class="feature-action-btn" id="codegraphSearchBtn">搜索</button>';
+            html += '</div>';
+            html += '<div id="codegraphSearchResults"></div>';
+            html += '</div>';
+
+            // Render call graph
+            html += '<div style="margin:16px 0;">';
+            html += '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">渲染调用链</div>';
+            html += '<div style="display:flex;gap:8px;margin-bottom:8px;">';
+            html += '<input type="text" id="codegraphRenderQuery" placeholder="方法签名，如 ReplenishmentPlanTask#generate" ' +
+                'style="flex:1;padding:8px 12px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;">';
+            html += '<select id="codegraphRenderType" style="padding:8px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:13px;">';
+            html += '<option value="call_chain">正向调用链</option>';
+            html += '<option value="reverse_chain">反向调用链</option>';
+            html += '<option value="impact">影响范围</option>';
+            html += '</select>';
+            html += '<button class="feature-action-btn" id="codegraphRenderBtn">渲染</button>';
+            html += '</div>';
+            html += '<div id="codegraphRenderResult"></div>';
+            html += '</div>';
+        }
+        html += '</div>'; // end codegraphTabContent
+
         body.innerHTML = html;
 
-        // Attach reload + upload handlers
+        // ---- Tab switching ----
+        body.querySelectorAll('.knowledge-tab').forEach(function(tab) {
+            tab.addEventListener('click', function() {
+                body.querySelectorAll('.knowledge-tab').forEach(function(t) {
+                    t.style.color = 'var(--text-muted)';
+                    t.style.borderBottomColor = 'transparent';
+                    t.classList.remove('active');
+                });
+                tab.style.color = 'var(--accent)';
+                tab.style.borderBottomColor = 'var(--accent)';
+                tab.classList.add('active');
+                var tabName = tab.dataset.tab;
+                body.querySelector('#knowledgeTabContent').style.display = tabName === 'knowledge' ? 'block' : 'none';
+                body.querySelector('#codegraphTabContent').style.display = tabName === 'codegraph' ? 'block' : 'none';
+            });
+        });
+
+        // ---- Knowledge tab handlers ----
         var actionStatus = body.querySelector('#knowledgeActionStatus');
         body.querySelector('#knowledgeReloadBtn').addEventListener('click', async function() {
             var btn = body.querySelector('#knowledgeReloadBtn');
@@ -3417,7 +3502,6 @@ async function showKnowledgeModal() {
                 actionStatus.textContent = '✓ 已刷新，当前 ' + rData.fragmentCount + ' 个片段';
                 btn.disabled = false;
                 btn.textContent = '🔄 刷新知识库';
-                // Refresh the status stats at top of modal
                 setTimeout(showKnowledgeModal, 1000);
             } catch (e) {
                 actionStatus.style.color = 'var(--red)';
@@ -3436,9 +3520,7 @@ async function showKnowledgeModal() {
                 var formData = new FormData();
                 formData.append('file', file);
                 var uResp = await fetch(BASE + '/knowledge/upload', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: formData
+                    method: 'POST', headers: authHeaders(), body: formData
                 });
                 var uData = await uResp.json();
                 if (!uResp.ok) {
@@ -3447,19 +3529,13 @@ async function showKnowledgeModal() {
                     return;
                 }
                 actionStatus.style.color = 'var(--green)';
-                actionStatus.textContent = '✓ 已上传 ' + file.name + '，当前 ' + uData.fragmentCount + ' 个片段';
-                // Refresh the modal to show new fragment count + sources
+                actionStatus.textContent = '✓ 已上传 ' + file.name;
                 setTimeout(showKnowledgeModal, 1000);
             } catch (err) {
                 actionStatus.style.color = 'var(--red)';
                 actionStatus.textContent = '异常: ' + err.message;
             }
         });
-
-        // Attach search handler
-        var searchInput = document.getElementById('knowledgeSearchInput');
-        var searchBtn = document.getElementById('knowledgeSearchBtn');
-        var resultsDiv = document.getElementById('knowledgeSearchResults');
 
         // Stat-card click → toggle fragment list
         var fragmentsListDiv = body.querySelector('#knowledgeFragmentsList');
@@ -3490,26 +3566,51 @@ async function showKnowledgeModal() {
                     container.innerHTML = featureEmpty('知识库为空');
                     return;
                 }
-                var fHtml = '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">' +
-                    '全部知识点 (' + fragments.length + ') — 点击展开/折叠内容</div>';
-                fragments.forEach(function(f, idx) {
-                    var safeId = 'knowledgeFragment_' + idx;
-                    fHtml += '<div style="margin-bottom:8px;padding:10px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;" ' +
-                        'data-fragment-idx="' + idx + '" id="' + safeId + '_header">' +
-                        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-                        '<span style="font-weight:600;color:var(--accent);">' + escapeHtml(f.title || '(无标题)') + '</span>' +
-                        '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(f.source || '') + '</span>' +
-                        '</div></div>';
-                    fHtml += '<div id="' + safeId + '_body" style="display:none;margin:-6px 0 8px 0;padding:10px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
-                        '<pre style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content || '') + '</pre>' +
-                        '</div>';
+
+                // Group by source
+                var bySource = {};
+                fragments.forEach(function(f) {
+                    var src = f.source || 'unknown';
+                    if (!bySource[src]) bySource[src] = [];
+                    bySource[src].push(f);
                 });
+
+                var fHtml = '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">' +
+                    '全部知识点 (' + fragments.length + ') — 按来源分类</div>';
+
+                Object.keys(bySource).sort().forEach(function(src) {
+                    var srcFragments = bySource[src];
+                    var srcLabel = src;
+                    var srcBadge = 'var(--accent)';
+                    if (src === 'module-architecture') { srcLabel = '🔗 模块架构'; srcBadge = '#4dabf7'; }
+                    else if (src === 'upload') { srcLabel = '📤 用户上传'; srcBadge = '#69db7c'; }
+                    else if (src === 'knowledge') { srcLabel = '📚 知识文档'; srcBadge = '#ffd43b'; }
+
+                    fHtml += '<div style="margin-bottom:12px;">';
+                    fHtml += '<div style="font-size:12px;font-weight:600;color:' + srcBadge + ';margin-bottom:6px;padding:4px 8px;background:var(--bg-card);border-radius:var(--radius-sm);">' +
+                        escapeHtml(srcLabel) + ' (' + srcFragments.length + ')</div>';
+
+                    srcFragments.forEach(function(f, idx) {
+                        var safeId = 'knowledgeFragment_' + src.replace(/[^a-zA-Z0-9]/g, '_') + '_' + idx;
+                        var ver = f.version || '1';
+                        fHtml += '<div style="margin-bottom:4px;margin-left:12px;padding:8px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);cursor:pointer;" ' +
+                            'data-fragment-id="' + safeId + '">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span style="font-weight:600;color:var(--accent);font-size:12px;">' + escapeHtml(f.title || '(无标题)') + '</span>' +
+                            '<span class="feature-badge" style="font-size:10px;padding:1px 6px;">v' + escapeHtml(ver) + '</span>' +
+                            '</div></div>';
+                        fHtml += '<div id="' + safeId + '_body" style="display:none;margin:-2px 0 4px 12px;padding:8px;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                            '<pre style="font-size:11px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content || '') + '</pre>' +
+                            '</div>';
+                    });
+                    fHtml += '</div>';
+                });
+
                 container.innerHTML = fHtml;
-                // Attach click handlers to each fragment header
-                container.querySelectorAll('[data-fragment-idx]').forEach(function(header) {
+                container.querySelectorAll('[data-fragment-id]').forEach(function(header) {
                     header.addEventListener('click', function() {
-                        var idxAttr = header.getAttribute('data-fragment-idx');
-                        var bodyEl = container.querySelector('#knowledgeFragment_' + idxAttr + '_body');
+                        var id = header.getAttribute('data-fragment-id');
+                        var bodyEl = container.querySelector('#' + id + '_body');
                         if (bodyEl) {
                             bodyEl.style.display = bodyEl.style.display === 'none' ? 'block' : 'none';
                         }
@@ -3519,6 +3620,11 @@ async function showKnowledgeModal() {
                 container.innerHTML = featureEmpty('加载失败: ' + e.message);
             }
         }
+
+        // Knowledge search
+        var searchInput = document.getElementById('knowledgeSearchInput');
+        var searchBtn = document.getElementById('knowledgeSearchBtn');
+        var resultsDiv = document.getElementById('knowledgeSearchResults');
 
         async function doSearch() {
             var q = searchInput.value.trim();
@@ -3534,13 +3640,14 @@ async function showKnowledgeModal() {
                 }
                 var fHtml = '';
                 fragments.forEach(function(f) {
-                    var scoreText = f.score != null ? (Math.round(f.score * 100) + '%') : 'N/A';
+                    var srcLabel = f.source || 'unknown';
+                    if (srcLabel === 'module-architecture') srcLabel = '🔗 模块架构';
+                    else if (srcLabel === 'upload') srcLabel = '📤 用户上传';
                     fHtml += '<div style="margin-bottom:12px;padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
                         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
                         '<span style="font-weight:600;color:var(--accent);">' + escapeHtml(f.title) + '</span>' +
-                        '<span class="feature-badge" style="background:var(--accent);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;">相关度 ' + scoreText + '</span>' +
+                        '<span style="font-size:11px;color:var(--text-muted);">' + escapeHtml(srcLabel) + '</span>' +
                         '</div>' +
-                        '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">来源: ' + escapeHtml(f.source) + '</div>' +
                         '<pre style="font-size:12px;color:var(--text-primary);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;line-height:1.5;">' + escapeHtml(f.content) + '</pre>' +
                         '</div>';
                 });
@@ -3554,6 +3661,94 @@ async function showKnowledgeModal() {
         searchInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') doSearch();
         });
+
+        // ---- Code Graph tab handlers ----
+        if (cgData.enabled) {
+            var cgSearchInput = document.getElementById('codegraphSearchInput');
+            var cgSearchBtn = document.getElementById('codegraphSearchBtn');
+            var cgResultsDiv = document.getElementById('codegraphSearchResults');
+
+            async function doCgSearch() {
+                var q = cgSearchInput.value.trim();
+                if (!q) { cgResultsDiv.innerHTML = ''; return; }
+                cgResultsDiv.innerHTML = '<div class="feature-empty">搜索中...</div>';
+                try {
+                    var sResp = await fetch(BASE + '/knowledge/codegraph/search?q=' + encodeURIComponent(q), { headers: authHeaders() });
+                    var sData = await sResp.json();
+                    var nodes = sData.nodes || [];
+                    if (nodes.length === 0) {
+                        cgResultsDiv.innerHTML = featureEmpty('无匹配的代码节点');
+                        return;
+                    }
+                    var nHtml = '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">找到 ' + nodes.length + ' 个节点</div>';
+                    nodes.forEach(function(n) {
+                        var typeBadge = n.type === 'METHOD' ? '🔧' : n.type === 'CLASS' ? '📦' : '📎';
+                        nHtml += '<div style="margin-bottom:6px;padding:8px 12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                            '<span style="font-weight:600;color:var(--accent);font-size:12px;">' + typeBadge + ' ' + escapeHtml(n.id) + '</span>' +
+                            '<span style="font-size:11px;color:var(--text-muted);">→' + n.outgoingEdges + ' ←' + n.incomingEdges + '</span>' +
+                            '</div>' +
+                            '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(n.filePath || '') + ':' + n.lineNumber + '</div>' +
+                            '</div>';
+                    });
+                    cgResultsDiv.innerHTML = nHtml;
+                } catch (e) {
+                    cgResultsDiv.innerHTML = featureEmpty('搜索失败: ' + e.message);
+                }
+            }
+
+            cgSearchBtn.addEventListener('click', doCgSearch);
+            cgSearchInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') doCgSearch();
+            });
+
+            // Render call graph
+            var renderBtn = document.getElementById('codegraphRenderBtn');
+            var renderResult = document.getElementById('codegraphRenderResult');
+
+            renderBtn.addEventListener('click', async function() {
+                var query = document.getElementById('codegraphRenderQuery').value.trim();
+                var graphType = document.getElementById('codegraphRenderType').value;
+                if (!query) { renderResult.innerHTML = '<div style="color:var(--text-muted);font-size:12px;">请输入方法签名</div>'; return; }
+
+                renderResult.innerHTML = '<div class="feature-empty">渲染中...</div>';
+                try {
+                    var formData = new URLSearchParams();
+                    formData.append('query', query);
+                    formData.append('graphType', graphType);
+                    var rResp = await fetch(BASE + '/knowledge/codegraph/render', {
+                        method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/x-www-form-urlencoded' }, authHeaders()),
+                        body: formData.toString()
+                    });
+                    var rData = await rResp.json();
+                    if (rData.error) {
+                        renderResult.innerHTML = '<div style="color:var(--red);font-size:12px;">' + escapeHtml(rData.error) + '</div>';
+                        return;
+                    }
+                    var content = rData.result || '';
+                    // Extract file path from result
+                    var pathPrefix = 'Call graph rendered: ';
+                    var pathIdx = content.indexOf(pathPrefix);
+                    if (pathIdx >= 0) {
+                        var filePath = content.substring(pathIdx + pathPrefix.length);
+                        var nlIdx = filePath.indexOf('\n');
+                        if (nlIdx >= 0) filePath = filePath.substring(0, nlIdx);
+                        renderResult.innerHTML = '<div style="padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                            '<div style="font-size:12px;color:var(--green);margin-bottom:8px;">✓ 图形已生成</div>' +
+                            '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">文件: <code>' + escapeHtml(filePath) + '</code></div>' +
+                            '<pre style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;">' + escapeHtml(content) + '</pre>' +
+                            '</div>';
+                    } else {
+                        renderResult.innerHTML = '<div style="padding:12px;background:var(--bg-card);border-radius:var(--radius-sm);border:1px solid var(--border);">' +
+                            '<pre style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;">' + escapeHtml(content) + '</pre></div>';
+                    }
+                } catch (e) {
+                    renderResult.innerHTML = featureEmpty('渲染失败: ' + e.message);
+                }
+            });
+        }
+
     } catch (e) {
         body.innerHTML = featureEmpty('加载失败: ' + e.message);
     }

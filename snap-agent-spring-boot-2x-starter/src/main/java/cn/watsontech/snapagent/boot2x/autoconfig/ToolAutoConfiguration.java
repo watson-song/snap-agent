@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
+import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools;
+import cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextAdvisor;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
 import cn.watsontech.snapagent.boot2x.tool.CodeReaderTools;
@@ -302,6 +304,8 @@ public class ToolAutoConfiguration {
             ObjectProvider<LogSearchTools> logSearchTools,
             ObjectProvider<TraceSearchTools> traceSearchTools,
             ObjectProvider<ConfigReadTools> configReadTools,
+            ObjectProvider<CodeGraphTools> codeGraphTools,
+            ObjectProvider<ModuleArchitectureTools> moduleArchTools,
             ObjectProvider<McpBootstrap> mcpBootstrapProvider) {
         InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
         // Collect all tools beans and register their ToolCallbacks
@@ -316,6 +320,8 @@ public class ToolAutoConfiguration {
         addIfAvailable(toolsBeans, logSearchTools);
         addIfAvailable(toolsBeans, traceSearchTools);
         addIfAvailable(toolsBeans, configReadTools);
+        addIfAvailable(toolsBeans, codeGraphTools);
+        addIfAvailable(toolsBeans, moduleArchTools);
 
         McpBootstrap mcp = mcpBootstrapProvider.getIfAvailable();
         if (mcp != null) {

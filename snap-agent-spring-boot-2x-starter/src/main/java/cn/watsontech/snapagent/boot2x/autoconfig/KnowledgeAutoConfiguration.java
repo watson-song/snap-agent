@@ -11,10 +11,12 @@ import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeETLPipeline;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.boot2x.knowledge.VectorStoreDocumentRetriever;
 import cn.watsontech.snapagent.boot2x.codegraph.AsyncCodeGraphIndex;
+import cn.watsontech.snapagent.boot2x.codegraph.ChineseCodeGraphMessages;
 import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphHotReloader;
 import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools;
 import cn.watsontech.snapagent.boot2x.codegraph.H2CodeGraphIndex;
 import cn.watsontech.snapagent.boot2x.codegraph.InMemoryCodeGraphIndex;
+import cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools;
 import cn.watsontech.snapagent.boot2x.codegraph.SimpleCodeGraphBuilder;
 import cn.watsontech.snapagent.core.rag.DefaultQueryAugmenter;
 import org.slf4j.Logger;
@@ -403,11 +405,35 @@ public class KnowledgeAutoConfiguration {
     public CodeGraphTools codeGraphTools(
             CodeGraphIndex index,
             SnapAgentProperties props) {
-        log.info("CodeGraphTools assembled (maxDepth={}, maxImpactDepth={})",
-                props.getCodeGraph().getMaxDepth(), props.getCodeGraph().getMaxImpactDepth());
+        String graphOutputDir = props.getUploadSkillsDir() + "/code-graphs";
+        log.info("CodeGraphTools assembled (maxDepth={}, maxImpactDepth={}, graphOutput={})",
+                props.getCodeGraph().getMaxDepth(), props.getCodeGraph().getMaxImpactDepth(),
+                graphOutputDir);
         return new CodeGraphTools(
                 index, props.getCodeGraph().getMaxDepth(),
-                props.getCodeGraph().getMaxImpactDepth());
+                props.getCodeGraph().getMaxImpactDepth(),
+                new ChineseCodeGraphMessages(), graphOutputDir);
+    }
+
+    /**
+     * Module architecture tools: scan project packages, generate dependency
+     * diagrams, store as knowledge documents.
+     *
+     * <p>Requires a {@link CodePathGuard} (project root access) and is
+     * activated only when code-graph is enabled.</p>
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
+    @ConditionalOnBean(CodePathGuard.class)
+    @ConditionalOnMissingBean
+    public ModuleArchitectureTools moduleArchitectureTools(
+            CodePathGuard codePathGuard,
+            ObjectProvider<VectorStore> vectorStoreProvider,
+            SnapAgentProperties props) {
+        String knowledgeDir = props.getUploadSkillsDir() + "/knowledge";
+        log.info("ModuleArchitectureTools assembled (knowledgeDir={})", knowledgeDir);
+        return new ModuleArchitectureTools(
+                codePathGuard, vectorStoreProvider.getIfAvailable(), knowledgeDir);
     }
 
     /**

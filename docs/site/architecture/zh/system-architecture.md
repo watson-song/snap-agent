@@ -363,6 +363,11 @@ public interface CodeGraphIndex {
 - **边类型**：CALLS / IMPLEMENTS / EXTENDS / DEPENDS_ON / OVERRIDES / REFERENCES
 - **持久化模式**：`persistence=memory`（默认，纯内存）或 `persistence=h2`（H2 文件持久化）
 - **CI/CD 集成**：`CodeGraphCli` 提供 CLI 入口，CI 阶段预构建 H2 文件并打入 Docker 镜像，K8s 启动时直接加载（详见集成指南）
+- **模块架构图**：`ModuleArchitectureTools` 提供两个工具：
+  - `generate_module_arch` — 扫描包结构，生成模块依赖关系图（Mermaid + HTML）
+  - `store_as_knowledge` — 将架构图存入 VectorStore 作为知识文档，诊断时通过 RAG 检索模块级上下文。支持自动版本号管理（同名文档重复存储时自动递增版本号）
+- **可视化**：`render_call_graph` 工具将调用链/影响范围渲染为带 Mermaid.js 的可交互 HTML，支持缩放、搜索节点、导出 SVG
+- **REST API**：`KnowledgeRestController` 提供知识库和代码图谱的 REST 端点（`/knowledge/status`、`/knowledge/search`、`/knowledge/fragments`、`/knowledge/codegraph/status`、`/knowledge/codegraph/search`、`/knowledge/codegraph/render`），前端知识库弹框通过 Tab 切换展示知识文档和代码图谱
 
 ### 3.7 IssueStore / IssueTracker — 问题闭环
 
