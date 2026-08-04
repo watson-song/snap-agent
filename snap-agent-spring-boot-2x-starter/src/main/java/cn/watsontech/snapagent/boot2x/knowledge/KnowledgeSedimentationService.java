@@ -102,8 +102,15 @@ public class KnowledgeSedimentationService {
         }
 
         Map<String, Object> metadata = new LinkedHashMap<String, Object>();
-        metadata.put("source", "sedimentation:" + issue.getIssueId());
+        metadata.put("source", "diagnosis-experience");
         metadata.put("category", "经验沉淀");
+        metadata.put("issueId", issue.getIssueId());
+        if (issue.getTaskId() != null) {
+            metadata.put("taskId", issue.getTaskId());
+        }
+        if (issue.getConversationId() != null) {
+            metadata.put("conversationId", issue.getConversationId());
+        }
 
         return new Document(title, content.toString(), metadata, null);
     }

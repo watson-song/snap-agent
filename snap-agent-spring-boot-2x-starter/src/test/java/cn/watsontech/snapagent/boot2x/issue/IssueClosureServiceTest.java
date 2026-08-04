@@ -430,7 +430,7 @@ class IssueClosureServiceTest {
 
         assertThat(result).isNotNull();
         assertThat(result.getStatus()).isEqualTo(IssueStatus.CLOSED);
-        assertThat(result.getKnowledgeEntryId()).isEqualTo("sedimentation:issue-005");
+        assertThat(result.getKnowledgeEntryId()).isEqualTo("diagnosis-experience:issue-005");
         verify(sedimentationService).sediment(any(IssueClosure.class));
         verify(issueStore).save(any(IssueClosure.class));
     }
@@ -469,7 +469,7 @@ class IssueClosureServiceTest {
 
         assertThat(result).isNotNull();
         assertThat(result.getStatus()).isEqualTo(IssueStatus.CLOSED);
-        assertThat(result.getKnowledgeEntryId()).isEqualTo("sedimentation:issue-006");
+        assertThat(result.getKnowledgeEntryId()).isEqualTo("diagnosis-experience:issue-006");
         // Should not throw even though sedimentationService is null
         verify(issueStore).save(any(IssueClosure.class));
     }
@@ -633,7 +633,7 @@ class IssueClosureServiceTest {
                 suggestionOf("sol2"), "sol2",
                 IssueStatus.CLOSED, null,
                 null, null,
-                verificationOf(true, "ok"), "sedimentation:issue-list-2",
+                verificationOf(true, "ok"), "diagnosis-experience:issue-list-2",
                 3_000L, 4_000L);
         when(issueStore.list()).thenReturn(Arrays.asList(issue1, issue2));
 

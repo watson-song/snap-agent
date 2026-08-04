@@ -550,7 +550,7 @@ public class IssueClosureService {
         }
 
         long now = System.currentTimeMillis();
-        IssueClosure updated = issue.withKnowledgeEntry("sedimentation:" + issueId, now)
+        IssueClosure updated = issue.withKnowledgeEntry("diagnosis-experience:" + issueId, now)
                 .withStatus(IssueStatus.CLOSED, now);
         issueStore.save(updated);
         log.info("Issue {} closed", issueId);

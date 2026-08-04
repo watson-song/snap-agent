@@ -18,6 +18,8 @@ import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
 import cn.watsontech.snapagent.core.memory.InMemoryChatMemoryRepository;
 import cn.watsontech.snapagent.core.memory.MessageChatMemoryAdvisor;
 import cn.watsontech.snapagent.core.memory.MessageWindowChatMemory;
+import cn.watsontech.snapagent.core.memory.Summarizer;
+import cn.watsontech.snapagent.core.memory.SummarizingChatMemory;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.slf4j.Logger;
@@ -144,17 +146,33 @@ public class SnapAgentAutoConfiguration {
     // declaring their own ChatMemoryRepository bean.
     @Bean
     @ConditionalOnMissingBean
-    public ChatMemoryRepository chatMemoryRepository() {
+    public ChatMemoryRepository chatMemoryRepository(SnapAgentProperties props) {
+        String repoType = props.getMemory().getRepositoryType();
+        if ("file".equalsIgnoreCase(repoType)) {
+            String dir = props.getUploadSkillsDir() + "/memory/conversations";
+            log.info("Using FileChatMemoryRepository (dir={})", dir);
+            return new cn.watsontech.snapagent.boot2x.memory.FileChatMemoryRepository(dir);
+        }
         log.info("Using InMemoryChatMemoryRepository for ReAct loop memory");
         return new InMemoryChatMemoryRepository();
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public ChatMemory chatMemory(ChatMemoryRepository chatMemoryRepository) {
-        log.info("Using MessageWindowChatMemory (maxMessages={})",
-                MessageWindowChatMemory.DEFAULT_MAX_MESSAGES);
-        return new MessageWindowChatMemory(chatMemoryRepository);
+    public ChatMemory chatMemory(ChatMemoryRepository chatMemoryRepository,
+                                 ObjectProvider<Summarizer> summarizerProvider,
+                                 SnapAgentProperties props) {
+        Summarizer summarizer = summarizerProvider.getIfAvailable();
+        if (summarizer != null) {
+            int maxMsgs = props.getMemory().getMaxMessages();
+            int threshold = props.getMemory().getSummarizeThreshold();
+            log.info("Using SummarizingChatMemory (maxMessages={}, summarizeThreshold={})",
+                    maxMsgs, threshold);
+            return new SummarizingChatMemory(chatMemoryRepository, summarizer, maxMsgs, threshold);
+        }
+        log.info("Using MessageWindowChatMemory (maxMessages={}, no Summarizer bean available)",
+                props.getMemory().getMaxMessages());
+        return new MessageWindowChatMemory(chatMemoryRepository, props.getMemory().getMaxMessages());
     }
 
     // ---- MessageChatMemoryAdvisor (Layer 5 — Short-term Notes) ----

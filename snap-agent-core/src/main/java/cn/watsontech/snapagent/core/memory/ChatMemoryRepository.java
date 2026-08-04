@@ -2,6 +2,7 @@ package cn.watsontech.snapagent.core.memory;
 
 import cn.watsontech.snapagent.core.llm.Message;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -35,4 +36,17 @@ public interface ChatMemoryRepository {
      * @param conversationId the conversation identifier
      */
     void delete(String conversationId);
+
+    /**
+     * List all conversation IDs, optionally filtered by user.
+     *
+     * <p>Default implementation returns an empty list. Implementations
+     * with persistent storage should override this.</p>
+     *
+     * @param userId the user ID to filter by (null or empty = all conversations)
+     * @return list of conversation IDs, never null
+     */
+    default List<String> listConversations(String userId) {
+        return Collections.emptyList();
+    }
 }

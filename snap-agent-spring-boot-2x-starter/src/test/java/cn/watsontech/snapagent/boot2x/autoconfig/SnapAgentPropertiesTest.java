@@ -395,7 +395,9 @@ class SnapAgentPropertiesTest {
         SnapAgentProperties.Memory memory = props.getMemory();
 
         assertThat(memory.getType()).isEqualTo("in-memory");
-        assertThat(memory.getMaxMessages()).isEqualTo(20);
+        assertThat(memory.getMaxMessages()).isEqualTo(50);
+        assertThat(memory.getSummarizeThreshold()).isEqualTo(10);
+        assertThat(memory.getRepositoryType()).isEqualTo("memory");
         assertThat(memory.getJdbc().getTableName()).isEqualTo("snap_agent_chat_memory");
     }
 

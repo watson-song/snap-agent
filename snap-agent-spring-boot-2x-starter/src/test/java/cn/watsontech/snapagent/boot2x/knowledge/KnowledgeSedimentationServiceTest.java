@@ -54,8 +54,9 @@ class KnowledgeSedimentationServiceTest {
         assertThat(doc.getContent()).contains("## 问题");
         assertThat(doc.getContent()).contains("## 根因");
         assertThat(doc.getContent()).contains("## 解决方案");
-        assertThat((String) doc.getMetadata("source")).isEqualTo("sedimentation:issue-001");
+        assertThat((String) doc.getMetadata("source")).isEqualTo("diagnosis-experience");
         assertThat((String) doc.getMetadata("category")).isEqualTo("经验沉淀");
+        assertThat((String) doc.getMetadata("issueId")).isEqualTo("issue-001");
     }
 
     // UC-21: extract → embed → VectorStore.add

@@ -2107,8 +2107,12 @@ public class SnapAgentProperties {
     public static class Memory {
         /** Storage type: "in-memory" (default) or "jdbc". */
         private String type = "in-memory";
-        /** Maximum messages to retain (sliding window). */
-        private int maxMessages = 20;
+        /** Maximum messages to retain (sliding window / summarize threshold). */
+        private int maxMessages = 50;
+        /** Number of oldest messages to summarize when window is exceeded. */
+        private int summarizeThreshold = 10;
+        /** Repository type: "memory" (default) or "file". */
+        private String repositoryType = "memory";
         /** JDBC configuration. */
         private JdbcConfig jdbc = new JdbcConfig();
 
@@ -2116,6 +2120,10 @@ public class SnapAgentProperties {
         public void setType(String type) { this.type = type; }
         public int getMaxMessages() { return maxMessages; }
         public void setMaxMessages(int v) { this.maxMessages = v; }
+        public int getSummarizeThreshold() { return summarizeThreshold; }
+        public void setSummarizeThreshold(int v) { this.summarizeThreshold = v; }
+        public String getRepositoryType() { return repositoryType; }
+        public void setRepositoryType(String v) { this.repositoryType = v; }
         public JdbcConfig getJdbc() { return jdbc; }
         public void setJdbc(JdbcConfig jdbc) { this.jdbc = jdbc; }
 
