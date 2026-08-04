@@ -15,6 +15,7 @@ import cn.watsontech.snapagent.boot2x.issue.SimpleVerificationRunner;
 import cn.watsontech.snapagent.boot2x.issue.TemplateSolutionSuggester;
 import cn.watsontech.snapagent.boot2x.issue.ZentaoIssueTracker;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
+import cn.watsontech.snapagent.boot2x.memory.MemoryLearningExtractor;
 import cn.watsontech.snapagent.boot2x.vcs.BitbucketVcsClient;
 import cn.watsontech.snapagent.boot2x.vcs.GitLabVcsClient;
 import cn.watsontech.snapagent.core.agent.TaskStore;
@@ -23,6 +24,10 @@ import cn.watsontech.snapagent.core.issue.IssueStore;
 import cn.watsontech.snapagent.core.issue.IssueTracker;
 import cn.watsontech.snapagent.core.issue.SolutionSuggester;
 import cn.watsontech.snapagent.core.issue.VerificationRunner;
+import cn.watsontech.snapagent.core.llm.LlmClient;
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
+import cn.watsontech.snapagent.core.memory.ProjectFactsStore;
+import cn.watsontech.snapagent.core.memory.UserProfileStore;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.vectorstore.VectorStore;
 import cn.watsontech.snapagent.core.vcs.VcsClient;
@@ -239,15 +244,47 @@ public class IssueAutoConfiguration {
             ObjectProvider<SolutionSuggester> solutionSuggesterProvider,
             ObjectProvider<VerificationRunner> verificationRunnerProvider,
             ObjectProvider<FixExecutionService> fixExecutionServiceProvider,
+            ObjectProvider<MemoryLearningExtractor> memoryLearningExtractorProvider,
+            ObjectProvider<ChatMemoryRepository> chatMemoryRepositoryProvider,
+            ObjectProvider<UserProfileStore> userProfileStoreProvider,
+            ObjectProvider<ProjectFactsStore> projectFactsStoreProvider,
             SnapAgentProperties properties) {
         log.info("IssueClosureService assembled (system-user-id={})",
                 properties.getIssueClosure().getSystemUserId());
-        return new IssueClosureService(agentService, taskStore, skillRegistry,
+        IssueClosureService service = new IssueClosureService(agentService, taskStore, skillRegistry,
                 issueStore, issueTracker,
                 sedimentationServiceProvider.getIfAvailable(),
                 solutionSuggesterProvider.getIfAvailable(),
                 verificationRunnerProvider.getIfAvailable(),
                 properties.getIssueClosure().getSystemUserId(),
                 fixExecutionServiceProvider.getIfAvailable());
+
+        // P2.1: Configure memory learning if dependencies are available
+        MemoryLearningExtractor extractor = memoryLearningExtractorProvider.getIfAvailable();
+        ChatMemoryRepository chatMemoryRepo = chatMemoryRepositoryProvider.getIfAvailable();
+        UserProfileStore userProfileStore = userProfileStoreProvider.getIfAvailable();
+        ProjectFactsStore projectFactsStore = projectFactsStoreProvider.getIfAvailable();
+
+        if (extractor != null && chatMemoryRepo != null) {
+            service.configureMemoryLearning(extractor, chatMemoryRepo, userProfileStore, projectFactsStore);
+            log.info("Memory learning configured for IssueClosureService");
+        }
+
+        return service;
+    }
+
+    // ---- P2.1: Memory Learning ----
+
+    @Bean
+    @ConditionalOnMissingBean
+    @ConditionalOnProperty(prefix = "snap-agent.memory.learning", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public MemoryLearningExtractor memoryLearningExtractor(ObjectProvider<LlmClient> llmClientProvider) {
+        LlmClient llmClient = llmClientProvider.getIfAvailable();
+        if (llmClient == null) {
+            log.warn("MemoryLearningExtractor not assembled: LlmClient not available");
+            return null;
+        }
+        log.info("MemoryLearningExtractor assembled");
+        return new MemoryLearningExtractor(llmClient);
     }
 }

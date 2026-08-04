@@ -351,23 +351,23 @@ snap-agent:
 
 ## 7. 迁移计划
 
-| 阶段 | 变更 | 风险 | 测试 |
-|------|------|------|------|
-| P1.1 | 接入 `SummarizingChatMemory` 替代 `MessageWindowChatMemory` | 低 — 已有实现+测试 | SummarizingChatMemoryTest (已有) |
-| P1.2 | 新建 `FileChatMemoryRepository` 替代 `InMemoryChatMemoryRepository` | 中 — 需扩展 `ChatMemoryRepository` SPI + 并发安全 | 新建 FileChatMemoryRepositoryTest |
-| P1.3 | 优化 `KnowledgeSedimentationService.extract()` 输出格式 + 增加文件持久化 | 低 — 在现有完整链路上增强 | 新建 SedimentationFormatTest |
-| P1.4 | 统一 memory 配置项 (`snap-agent.memory.*`) | 低 — 新增配置 | 配置测试 |
-| P2.1 | `MemoryLearningExtractor` 自动学习 | 中 — 新能力 | TDD |
-| P2.2 | `ConversationStore` 从 `FileChatMemoryRepository` 回填 | 中 — 合并两套存储 | TDD |
+| 阶段 | 变更 | 风险 | 测试 | 状态 |
+|------|------|------|------|------|
+| P1.1 | 接入 `SummarizingChatMemory` 替代 `MessageWindowChatMemory` | 低 — 已有实现+测试 | SummarizingChatMemoryTest (已有) | ✅ 完成 |
+| P1.2 | 新建 `FileChatMemoryRepository` 替代 `InMemoryChatMemoryRepository` | 中 — 需扩展 `ChatMemoryRepository` SPI + 并发安全 | 新建 FileChatMemoryRepositoryTest | ✅ 完成 |
+| P1.3 | 优化 `KnowledgeSedimentationService.extract()` 输出格式 + 增加文件持久化 | 低 — 在现有完整链路上增强 | 新建 SedimentationFormatTest | ✅ 完成 |
+| P1.4 | 统一 memory 配置项 (`snap-agent.memory.*`) | 低 — 新增配置 | 配置测试 | ✅ 完成 |
+| P2.1 | `MemoryLearningExtractor` 自动学习 | 中 — 新能力 | MemoryLearningExtractorTest | ✅ 完成 |
+| P2.2 | `ConversationStore` 从 `FileChatMemoryRepository` 回填 | 中 — 合并两套存储 | TDD | 🔲 待实施 |
 
 ## 8. 文件布局
 
 ```
 snap-agent-core/src/main/java/.../memory/
 ├── ChatMemory.java                     ← 保留
-├── ChatMemoryRepository.java           ← 保留
+├── ChatMemoryRepository.java           ← 保留 (P1.2 扩展 listConversations)
 ├── Summarizer.java                     ← 保留
-├── SummarizingChatMemory.java          ← 保留 (接入)
+├── SummarizingChatMemory.java          ← 保留 (P1.1 接入)
 ├── MessageWindowChatMemory.java        ← 保留 (作为 fallback)
 ├── MessageChatMemoryAdvisor.java       ← 保留
 ├── LongTermMemoryAdvisor.java          ← 保留
@@ -383,8 +383,10 @@ snap-agent-core/src/main/java/.../memory/
 
 snap-agent-spring-boot-2x-starter/src/main/java/.../memory/
 ├── LlmSummarizer.java                  ← 新增 (P1.1)
-└── TruncatingSummarizer.java           ← 新增 (P1.1 fallback)
+├── TruncatingSummarizer.java           ← 新增 (P1.1 fallback)
+└── MemoryLearningExtractor.java        ← 新增 (P2.1)
 
 snap-agent-spring-boot-2x-starter/src/main/java/.../autoconfig/
-└── SnapAgentAutoConfiguration.java     ← 修改 chatMemory() bean
+├── SnapAgentAutoConfiguration.java     ← 修改 chatMemory() bean (P1.1, P1.2, P1.4)
+└── IssueAutoConfiguration.java         ← 修改 issueClosureService() bean (P2.1)
 ```

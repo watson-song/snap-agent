@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.issue;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.boot2x.agent.AgentService;
 import cn.watsontech.snapagent.boot2x.fix.FixExecutionService;
+import cn.watsontech.snapagent.boot2x.memory.MemoryLearningExtractor;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStore;
 import cn.watsontech.snapagent.core.issue.AcceptanceCriterion;
@@ -15,6 +16,12 @@ import cn.watsontech.snapagent.core.issue.SolutionSuggester;
 import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
 import cn.watsontech.snapagent.core.issue.VerificationResult;
 import cn.watsontech.snapagent.core.issue.VerificationRunner;
+import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
+import cn.watsontech.snapagent.core.memory.ProjectFact;
+import cn.watsontech.snapagent.core.memory.ProjectFactsStore;
+import cn.watsontech.snapagent.core.memory.UserProfile;
+import cn.watsontech.snapagent.core.memory.UserProfileStore;
 import cn.watsontech.snapagent.core.skill.SkillMeta;
 import cn.watsontech.snapagent.core.skill.SkillRegistry;
 import cn.watsontech.snapagent.core.vcs.FixResult;
@@ -55,6 +62,12 @@ public class IssueClosureService {
     private final String systemUserId;
     private final FixExecutionService fixExecutionService;
 
+    // P2.1: Optional memory learning dependencies
+    private MemoryLearningExtractor memoryLearningExtractor;
+    private ChatMemoryRepository chatMemoryRepository;
+    private UserProfileStore userProfileStore;
+    private ProjectFactsStore projectFactsStore;
+
     /**
      * Construct the issue closure service.
      *
@@ -89,6 +102,27 @@ public class IssueClosureService {
         this.verificationRunner = verificationRunner;
         this.systemUserId = systemUserId;
         this.fixExecutionService = fixExecutionService;
+    }
+
+    /**
+     * Configure memory learning dependencies (P2.1).
+     *
+     * <p>When configured, {@link #close(String)} will extract user preferences
+     * and project facts from the conversation history and update the stores.</p>
+     *
+     * @param memoryLearningExtractor the memory learning extractor
+     * @param chatMemoryRepository    the chat memory repository (for loading conversation)
+     * @param userProfileStore        the user profile store (for saving extracted profile)
+     * @param projectFactsStore       the project facts store (for saving extracted facts)
+     */
+    public void configureMemoryLearning(MemoryLearningExtractor memoryLearningExtractor,
+                                        ChatMemoryRepository chatMemoryRepository,
+                                        UserProfileStore userProfileStore,
+                                        ProjectFactsStore projectFactsStore) {
+        this.memoryLearningExtractor = memoryLearningExtractor;
+        this.chatMemoryRepository = chatMemoryRepository;
+        this.userProfileStore = userProfileStore;
+        this.projectFactsStore = projectFactsStore;
     }
 
     /**
@@ -549,6 +583,15 @@ public class IssueClosureService {
             }
         }
 
+        // P2.1: Memory learning - extract user profile and project facts from conversation
+        if (memoryLearningExtractor != null && chatMemoryRepository != null) {
+            try {
+                extractAndSaveMemory(issue);
+            } catch (RuntimeException e) {
+                log.warn("Memory learning failed for issue {}: {}", issueId, e.getMessage());
+            }
+        }
+
         long now = System.currentTimeMillis();
         IssueClosure updated = issue.withKnowledgeEntry("diagnosis-experience:" + issueId, now)
                 .withStatus(IssueStatus.CLOSED, now);
@@ -931,5 +974,57 @@ public class IssueClosureService {
 
     private static String randomSuffix() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /**
+     * Extract and save memory from the conversation associated with this issue.
+     *
+     * <p>Loads the conversation messages, extracts user profile and project facts
+     * using the MemoryLearningExtractor, and saves them to the respective stores.</p>
+     *
+     * @param issue the issue closure with conversation context
+     */
+    private void extractAndSaveMemory(IssueClosure issue) {
+        String conversationId = issue.getConversationId();
+        if (conversationId == null || conversationId.isEmpty()) {
+            log.debug("No conversation ID for issue {}, skipping memory learning", issue.getIssueId());
+            return;
+        }
+
+        // Load conversation messages
+        List<Message> messages = chatMemoryRepository.load(conversationId);
+        if (messages == null || messages.isEmpty()) {
+            log.debug("No messages found for conversation {}, skipping memory learning", conversationId);
+            return;
+        }
+
+        String userId = issue.getUserId();
+
+        // Extract and save user profile
+        if (userProfileStore != null && userId != null && !userId.isEmpty()) {
+            try {
+                UserProfile profile = memoryLearningExtractor.extractUserProfile(userId, messages);
+                if (profile != null) {
+                    userProfileStore.save(userId, profile);
+                    log.info("User profile extracted and saved for user {}", userId);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Failed to extract/save user profile for user {}: {}", userId, e.getMessage());
+            }
+        }
+
+        // Extract and save project facts
+        if (projectFactsStore != null) {
+            try {
+                List<ProjectFact> facts = memoryLearningExtractor.extractProjectFacts(messages, issue);
+                if (facts != null && !facts.isEmpty()) {
+                    // Use issueId as projectId for now - could be enhanced to use actual project context
+                    projectFactsStore.save(issue.getIssueId(), facts);
+                    log.info("Extracted and saved {} project facts from issue {}", facts.size(), issue.getIssueId());
+                }
+            } catch (RuntimeException e) {
+                log.warn("Failed to extract/save project facts for issue {}: {}", issue.getIssueId(), e.getMessage());
+            }
+        }
     }
 }
