@@ -28,11 +28,13 @@ class SkillMetaTest {
     }
 
     @Test
-    void shouldReturnEmptyListWhenToolsNull() {
+    void shouldPreserveNullToolsToIndicateAllTools() {
         SkillMeta meta = new SkillMeta("n", "d", null, null, "b",
                 SkillAvailability.INVALID, "reason");
 
-        assertThat(meta.getTools()).isEmpty();
+        // tools=null means "all tools" (legacy behavior), preserved as null
+        assertThat(meta.getTools()).isNull();
+        // inputs is still converted to empty list
         assertThat(meta.getInputs()).isEmpty();
         assertThat(meta.getUnavailableReason()).isEqualTo("reason");
     }

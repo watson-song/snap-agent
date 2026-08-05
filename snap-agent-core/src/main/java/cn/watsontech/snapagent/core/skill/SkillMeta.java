@@ -69,7 +69,7 @@ public final class SkillMeta {
                      String requiredPermission, SkillMode mode) {
         this.name = name;
         this.description = description;
-        this.tools = tools == null ? Collections.<String>emptyList() : tools;
+        this.tools = tools;  // Preserve null to distinguish "all tools" from "no tools"
         this.inputs = inputs == null ? Collections.<InputSpec>emptyList() : inputs;
         this.shortcuts = shortcuts == null ? Collections.<Shortcut>emptyList() : shortcuts;
         this.body = body;
