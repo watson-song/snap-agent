@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
-description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。
-version: 1.2.0
+description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。支持老项目逆向分析模式。
+version: 1.4.0
 tools:
   - project_structure
   - read_code
@@ -14,6 +14,8 @@ triggers:
   - domain knowledge discovery
   - auto generate domain knowledge
   - 从代码生成知识文件
+  - 老项目逆向分析
+  - legacy project analysis
 author: SnapAgent
 ---
 
@@ -21,7 +23,74 @@ author: SnapAgent
 
 你是一个领域知识发现专家。你的任务是从现有代码中自动提取业务概念，生成结构化的领域知识文件。
 
-## v1.2.0 新增特性
+## v1.4.0 新增特性：老项目逆向分析模式
+
+针对"老项目 + 写文档"的痛点，采用"先扫描目录结构，再逐层拆解，最后反向生成架构"的策略。
+
+### 老项目逆向分析四步法
+
+#### 第一步：生成项目"目录树"骨架（宏观认知）
+
+先让 AI 对项目有宏观认知，避免上下文窗口限制导致分析失败。
+
+```bash
+# Linux/Mac
+tree -L 4 -I 'target|node_modules|.git|logs' > project_tree.txt
+
+# Windows PowerShell
+Get-ChildItem -Recurse -Directory | Select-Object FullName
+```
+
+**分析要求**：
+1. 顶层模块划分（按包名推测业务领域）
+2. 分层架构识别（Controller/Service/DAO/Mapper/Util 是否清晰）
+3. 指出可能存在的循环依赖风险点
+
+#### 第二步：提取"依赖关系"DNA（核心）
+
+从 pom.xml 和 @Autowired 注解提取模块间依赖关系。
+
+**分析要求**：
+1. 生成模块依赖矩阵图（Mermaid 语法）
+2. 标明 A 模块引用了 B 模块的哪个 jar 包
+3. 指出是否存在循环依赖
+
+```java
+// 关键线索识别
+@Autowired
+private XxxService xxxService;  // 本地依赖
+
+@FeignClient("service-name")   // 远程依赖
+@DubboReference                // RPC 依赖
+@Resource                      // 本地依赖
+```
+
+#### 第三步：逆向绘制"架构分层与调用链"
+
+对于老项目，业务逻辑可能分散在 Service、Manager、Handler 里。通过代码注解反推调用关系。
+
+**分析要求**：
+1. 分层职责表：Controller、Service、Manager、DAO 各层职责
+2. 核心链路时序图（PlantUML/Mermaid）：选取最核心的 3 个业务用例，画出完整调用栈
+3. 外部依赖拓扑：识别所有 @FeignClient 或 RestTemplate，列出下游服务
+4. DB 层反向 ER 线索：根据 Mapper.xml 或 @Table 注解，生成核心表关联关系
+
+#### 第四步：生成架构文档（最终交付）
+
+整合所有分析，生成完整的架构文档，包含：
+1. 整体架构图（Mermaid）
+2. 模块清单与职责说明
+3. 横向调用关系表（调用方 → 被调用方 → 调用方式）
+4. 潜在技术债务警示（耦合点、反模式）
+
+### 老项目"弯道超车"技巧
+
+1. **先跑通再写文档**：如果项目能本地启动，先读取 application.yml 中的 spring.datasource 和 dubbo.registry 配置，自动识别微服务边界
+2. **不要一次性喂大文件**：对于超过 1000 行的 Service 类，先总结前 10 个 public 方法的作用，确认后再分析实现细节
+3. **借力工具**：如果模块关系不准，可以运行 jdepend 工具生成 package-cycle.txt，基于真实耦合数据画图
+4. **异步事件依赖**：如果模块间通过消息队列（RocketMQ/Kafka）异步调用，识别 @RocketMQMessageListener、@KafkaListener 等注解
+
+## v1.3.0 新增特性
 
 ### 1. DTO/VO 类识别增强
 - 扫描 `dto/` 和 `vo/` 包，提取数据传输对象
@@ -48,6 +117,31 @@ author: SnapAgent
 - 提取复杂查询的执行计划建议
 - 识别潜在的性能问题（N+1 查询、全表扫描）
 
+## v1.3.0 新增特性
+
+### 6. 关联表结构完整提取
+- 不仅提取核心表，还提取所有关联表的完整字段结构
+- 通过外键关系、Service 注入、SQL JOIN 识别关联表
+- 为每个关联表生成完整的字段定义文档
+
+### 7. 异常处理策略提取
+- 识别 try-catch 块和异常处理模式
+- 提取自定义异常类及其使用场景
+- 记录异常处理策略（中止/收集所有错误/重试）
+- 记录错误信息返回格式
+
+### 8. 技术实现细节提取
+- 识别动态表头实现（MenuDisplayEnum 等）
+- 提取批量处理实现（线程池、批次大小）
+- 提取缓存策略（Redis、本地缓存）
+- 提取并发控制策略（分布式锁、乐观锁）
+
+### 9. 模块集成关系提取
+- 识别模块间的数据流转关系
+- 提取跨模块调用的具体接口和参数
+- 记录数据格式转换逻辑
+- 生成模块集成关系图
+
 ## 核心能力
 
 - 扫描项目结构，识别核心业务包
@@ -61,6 +155,89 @@ author: SnapAgent
 - 自动生成业务概念关系图（Mermaid）
 
 ## 工作流程
+
+### 模式选择
+
+根据项目情况选择分析模式：
+- **标准模式**：适用于结构清晰的 Spring Boot 项目
+- **老项目逆向模式**：适用于历史遗留项目、文档缺失项目、多人协作混乱项目
+
+### 老项目逆向模式工作流程（推荐优先使用）
+
+#### Step 0: 项目目录树扫描（宏观认知）
+
+先生成项目目录树，建立宏观认知：
+
+```bash
+# Linux/Mac
+tree -L 4 -I 'target|node_modules|.git|logs' > project_tree.txt
+
+# Windows PowerShell
+Get-ChildItem -Recurse -Directory | Select-Object FullName
+```
+
+**分析输出**：
+1. 顶层模块划分（按包名推测业务领域）
+2. 分层架构识别（Controller/Service/DAO/Mapper/Util 是否清晰）
+3. 循环依赖风险点识别
+
+#### Step 0.1: 依赖关系 DNA 提取
+
+从 pom.xml 和注解提取模块间依赖关系：
+
+```
+分析内容：
+1. 父级 pom.xml → 模块依赖矩阵
+2. 各子模块 pom.xml → 具体依赖的 jar 包
+3. @Autowired/@Resource → 本地服务依赖
+4. @FeignClient → 远程 HTTP 依赖
+5. @DubboReference → RPC 依赖
+6. @RocketMQMessageListener → 消息队列依赖
+```
+
+**输出**：
+- 模块依赖矩阵图（Mermaid）
+- 循环依赖检测报告
+- 外部服务依赖清单
+
+#### Step 0.2: 架构分层与调用链逆向
+
+通过代码注解反推调用关系：
+
+```
+分析维度：
+1. Controller 层 → REST API 入口识别
+2. Service 层 → 业务逻辑职责划分
+3. Manager/Handler 层 → 中间层职责识别
+4. DAO/Mapper 层 → 数据访问模式识别
+5. 跨层调用 → 识别不规范调用（如 Controller 直接调用 DAO）
+```
+
+**输出**：
+- 分层职责表
+- 核心链路时序图（选取最核心的 3 个业务用例）
+- 外部依赖拓扑图
+
+#### Step 0.3: 技术债务识别
+
+识别项目中的技术债务和反模式：
+
+```
+识别模式：
+1. 工具类包被所有模块引用 → 耦合风险
+2. Service 层直接操作 HttpServletRequest → Web 耦合
+3. 循环依赖 → 模块边界不清
+4. 超大类（>1000行） → 职责不清
+5. 硬编码配置 → 配置管理缺失
+6. 重复代码 → 缺乏抽象
+```
+
+**输出**：
+- 技术债务清单
+- 耦合点分析
+- 改进建议
+
+### 标准模式工作流程
 
 ### Step 1: 项目结构扫描
 
@@ -370,7 +547,167 @@ public interface PlanMapper {
 - 子查询 → 数据依赖
 - 动态条件 → 业务规则
 
-### Step 13: 业务域聚类
+### Step 13: 关联表结构完整提取（v1.3.0 新增）
+
+不仅提取核心表，还要提取所有关联表的完整字段结构：
+
+```
+关联表识别策略：
+1. 外键关系 → Entity 中的 @ManyToOne, @OneToMany 注解
+2. Service 注入 → Service 中注入的其他 Entity 的 Mapper
+3. SQL JOIN → Mapper XML 中的 JOIN 语句
+4. 查询条件 → 查询条件中引用的其他表
+5. 业务关联 → 业务逻辑中一起使用的表
+
+提取要求：
+- 为每个关联表生成完整的字段定义
+- 标注表之间的关联关系（外键、逻辑关联）
+- 说明关联查询的使用场景
+```
+
+示例：
+```java
+// 核心表：output_replenish_mmc_sum
+// 关联表识别：
+// 1. SQL JOIN → output_replenish_sku_store (JOIN ON batch_dt + version)
+// 2. Service 注入 → IReplenishSkuStoreService → output_replenish_sku_store
+// 3. 业务关联 → output_replenish_sum (按天汇总)
+```
+
+### Step 14: 异常处理策略提取（v1.3.0 新增）
+
+从代码中提取异常处理策略：
+
+```
+提取模式：
+1. try-catch 块 → 异常处理逻辑
+   - catch (Exception e) { throw ... } → 中止策略
+   - catch (Exception e) { errors.add(e) } → 收集策略
+   - catch (Exception e) { retry() } → 重试策略
+
+2. 自定义异常类 → 业务异常定义
+   - DfproServerException → 系统异常
+   - BusinessException → 业务异常
+   - ValidationException → 校验异常
+
+3. 错误信息格式 → 错误返回格式
+   - R.error(code, message) → 统一错误格式
+   - 错误码定义 → 错误码枚举
+
+4. 校验失败处理 → 校验失败策略
+   - 第一个错误就中止 → 快速失败
+   - 收集所有错误后返回 → 批量校验
+```
+
+示例提取：
+```java
+public void importExcel(MultipartFile file) {
+    try {
+        List<ExcelVO> list = EasyExcel.read(file).doReadSync();
+        for (ExcelVO vo : list) {
+            validate(vo);  // 可能抛出 ValidationException
+        }
+        saveBatch(list);
+    } catch (ExcelAnalysisException e) {
+        throw new DfproServerException(EXCEL_FORMAT_ERROR, e.getMessage());
+    } catch (ValidationException e) {
+        throw new DfproServerException(VALIDATION_ERROR, e.getMessage());
+    }
+}
+```
+→ 异常处理策略:
+  - Excel格式错误 → 抛出 DfproServerException(EXCEL_FORMAT_ERROR)
+  - 校验失败 → 抛出 DfproServerException(VALIDATION_ERROR)
+  - 策略：遇到第一个错误就中止（快速失败）
+
+### Step 15: 技术实现细节提取（v1.3.0 新增）
+
+提取关键技术实现细节：
+
+```
+提取目标：
+1. 动态表头实现
+   - MenuDisplayEnum → 表头配置枚举
+   - getDisplayHeaderByName() → 动态表头获取方法
+   - 不同租户的表头差异
+
+2. 批量处理实现
+   - 线程池配置 → ThreadPoolExecutor 参数
+   - 批次大小 → 每批处理的数据量
+   - 并发控制 → 同步/异步策略
+
+3. 缓存策略
+   - Redis 缓存 → key 格式、过期时间
+   - 本地缓存 → Caffeine/Guava 配置
+   - 缓存更新 → 更新策略（主动/被动）
+
+4. 并发控制
+   - 分布式锁 → Redisson 锁
+   - 乐观锁 → version 字段
+   - @TaskCheck → 任务状态检查
+```
+
+示例提取：
+```java
+// 动态表头
+List<List<String>> heads = configDisplayFiledService.getDisplayHeaderByName(
+    MenuDisplayEnum.STRATEGY.getCode(),
+    user.getLanguage(),
+    MenuDisplayTypeEnum.EXPORT.getCode()
+);
+
+// 批量处理
+ExecutorService updateThreadPool = new ThreadPoolExecutor(4, 4, ...);
+for (List<Long> batch : batches) {  // 每批 300 条
+    updateThreadPool.submit(() -> mapper.batchUpdate(batch));
+}
+```
+→ 技术实现细节:
+  - 动态表头: 通过 MenuDisplayEnum + language + displayType 动态获取
+  - 批量处理: 4线程线程池，每批300条
+  - 租户差异: Fendi 和 LV 使用不同的 Excel VO 类
+
+### Step 16: 模块集成关系提取（v1.3.0 新增）
+
+提取模块间的集成关系：
+
+```
+提取维度：
+1. 数据流转 → 数据从一个模块流向另一个模块
+   - 源模块 → 目标模块
+   - 数据格式 → 数据格式转换
+   - 触发条件 → 什么情况下触发
+
+2. 接口调用 → 跨模块的接口调用
+   - 调用方 → 被调用方
+   - 接口签名 → 方法签名和参数
+   - 返回值 → 返回值类型和含义
+
+3. 共享数据 → 多个模块共享的数据
+   - 共享表 → 多个模块访问的表
+   - 共享缓存 → 多个模块使用的缓存
+   - 共享配置 → 多个模块使用的配置
+
+4. 依赖关系 → 模块间的依赖
+   - 编译依赖 → Maven 依赖
+   - 运行时依赖 → Spring 注入
+   - 数据依赖 → 数据依赖关系
+```
+
+示例：
+```
+调拨日历配置模块 → 补货计算模块
+  数据流转: config_pl_transfer_calendar → 补货计算输入
+  触发条件: 用户点击"手动计算"或定时任务触发
+  数据格式: 配置规则 → 计算参数
+
+补货计算模块 → 调拨建议模块
+  数据流转: output_replenish_mmc_sum → suggest_transfer_order
+  触发条件: 用户选择补货结果并保存调拨建议
+  数据格式: 补货结果 → 调拨建议单
+```
+
+### Step 17: 业务域聚类
 
 按业务语义将概念聚类：
 
@@ -383,7 +720,7 @@ public interface PlanMapper {
 5. Controller 和 Service 的 RequestMapping 路径前缀相同
 ```
 
-### Step 14: 生成业务概念关系图
+### Step 18: 生成业务概念关系图
 
 使用 Mermaid 生成业务概念关系图：
 
@@ -400,7 +737,7 @@ graph LR
 - 虚线箭头 (⇢)：间接关联
 - 双向箭头 (↔)：数据同步
 
-### Step 15: 生成领域知识文件
+### Step 19: 生成领域知识文件
 
 为每个业务概念生成一个 Markdown 文件，格式如下：
 
@@ -454,6 +791,12 @@ TaskClass.method()
 | field1 | String | 字段描述 |
 | field2 | Integer | 字段描述 |
 
+### table_name_2（关联表描述）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | Long | 主键 |
+| field1 | String | 字段描述 |
+
 ## 业务枚举
 ### StatusEnum（状态枚举）
 | 值 | 名称 | 说明 |
@@ -465,9 +808,29 @@ TaskClass.method()
 1. 规则1
 2. 规则2
 
+## 异常处理
+- **Excel格式错误** → 抛出 DfproServerException(EXCEL_FORMAT_ERROR)，中止导入
+- **校验失败** → 收集所有错误后返回，或遇到第一个错误就中止
+- **数据不存在** → 抛出 DfproServerException(DATA_NOT_FOUND)
+
+## 技术实现细节
+- **动态表头**: 通过 MenuDisplayEnum + language + displayType 动态获取
+- **批量处理**: 4线程线程池，每批300条
+- **租户差异**: Fendi 和 LV 使用不同的 Excel VO 类
+- **并发控制**: @TaskCheck 注解检查任务状态
+
 ## 已知陷阱
 - 陷阱1
 - 陷阱2
+
+## 模块集成关系
+```
+当前模块 → 下游模块1
+  数据流转: 表A → 表B
+  触发条件: xxx
+当前模块 → 下游模块2
+  接口调用: ServiceA.method() → ServiceB.method()
+```
 
 ## 业务概念关系图
 ```mermaid
@@ -494,8 +857,11 @@ SELECT * FROM table_name_1 WHERE field1 = 'value';
 6. 服务名使用类名（不含包名）
 7. 字段名使用 snake_case（数据库字段）或 camelCase（Java 字段）
 8. 必须包含业务概念关系图（Mermaid）
-9. 每个数据表必须包含字段列表和类型
+9. **每个数据表必须包含完整字段列表和类型**（包括关联表）
 10. 如果存在枚举，必须列出枚举值和含义
+11. **必须包含异常处理策略**（记录异常类型、处理策略、错误信息格式）
+12. **必须包含技术实现细节**（动态表头、批量处理、缓存策略、并发控制）
+13. **必须包含模块集成关系**（数据流转、接口调用、共享数据）
 
 ## 批量生成模式
 

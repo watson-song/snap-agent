@@ -119,7 +119,6 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("v1.2.0 新增特性");
         assertThat(body).contains("DTO/VO 类识别增强");
         assertThat(body).contains("dto/");
         assertThat(body).contains("vo/");
@@ -174,5 +173,139 @@ class DomainKnowledgeDiscoverySkillTest {
         assertThat(body).contains("@Insert");
         assertThat(body).contains("性能分析");
         assertThat(body).contains("N+1 查询");
+    }
+
+    @Test
+    void shouldHaveRelatedTableExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("v1.3.0 新增特性");
+        assertThat(body).contains("关联表结构完整提取");
+        assertThat(body).contains("外键关系");
+        assertThat(body).contains("SQL JOIN");
+        assertThat(body).contains("关联表识别策略");
+    }
+
+    @Test
+    void shouldHaveExceptionHandlingExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("异常处理策略提取");
+        assertThat(body).contains("try-catch");
+        assertThat(body).contains("自定义异常类");
+        assertThat(body).contains("DfproServerException");
+        assertThat(body).contains("错误信息格式");
+    }
+
+    @Test
+    void shouldHaveTechnicalImplementationExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("技术实现细节提取");
+        assertThat(body).contains("动态表头");
+        assertThat(body).contains("MenuDisplayEnum");
+        assertThat(body).contains("批量处理");
+        assertThat(body).contains("线程池");
+        assertThat(body).contains("缓存策略");
+    }
+
+    @Test
+    void shouldHaveModuleIntegrationExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("模块集成关系提取");
+        assertThat(body).contains("数据流转");
+        assertThat(body).contains("接口调用");
+        assertThat(body).contains("共享数据");
+        assertThat(body).contains("依赖关系");
+    }
+
+    @Test
+    void shouldHaveUpdatedOutputRequirements() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("每个数据表必须包含完整字段列表和类型");
+        assertThat(body).contains("必须包含异常处理策略");
+        assertThat(body).contains("必须包含技术实现细节");
+        assertThat(body).contains("必须包含模块集成关系");
+    }
+
+    @Test
+    void shouldHaveLegacyProjectMode() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("v1.4.0 新增特性");
+        assertThat(body).contains("老项目逆向分析模式");
+        assertThat(body).contains("老项目逆向分析四步法");
+    }
+
+    @Test
+    void shouldHaveDirectoryTreeScanning() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("目录树");
+        assertThat(body).contains("宏观认知");
+        assertThat(body).contains("tree -L 4");
+    }
+
+    @Test
+    void shouldHaveDependencyDNAExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("依赖关系 DNA");
+        assertThat(body).contains("pom.xml");
+        assertThat(body).contains("@FeignClient");
+        assertThat(body).contains("@DubboReference");
+    }
+
+    @Test
+    void shouldHaveArchitectureReverseEngineering() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("架构分层与调用链逆向");
+        assertThat(body).contains("分层职责表");
+        assertThat(body).contains("核心链路时序图");
+        assertThat(body).contains("外部依赖拓扑");
+    }
+
+    @Test
+    void shouldHaveTechnicalDebtIdentification() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("技术债务识别");
+        assertThat(body).contains("耦合风险");
+        assertThat(body).contains("反模式");
+        assertThat(body).contains("超大类");
+    }
+
+    @Test
+    void shouldHaveLegacyProjectTips() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("弯道超车");
+        assertThat(body).contains("不要一次性喂大文件");
+        assertThat(body).contains("jdepend");
     }
 }
