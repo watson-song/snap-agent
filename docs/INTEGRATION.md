@@ -116,7 +116,7 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.6.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -127,6 +127,8 @@ Starter 会自动引入 `snap-agent-core`。以下依赖如果宿主项目已有
 - `mysql-connector-java`（可选，JDBC 工具需要）
 - `spring-boot-starter-data-redis`（可选，Redis 工具需要）
 - `springdoc-openapi-ui`（可选，自动生成 Swagger UI / OpenAPI 3 文档，见下方）
+- `com.squareup.okhttp3:okhttp`（**必需**，LLM 流式调用依赖，Starter 中为 optional。版本 >= 4.9）
+- `com.h2database:h2`（可选，代码图谱 H2 持久化需要）
 
 ### 可选：启用 Swagger UI / OpenAPI 3
 
@@ -204,11 +206,21 @@ public class SnapAgentDataSourceConfig {
 
 > **重要**：DataSource 的 Bean 名默认必须为 `snapAgentReadOnlyDataSource`。如需自定义名称，在配置中设置 `snap-agent.jdbc.datasource-bean-name`。
 
+> **简化模式**：如果宿主项目使用 Spring Boot 自动装配的 DataSource（无显式 `@Bean` 定义），可以直接复用宿主的 DataSource：
+> ```yaml
+> snap-agent:
+>   jdbc:
+>     datasource-bean-name: dataSource  # Spring Boot 默认 Bean 名
+> ```
+> SqlGuard 会拦截所有非 SELECT 语句，复用宿主 DataSource 也是安全的。但仍建议使用只读账号，遵循最小权限原则。
+
 ## 第五步：配置安全规则
 
 SnapAgent 的端点需要与宿主应用的安全框架协调。以下是常见场景：
 
 ### 场景 A：宿主使用 Spring Security
+
+> **注意**：如果宿主配置了 `server.servlet.context-path`（如 `/rest`），安全白名单中的路径**不含** context-path。Spring Security 的 `antMatchers` 在 context-path 之后匹配。例如 context-path 为 `/rest` 时，SnapAgent 端点实际 URL 为 `/rest/snap-agent/**`，但白名单仍写 `/snap-agent/**`。
 
 ```java
 @Configuration
@@ -356,6 +368,20 @@ docs/skills/                          # builtin-skills-dir（classpath，只读�
 2. 访问 `http://localhost:8080/snap-agent/` — 应看到 Chat UI
 3. 访问 `http://localhost:8080/snap-agent/skills` — 应返回 Skill 列表 JSON
 4. 在 UI 中选择 Skill，输入问题，开始诊断
+
+### CI/CD 可行性验证（推荐在集成时立即执行）
+
+完成集成后，立即验证 CI/CD 环境是否能解析 snap-agent 依赖：
+
+```bash
+# 模拟 CI/CD 环境：清除本地缓存后重新解析
+mvn dependency:resolve -pl <starter-module> -U
+```
+
+如果报 `Could not find artifact cn.watsontech.snapagent:...`，最可能的原因是 Maven `settings.xml` 配置了 `<mirrorOf>*</mirrorOf>`（如 Artifactory/Nexus），将 `file://` 本地仓库请求也拦截了。此时需采用以下方案之一：
+
+1. **推荐**：将 snap-agent JAR 发布到内部 Artifactory/Nexus
+2. **备选**：使用 `lib/` 目录 + system scope 方式（见第一步方式 B-fallback）
 
 ## 多实例部署（K8s）
 
