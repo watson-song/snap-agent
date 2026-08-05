@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。
-version: 1.0.0
+version: 1.1.0
 tools:
   - project_structure
   - read_code
@@ -25,9 +25,13 @@ author: SnapAgent
 
 - 扫描项目结构，识别核心业务包
 - 分析 Service 类，提取业务概念和职责
-- 从 SQL 查询和 Repository 类中提取表名
-- 从 Task/Job 类中提取入口方法
+- 从 @TableName 注解和 Entity 类提取表名和字段
+- 从 Controller 类提取 REST API 入口
+- 从 Task/Job 类提取定时任务入口
+- 从 Mapper XML 提取复杂 SQL 查询
+- 从 Enum 类提取业务状态/类型定义
 - 按业务域聚类，生成领域知识文件
+- 自动生成业务概念关系图（Mermaid）
 
 ## 工作流程
 
@@ -37,10 +41,12 @@ author: SnapAgent
 
 ```
 扫描模式：
-1. 查找 service/ 包 → 提取业务服务类
-2. 查找 repository/ 或 dao/ 包 → 提取数据访问类
-3. 查找 task/ 或 job/ 包 → 提取定时任务入口
-4. 查找 entity/ 或 model/ 包 → 提取实体类（推断表名）
+1. 查找 controller/ 包 → 提取 REST API 入口
+2. 查找 service/ 包 → 提取业务服务类
+3. 查找 mapper/ 或 dao/ 或 repository/ 包 → 提取数据访问类
+4. 查找 task/ 或 job/ 包 → 提取定时任务入口
+5. 查找 entity/ 或 model/ 包 → 提取实体类（推断表名）
+6. 查找 enums/ 包 → 提取业务枚举定义
 ```
 
 ### Step 2: 业务概念提取
@@ -52,32 +58,113 @@ author: SnapAgent
 1. 类名 → 业务概念（如 AllocationPlanService → 调拨计划）
 2. 类注释 → 业务描述
 3. 方法名 → 核心操作（createPlan, validatePlan）
-4. 注入的 Repository → 涉及的表
+4. 注入的 Repository/Mapper → 涉及的表
 5. 调用的其他 Service → 关联概念
+6. @Autowired/@Resource 注入 → 依赖关系
 ```
 
-### Step 3: 表名提取
+### Step 3: 表名和字段提取
 
-从以下来源提取表名：
+从 Entity 类提取表名和字段：
 
 ```
-1. @Table(name = "xxx") 注解
-2. SQL 查询字符串中的 FROM/JOIN 子句
-3. Repository 类名推断（AllocationPlanRepository → drp_allocation_plan）
-4. Entity 类名推断（AllocationPlan → drp_allocation_plan）
+1. @TableName("xxx") 注解 → 表名
+2. @TableId 注解 → 主键字段
+3. @ApiModelProperty 注解 → 字段描述
+4. 字段类型 → 数据类型（String/Integer/Date/BigDecimal）
+5. @TableField(exist = false) → 非数据库字段，排除
 ```
 
-### Step 4: 入口方法提取
+示例提取：
+```java
+@TableName("config_pl_transfer_calendar")
+public class ConfigPlTransferCalendar {
+    @TableId(value = "id", type = IdType.AUTO)
+    private Long id;
 
-从 Task/Job 类提取入口方法：
+    @ApiModelProperty("产品线")
+    private String productLine;
+}
+```
+→ 表名：config_pl_transfer_calendar
+→ 字段：id (主键), product_line (产品线)
+
+### Step 4: REST API 入口提取
+
+从 Controller 类提取 REST API：
+
+```
+1. @RestController 注解的类
+2. @RequestMapping/@GetMapping/@PostMapping 注解的方法
+3. @ApiOperation 注解 → API 描述
+4. 方法参数 → 请求参数
+5. 返回类型 → 响应类型
+```
+
+示例：
+```java
+@RestController
+@RequestMapping("/api/replenish")
+public class ReplenishController {
+    @PostMapping("/calculate")
+    @ApiOperation("触发补货计算")
+    public Result calculate(@RequestBody ReplenishReq req) {
+        // ...
+    }
+}
+```
+→ API: POST /api/replenish/calculate (触发补货计算)
+
+### Step 5: 定时任务入口提取
+
+从 Task/Job 类提取定时任务入口：
 
 ```
 1. @Scheduled 注解的方法
 2. JobHandler 接口的实现方法
 3. 包含 "execute" 或 "run" 的公共方法
+4. 类名包含 Job/Task/Scheduler
 ```
 
-### Step 5: 业务域聚类
+### Step 6: 业务枚举提取
+
+从 Enum 类提取业务状态/类型定义：
+
+```
+1. 枚举名 → 业务类型（如 TaskStatusEnum → 任务状态）
+2. 枚举值 → 状态/类型值（如 PENDING, RUNNING, SUCCESS）
+3. @EnumValue 注解 → 数据库存储值
+4. 枚举注释 → 值描述
+```
+
+示例：
+```java
+public enum TaskStatusEnum {
+    PENDING(0, "待处理"),
+    RUNNING(1, "处理中"),
+    SUCCESS(2, "成功"),
+    FAILED(3, "失败");
+}
+```
+→ 任务状态：0=待处理, 1=处理中, 2=成功, 3=失败
+
+### Step 7: Mapper XML 分析
+
+从 Mapper XML 提取复杂 SQL：
+
+```
+1. <select> 标签 → 查询语句
+2. <insert>/<update>/<delete> → 写操作
+3. <if>/<where>/<choose> → 动态 SQL 条件
+4. SQL 注释 → 查询用途
+```
+
+关注点：
+- 复杂 JOIN 查询 → 表关联关系
+- 子查询 → 数据依赖
+- 动态条件 → 业务规则
+
+### Step 8: 业务域聚类
 
 按业务语义将概念聚类：
 
@@ -87,9 +174,27 @@ author: SnapAgent
 2. 互相调用的 Service → 关联概念
 3. 共享表的 Service → 同一业务域
 4. 类名前缀相同 → 同一业务域（如 Allocation* → 调拨）
+5. Controller 和 Service 的 RequestMapping 路径前缀相同
 ```
 
-### Step 6: 生成领域知识文件
+### Step 9: 生成业务概念关系图
+
+使用 Mermaid 生成业务概念关系图：
+
+```mermaid
+graph LR
+    A[调拨日历配置] --> B[任务调度]
+    B --> C[补货计算]
+    C --> D[输出结果表]
+    A --> C
+```
+
+关系类型：
+- 实线箭头 (→)：直接调用/依赖
+- 虚线箭头 (⇢)：间接关联
+- 双向箭头 (↔)：数据同步
+
+### Step 10: 生成领域知识文件
 
 为每个业务概念生成一个 Markdown 文件，格式如下：
 
@@ -104,6 +209,9 @@ services:
   - ServiceClass2
 entry_points:
   - TaskClass.method()
+api_endpoints:
+  - POST /api/xxx
+  - GET /api/xxx
 related_concepts:
   - 关联概念1
   - 关联概念2
@@ -120,33 +228,106 @@ tags: [tag1, tag2]
   - `method1()` — 方法描述
   - `method2()` — 方法描述
 
+## REST API
+- `POST /api/xxx` — API 描述
+  - 请求参数：param1, param2
+  - 响应类型：Result<XxxVO>
+
 ## 入口方法
 ```
 TaskClass.method()
   └── ServiceClass1.method1()
-        └── RepositoryClass.save()
+        └── MapperClass.insert()
 ```
 
 ## 数据表
-### table_name_1
-| 字段 | 说明 |
-|------|------|
-| field1 | 描述 |
-| field2 | 描述 |
+### table_name_1（表描述）
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | Long | 主键 |
+| field1 | String | 字段描述 |
+| field2 | Integer | 字段描述 |
+
+## 业务枚举
+### StatusEnum（状态枚举）
+| 值 | 名称 | 说明 |
+|----|------|------|
+| 0 | PENDING | 待处理 |
+| 1 | RUNNING | 处理中 |
 
 ## 业务规则
 1. 规则1
 2. 规则2
+
+## 已知陷阱
+- 陷阱1
+- 陷阱2
+
+## 业务概念关系图
+```mermaid
+graph LR
+    A[当前概念] --> B[关联概念1]
+    A --> C[关联概念2]
+    B --> C
+```
+
+## SQL 示例
+```sql
+-- 查询示例
+SELECT * FROM table_name_1 WHERE field1 = 'value';
+```
 ```
 
 ## 输出要求
 
 1. 每个业务概念生成一个独立的 .md 文件
-2. 文件名使用英文（如 `allocation-plan.md`）
+2. 文件名使用英文，kebab-case（如 `allocation-plan.md`）
 3. 概念名称使用中文（如 `name: 调拨计划`）
 4. 必须包含 YAML frontmatter
-5. 表名使用小写加下划线
+5. 表名使用小写加下划线（snake_case）
 6. 服务名使用类名（不含包名）
+7. 字段名使用 snake_case（数据库字段）或 camelCase（Java 字段）
+8. 必须包含业务概念关系图（Mermaid）
+9. 每个数据表必须包含字段列表和类型
+10. 如果存在枚举，必须列出枚举值和含义
+
+## 批量生成模式
+
+当项目较大时，可以分批生成：
+
+```
+批次 1：核心业务域（Service + Entity + Controller）
+批次 2：任务调度（Job + Task + Scheduler）
+批次 3：配置管理（Config* 相关）
+批次 4：数据导入（Import* 相关）
+批次 5：报表输出（Report* 相关）
+```
+
+每批生成后，生成一个汇总报告：
+```markdown
+# 领域知识发现报告 - 批次 X
+
+## 生成文件
+- file1.md (概念1)
+- file2.md (概念2)
+
+## 统计
+- 识别 X 个业务概念
+- 提取 Y 个数据表
+- 发现 Z 个 REST API
+- 识别 W 个定时任务
+
+## 业务概念关系图
+```mermaid
+graph LR
+    A[概念1] --> B[概念2]
+    B --> C[概念3]
+```
+
+## 待完善
+- [ ] 概念1：需要补充业务背景
+- [ ] 概念2：需要确认已知陷阱
+```
 
 ## 执行命令
 

@@ -68,4 +68,48 @@ class DomainKnowledgeDiscoverySkillTest {
         assertThat(body).contains(".md 文件");
         assertThat(body).contains("文件名使用英文");
     }
+
+    @Test
+    void shouldHaveControllerScanning() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("controller/");
+        assertThat(body).contains("REST API");
+        assertThat(body).contains("api_endpoints:");
+    }
+
+    @Test
+    void shouldHaveEnumExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("enums/");
+        assertThat(body).contains("业务枚举");
+        assertThat(body).contains("StatusEnum");
+    }
+
+    @Test
+    void shouldHaveMermaidDiagram() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("Mermaid");
+        assertThat(body).contains("```mermaid");
+        assertThat(body).contains("业务概念关系图");
+    }
+
+    @Test
+    void shouldHaveBatchGenerationMode() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("批量生成模式");
+        assertThat(body).contains("批次 1");
+        assertThat(body).contains("核心业务域");
+    }
 }
