@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。
-version: 2.0.0
+version: 2.0.1
 tools:
   - project_structure
   - read_code
@@ -76,9 +76,10 @@ find . -name "*.java" -type f | head -100
 1. 类名 → 业务概念（如 AllocationPlanService → 调拨计划）
 2. 类注释 → 业务描述
 3. 方法名 → 核心操作（createPlan, validatePlan）
-4. 注入的 Repository/Mapper → 涉及的表
-5. 调用的其他 Service → 关联概念
+4. 注入的 Repository/Mapper → 涉及的表名（仅表名，字段详情在 Step 4）
+5. 调用的其他 Service → 关联概念（填入 related_concepts）
 6. @Autowired/@Resource 注入 → 依赖关系
+7. 包名/模块名 → 标签（填入 tags，如 replenishment, allocation）
 ```
 
 **降级策略**：如果类文件超过 1000 行，只提取：
@@ -86,10 +87,11 @@ find . -name "*.java" -type f | head -100
 - public 方法签名
 - @Autowired 注入的依赖
 
-### Step 4: 表结构提取
+### Step 4: 表结构与多租户识别
 
-从 Entity 类提取表名和字段：
+从 Entity 类提取表名、字段和多租户配置：
 
+**表结构提取**：
 ```
 提取规则：
 1. @TableName("xxx") → 表名
@@ -99,6 +101,20 @@ find . -name "*.java" -type f | head -100
 5. @TableField(exist = false) → 排除非数据库字段
 ```
 
+**多租户识别**：
+```
+提取规则：
+1. tenant_id / tenantId 字段 → 多租户标识
+2. @TenantId 注解 → 多租户字段
+3. TenantLineHandler 配置 → 租户隔离策略
+4. 如果检测到多租户，在文档中添加：
+   ```markdown
+   ## 多租户
+   - 租户字段：tenant_id
+   - 隔离策略：行级隔离（通过 TenantLineHandler）
+   ```
+```
+
 **降级策略**：如果无法从注解提取字段列表，记录为：
 ```markdown
 ## 数据表
@@ -106,10 +122,67 @@ find . -name "*.java" -type f | head -100
 > ⚠️ 字段列表待补充（无法从代码自动提取）
 ```
 
-### Step 5: REST API 提取
+### Step 5: DTO/VO 深度分析
 
-从 Controller 类提取 REST API：
+从 DTO/VO 类提取数据传输对象的详细定义：
 
+```
+提取规则：
+1. 验证注解 → 字段验证规则
+   - @NotNull / @NotBlank → 必填字段
+   - @Size(min, max) → 长度限制
+   - @Min / @Max → 数值范围
+   - @Pattern(regexp) → 格式验证
+   - @Email → 邮箱格式
+   - @Phone → 手机号格式
+
+2. 映射注解 → 字段映射关系
+   - @JsonProperty("xxx") → JSON 字段映射
+   - @JsonFormat(pattern) → 日期格式化
+   - @JsonSerialize / @JsonDeserialize → 自定义序列化
+
+3. 字段类型 → 数据类型推断
+   - String → 文本
+   - Integer/Long → 整数
+   - BigDecimal → 金额/精度
+   - Date/LocalDateTime → 时间
+   - Boolean → 布尔值
+
+4. 嵌套对象 → 复杂类型
+   - List<XxxDTO> → 列表类型
+   - XxxVO → 嵌套对象
+```
+
+**提取示例**：
+```java
+public class CreateOrderDTO {
+    @NotBlank(message = "订单号不能为空")
+    private String orderNo;
+
+    @Size(min = 1, max = 100, message = "商品数量必须在1-100之间")
+    private Integer quantity;
+
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private LocalDateTime orderTime;
+}
+```
+
+**输出格式**：
+```markdown
+## DTO/VO 定义
+### CreateOrderDTO
+| 字段 | 类型 | 验证规则 | 说明 |
+|------|------|---------|------|
+| orderNo | String | @NotBlank | 订单号（必填） |
+| quantity | Integer | @Size(1-100) | 商品数量 |
+| orderTime | LocalDateTime | @JsonFormat | 下单时间 |
+```
+
+### Step 6: REST API 与定时任务入口提取
+
+从 Controller 和 Task 类提取入口方法：
+
+**REST API 提取**：
 ```
 提取规则：
 1. @RestController → REST 控制器
@@ -119,10 +192,21 @@ find . -name "*.java" -type f | head -100
 5. 返回类型 → 响应类型
 ```
 
-### Step 6: 业务规则提取
+**定时任务提取**：
+```
+提取规则：
+1. @Scheduled(cron = "xxx") → 定时任务
+2. 类名包含 Task/Job/Batch → 批处理任务
+3. 实现 CommandLineRunner/ApplicationRunner → 启动任务
+4. @DolphinTask → Dolphin 调度任务
+5. 填入 entry_points，格式：TaskClass.method()
+```
 
-从 Service 实现类提取业务规则：
+### Step 7: 业务规则与已知陷阱提取
 
+从 Service 实现类提取业务规则和已知陷阱：
+
+**业务规则提取**：
 ```
 提取模式：
 1. 验证注解 → 字段级规则
@@ -138,24 +222,78 @@ find . -name "*.java" -type f | head -100
    - status = X → 状态定义
 ```
 
+**已知陷阱提取**：
+```
+提取信号：
+1. TODO/FIXME/HACK 注释 → 已知问题
+2. @Deprecated → 已废弃方法
+3. 复杂的 try-catch 块 → 异常处理陷阱
+4. 魔法数字/硬编码 → 维护陷阱
+5. 复杂的条件判断 → 逻辑陷阱
+6. 性能警告注释 → 性能陷阱
+```
+
 **降级策略**：如果代码中没有 try-catch，记录为：
 ```markdown
 ## 异常处理
 > ⚠️ 代码中未检测到显式异常处理逻辑
 ```
 
-### Step 7: 依赖关系分析
+### Step 8: SQL 性能分析
 
-分析 Service 之间的依赖关系：
+从 Mapper XML 和 @Select 注解分析 SQL 性能问题：
+
+```
+分析规则：
+1. SELECT * → 警告：应避免使用 SELECT *，建议指定具体字段
+   输出：> ⚠️ 性能警告：使用了 SELECT *，建议指定具体字段
+
+2. 无 WHERE 条件 → 警告：全表扫描风险
+   输出：> ⚠️ 性能警告：查询缺少 WHERE 条件，可能导致全表扫描
+
+3. 嵌套子查询 → 提示：可能存在性能优化空间
+   输出：> 💡 优化建议：嵌套子查询可考虑改为 JOIN
+
+4. LIKE '%xxx%' → 提示：前缀模糊查询无法使用索引
+   输出：> 💡 优化建议：前缀模糊查询（LIKE '%xxx%'）无法使用索引
+
+5. 多表 JOIN → 提示：检查 JOIN 顺序和索引
+   输出：> 💡 优化建议：多表 JOIN 请确保关联字段有索引
+```
+
+**输出格式**：
+```markdown
+## SQL 性能分析
+### XxxMapper.selectByCondition
+- ⚠️ 使用了 SELECT *，建议指定具体字段
+- 💡 多表 JOIN 请确保关联字段有索引
+```
+
+### Step 9: 依赖关系分析与架构图生成
+
+分析 Service 之间的依赖关系，并使用 `generate_module_arch` 工具生成模块架构图：
 
 ```
 分析维度：
 1. 直接依赖 → A 调用 B
 2. 间接依赖 → A 调用 B，B 调用 C
 3. 循环依赖 → A 调用 B，B 调用 A（标记为警告）
+
+架构图生成：
+使用 `generate_module_arch` 工具生成 Mermaid 格式的模块依赖图：
+- 节点：每个业务概念（Service）
+- 边：依赖关系（直接/间接）
+- 样式：循环依赖用红色标注
 ```
 
-### Step 8: 生成领域知识文件
+**降级策略**：如果 `generate_module_arch` 工具不可用，手动绘制 Mermaid 图：
+```mermaid
+graph TD
+    A[ServiceA] --> B[ServiceB]
+    B --> C[ServiceC]
+```
+
+### Step 10: 生成领域知识文件
 
 为每个业务概念生成一个 Markdown 文件，使用以下模板：
 
@@ -187,6 +325,12 @@ tags: [tag1, tag2]
   - `method1()` — 方法描述
   - `method2()` — 方法描述
 
+## DTO/VO 定义
+### XxxDTO
+| 字段 | 类型 | 验证规则 | 说明 |
+|------|------|---------|------|
+| field1 | String | @NotBlank | 字段描述 |
+
 ## REST API
 - `POST /api/xxx` — API 描述
   - 请求参数：param1, param2
@@ -199,9 +343,18 @@ tags: [tag1, tag2]
 | id | Long | 主键 |
 | field1 | String | 字段描述 |
 
+## 多租户
+- 租户字段：tenant_id
+- 隔离策略：行级隔离（通过 TenantLineHandler）
+
 ## 业务规则
 1. 规则1
 2. 规则2
+
+## SQL 性能分析
+### XxxMapper.selectByCondition
+- ⚠️ 使用了 SELECT *，建议指定具体字段
+- 💡 多表 JOIN 请确保关联字段有索引
 
 ## 异常处理
 - **异常类型1** → 处理方式
@@ -251,7 +404,7 @@ tags: [tag1, tag2]
 
 ## 错误处理
 
-### 常见错误及处理
+### 工具层面错误
 
 1. **工具不可用**
    - 错误：`project_structure` 工具调用失败
@@ -269,10 +422,36 @@ tags: [tag1, tag2]
    - 错误：项目不是 Java/Spring Boot 项目
    - 处理：提示用户当前版本仅支持 Java 项目
 
+### 业务层面错误
+
+5. **循环依赖导致分析死锁**
+   - 错误：检测到 A → B → A 的循环依赖
+   - 处理：在依赖关系图中标记为警告（红色），继续分析其他依赖，不中断流程
+   - 输出：在生成的文档中添加 `> ⚠️ 检测到循环依赖：ServiceA ↔ ServiceB`
+
+6. **部分文件读取失败**
+   - 错误：某些文件因权限问题无法读取
+   - 处理：跳过无法读取的文件，在汇总报告中列出失败文件
+   - 输出：`> ⚠️ 以下文件无法读取：path/to/file.java`
+
+7. **项目结构混乱**
+   - 错误：项目没有标准的分层结构（没有 controller/service/dao 等标准包）
+   - 处理：尝试识别实际的业务包命名模式，如果无法识别，提示用户手动指定业务包路径
+   - 输出：`> ⚠️ 未检测到标准分层结构，请确认业务包路径`
+
+8. **类名翻译歧义**
+   - 错误：英文类名可能有多种中文翻译（如 AllocationPlan 可能是"调拨计划"或"分配计划"）
+   - 处理：优先使用项目中的中文注释，如果没有注释，使用最常见的翻译，并在文档中标注"待确认"
+   - 输出：`name: 调拨计划（待确认，可能为"分配计划"）`
+
 ## 注意事项
 
 - 优先使用类注释和中文注释作为业务描述
-- 如果类名是英文，尝试翻译为中文概念名
+- 如果类名是英文，尝试翻译为中文概念名（参考以下示例）：
+  - `AllocationPlanService` → `allocation-plan.md` / 调拨计划
+  - `ReplenishPlanService` → `replenish-plan.md` / 补货计划
+  - `InventoryCheckService` → `inventory-check.md` / 库存校验
+  - `OrderCreateService` → `order-create.md` / 订单创建
 - 如果无法确定业务描述，使用"待补充"占位
 - 表名如果无法从代码提取，使用类名推断（驼峰转下划线）
 - **严禁编造内容**：如果无法从代码提取，明确标记为"待补充"
