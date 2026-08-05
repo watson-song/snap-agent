@@ -1,5 +1,7 @@
 package cn.watsontech.snapagent.boot2x.conversation;
 
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
+
 import java.util.List;
 
 /**
@@ -62,4 +64,54 @@ public interface ConversationStore {
      * @return markdown string, or {@code null} if not found or not owned
      */
     String exportMarkdown(String conversationId, String userId);
+
+    /**
+     * P2.2: Refills conversation messages from a ChatMemoryRepository.
+     *
+     * <p>This method synchronizes the conversation's message list with the
+     * messages stored in the ChatMemoryRepository. It's useful for:</p>
+     * <ul>
+     *   <li>Restoring conversation history after application restart</li>
+     *   <li>Merging two storage systems (ConversationStore + ChatMemoryRepository)</li>
+     *   <li>Ensuring message consistency across different storage layers</li>
+     * </ul>
+     *
+     * <p>The implementation should:</p>
+     * <ol>
+     *   <li>Load messages from the ChatMemoryRepository for the given conversationId</li>
+     *   <li>Convert core Message objects to ConversationMessage objects</li>
+     *   <li>Update the conversation's message list</li>
+     *   <li>Save the updated conversation</li>
+     * </ol>
+     *
+     * <p>Default implementation is a no-op for backward compatibility.</p>
+     *
+     * @param conversationId the conversation ID to refill
+     * @param userId         the conversation owner (for ownership check)
+     * @param chatMemoryRepo the ChatMemoryRepository to load messages from
+     * @return the updated conversation with refilled messages, or {@code null} if not found
+     */
+    default Conversation refillFromChatMemory(String conversationId, String userId,
+                                              ChatMemoryRepository chatMemoryRepo) {
+        // Default no-op implementation for backward compatibility
+        return load(conversationId, userId);
+    }
+
+    /**
+     * P2.2: Refills conversation messages from a ChatMemoryRepository without userId check.
+     *
+     * <p>This is a convenience method for startup refills where userId is not available
+     * in the ChatMemoryRepository. The implementation should skip ownership verification.</p>
+     *
+     * <p>Default implementation delegates to {@link #refillFromChatMemory(String, String, ChatMemoryRepository)}
+     * with userId=null.</p>
+     *
+     * @param conversationId the conversation ID to refill
+     * @param chatMemoryRepo the ChatMemoryRepository to load messages from
+     * @return the updated conversation with refilled messages, or {@code null} if not found
+     */
+    default Conversation refillFromChatMemory(String conversationId,
+                                              ChatMemoryRepository chatMemoryRepo) {
+        return refillFromChatMemory(conversationId, null, chatMemoryRepo);
+    }
 }

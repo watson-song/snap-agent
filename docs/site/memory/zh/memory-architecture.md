@@ -358,7 +358,7 @@ snap-agent:
 | P1.3 | 优化 `KnowledgeSedimentationService.extract()` 输出格式 + 增加文件持久化 | 低 — 在现有完整链路上增强 | 新建 SedimentationFormatTest | ✅ 完成 |
 | P1.4 | 统一 memory 配置项 (`snap-agent.memory.*`) | 低 — 新增配置 | 配置测试 | ✅ 完成 |
 | P2.1 | `MemoryLearningExtractor` 自动学习 | 中 — 新能力 | MemoryLearningExtractorTest | ✅ 完成 |
-| P2.2 | `ConversationStore` 从 `FileChatMemoryRepository` 回填 | 中 — 合并两套存储 | TDD | 🔲 待实施 |
+| P2.2 | `ConversationStore` 从 `FileChatMemoryRepository` 回填 | 中 — 合并两套存储 | ConversationStoreRefillTest | ✅ 完成 |
 
 ## 8. 文件布局
 

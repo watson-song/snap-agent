@@ -6,6 +6,8 @@ import cn.watsontech.snapagent.boot2x.conversation.Conversation;
 import cn.watsontech.snapagent.boot2x.conversation.ConversationMessage;
 import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
 import cn.watsontech.snapagent.boot2x.conversation.ConversationSummary;
+import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,14 +26,17 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Default {@link ConversationStore} that persists conversations as JSON files
- * under a base directory (typically the upload-skills directory).
+ * Default {@link ConversationStore} that persists conversation metadata as JSON files
+ * and delegates message storage to {@link ChatMemoryRepository}.
+ *
+ * <p>Architecture: Single source of truth for messages</p>
+ * <ul>
+ *   <li>Metadata (id, userId, skillId, title, timestamps) → JSON file</li>
+ *   <li>Messages → ChatMemoryRepository (single source of truth)</li>
+ * </ul>
  *
  * <p>File layout: {@code {baseDir}/conversations/{userId}/{conversationId}.json}</p>
- *
- * <p>JSON is used for structured storage (easy to parse back); markdown is
- * generated on-the-fly by {@link #exportMarkdown(String, String)} for
- * download.</p>
+ * <p>JSON only contains metadata, messages are loaded from ChatMemoryRepository on demand.</p>
  */
 public class FileConversationStore implements ConversationStore {
 
@@ -40,18 +45,21 @@ public class FileConversationStore implements ConversationStore {
 
     private final Path baseDir;
     private final ObjectMapper mapper;
+    private final ChatMemoryRepository chatMemoryRepository;
 
-    public FileConversationStore(String baseDirPath) {
-        this(baseDirPath, new ObjectMapper());
+    public FileConversationStore(String baseDirPath, ChatMemoryRepository chatMemoryRepository) {
+        this(baseDirPath, new ObjectMapper(), chatMemoryRepository);
     }
 
-    public FileConversationStore(String baseDirPath, ObjectMapper mapper) {
+    public FileConversationStore(String baseDirPath, ObjectMapper mapper, ChatMemoryRepository chatMemoryRepository) {
         String path = baseDirPath;
         if (path != null && path.startsWith("file:")) {
             path = path.substring(5);
         }
         this.baseDir = path != null ? Paths.get(path) : null;
         this.mapper = mapper;
+        this.chatMemoryRepository = chatMemoryRepository;
+
         if (this.baseDir != null) {
             try {
                 if (!Files.isDirectory(this.baseDir)) {
@@ -62,6 +70,10 @@ public class FileConversationStore implements ConversationStore {
                 log.warn("Failed to create conversations directory {}: {}",
                         this.baseDir, e.getMessage());
             }
+        }
+
+        if (this.chatMemoryRepository == null) {
+            log.warn("ChatMemoryRepository is null, messages will not be persisted");
         }
     }
 
@@ -88,7 +100,7 @@ public class FileConversationStore implements ConversationStore {
         long createdAt = isNew ? now : conversation.getCreatedAt();
         // Preserve original createdAt for existing conversations
         if (!isNew) {
-            Conversation existing = loadRaw(convId, conversation.getUserId(), userDir);
+            Conversation existing = loadMetadataOnly(convId, conversation.getUserId(), userDir);
             if (existing != null) {
                 createdAt = existing.getCreatedAt();
             }
@@ -99,23 +111,46 @@ public class FileConversationStore implements ConversationStore {
             title = deriveTitle(conversation.getMessages());
         }
 
-        Conversation saved = new Conversation(
+        // Save messages to ChatMemoryRepository (single source of truth)
+        if (chatMemoryRepository != null && conversation.getMessages() != null) {
+            try {
+                List<Message> messages = new ArrayList<Message>();
+                for (ConversationMessage convMsg : conversation.getMessages()) {
+                    // Convert ConversationMessage to Message
+                    messages.add(new Message(
+                            convMsg.getRole(),
+                            convMsg.getContent(),
+                            null,  // toolUseId not used in ConversationMessage
+                            null   // toolUses not used in ConversationMessage
+                    ));
+                }
+                chatMemoryRepository.save(convId, messages);
+                log.debug("Saved {} messages to ChatMemoryRepository for conversation {}",
+                        messages.size(), convId);
+            } catch (Exception e) {
+                log.error("Failed to save messages to ChatMemoryRepository for conversation {}: {}",
+                        convId, e.getMessage());
+            }
+        }
+
+        // Save metadata only (without messages) to JSON file
+        Conversation metadataOnly = new Conversation(
                 convId, conversation.getUserId(), conversation.getSkillId(),
-                title, createdAt, now, conversation.getMessages());
+                title, createdAt, now, Collections.<ConversationMessage>emptyList());
 
         Path file = userDir.resolve(convId + ".json");
         try {
-            Map<String, Object> data = toMap(saved);
+            Map<String, Object> data = toMetadataMap(metadataOnly);
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(data);
             Files.createDirectories(userDir);
             Files.write(file, json.getBytes(StandardCharsets.UTF_8));
-            log.debug("Saved conversation {} ({} messages) to {}",
-                    convId, saved.getMessageCount(), file);
+            log.debug("Saved conversation metadata {} to {}", convId, file);
         } catch (IOException e) {
-            log.error("Failed to save conversation {}: {}", convId, e.getMessage());
+            log.error("Failed to save conversation metadata {}: {}", convId, e.getMessage());
         }
 
-        return saved;
+        return new Conversation(convId, conversation.getUserId(), conversation.getSkillId(),
+                title, createdAt, now, conversation.getMessages());
     }
 
     @Override
@@ -124,7 +159,48 @@ public class FileConversationStore implements ConversationStore {
         if (userDir == null) {
             return null;
         }
-        return loadRaw(conversationId, userId, userDir);
+
+        // Load metadata from JSON
+        Conversation metadata = loadMetadataOnly(conversationId, userId, userDir);
+        if (metadata == null) {
+            return null;
+        }
+
+        // Load messages from ChatMemoryRepository (on-demand)
+        List<ConversationMessage> messages = Collections.emptyList();
+        if (chatMemoryRepository != null) {
+            try {
+                List<Message> coreMessages = chatMemoryRepository.load(conversationId);
+                if (coreMessages != null && !coreMessages.isEmpty()) {
+                    messages = new ArrayList<ConversationMessage>();
+                    for (Message msg : coreMessages) {
+                        // Convert Message to ConversationMessage
+                        messages.add(new ConversationMessage(
+                                msg.getRole(),
+                                msg.getContent(),
+                                System.currentTimeMillis(),  // Use current timestamp
+                                null  // taskId not available in Message
+                        ));
+                    }
+                    log.debug("Loaded {} messages from ChatMemoryRepository for conversation {}",
+                            messages.size(), conversationId);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to load messages from ChatMemoryRepository for conversation {}: {}",
+                        conversationId, e.getMessage());
+            }
+        }
+
+        // Merge metadata and messages
+        return new Conversation(
+                metadata.getId(),
+                metadata.getUserId(),
+                metadata.getSkillId(),
+                metadata.getTitle(),
+                metadata.getCreatedAt(),
+                metadata.getUpdatedAt(),
+                messages
+        );
     }
 
     @Override
@@ -205,7 +281,11 @@ public class FileConversationStore implements ConversationStore {
         return baseDir.resolve("conversations").resolve(safeUser);
     }
 
-    private Conversation loadRaw(String conversationId, String userId, Path userDir) {
+    /**
+     * Load only metadata from JSON file (without messages).
+     * Messages are loaded on-demand from ChatMemoryRepository.
+     */
+    private Conversation loadMetadataOnly(String conversationId, String userId, Path userDir) {
         if (conversationId == null || conversationId.isEmpty()) {
             return null;
         }
@@ -224,14 +304,17 @@ public class FileConversationStore implements ConversationStore {
                         conversationId, storedUserId, userId);
                 return null;
             }
-            return fromMap(data);
+            return fromMetadataMap(data);
         } catch (Exception e) {
-            log.warn("Failed to load conversation {}: {}", conversationId, e.getMessage());
+            log.warn("Failed to load conversation metadata {}: {}", conversationId, e.getMessage());
             return null;
         }
     }
 
-    private Map<String, Object> toMap(Conversation conv) {
+    /**
+     * Convert Conversation to metadata-only map (without messages).
+     */
+    private Map<String, Object> toMetadataMap(Conversation conv) {
         Map<String, Object> map = new LinkedHashMap<String, Object>();
         map.put("id", conv.getId());
         map.put("userId", conv.getUserId());
@@ -240,39 +323,14 @@ public class FileConversationStore implements ConversationStore {
         map.put("createdAt", conv.getCreatedAt());
         map.put("updatedAt", conv.getUpdatedAt());
         map.put("messageCount", conv.getMessageCount());
-
-        List<Map<String, Object>> msgList = new ArrayList<Map<String, Object>>();
-        for (ConversationMessage msg : conv.getMessages()) {
-            Map<String, Object> m = new LinkedHashMap<String, Object>();
-            m.put("role", msg.getRole());
-            m.put("content", msg.getContent());
-            m.put("timestamp", msg.getTimestamp());
-            if (msg.getTaskId() != null) {
-                m.put("taskId", msg.getTaskId());
-            }
-            msgList.add(m);
-        }
-        map.put("messages", msgList);
+        // Note: messages are NOT included - they're in ChatMemoryRepository
         return map;
     }
 
-    @SuppressWarnings("unchecked")
-    private Conversation fromMap(Map<String, Object> data) {
-        List<ConversationMessage> messages = new ArrayList<ConversationMessage>();
-        Object msgsObj = data.get("messages");
-        if (msgsObj instanceof List) {
-            for (Object item : (List<Object>) msgsObj) {
-                if (item instanceof Map) {
-                    Map<String, Object> m = (Map<String, Object>) item;
-                    String taskId = m.get("taskId") != null ? m.get("taskId").toString() : null;
-                    messages.add(new ConversationMessage(
-                            str(m.get("role")),
-                            str(m.get("content")),
-                            longVal(m.get("timestamp")),
-                            taskId));
-                }
-            }
-        }
+    /**
+     * Convert metadata map to Conversation (with empty message list).
+     */
+    private Conversation fromMetadataMap(Map<String, Object> data) {
         return new Conversation(
                 str(data.get("id")),
                 str(data.get("userId")),
@@ -280,7 +338,8 @@ public class FileConversationStore implements ConversationStore {
                 str(data.get("title")),
                 longVal(data.get("createdAt")),
                 longVal(data.get("updatedAt")),
-                messages);
+                Collections.<ConversationMessage>emptyList()  // Messages loaded separately
+        );
     }
 
     private String deriveTitle(List<ConversationMessage> messages) {

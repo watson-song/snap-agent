@@ -134,10 +134,11 @@ public class SnapAgentAutoConfiguration {
     // ---- ConversationStore (conversation history persistence) ----
     @Bean
     @ConditionalOnMissingBean
-    public ConversationStore conversationStore(SnapAgentProperties props) {
+    public ConversationStore conversationStore(SnapAgentProperties props,
+                                               ChatMemoryRepository chatMemoryRepository) {
         String baseDir = props.getUploadSkillsDir();
-        log.info("Using FileConversationStore with base dir: {}", baseDir);
-        return new FileConversationStore(baseDir);
+        log.info("Using FileConversationStore with base dir: {} and ChatMemoryRepository", baseDir);
+        return new FileConversationStore(baseDir, chatMemoryRepository);
     }
 
     // ---- ChatMemory (ReAct loop conversation history) ----
