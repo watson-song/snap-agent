@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。
-version: 2.0.1
+version: 2.1.0
 tools:
   - project_structure
   - read_code
@@ -65,6 +65,28 @@ author: SnapAgent
 **降级策略**：如果 `project_structure` 工具不可用，使用 shell 命令：
 ```bash
 find . -name "*.java" -type f | head -100
+```
+
+**跨模块扫描**：
+多模块项目需要扫描所有模块，特别关注：
+```
+扫描策略：
+1. 基础设施模块（如 dfpro-core）：安全框架、工具类、配置类
+2. 系统管理模块（如 dfpro-sys）：用户、角色、权限、认证
+3. 业务模块（如 dfpro-biz）：核心业务逻辑
+4. 启动模块（如 dfpro-starter）：配置文件、启动类
+
+注意：同一业务领域的代码可能分布在多个模块中
+例如：SSO 认证涉及 dfpro-biz（SsoController）和 dfpro-sys（IUserService.loginSsoByUserName）
+```
+
+**注释代码检测**：
+```
+检测规则：
+1. 检查 Controller 文件是否被注释掉（首行以 // 或 /* 开头）
+2. 被注释的 Controller 不计入活跃入口
+3. 在文档中标注："部分 Controller 已被注释（如 DeptController、DictDataController）"
+4. 被注释的代码可能表示功能已废弃或正在迁移
 ```
 
 ### Step 3: 业务概念提取
@@ -338,6 +360,33 @@ graph TD
 - **ReportAllocationPlanService.exportReport()** — 导出调拨计划报表
   - 读取表：drp_allocation_plan
   - 用途：导出报表供业务方查看
+```
+
+### Step 10.5: 基础设施域识别
+
+区分业务域和基础设施域，采用不同的文档策略：
+
+```
+域类型判断：
+1. 业务域（如补货计算、调拨建议）：
+   - 核心内容：业务规则、数据流向、SQL 逻辑
+   - 重点：计算逻辑、业务流程、数据处理
+
+2. 基础设施域（如系统管理、认证授权）：
+   - 核心内容：权限模型、认证流程、数据权限
+   - 重点：RBAC 模型、Token 管理、SSO 集成
+   - 简化：不需要详细的 SQL 性能分析
+
+3. 常量/枚举服务（如 ConstantController）：
+   - 核心内容：数据来源映射表
+   - 重点：哪些接口查哪些表
+   - 简化：不需要业务规则和数据流向
+
+基础设施域文档模板调整：
+- 可以省略"SQL 性能分析"
+- 可以简化"数据流向"
+- 增加"权限模型"或"认证流程"章节
+- 增加"已知陷阱"中记录跨模块依赖
 ```
 
 ### Step 11: 生成领域知识文件

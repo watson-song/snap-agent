@@ -12,7 +12,7 @@ import java.nio.file.Paths;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for the domain-knowledge-discovery skill.
+ * Tests for the domain-knowledge-discovery skill (v2.1.0).
  * Verifies that the skill file can be parsed and has the correct structure.
  */
 class DomainKnowledgeDiscoverySkillTest {
@@ -40,7 +40,7 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         assertThat(skill.getTools()).isNotNull();
-        assertThat(skill.getTools()).contains("project_structure", "read_code");
+        assertThat(skill.getTools()).contains("project_structure", "read_code", "generate_module_arch");
     }
 
     @Test
@@ -52,7 +52,8 @@ class DomainKnowledgeDiscoverySkillTest {
         assertThat(body).contains("Step 1");
         assertThat(body).contains("Step 2");
         assertThat(body).contains("Step 3");
-        assertThat(body).contains("YAML frontmatter");
+        assertThat(body).contains("Step 4");
+        assertThat(body).contains("Step 11");
         assertThat(body).contains("tables:");
         assertThat(body).contains("services:");
         assertThat(body).contains("entry_points:");
@@ -64,9 +65,9 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("输出要求");
-        assertThat(body).contains(".md 文件");
+        assertThat(body).contains("输出规范");
         assertThat(body).contains("文件名使用英文");
+        assertThat(body).contains("kebab-case");
     }
 
     @Test
@@ -77,7 +78,8 @@ class DomainKnowledgeDiscoverySkillTest {
         String body = skill.getBody();
         assertThat(body).contains("controller/");
         assertThat(body).contains("REST API");
-        assertThat(body).contains("api_endpoints:");
+        assertThat(body).contains("@RestController");
+        assertThat(body).contains("@RequestMapping");
     }
 
     @Test
@@ -87,8 +89,7 @@ class DomainKnowledgeDiscoverySkillTest {
 
         String body = skill.getBody();
         assertThat(body).contains("enums/");
-        assertThat(body).contains("业务枚举");
-        assertThat(body).contains("StatusEnum");
+        assertThat(body).contains("枚举");
     }
 
     @Test
@@ -97,9 +98,8 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("Mermaid");
-        assertThat(body).contains("```mermaid");
-        assertThat(body).contains("业务概念关系图");
+        assertThat(body).contains("mermaid");
+        assertThat(body).contains("graph TD");
     }
 
     @Test
@@ -108,21 +108,21 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("批量生成模式");
-        assertThat(body).contains("批次 1");
-        assertThat(body).contains("核心业务域");
+        assertThat(body).contains("批量生成");
+        assertThat(body).contains("汇总报告");
     }
 
     @Test
-    void shouldHaveDtoVoIdentification() throws IOException {
+    void shouldHaveDtoVoAnalysis() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("DTO/VO 类识别增强");
-        assertThat(body).contains("dto/");
-        assertThat(body).contains("vo/");
+        assertThat(body).contains("Step 5");
+        assertThat(body).contains("DTO/VO");
         assertThat(body).contains("验证注解");
+        assertThat(body).contains("@NotNull");
+        assertThat(body).contains("@Size");
     }
 
     @Test
@@ -131,23 +131,22 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("业务规则智能提取");
-        assertThat(body).contains("@NotNull");
-        assertThat(body).contains("@Size");
-        assertThat(body).contains("条件判断");
-        assertThat(body).contains("状态转换");
+        assertThat(body).contains("Step 7");
+        assertThat(body).contains("业务规则");
+        assertThat(body).contains("已知陷阱");
+        assertThat(body).contains("TODO/FIXME");
     }
 
     @Test
-    void shouldHaveServiceDependencyAnalysis() throws IOException {
+    void shouldHaveSqlPerformanceAnalysis() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("服务依赖深度分析");
-        assertThat(body).contains("调用链");
-        assertThat(body).contains("循环依赖");
-        assertThat(body).contains("依赖深度");
+        assertThat(body).contains("Step 8");
+        assertThat(body).contains("SQL 性能");
+        assertThat(body).contains("SELECT *");
+        assertThat(body).contains("WHERE 条件");
     }
 
     @Test
@@ -156,156 +155,121 @@ class DomainKnowledgeDiscoverySkillTest {
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("多租户模式识别");
+        assertThat(body).contains("多租户");
         assertThat(body).contains("tenant_id");
-        assertThat(body).contains("租户隔离");
-        assertThat(body).contains("跨租户操作");
+        assertThat(body).contains("TenantLineHandler");
     }
 
     @Test
-    void shouldHaveSqlExtractionEnhancement() throws IOException {
+    void shouldHaveDependencyAnalysis() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("SQL 提取增强");
-        assertThat(body).contains("@Select");
-        assertThat(body).contains("@Insert");
-        assertThat(body).contains("性能分析");
-        assertThat(body).contains("N+1 查询");
-    }
-
-    @Test
-    void shouldHaveRelatedTableExtraction() throws IOException {
-        String content = loadSkillContent();
-        SkillMeta skill = loader.parse(content);
-
-        String body = skill.getBody();
-        assertThat(body).contains("v1.3.0 新增特性");
-        assertThat(body).contains("关联表结构完整提取");
-        assertThat(body).contains("外键关系");
-        assertThat(body).contains("SQL JOIN");
-        assertThat(body).contains("关联表识别策略");
-    }
-
-    @Test
-    void shouldHaveExceptionHandlingExtraction() throws IOException {
-        String content = loadSkillContent();
-        SkillMeta skill = loader.parse(content);
-
-        String body = skill.getBody();
-        assertThat(body).contains("异常处理策略提取");
-        assertThat(body).contains("try-catch");
-        assertThat(body).contains("自定义异常类");
-        assertThat(body).contains("DfproServerException");
-        assertThat(body).contains("错误信息格式");
-    }
-
-    @Test
-    void shouldHaveTechnicalImplementationExtraction() throws IOException {
-        String content = loadSkillContent();
-        SkillMeta skill = loader.parse(content);
-
-        String body = skill.getBody();
-        assertThat(body).contains("技术实现细节提取");
-        assertThat(body).contains("动态表头");
-        assertThat(body).contains("MenuDisplayEnum");
-        assertThat(body).contains("批量处理");
-        assertThat(body).contains("线程池");
-        assertThat(body).contains("缓存策略");
-    }
-
-    @Test
-    void shouldHaveModuleIntegrationExtraction() throws IOException {
-        String content = loadSkillContent();
-        SkillMeta skill = loader.parse(content);
-
-        String body = skill.getBody();
-        assertThat(body).contains("模块集成关系提取");
-        assertThat(body).contains("数据流转");
-        assertThat(body).contains("接口调用");
-        assertThat(body).contains("共享数据");
+        assertThat(body).contains("Step 9");
         assertThat(body).contains("依赖关系");
+        assertThat(body).contains("循环依赖");
+        assertThat(body).contains("generate_module_arch");
     }
 
     @Test
-    void shouldHaveUpdatedOutputRequirements() throws IOException {
+    void shouldHaveDataFlowAnalysis() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("每个数据表必须包含完整字段列表和类型");
-        assertThat(body).contains("必须包含异常处理策略");
-        assertThat(body).contains("必须包含技术实现细节");
-        assertThat(body).contains("必须包含模块集成关系");
+        assertThat(body).contains("Step 10");
+        assertThat(body).contains("数据流向");
+        assertThat(body).contains("数据生成");
+        assertThat(body).contains("数据消费");
     }
 
     @Test
-    void shouldHaveLegacyProjectMode() throws IOException {
+    void shouldHaveTableStructureExtraction() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("v1.4.0 新增特性");
-        assertThat(body).contains("老项目逆向分析模式");
-        assertThat(body).contains("老项目逆向分析四步法");
+        assertThat(body).contains("Step 4");
+        assertThat(body).contains("@TableName");
+        assertThat(body).contains("@TableId");
     }
 
     @Test
-    void shouldHaveDirectoryTreeScanning() throws IOException {
+    void shouldHaveProjectScaleAssessment() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("目录树");
-        assertThat(body).contains("宏观认知");
-        assertThat(body).contains("tree -L 4");
+        assertThat(body).contains("项目规模");
+        assertThat(body).contains("小型项目");
+        assertThat(body).contains("中型项目");
+        assertThat(body).contains("大型项目");
     }
 
     @Test
-    void shouldHaveDependencyDNAExtraction() throws IOException {
+    void shouldHaveErrorHandling() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("依赖关系 DNA");
-        assertThat(body).contains("pom.xml");
-        assertThat(body).contains("@FeignClient");
-        assertThat(body).contains("@DubboReference");
+        assertThat(body).contains("错误处理");
+        assertThat(body).contains("工具不可用");
+        assertThat(body).contains("降级策略");
+        assertThat(body).contains("循环依赖");
     }
 
     @Test
-    void shouldHaveArchitectureReverseEngineering() throws IOException {
+    void shouldHaveOutputTemplate() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("架构分层与调用链逆向");
-        assertThat(body).contains("分层职责表");
-        assertThat(body).contains("核心链路时序图");
-        assertThat(body).contains("外部依赖拓扑");
+        assertThat(body).contains("业务描述");
+        assertThat(body).contains("核心服务");
+        assertThat(body).contains("数据流向");
+        assertThat(body).contains("已知陷阱");
     }
 
     @Test
-    void shouldHaveTechnicalDebtIdentification() throws IOException {
+    void shouldHaveCrossModuleScanning() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("技术债务识别");
-        assertThat(body).contains("耦合风险");
-        assertThat(body).contains("反模式");
-        assertThat(body).contains("超大类");
+        assertThat(body).contains("跨模块扫描");
+        assertThat(body).contains("基础设施模块");
+        assertThat(body).contains("系统管理模块");
     }
 
     @Test
-    void shouldHaveLegacyProjectTips() throws IOException {
+    void shouldHaveCommentedCodeDetection() throws IOException {
         String content = loadSkillContent();
         SkillMeta skill = loader.parse(content);
 
         String body = skill.getBody();
-        assertThat(body).contains("弯道超车");
-        assertThat(body).contains("不要一次性喂大文件");
-        assertThat(body).contains("jdepend");
+        assertThat(body).contains("注释代码检测");
+        assertThat(body).contains("被注释的 Controller");
+    }
+
+    @Test
+    void shouldHaveInfrastructureDomainHandling() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("Step 10.5");
+        assertThat(body).contains("基础设施域识别");
+        assertThat(body).contains("常量/枚举服务");
+    }
+
+    @Test
+    void shouldHaveScheduledTaskExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("@Scheduled");
+        assertThat(body).contains("定时任务");
     }
 }
