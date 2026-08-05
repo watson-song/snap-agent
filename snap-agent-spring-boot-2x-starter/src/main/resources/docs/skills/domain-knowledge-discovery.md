@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 从现有代码自动发现和生成领域知识文件。扫描项目结构，识别业务概念、表名、服务类、入口方法，生成带 YAML frontmatter 的 Markdown 文件。
-version: 1.1.0
+version: 1.2.0
 tools:
   - project_structure
   - read_code
@@ -20,6 +20,33 @@ author: SnapAgent
 # 领域知识自动发现 (Domain Knowledge Discovery)
 
 你是一个领域知识发现专家。你的任务是从现有代码中自动提取业务概念，生成结构化的领域知识文件。
+
+## v1.2.0 新增特性
+
+### 1. DTO/VO 类识别增强
+- 扫描 `dto/` 和 `vo/` 包，提取数据传输对象
+- 识别 DTO/VO 与 Entity 的映射关系
+- 提取字段验证规则和转换逻辑
+
+### 2. 业务规则智能提取
+- 识别验证注解（`@NotNull`, `@Size`, `@Min`, `@Max`, `@Pattern`）
+- 分析条件判断逻辑（if/else/switch）
+- 提取业务约束和不变量
+
+### 3. 服务依赖深度分析
+- 分析方法调用链（A → B → C）
+- 识别循环依赖和深层依赖
+- 生成服务依赖拓扑图
+
+### 4. 多租户模式识别
+- 自动识别 `tenant_id` 字段
+- 提取租户隔离相关的业务规则
+- 识别跨租户操作的敏感点
+
+### 5. SQL 提取增强
+- 支持注解方式 SQL（`@Select`, `@Insert`, `@Update`, `@Delete`）
+- 提取复杂查询的执行计划建议
+- 识别潜在的性能问题（N+1 查询、全表扫描）
 
 ## 核心能力
 
@@ -148,7 +175,186 @@ public enum TaskStatusEnum {
 ```
 → 任务状态：0=待处理, 1=处理中, 2=成功, 3=失败
 
-### Step 7: Mapper XML 分析
+### Step 7: DTO/VO 类分析（v1.2.0 新增）
+
+从 DTO/VO 类提取数据传输对象：
+
+```
+扫描路径：
+1. dto/ 包 → 数据传输对象
+2. vo/ 包 → 视图对象
+3. request/ 包 → 请求对象
+4. response/ 包 → 响应对象
+
+提取信息：
+1. 类名 → DTO/VO 名称
+2. 字段 → 数据字段
+3. 验证注解 → 验证规则（@NotNull, @Size, @Min, @Max）
+4. 转换注解 → 映射关系（@JsonProperty, @JsonFormat）
+5. 关联 Entity → 数据来源
+```
+
+示例：
+```java
+public class ReplenishPlanDTO {
+    @NotNull(message = "SKU不能为空")
+    private String skuCode;
+
+    @Size(min = 1, max = 100, message = "数量必须在1-100之间")
+    private Integer quantity;
+
+    @JsonFormat(pattern = "yyyy-MM-dd")
+    private LocalDate planDate;
+}
+```
+→ DTO: ReplenishPlanDTO
+→ 字段: skuCode (必填), quantity (1-100), planDate (日期格式)
+→ 验证规则: SKU必填, 数量1-100, 日期格式yyyy-MM-dd
+
+### Step 8: 业务规则智能提取（v1.2.0 新增）
+
+从 Service 实现类提取业务规则：
+
+```
+提取模式：
+1. 验证注解 → 字段级规则
+   - @NotNull → 必填
+   - @Size(min, max) → 长度范围
+   - @Min, @Max → 数值范围
+   - @Pattern → 格式要求
+
+2. 条件判断 → 业务逻辑规则
+   - if (condition) → 前置条件
+   - if (error) throw → 业务约束
+   - assert → 不变量
+
+3. 状态转换 → 状态机规则
+   - status = X → 状态定义
+   - transition from A to B → 状态转换
+```
+
+示例提取：
+```java
+public void createPlan(PlanDTO dto) {
+    // 验证规则
+    if (dto.getQuantity() <= 0) {
+        throw new BusinessException("数量必须大于0");
+    }
+
+    // 业务规则
+    if (dto.getPlanDate().isBefore(LocalDate.now())) {
+        throw new BusinessException("计划日期不能早于今天");
+    }
+
+    // 状态转换
+    plan.setStatus(PlanStatus.DRAFT);
+}
+```
+→ 业务规则:
+  - 数量必须大于0
+  - 计划日期不能早于今天
+  - 新建计划状态为DRAFT
+
+### Step 9: 服务依赖深度分析（v1.2.0 新增）
+
+分析方法调用链：
+
+```
+分析维度：
+1. 直接依赖 → A 调用 B
+2. 间接依赖 → A 调用 B，B 调用 C
+3. 循环依赖 → A 调用 B，B 调用 A（警告）
+4. 依赖深度 → 调用链的最大深度
+
+工具：
+- 读取 Service 实现类
+- 分析 @Autowired 注入
+- 追踪方法调用
+- 构建依赖图
+```
+
+示例：
+```java
+@Service
+public class ReplenishPlanService {
+    @Autowired
+    private InventoryService inventoryService;
+
+    @Autowired
+    private SkuService skuService;
+
+    public void createPlan() {
+        Sku sku = skuService.getSku(skuCode);
+        Integer stock = inventoryService.getStock(skuCode);
+        // ...
+    }
+}
+```
+→ 依赖关系:
+  - ReplenishPlanService → InventoryService (直接)
+  - ReplenishPlanService → SkuService (直接)
+  - 依赖深度: 1
+
+### Step 10: 多租户模式识别（v1.2.0 新增）
+
+识别多租户相关代码：
+
+```
+识别模式：
+1. tenant_id 字段 → 租户标识
+2. TenantContext → 租户上下文
+3. @TenantFilter → 租户过滤注解
+4. TenantInterceptor → 租户拦截器
+
+提取信息：
+- 哪些表包含 tenant_id
+- 哪些查询自动过滤租户
+- 哪些操作需要租户隔离
+- 跨租户操作的敏感点
+```
+
+示例：
+```java
+@Entity
+@TableName("replenish_plan")
+public class ReplenishPlan {
+    private Long tenantId;  // 租户ID
+    private String planNo;
+    // ...
+}
+```
+→ 多租户: replenish_plan 表支持租户隔离
+
+### Step 11: SQL 提取增强（v1.2.0 新增）
+
+从注解方式提取 SQL：
+
+```
+支持注解：
+1. @Select("SELECT ...") → 查询语句
+2. @Insert("INSERT ...") → 插入语句
+3. @Update("UPDATE ...") → 更新语句
+4. @Delete("DELETE ...") → 删除语句
+
+性能分析：
+- 识别 SELECT * → 建议指定字段
+- 识别无 WHERE 条件 → 警告全表扫描
+- 识别 N+1 查询 → 建议批量查询
+- 识别缺少索引 → 建议添加索引
+```
+
+示例：
+```java
+@Mapper
+public interface PlanMapper {
+    @Select("SELECT * FROM replenish_plan WHERE sku_code = #{skuCode}")
+    List<ReplenishPlan> selectBySkuCode(@Param("skuCode") String skuCode);
+}
+```
+→ SQL: SELECT * FROM replenish_plan WHERE sku_code = #{skuCode}
+→ 性能建议: 避免 SELECT *，指定需要的字段
+
+### Step 12: Mapper XML 分析
 
 从 Mapper XML 提取复杂 SQL：
 
@@ -164,7 +370,7 @@ public enum TaskStatusEnum {
 - 子查询 → 数据依赖
 - 动态条件 → 业务规则
 
-### Step 8: 业务域聚类
+### Step 13: 业务域聚类
 
 按业务语义将概念聚类：
 
@@ -177,7 +383,7 @@ public enum TaskStatusEnum {
 5. Controller 和 Service 的 RequestMapping 路径前缀相同
 ```
 
-### Step 9: 生成业务概念关系图
+### Step 14: 生成业务概念关系图
 
 使用 Mermaid 生成业务概念关系图：
 
@@ -194,7 +400,7 @@ graph LR
 - 虚线箭头 (⇢)：间接关联
 - 双向箭头 (↔)：数据同步
 
-### Step 10: 生成领域知识文件
+### Step 15: 生成领域知识文件
 
 为每个业务概念生成一个 Markdown 文件，格式如下：
 

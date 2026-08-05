@@ -112,4 +112,67 @@ class DomainKnowledgeDiscoverySkillTest {
         assertThat(body).contains("批次 1");
         assertThat(body).contains("核心业务域");
     }
+
+    @Test
+    void shouldHaveDtoVoIdentification() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("v1.2.0 新增特性");
+        assertThat(body).contains("DTO/VO 类识别增强");
+        assertThat(body).contains("dto/");
+        assertThat(body).contains("vo/");
+        assertThat(body).contains("验证注解");
+    }
+
+    @Test
+    void shouldHaveBusinessRuleExtraction() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("业务规则智能提取");
+        assertThat(body).contains("@NotNull");
+        assertThat(body).contains("@Size");
+        assertThat(body).contains("条件判断");
+        assertThat(body).contains("状态转换");
+    }
+
+    @Test
+    void shouldHaveServiceDependencyAnalysis() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("服务依赖深度分析");
+        assertThat(body).contains("调用链");
+        assertThat(body).contains("循环依赖");
+        assertThat(body).contains("依赖深度");
+    }
+
+    @Test
+    void shouldHaveMultiTenantRecognition() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("多租户模式识别");
+        assertThat(body).contains("tenant_id");
+        assertThat(body).contains("租户隔离");
+        assertThat(body).contains("跨租户操作");
+    }
+
+    @Test
+    void shouldHaveSqlExtractionEnhancement() throws IOException {
+        String content = loadSkillContent();
+        SkillMeta skill = loader.parse(content);
+
+        String body = skill.getBody();
+        assertThat(body).contains("SQL 提取增强");
+        assertThat(body).contains("@Select");
+        assertThat(body).contains("@Insert");
+        assertThat(body).contains("性能分析");
+        assertThat(body).contains("N+1 查询");
+    }
 }
