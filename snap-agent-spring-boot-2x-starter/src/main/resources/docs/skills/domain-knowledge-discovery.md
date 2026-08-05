@@ -293,7 +293,54 @@ graph TD
     B --> C[ServiceC]
 ```
 
-### Step 10: 生成领域知识文件
+### Step 10: 数据流向分析
+
+分析数据的生成和消费关系：
+
+**数据生成分析**：
+```
+分析哪些服务/任务写入数据到表：
+1. 查找 *Mapper.insert/save/update 调用
+2. 查找 *Service.create/save/update 方法
+3. 查找定时任务（@Scheduled, Task, Job）
+4. 查找消息消费者（@RabbitListener, @KafkaListener）
+5. 记录为：数据生成方
+```
+
+**数据消费分析**：
+```
+分析哪些服务/任务读取数据从表：
+1. 查找 *Mapper.select/query/find/list 调用
+2. 查找 *Service.get/query/find/list 方法
+3. 查找定时任务的数据读取
+4. 查找消息生产者的数据来源
+5. 记录为：数据消费方
+```
+
+**输出格式**：
+```markdown
+## 数据流向
+### 数据生成（写入方）
+- **TaskReplenishmentPlanJob.execute()** — 定时任务生成补货计划
+  - 调用：ReplenishmentPlanService.createPlan()
+  - 写入表：drp_allocation_plan
+  - 触发频率：每天凌晨 2:00
+
+- **AllocationPlanService.createPlan()** — 手动创建调拨计划
+  - 触发方式：REST API POST /api/allocation-plan
+  - 写入表：drp_allocation_plan
+
+### 数据消费（读取方）
+- **TransferSuggestionService.generateSuggestion()** — 生成调拨建议
+  - 读取表：drp_allocation_plan
+  - 用途：基于调拨计划生成调拨建议
+
+- **ReportAllocationPlanService.exportReport()** — 导出调拨计划报表
+  - 读取表：drp_allocation_plan
+  - 用途：导出报表供业务方查看
+```
+
+### Step 11: 生成领域知识文件
 
 为每个业务概念生成一个 Markdown 文件，使用以下模板：
 
@@ -342,6 +389,26 @@ tags: [tag1, tag2]
 |------|------|------|
 | id | Long | 主键 |
 | field1 | String | 字段描述 |
+
+## 数据流向
+### 数据生成（写入方）
+- **TaskXxxJob.execute()** — 定时任务生成数据
+  - 调用：XxxService.create()
+  - 写入表：table_name_1
+  - 触发频率：每天凌晨 2:00
+
+- **XxxService.createXxx()** — 手动创建数据
+  - 触发方式：REST API POST /api/xxx
+  - 写入表：table_name_1
+
+### 数据消费（读取方）
+- **YyyService.generateYyy()** — 生成下游数据
+  - 读取表：table_name_1
+  - 用途：基于此数据生成下游数据
+
+- **ZzzService.exportReport()** — 导出报表
+  - 读取表：table_name_1
+  - 用途：导出报表供业务方查看
 
 ## 多租户
 - 租户字段：tenant_id
