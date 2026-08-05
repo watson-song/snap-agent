@@ -216,7 +216,8 @@ class ZentaoIssueTrackerTest {
     @Test
     void addComment_putsToBugEndpoint() throws Exception {
         try (MockHttpServer server = new MockHttpServer()) {
-            server.when("/api.php/v1/bugs/123", "PUT", 200, "")
+            server.when("/api.php/v1/bugs/123", "GET", 200, "{\"title\":\"Test bug\"}")
+                    .when("/api.php/v1/bugs/123", "PUT", 200, "")
                     .start();
 
             ZentaoIssueTracker tracker = createTracker(server.getBaseUrl(), "zentao-token");

@@ -39,7 +39,8 @@ class ZentaoIssueTrackerAddCommentTest {
     @Test
     void addComment_successPutsCommentBodyWithTokenHeader() throws Exception {
         try (MockHttpServer server = new MockHttpServer()) {
-            server.when("/api.php/v1/bugs/456", "PUT", 200, "")
+            server.when("/api.php/v1/bugs/456", "GET", 200, "{\"title\":\"Bug title\",\"steps\":\"Steps\"}")
+                    .when("/api.php/v1/bugs/456", "PUT", 200, "")
                     .start();
 
             SnapAgentProperties.IssueClosure.ZentaoTracker cfg = new SnapAgentProperties.IssueClosure.ZentaoTracker();

@@ -129,7 +129,7 @@ class SimpleVerificationRunnerTest {
         doAnswer(invocation -> {
             AgentTask task = invocation.getArgument(0);
             task.setStatus(TaskStatus.SUCCEEDED);
-            task.setReport("Verification passed: pool size now adequate");
+            task.setReport("Verification passed: root cause found - pool size now adequate, data connection restored");
             return null;
         }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
 
@@ -184,7 +184,7 @@ class SimpleVerificationRunnerTest {
         doAnswer(invocation -> {
             AgentTask task = invocation.getArgument(0);
             task.setStatus(TaskStatus.SUCCEEDED); // afterStatus
-            task.setReport("now passes");
+            task.setReport("Verification passed: root cause found and fixed, data query successful");
             return null;
         }).when(agentExecutor).execute(any(AgentTask.class), any(SkillMeta.class));
 

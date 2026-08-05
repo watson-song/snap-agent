@@ -27,7 +27,7 @@ import static org.mockito.Mockito.*;
 class AgentNodeTest {
 
     private SkillMeta testSkill() {
-        return new SkillMeta("test-skill", null, Collections.<String>emptyList(),
+        return new SkillMeta("test-skill", null, null,
                 null, "test body", SkillAvailability.AVAILABLE, null);
     }
 
