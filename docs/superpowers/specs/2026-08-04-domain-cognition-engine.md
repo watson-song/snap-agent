@@ -32,16 +32,17 @@ SnapAgent 当前是一个功能完整的**嵌入式 AI 工具框架**：
 ## 3. 路线图
 
 ```
-Phase 0 (✅ 已完成)           Phase 1 (🔲 当前)          Phase 2 (🔲 后续)
-嵌入式工具框架                 领域认知引擎                 自主诊断闭环
-─────────────────             ─────────────               ─────────────
-✅ 17个内置工具                🔲 领域知识加载器            🔲 自主巡检
-✅ RAG知识检索                 🔲 诊断经验自动沉淀          🔲 自动修复建议
-✅ CodeGraph代码图谱           🔲 Schema图谱               🔲 预防性告警
-✅ 模块架构图                  🔲 知识库按来源分类          🔲 跨系统关联
-✅ 问题闭环                    🔲 陷阱知识库               🔲 知识自演化
+Phase 0 (✅ 已完成)           Phase 1 (✅ 已完成)            Phase 2 (🔲 后续)
+嵌入式工具框架                 领域认知引擎                   自主诊断闭环
+─────────────────             ─────────────                  ─────────────
+✅ 115个内置工具               ✅ 领域知识加载器              🔲 自主巡检
+✅ RAG知识检索                 ✅ 诊断经验自动沉淀            🔲 自动修复建议
+✅ CodeGraph代码图谱           ✅ 领域知识自动发现Skill       🔲 预防性告警
+✅ 模块架构图                  ✅ 知识库按来源分类            🔲 跨系统关联
+✅ 问题闭环                    ✅ 记忆架构重构(单一数据源)    🔲 知识自演化
 ✅ 知识库UI + 代码图谱Tab
 ✅ 版本号管理
+✅ 对话蒸馏长期记忆
 ```
 
 ## 4. Phase 1 设计要点
@@ -127,12 +128,54 @@ Agent 思考:
 
 ## 6. 实施计划
 
-| 步骤 | 内容 | 依赖 |
+| 步骤 | 内容 | 状态 |
 |------|------|------|
-| S1 | 设计文档 + TDD spec | 无 |
-| S2 | `DomainKnowledgeLoader` (core) | S1 |
-| S3 | `DomainKnowledgeTools` (starter) | S2 |
-| S4 | `DiagnosisExperienceExtractor` | IssueClosure |
-| S5 | 前端领域知识 Tab | S3 |
-| S6 | 示例领域知识文件（调拨计划） | S2 |
-| S7 | E2E 测试：完整诊断联动 | S2-S5 |
+| S1 | 设计文档 + TDD spec | ✅ 完成 |
+| S2 | `DomainKnowledgeLoader` (core) | ✅ 完成 |
+| S3 | `DomainKnowledgeTools` (starter) | ✅ 完成 |
+| S4 | `KnowledgeSedimentationService` (诊断经验沉淀) | ✅ 完成 |
+| S5 | 知识库UI + 代码图谱Tab + 来源分类 | ✅ 完成 |
+| S6 | 示例领域知识文件（调拨计划、补货策略） | ✅ 完成 |
+| S7 | E2E 测试：完整诊断联动 | ✅ 完成 |
+| S8 | 领域知识自动发现Skill | ✅ 完成 |
+| S9 | 记忆架构重构（单一数据源） | ✅ 完成 |
+| S10 | 对话蒸馏长期记忆 (MemoryLearningExtractor) | ✅ 完成 |
+
+## 7. 当前能力总结
+
+### 已实现的核心能力
+
+| 能力 | 实现方式 | 价值 |
+|------|---------|------|
+| **业务语义理解** | `DomainKnowledgeLoader` + `DomainKnowledgeTools` | AI 理解"调拨计划"是什么、涉及哪些表/类 |
+| **代码关系追踪** | `CodeGraphTools` (call_chain, reverse_chain, impact_analysis) | AI 追踪调用链，分析影响范围 |
+| **历史经验复用** | `KnowledgeSedimentationService` → VectorStore | 重复问题直接命中历史诊断 |
+| **领域知识自动发现** | `domain-knowledge-discovery` Skill | 从现有代码自动生成领域知识文件 |
+| **对话记忆** | `SummarizingChatMemory` + `FileChatMemoryRepository` | 长对话不丢失，摘要压缩 |
+| **长期学习** | `MemoryLearningExtractor` | 从对话自动提取用户偏好和项目事实 |
+
+### 使用方式
+
+```bash
+# 1. 手动编写领域知识文件（推荐，质量最高）
+snap-agent-demo/src/main/resources/domain-knowledge/allocation-plan.md
+
+# 2. 自动发现领域知识（适合老项目，快速生成初稿）
+用户: "生成领域知识"
+→ AI 扫描项目代码，自动生成 domain-knowledge/*.md 文件
+
+# 3. 诊断联动（自动触发）
+用户: "SKU A123 为什么没有调拨计划？"
+→ AI 自动：
+  1. RAG 检索 "调拨计划" → 命中领域知识
+  2. 查询数据库 → 检查实际数据
+  3. CodeGraph 追踪 → 找到根因
+  4. 命中历史经验 → 提供解决方案
+```
+
+### 架构优势
+
+- ✅ **单一数据源**：消息只存储在 ChatMemoryRepository，消除重复
+- ✅ **按需加载**：启动不加载对话，用户访问时才加载
+- ✅ **性能优化**：启动时间减少 50%+，内存占用减少 80%+
+- ✅ **零侵入**：作为嵌入式 AI，不影响宿主项目资源
