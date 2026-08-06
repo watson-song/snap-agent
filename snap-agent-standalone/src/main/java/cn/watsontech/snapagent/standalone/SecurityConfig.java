@@ -53,6 +53,8 @@ public class SecurityConfig {
                 .antMatchers("/snap-agent/*.html", "/snap-agent/*.js",
                              "/snap-agent/*.css", "/snap-agent/*.svg",
                              "/snap-agent/*.png").permitAll()
+                .antMatchers("/settings.html").permitAll()
+                .antMatchers("/snap-agent/settings", "/snap-agent/settings/**").permitAll()
                 // SnapAgent API (auth handled by JWT filter + snap-agent internally)
                 .antMatchers("/snap-agent/**").permitAll()
                 // Everything else: authenticated
