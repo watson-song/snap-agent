@@ -700,6 +700,7 @@ SnapAgent 作为嵌入式库运行在宿主 JVM 内，以下是已识别的影�
 | 线程池 | 共享 Spring 的 `TaskExecutor`，不创建独立线程池 | Spring 默认 | 如需隔离可配置独立 `ThreadPoolTaskExecutor` bean |
 | 内存 | Anchor 缓存使用 `ConcurrentHashMap`，maxSize=256/512 | 低占用 | 一般无需调整 |
 | 数据库连接 | JDBC 工具复用宿主 `DataSource`，执行 Skill 中定义的 SQL | 0（按需） | 确保只读 DataSource 或配置独立 DataSource |
+| **TaskStore 内存** | 每个 task 持有 500 transcript + 1000 audit 条目 | maxSize=5000, ttl=24h | 可按需调低 `snap-agent.agent.task-store-max-size` |
 | HTTP 调用 | LLM API 调用使用 OkHttp，同步阻塞 | 超时 120s | 高并发场景注意连接池大小 |
 
 #### 安全影响与默认配置
