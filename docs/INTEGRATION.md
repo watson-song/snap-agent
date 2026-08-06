@@ -128,7 +128,6 @@ Starter 会自动引入 `snap-agent-core`。以下依赖如果宿主项目已有
 - `spring-boot-starter-data-redis`（可选，Redis 工具需要）
 - `springdoc-openapi-ui`（可选，自动生成 Swagger UI / OpenAPI 3 文档，见下方）
 - `com.squareup.okhttp3:okhttp`（**必需**，LLM 流式调用依赖，Starter 中为 optional。版本 >= 4.9）
-- `com.github.ben-manes.caffeine:caffeine`（**必需**，AnchorSummaryCache 缓存依赖，Starter 中未声明为 optional 但 system scope 模式下需显式添加。Spring Boot 2.x 建议 2.9.x）
 - `com.h2database:h2`（可选，代码图谱 H2 持久化需要）
 
 ### 可选：启用 Swagger UI / OpenAPI 3
@@ -188,9 +187,6 @@ Starter 已声明 `springdoc-openapi-ui` 为 `optional` 依赖。宿主项目在
        <version>4.9.3</version>
    </dependency>
    <dependency>
-       <groupId>com.github.ben-manes.caffeine</groupId>
-       <artifactId>caffeine</artifactId>
-       <version>2.9.3</version>
    </dependency>
    <dependency>
        <groupId>com.h2database</groupId>
@@ -691,6 +687,47 @@ if (requestUri != null && requestUri.contains("/stream")) {
 ```
 
 > 详见第五步的安全配置示例。如果宿主使用 Shiro 或无安全框架，对应地在 Shiro 链定义或反向代理层放行这些路径。
+
+
+### 注意事项 3：SnapAgent 对宿主应用的影响分析
+
+SnapAgent 作为嵌入式库运行在宿主 JVM 内，以下是已识别的影响面及默认安全配置建议：
+
+#### 性能影响
+
+| 影响点 | 说明 | 默认值 | 调优建议 |
+|--------|------|--------|----------|
+| 线程池 | 共享 Spring 的 `TaskExecutor`，不创建独立线程池 | Spring 默认 | 如需隔离可配置独立 `ThreadPoolTaskExecutor` bean |
+| 内存 | Anchor 缓存使用 `ConcurrentHashMap`，maxSize=256/512 | 低占用 | 一般无需调整 |
+| 数据库连接 | JDBC 工具复用宿主 `DataSource`，执行 Skill 中定义的 SQL | 0（按需） | 确保只读 DataSource 或配置独立 DataSource |
+| HTTP 调用 | LLM API 调用使用 OkHttp，同步阻塞 | 超时 120s | 高并发场景注意连接池大小 |
+
+#### 安全影响与默认配置
+
+以下配置建议作为**集成时的默认安全基线**，集成后可按需调整：
+
+1. **URL 白名单最小化**：
+   - 生产环境建议使用细粒度白名单（而非 `/snap-agent/**` 全放行）
+   - 至少区分静态资源（`*.html, *.js, *.css`）和 API 端点
+
+2. **JWT / Token 鉴权**：
+   - SnapAgent 自带 Basic Auth + JWT 鉴权（`snap-agent.security.jwt.secret`）
+   - 建议配置 `jwt-secret` 为强随机字符串（至少 32 字符）
+   - 生产环境必须修改默认 `jwt-secret`
+
+3. **数据源隔离**：
+   - JDBC 工具默认使用宿主主 DataSource，建议配置独立只读 DataSource
+   - 配置 `snap-agent.tools.jdbc.datasource-bean-name` 指向只读数据源 bean
+   - 避免 Skill 中的 SQL 意外写入或触发事务
+
+4. **Skill 文件管控**：
+   - Skill 文件中的 SQL 会直接执行，必须审查 SQL 安全性
+   - 建议 Skill 中仅包含 `SELECT` 语句，禁止 `INSERT/UPDATE/DELETE`
+   - 使用 `${param}` 参数化查询，禁止拼接 SQL
+
+5. **日志路径**：
+   - SnapAgent 默认日志路径为 `/data/logs/`，本地开发需覆盖
+   - 生产环境确保日志目录存在且有写入权限
 
 ## 常见问题
 
