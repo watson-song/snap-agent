@@ -128,6 +128,7 @@ Starter 会自动引入 `snap-agent-core`。以下依赖如果宿主项目已有
 - `spring-boot-starter-data-redis`（可选，Redis 工具需要）
 - `springdoc-openapi-ui`（可选，自动生成 Swagger UI / OpenAPI 3 文档，见下方）
 - `com.squareup.okhttp3:okhttp`（**必需**，LLM 流式调用依赖，Starter 中为 optional。版本 >= 4.9）
+- `com.github.ben-manes.caffeine:caffeine`（**必需**，AnchorSummaryCache 缓存依赖，Starter 中未声明为 optional 但 system scope 模式下需显式添加。Spring Boot 2.x 建议 2.9.x）
 - `com.h2database:h2`（可选，代码图谱 H2 持久化需要）
 
 ### 可选：启用 Swagger UI / OpenAPI 3
@@ -146,6 +147,68 @@ Starter 已声明 `springdoc-openapi-ui` 为 `optional` 依赖。宿主项目在
 ```
 
 > 版本 1.7.0 是最后兼容 Spring Boot 2.x 的版本。Spring Boot 3.x 请用 `springdoc-openapi-starter-webmvc-ui`。
+
+### system scope 模式（CI/CD 无内部 Maven 仓库时）
+
+如果 CI/CD 环境的 Maven `settings.xml` 配置了 `<mirrorOf>*</mirrorOf>` 拦截所有仓库请求，且 snap-agent 未发布到内部 Artifactory，可以使用 `system scope` 绕过仓库解析：
+
+1. 在项目根目录创建 `lib/` 目录，按 Maven 仓库布局存放 JAR + POM：
+   ```
+   lib/cn/watsontech/snapagent/snap-agent-core/2.0.0-SNAPSHOT/
+   ├── snap-agent-core-2.0.0-SNAPSHOT.jar
+   └── snap-agent-core-2.0.0-SNAPSHOT.pom
+   lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/2.0.0-SNAPSHOT/
+   ├── snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar
+   └── snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.pom
+   ```
+
+2. pom.xml 中添加 system scope 依赖：
+   ```xml
+   <dependency>
+       <groupId>cn.watsontech.snapagent</groupId>
+       <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+       <version>2.0.0-SNAPSHOT</version>
+       <scope>system</scope>
+       <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/2.0.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar</systemPath>
+   </dependency>
+   <dependency>
+       <groupId>cn.watsontech.snapagent</groupId>
+       <artifactId>snap-agent-core</artifactId>
+       <version>2.0.0-SNAPSHOT</version>
+       <scope>system</scope>
+       <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-core/2.0.0-SNAPSHOT/snap-agent-core-2.0.0-SNAPSHOT.jar</systemPath>
+   </dependency>
+   ```
+
+3. **关键：system scope 不解析传递依赖**，以下依赖必须显式声明：
+   ```xml
+   <dependency>
+       <groupId>com.squareup.okhttp3</groupId>
+       <artifactId>okhttp</artifactId>
+       <version>4.9.3</version>
+   </dependency>
+   <dependency>
+       <groupId>com.github.ben-manes.caffeine</groupId>
+       <artifactId>caffeine</artifactId>
+       <version>2.9.3</version>
+   </dependency>
+   <dependency>
+       <groupId>com.h2database</groupId>
+       <artifactId>h2</artifactId>
+       <version>1.4.200</version>
+   </dependency>
+   ```
+
+4. 确保 `spring-boot-maven-plugin` 包含 system scope 依赖：
+   ```xml
+   <plugin>
+       <groupId>org.springframework.boot</groupId>
+       <artifactId>spring-boot-maven-plugin</artifactId>
+       <configuration>
+           <includeSystemScope>true</includeSystemScope>
+       </configuration>
+   </plugin>
+   ```
 
 ## 第三步：配置 application.yml
 
@@ -210,8 +273,14 @@ public class SnapAgentDataSourceConfig {
 > ```yaml
 > snap-agent:
 >   jdbc:
->     datasource-bean-name: dataSource  # Spring Boot 默认 Bean 名
+>     datasource-bean-name: <你的DataSource Bean名>
 > ```
+>
+> **如何查找实际的 DataSource Bean 名？**
+> - 如果 `application.yml` 配置了 `spring.datasource.name: xxx`，则 Bean 名为 `xxx`
+> - 如果未配置 `name`，Spring Boot 默认 Bean 名为 `dataSource`
+> - 启动日志中 HikariCP 会打印 DataSource 名称：`HikariDataSource - <名称> - Starting...`
+>
 > SqlGuard 会拦截所有非 SELECT 语句，复用宿主 DataSource 也是安全的。但仍建议使用只读账号，遵循最小权限原则。
 
 ## 第五步：配置安全规则
@@ -650,6 +719,23 @@ if (requestUri != null && requestUri.contains("/stream")) {
 ### Q: 数据库查询报错 "SqlGuard rejected"
 
 SqlGuard 拒绝了非 SELECT 语句。检查 Skill 文件中的 SQL 是否只包含 SELECT/SHOW/DESCRIBE/EXPLAIN/WITH 语句。详见 `SqlGuardTest`。
+
+### Q: JDBC 工具（mysql_query）不注册 / Skills 显示 UNAVAILABLE
+
+检查以下三项：
+
+1. **确认 `snap-agent.jdbc.enabled: true`** 已配置
+2. **确认 `datasource-bean-name` 与宿主实际 Bean 名一致**：
+   ```yaml
+   snap-agent:
+     jdbc:
+       enabled: true
+       datasource-bean-name: <实际Bean名>  # 不是固定的 dataSource！
+   ```
+   查看启动日志 `HikariDataSource - <名称> - Starting...` 获取实际名称。
+3. **确认 DataSource 在 Spring 容器中可用**：启动时添加 `--debug` 参数，查看 auto-configuration report 中 `ToolAutoConfiguration#jdbcQueryTools` 的条件匹配结果。
+
+> 从 2.0.0-SNAPSHOT 起，JdbcQueryTools 使用 lazy DataSource 解析，不再因 auto-configuration 顺序问题导致不注册。
 
 ### Q: 多实例下任务找不到
 
