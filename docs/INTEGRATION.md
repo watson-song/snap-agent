@@ -116,7 +116,7 @@ git clone <repo-url> snap-agent && cd snap-agent && mvn clean install -DskipTest
 <dependency>
     <groupId>cn.watsontech.snapagent</groupId>
     <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
-    <version>0.6.0-SNAPSHOT</version>
+    <version>2.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
@@ -428,7 +428,7 @@ env:
 mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
 
 # 构建 H2 图谱文件
-java -cp "$(mvn dependency:build-classpath -pl snap-agent-spring-boot-2x-starter -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout):snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-0.6.0-SNAPSHOT.jar" \
+java -cp "$(mvn dependency:build-classpath -pl snap-agent-spring-boot-2x-starter -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout):snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar" \
   cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
   --project-root . \
   --scan-packages com.yourcompany \
@@ -460,7 +460,7 @@ COPY pom.xml /app/
 COPY lib/ /app/lib/   # 如果用 lib/ 本地仓库方式
 WORKDIR /app
 # 构建图谱
-RUN java -cp "lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/0.6.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-0.6.0-SNAPSHOT.jar:lib/cn/watsontech/snapagent/snap-agent-core/0.6.0-SNAPSHOT/snap-agent-core-0.6.0-SNAPSHOT.jar:lib/com/h2database/h2/1.4.200/h2-1.4.200.jar" \
+RUN java -cp "lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/2.0.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar:lib/cn/watsontech/snapagent/snap-agent-core/2.0.0-SNAPSHOT/snap-agent-core-2.0.0-SNAPSHOT.jar:lib/com/h2database/h2/1.4.200/h2-1.4.200.jar" \
   cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
   --project-root /app \
   --scan-packages com.yourcompany \
