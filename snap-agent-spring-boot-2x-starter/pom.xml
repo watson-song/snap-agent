@@ -129,10 +129,6 @@
         </dependency>
 
         <!-- Caffeine cache (for AnchorSummaryCache) -->
-        <dependency>
-            <groupId>com.github.ben-manes.caffeine</groupId>
-            <artifactId>caffeine</artifactId>
-        </dependency>
 
         <!-- springdoc-openapi-ui (optional): auto-generate OpenAPI 3 / Swagger UI
              for SnapAgentController REST endpoints. Host apps get /swagger-ui.html

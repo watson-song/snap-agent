@@ -1,18 +1,14 @@
 package cn.watsontech.snapagent.boot2x.anchor;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-
 import java.time.Instant;
-import java.util.concurrent.TimeUnit;
+import java.util.Comparator;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * LRU + per-entry TTL cache for anchor content injection results.
  *
- * <p>Uses Caffeine under the hood with a global maximum size and a
- * conservative global TTL ceiling (7 days). Per-entry TTL is enforced
- * via {@link InjectionCacheEntry#isExpired()} — entries that have passed
- * their declared TTL return null on {@link #get(String)}.</p>
+ * <p>Uses {@link ConcurrentHashMap} with timestamp-based TTL and size-based
+ * eviction. No external cache library (Caffeine, Guava, etc.) required.</p>
  *
  * <p>Cache key format: {@code userId:sourceId:anchorName:pageUrl}</p>
  */
@@ -21,7 +17,8 @@ public class AnchorInjectionCache {
     static final long MAX_TTL_SECONDS = 7 * 24 * 3600; // 7 days hard ceiling
     private static final int DEFAULT_MAX_SIZE = 512;
 
-    private final Cache<String, InjectionCacheEntry> cache;
+    private final ConcurrentHashMap<String, InjectionCacheEntry> cache = new ConcurrentHashMap<>();
+    private final int maxSize;
 
     /** Creates a cache with default max size (512). */
     public AnchorInjectionCache() {
@@ -30,10 +27,7 @@ public class AnchorInjectionCache {
 
     /** Creates a cache with the specified max size. */
     public AnchorInjectionCache(int maxSize) {
-        this.cache = Caffeine.newBuilder()
-                .maximumSize(maxSize > 0 ? maxSize : DEFAULT_MAX_SIZE)
-                .expireAfterWrite(MAX_TTL_SECONDS, TimeUnit.SECONDS)
-                .build();
+        this.maxSize = maxSize > 0 ? maxSize : DEFAULT_MAX_SIZE;
     }
 
     /**
@@ -41,10 +35,10 @@ public class AnchorInjectionCache {
      * Expired entries are invalidated and null is returned.
      */
     public InjectionCacheEntry get(String key) {
-        InjectionCacheEntry entry = cache.getIfPresent(key);
+        InjectionCacheEntry entry = cache.get(key);
         if (entry == null) return null;
         if (entry.isExpired()) {
-            cache.invalidate(key);
+            cache.remove(key);
             return null;
         }
         return entry;
@@ -58,16 +52,30 @@ public class AnchorInjectionCache {
         long effectiveTtl = Math.min(ttlSeconds, MAX_TTL_SECONDS);
         Instant expiresAt = generatedAt.plusSeconds(effectiveTtl);
         cache.put(key, new InjectionCacheEntry(html, generatedAt, expiresAt));
+        evictIfNeeded();
     }
 
     /** Returns the number of entries currently in the cache. */
     public int size() {
-        cache.cleanUp();
-        return cache.asMap().size();
+        return cache.size();
     }
 
     /** Removes all entries from the cache. */
     public void invalidateAll() {
-        cache.invalidateAll();
+        cache.clear();
+    }
+
+    private void evictIfNeeded() {
+        if (cache.size() <= maxSize) return;
+
+        // First pass: remove expired entries
+        cache.entrySet().removeIf(e -> e.getValue().isExpired());
+        if (cache.size() <= maxSize) return;
+
+        // Second pass: remove oldest entries
+        cache.entrySet().stream()
+                .sorted(Comparator.comparingLong(e -> e.getValue().getExpiresAt().toEpochMilli()))
+                .limit(cache.size() - maxSize)
+                .forEach(e -> cache.remove(e.getKey()));
     }
 }
