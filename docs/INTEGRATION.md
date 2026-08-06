@@ -786,3 +786,4 @@ SqlGuard 拒绝了非 SELECT 语句。检查 Skill 文件中的 SQL 是否只包
 3. **LLM 超时设够大**：复杂诊断可能需要多轮 LLM 调用，建议 `timeout-seconds: 120`
 4. **限制并发**：生产环境建议 `max-concurrent-runs-per-user: 1`，防止资源滥用
 5. **监控线程池**：`snapAgentExecutor` 线程池（core=2, max=4, queue=10），高并发时需调整
+# test
