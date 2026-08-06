@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  snap-agent:
+    build:
+      context: ..
+      dockerfile: snap-agent-standalone/Dockerfile
+    container_name: snap-agent
+    ports:
+      - "${SNAP_AGENT_PORT:-8090}:8090"
+    environment:
+      # ---- LLM ----
+      - LLM_API_TYPE=${LLM_API_TYPE:-anthropic}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.anthropic.com}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_AUTH_TOKEN=${LLM_AUTH_TOKEN:-}
+      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-20250514}
+
+      # ---- JWT Auth ----
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production-min-32-chars!!}
+      - JWT_USER_CLAIM=${JWT_USER_CLAIM:-sub}
+
+      # ---- Database (optional, for JDBC tools) ----
+      - DATASOURCE_URL=${DATASOURCE_URL:-}
+      - DATASOURCE_USERNAME=${DATASOURCE_USERNAME:-}
+      - DATASOURCE_PASSWORD=${DATASOURCE_PASSWORD:-}
+      - JDBC_ENABLED=${JDBC_ENABLED:-false}
+
+      # ---- CORS ----
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
+
+      # ---- Features ----
+      - CODE_ENABLED=${CODE_ENABLED:-false}
+      - CODE_GRAPH_ENABLED=${CODE_GRAPH_ENABLED:-false}
+      - ANCHOR_ENABLED=${ANCHOR_ENABLED:-false}
+      - PATROL_ENABLED=${PATROL_ENABLED:-false}
+      - ALERT_ENABLED=${ALERT_ENABLED:-false}
+
+      # ---- JVM ----
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - snap-agent-logs:/app/data/logs
+      - snap-agent-conversations:/app/data/conversations
+      - snap-agent-skills:/app/data/skills
+      # Mount project root for code understanding (optional)
+      # - /path/to/your/project:/app/project:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  snap-agent-logs:
+  snap-agent-conversations:
+  snap-agent-skills:

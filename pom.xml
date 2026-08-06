@@ -53,6 +53,7 @@
         <module>snap-agent-client</module>
         <module>snap-agent-demo</module>
         <module>snap-agent-anchor-demo</module>
+        <module>snap-agent-standalone</module>
         <module>snap-agent-plugin-archetype</module>
     </modules>
 
