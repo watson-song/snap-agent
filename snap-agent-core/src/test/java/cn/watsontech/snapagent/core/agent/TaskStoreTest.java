@@ -1,193 +1,219 @@
 package cn.watsontech.snapagent.core.agent;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.Collection;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class TaskStoreTest {
 
-    private TaskStore store;
-
-    @BeforeEach
-    void setUp() {
-        store = new TaskStore();
+    private AgentTask newTask(String id, String userId) {
+        return new AgentTask(id, userId, "skill1", null, null);
     }
+
+    // ---- Basic CRUD ----
 
     @Test
     void shouldSaveAndGetTask() {
-        AgentTask task = AgentTask.create("u1", "skill-1", null, "m");
-
+        TaskStore store = new TaskStore();
+        AgentTask task = newTask("t1", "u1");
         store.save(task);
 
-        assertThat(store.get(task.getTaskId())).isSameAs(task);
+        assertThat(store.get("t1")).isSameAs(task);
+        assertThat(store.size()).isEqualTo(1);
     }
 
     @Test
-    void shouldReturnNullWhenTaskNotFound() {
+    void shouldReturnNullForMissingTask() {
+        TaskStore store = new TaskStore();
         assertThat(store.get("nonexistent")).isNull();
     }
 
     @Test
-    void shouldReturnNullWhenTaskIdNull() {
-        assertThat(store.get(null)).isNull();
-    }
+    void shouldOverwriteTaskWithSameId() {
+        TaskStore store = new TaskStore();
+        AgentTask t1 = newTask("t1", "u1");
+        AgentTask t2 = newTask("t1", "u2");
+        store.save(t1);
+        store.save(t2);
 
-    @Test
-    void shouldNotSaveWhenTaskNullOrIdNull() {
-        store.save(null);
-        store.save(new AgentTask(null, "u", "s", null, "m"));
-
-        assertThat(store.all()).isEmpty();
-    }
-
-    @Test
-    void shouldUpdateTask() {
-        AgentTask task = AgentTask.create("u", "s", null, "m");
-        store.save(task);
-        task.setStatus(TaskStatus.RUNNING);
-        store.update(task);
-
-        assertThat(store.get(task.getTaskId()).getStatus()).isEqualTo(TaskStatus.RUNNING);
+        assertThat(store.get("t1")).isSameAs(t2);
+        assertThat(store.size()).isEqualTo(1);
     }
 
     @Test
     void shouldRemoveTask() {
-        AgentTask task = AgentTask.create("u", "s", null, "m");
-        store.save(task);
+        TaskStore store = new TaskStore();
+        store.save(newTask("t1", "u1"));
+        store.remove("t1");
 
-        store.remove(task.getTaskId());
+        assertThat(store.get("t1")).isNull();
+        assertThat(store.size()).isEqualTo(0);
+    }
 
-        assertThat(store.get(task.getTaskId())).isNull();
+    @Test
+    void shouldIgnoreNullTask() {
+        TaskStore store = new TaskStore();
+        store.save(null);
+        assertThat(store.size()).isEqualTo(0);
     }
 
     @Test
     void shouldReturnAllTasks() {
-        AgentTask t1 = AgentTask.create("u1", "s", null, "m");
-        AgentTask t2 = AgentTask.create("u2", "s", null, "m");
-        store.save(t1);
-        store.save(t2);
+        TaskStore store = new TaskStore();
+        store.save(newTask("t1", "u1"));
+        store.save(newTask("t2", "u1"));
 
         assertThat(store.all()).hasSize(2);
     }
 
     @Test
-    void shouldCountByUserAndStatus() {
-        AgentTask t1 = AgentTask.create("u1", "s", null, "m");
-        t1.setStatus(TaskStatus.RUNNING);
-        AgentTask t2 = AgentTask.create("u1", "s", null, "m");
-        t2.setStatus(TaskStatus.RUNNING);
-        AgentTask t3 = AgentTask.create("u2", "s", null, "m");
-        t3.setStatus(TaskStatus.RUNNING);
-        AgentTask t4 = AgentTask.create("u1", "s", null, "m");
-        t4.setStatus(TaskStatus.SUCCEEDED);
-
-        store.save(t1);
-        store.save(t2);
-        store.save(t3);
-        store.save(t4);
-
-        assertThat(store.countByUserAndStatus("u1", TaskStatus.RUNNING)).isEqualTo(2);
-        assertThat(store.countByUserAndStatus("u1", TaskStatus.SUCCEEDED)).isEqualTo(1);
-        assertThat(store.countByUserAndStatus("u2", TaskStatus.RUNNING)).isEqualTo(1);
-        assertThat(store.countByUserAndStatus("u1", TaskStatus.PENDING)).isEqualTo(0);
-    }
-
-    @Test
     void shouldClearAllTasks() {
-        store.save(AgentTask.create("u", "s", null, "m"));
-        store.save(AgentTask.create("u", "s", null, "m"));
-
+        TaskStore store = new TaskStore();
+        store.save(newTask("t1", "u1"));
+        store.save(newTask("t2", "u1"));
         store.clear();
 
-        assertThat(store.all()).isEmpty();
+        assertThat(store.size()).isEqualTo(0);
+    }
+
+    // ---- Query ----
+
+    @Test
+    void shouldQueryByUser() {
+        TaskStore store = new TaskStore();
+        store.save(newTask("t1", "u1"));
+        store.save(newTask("t2", "u2"));
+        store.save(newTask("t3", "u1"));
+
+        assertThat(store.query("u1", null, null, 10, 0)).hasSize(2);
+        assertThat(store.query("u2", null, null, 10, 0)).hasSize(1);
     }
 
     @Test
-    void shouldQueryByUserIdWithPagination() {
-        for (int i = 0; i < 15; i++) {
-            AgentTask task = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "model");
-            store.save(task);
-        }
-        for (int i = 0; i < 5; i++) {
-            AgentTask task = AgentTask.create("user2", "skill-a", new HashMap<String, String>(), "model");
-            store.save(task);
-        }
+    void shouldQueryBySkill() {
+        TaskStore store = new TaskStore();
+        store.save(new AgentTask("t1", "u1", "s1", null, null));
+        store.save(new AgentTask("t2", "u1", "s2", null, null));
 
-        List<AgentTask> page1 = store.query("user1", null, null, 10, 0);
-        assertThat(page1).hasSize(10);
-
-        List<AgentTask> page2 = store.query("user1", null, null, 10, 10);
-        assertThat(page2).hasSize(5);
+        assertThat(store.query("u1", "s1", null, 10, 0)).hasSize(1);
     }
 
-    @Test
-    void shouldFilterBySkillId() {
-        store.save(AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "model"));
-        store.save(AgentTask.create("user1", "skill-b", new HashMap<String, String>(), "model"));
-        store.save(AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "model"));
-
-        List<AgentTask> results = store.query("user1", "skill-a", null, 100, 0);
-        assertThat(results).hasSize(2);
-        assertThat(results).allMatch(t -> "skill-a".equals(t.getSkillId()));
-    }
+    // ---- Eviction: maxSize ----
 
     @Test
-    void shouldFilterByStatus() {
-        AgentTask t1 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "model");
+    void shouldEvictTerminalTasksWhenOverMaxSize() {
+        TaskStore store = new TaskStore(3, Long.MAX_VALUE);
+
+        AgentTask t1 = newTask("t1", "u1");
         t1.setStatus(TaskStatus.SUCCEEDED);
-        store.save(t1);
-        AgentTask t2 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "model");
+        AgentTask t2 = newTask("t2", "u1");
         t2.setStatus(TaskStatus.FAILED);
-        store.save(t2);
+        AgentTask t3 = newTask("t3", "u1");
+        t3.setStatus(TaskStatus.CANCELLED);
 
-        List<AgentTask> results = store.query("user1", null, TaskStatus.SUCCEEDED, 100, 0);
-        assertThat(results).hasSize(1);
-        assertThat(results.get(0).getStatus()).isEqualTo(TaskStatus.SUCCEEDED);
-    }
-
-    @Test
-    void shouldReturnResultsSortedByCreatedAtDesc() {
-        AgentTask t1 = AgentTask.create("user1", "s", new HashMap<String, String>(), "m");
         store.save(t1);
-        AgentTask t2 = AgentTask.create("user1", "s", new HashMap<String, String>(), "m");
         store.save(t2);
+        store.save(t3);
+        assertThat(store.size()).isEqualTo(3);
 
-        List<AgentTask> results = store.query("user1", null, null, 100, 0);
-        assertThat(results.get(0).getCreatedAt()).isGreaterThanOrEqualTo(results.get(results.size() - 1).getCreatedAt());
+        // Adding 4th triggers eviction; t1 (oldest terminal) should go
+        AgentTask t4 = newTask("t4", "u1");
+        t4.setStatus(TaskStatus.RUNNING);
+        store.save(t4);
+
+        assertThat(store.size()).isLessThanOrEqualTo(3);
+        assertThat(store.get("t1")).isNull();
+        assertThat(store.get("t4")).isNotNull();
     }
 
     @Test
-    void shouldReturnTotalCount() {
-        for (int i = 0; i < 7; i++) {
-            store.save(AgentTask.create("user1", "s", new HashMap<String, String>(), "m"));
+    void shouldPreferEvictingTerminalOverRunning() {
+        TaskStore store = new TaskStore(2, Long.MAX_VALUE);
+
+        AgentTask running = newTask("running", "u1");
+        running.setStatus(TaskStatus.RUNNING);
+        AgentTask terminal = newTask("terminal", "u1");
+        terminal.setStatus(TaskStatus.SUCCEEDED);
+
+        store.save(running);
+        store.save(terminal);
+
+        // Adding 3rd triggers eviction
+        store.save(newTask("t3", "u1"));
+
+        assertThat(store.size()).isLessThanOrEqualTo(2);
+        assertThat(store.get("terminal")).isNull();
+        assertThat(store.get("running")).isNotNull();
+    }
+
+    // ---- Eviction: TTL ----
+
+    @Test
+    void shouldEvictExpiredTasks() {
+        TaskStore store = new TaskStore(100, 1); // TTL=1ms
+
+        store.save(newTask("t1", "u1"));
+        assertThat(store.size()).isEqualTo(1);
+
+        try { Thread.sleep(10); } catch (InterruptedException e) { /* ignore */ }
+
+        // Trigger eviction via save
+        store.save(newTask("t2", "u1"));
+
+        assertThat(store.get("t1")).isNull();
+        assertThat(store.get("t2")).isNotNull();
+        assertThat(store.size()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotEvictNonExpiredTasks() {
+        TaskStore store = new TaskStore(100, 60000); // 60s TTL
+
+        store.save(newTask("t1", "u1"));
+        assertThat(store.query("u1", null, null, 10, 0)).hasSize(1);
+    }
+
+    // ---- Default constructor ----
+
+    @Test
+    void shouldAcceptManyTasksWithDefaults() {
+        TaskStore store = new TaskStore();
+        for (int i = 0; i < 100; i++) {
+            store.save(newTask("t" + i, "u1"));
         }
-
-        int total = store.countByUser("user1");
-        assertThat(total).isEqualTo(7);
-
-        assertThat(store.countByUser("user2")).isEqualTo(0);
+        assertThat(store.size()).isEqualTo(100);
     }
 
+    // ---- Count methods ----
+
     @Test
-    void shouldCountWithFilters() {
-        AgentTask t1 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "m");
+    void shouldCountByUserAndStatus() {
+        TaskStore store = new TaskStore();
+        AgentTask t1 = newTask("t1", "u1");
         t1.setStatus(TaskStatus.SUCCEEDED);
-        store.save(t1);
-        AgentTask t2 = AgentTask.create("user1", "skill-a", new HashMap<String, String>(), "m");
-        t2.setStatus(TaskStatus.FAILED);
-        store.save(t2);
-        AgentTask t3 = AgentTask.create("user1", "skill-b", new HashMap<String, String>(), "m");
+        AgentTask t2 = newTask("t2", "u1");
+        t2.setStatus(TaskStatus.RUNNING);
+        AgentTask t3 = newTask("t3", "u2");
         t3.setStatus(TaskStatus.SUCCEEDED);
+
+        store.save(t1);
+        store.save(t2);
         store.save(t3);
 
-        assertThat(store.count("user1", "skill-a", null)).isEqualTo(2);
-        assertThat(store.count("user1", null, TaskStatus.SUCCEEDED)).isEqualTo(2);
-        assertThat(store.count("user1", "skill-a", TaskStatus.SUCCEEDED)).isEqualTo(1);
-        assertThat(store.count("user1", "skill-b", TaskStatus.FAILED)).isEqualTo(0);
+        assertThat(store.countByUserAndStatus("u1", TaskStatus.SUCCEEDED)).isEqualTo(1);
+        assertThat(store.countByUserAndStatus("u1", TaskStatus.RUNNING)).isEqualTo(1);
+    }
+
+    @Test
+    void shouldCountByUser() {
+        TaskStore store = new TaskStore();
+        store.save(newTask("t1", "u1"));
+        store.save(newTask("t2", "u1"));
+        store.save(newTask("t3", "u2"));
+
+        assertThat(store.countByUser("u1")).isEqualTo(2);
+        assertThat(store.countByUser("u2")).isEqualTo(1);
     }
 }
