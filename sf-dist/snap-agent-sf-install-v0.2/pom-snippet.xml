@@ -1,0 +1,154 @@
+<!--
+  SnapAgent v0.2 — 本地 Maven 仓库配置（CICD 无外网场景）
+
+  将以下内容合并到宿主项目 pom.xml 的 <repositories> 和 <dependencies> 中。
+  lib/ 目录需放在宿主项目根目录下（与 pom.xml 同级）。
+  Maven 会从 lib/ 内的标准仓库路径解析 snap-agent 的 jar 和 pom，
+  不需要访问 Maven Central 或任何外部仓库。
+
+  ⚠ 多模块项目注意：
+  必须用 ${maven.multiModuleProjectDirectory} 而非 ${project.basedir}。
+  ${project.basedir} 在子模块构建时解析为子模块目录，会导致 Maven 找不到
+  根目录下的 lib/，静默回退到远程仓库，CI/CD 构建报 "Could not find artifact"。
+  ${maven.multiModuleProjectDirectory}（Maven 3.3.1+）始终指向项目根目录。
+
+  ⚠ Mirror 拦截降级方案：
+  如果 CICD 的 settings.xml 配置了 <mirror>（如 <mirrorOf>*</mirror> 重定向到
+  Artifactory），file:// 本地文件仓库会被全局拦截，方案一不可用。
+  此时使用方案二（maven-install-plugin:install-file，推荐）或方案三（system scope，不推荐）。
+-->
+
+<!-- ============ 方案一：file:// 文件仓库（无 mirror 拦截时首选）============ -->
+<repositories>
+    <repository>
+        <id>snap-agent-local</id>
+        <url>file://${maven.multiModuleProjectDirectory}/lib</url>
+        <releases>
+            <enabled>true</enabled>
+            <checksumPolicy>ignore</checksumPolicy>
+        </releases>
+        <snapshots>
+            <enabled>false</enabled>
+        </snapshots>
+    </repository>
+</repositories>
+
+<dependencies>
+    <!-- SnapAgent Starter（会自动引入 snap-agent-core） -->
+    <dependency>
+        <groupId>cn.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+        <version>0.2</version>
+    </dependency>
+
+    <!-- OkHttp（LLM 流式调用必需，Spring Boot 不自带，需显式声明） -->
+    <!-- 如果宿主项目已有 okhttp 可跳过此依赖 -->
+    <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>okhttp</artifactId>
+    </dependency>
+</dependencies>
+
+<!-- ============ 方案二：maven-install-plugin:install-file（mirror 拦截时推荐）============ -->
+<!-- 当 CI/CD 的 settings.xml 配置了 <mirrorOf>*</mirror>，file:// 仓库被拦截时使用。 -->
+<!-- 此方案在 validate 阶段将 lib/ 中的 jar+pom 安装到本地 .m2 仓库，Maven 即可正常解析。 -->
+<!-- 优点：非 deprecated、正确解析传递依赖（包括 parent pom 的 dependencyManagement）、Spring Boot fat JAR 自动包含、不影响 dependency:tree 可读性。 -->
+<!--
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-install-plugin</artifactId>
+            <version>2.5.2</version>
+            <executions>
+                <execution>
+                    <id>install-snap-agent-parent</id>
+                    <phase>validate</phase>
+                    <goals><goal>install-file</goal></goals>
+                    <configuration>
+                        <file>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-parent/0.2/snap-agent-parent-0.2.pom</file>
+                        <groupId>cn.watsontech.snapagent</groupId>
+                        <artifactId>snap-agent-parent</artifactId>
+                        <version>0.2</version>
+                        <packaging>pom</packaging>
+                        <pomFile>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-parent/0.2/snap-agent-parent-0.2.pom</pomFile>
+                    </configuration>
+                </execution>
+                <execution>
+                    <id>install-snap-agent-core</id>
+                    <phase>validate</phase>
+                    <goals><goal>install-file</goal></goals>
+                    <configuration>
+                        <file>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-core/0.2/snap-agent-core-0.2.jar</file>
+                        <groupId>cn.watsontech.snapagent</groupId>
+                        <artifactId>snap-agent-core</artifactId>
+                        <version>0.2</version>
+                        <packaging>jar</packaging>
+                        <pomFile>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-core/0.2/snap-agent-core-0.2.pom</pomFile>
+                    </configuration>
+                </execution>
+                <execution>
+                    <id>install-snap-agent-starter</id>
+                    <phase>validate</phase>
+                    <goals><goal>install-file</goal></goals>
+                    <configuration>
+                        <file>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/0.2/snap-agent-spring-boot-2x-starter-0.2.jar</file>
+                        <groupId>cn.watsontech.snapagent</groupId>
+                        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+                        <version>0.2</version>
+                        <packaging>jar</packaging>
+                        <pomFile>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/0.2/snap-agent-spring-boot-2x-starter-0.2.pom</pomFile>
+                    </configuration>
+                </execution>
+            </executions>
+        </plugin>
+    </plugins>
+</build>
+
+<dependencies>
+    <dependency>
+        <groupId>cn.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+        <version>0.2</version>
+    </dependency>
+    <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>okhttp</artifactId>
+    </dependency>
+</dependencies>
+-->
+
+<!-- ============ 方案三：system scope（不推荐，最后手段）============ -->
+<!-- system scope 已 deprecated，不解析传递依赖，需显式声明 core + starter 两个依赖，还需配 includeSystemScope。 -->
+<!-- 仅当方案一和方案二均不可用时才考虑此方案。 -->
+<!--
+<dependencies>
+    <dependency>
+        <groupId>cn.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-spring-boot-2x-starter</artifactId>
+        <version>0.2</version>
+        <scope>system</scope>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/0.2/snap-agent-spring-boot-2x-starter-0.2.jar</systemPath>
+    </dependency>
+    <dependency>
+        <groupId>cn.watsontech.snapagent</groupId>
+        <artifactId>snap-agent-core</artifactId>
+        <version>0.2</version>
+        <scope>system</scope>
+        <systemPath>${maven.multiModuleProjectDirectory}/lib/cn/watsontech/snapagent/snap-agent-core/0.2/snap-agent-core-0.2.jar</systemPath>
+    </dependency>
+    <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>okhttp</artifactId>
+    </dependency>
+</dependencies>
+
+// spring-boot-maven-plugin 必须配置 includeSystemScope，否则 system scope JAR 不会打入 fat JAR：
+// <plugin>
+//     <groupId>org.springframework.boot</groupId>
+//     <artifactId>spring-boot-maven-plugin</artifactId>
+//     <configuration>
+//         <includeSystemScope>true</includeSystemScope>
+//     </configuration>
+// </plugin>
+-->
