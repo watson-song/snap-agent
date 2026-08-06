@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapAgent Settings</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .header { background: #1a1a2e; color: white; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 18px; font-weight: 600; }
+        .header a { color: #64b5f6; text-decoration: none; font-size: 14px; }
+        .container { max-width: 800px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 8px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .card h2 { font-size: 16px; margin-bottom: 16px; color: #1a1a2e; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #555; }
+        .form-group input, .form-group select { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .form-group input:focus, .form-group select:focus { border-color: #64b5f6; outline: none; box-shadow: 0 0 0 2px rgba(100,181,246,0.2); }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .toggle { display: flex; align-items: center; gap: 8px; }
+        .toggle input[type="checkbox"] { width: 18px; height: 18px; }
+        .toggle label { font-size: 14px; margin: 0; }
+        .btn { padding: 10px 24px; border: none; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; }
+        .btn-primary { background: #1a73e8; color: white; }
+        .btn-primary:hover { background: #1557b0; }
+        .btn-secondary { background: #e0e0e0; color: #333; }
+        .actions { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 24px; border-radius: 4px; color: white; font-size: 14px; display: none; z-index: 100; }
+        .toast.success { background: #2e7d32; }
+        .toast.error { background: #c62828; }
+        .hint { font-size: 12px; color: #888; margin-top: 2px; }
+        .status-ok { color: #2e7d32; }
+        .status-warn { color: #e65100; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>&#9881; SnapAgent Settings</h1>
+        <a href="/snap-agent/index.html">&larr; Back to Chat</a>
+    </div>
+    <div class="container">
+        <div class="card" id="status-card">
+            <h2>Setup Status</h2>
+            <p id="status-text">Checking...</p>
+        </div>
+        <div class="card">
+            <h2>LLM Configuration</h2>
+            <div class="form-row">
+                <div class="form-group"><label>API Type</label>
+                    <select id="llm-apiType"><option value="anthropic">Anthropic</option><option value="openai">OpenAI Compatible</option></select>
+                </div>
+                <div class="form-group"><label>Model</label><input type="text" id="llm-model" placeholder="claude-sonnet-4-20250514"></div>
+            </div>
+            <div class="form-group"><label>Base URL</label><input type="text" id="llm-baseUrl" placeholder="https://api.anthropic.com"><div class="hint">For proxy/gateway, enter the proxy URL</div></div>
+            <div class="form-row">
+                <div class="form-group"><label>API Key</label><input type="password" id="llm-apiKey" placeholder="sk-..."></div>
+                <div class="form-group"><label>Auth Token</label><input type="password" id="llm-authToken" placeholder="token..."></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Max Tokens</label><input type="number" id="llm-maxTokens" value="8192"></div>
+                <div class="form-group"><label>Timeout (s)</label><input type="number" id="llm-timeoutSeconds" value="120"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Database (JDBC Tools)</h2>
+            <div class="toggle form-group"><input type="checkbox" id="jdbc-enabled"><label for="jdbc-enabled">Enable database query tools</label></div>
+            <div id="jdbc-fields">
+                <div class="form-group"><label>JDBC URL</label><input type="text" id="jdbc-url" placeholder="jdbc:mysql://host:3306/db"></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Username</label><input type="text" id="jdbc-username" placeholder="readonly_user"></div>
+                    <div class="form-group"><label>Password</label><input type="password" id="jdbc-password"></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Features</h2>
+            <div class="form-row">
+                <div class="toggle"><input type="checkbox" id="feat-anchor"><label for="feat-anchor">Anchor</label></div>
+                <div class="toggle"><input type="checkbox" id="feat-patrol"><label for="feat-patrol">Patrol</label></div>
+                <div class="toggle"><input type="checkbox" id="feat-alert"><label for="feat-alert">Alert</label></div>
+                <div class="toggle"><input type="checkbox" id="feat-codegraph"><label for="feat-codegraph">Code Graph</label></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Security</h2>
+            <div class="form-group"><label>JWT Secret</label><input type="password" id="sec-jwtSecret" placeholder="min 32 characters"><div class="hint">Shared with your auth system</div></div>
+            <div class="form-group"><label>CORS Origins</label><input type="text" id="sec-cors" placeholder="*"></div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-secondary" onclick="loadSettings()">Reset</button>
+            <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+        </div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script>
+    var API='/snap-agent/settings';
+    async function loadSettings(){try{var r=await fetch(API);var s=await r.json();var st=await(await fetch(API+'/status')).json();
+    document.getElementById('status-text').innerHTML=st.setupComplete?'<span class="status-ok">Configured</span> Model: '+st.model:'<span class="status-warn">Not configured</span> Set LLM API key below';
+    document.getElementById('llm-apiType').value=s.llm.apiType||'anthropic';document.getElementById('llm-baseUrl').value=s.llm.baseUrl||'';
+    document.getElementById('llm-model').value=s.llm.model||'';document.getElementById('llm-apiKey').placeholder=s.llm.apiKey||'sk-...';
+    document.getElementById('llm-authToken').placeholder=s.llm.authToken||'token';document.getElementById('llm-maxTokens').value=s.llm.maxTokens||8192;
+    document.getElementById('llm-timeoutSeconds').value=s.llm.timeoutSeconds||120;
+    document.getElementById('jdbc-enabled').checked=s.jdbc.enabled;document.getElementById('jdbc-url').value=s.jdbc.url||'';
+    document.getElementById('jdbc-username').value=s.jdbc.username||'';document.getElementById('jdbc-password').placeholder=s.jdbc.password||'';
+    document.getElementById('feat-anchor').checked=s.features.anchorEnabled;document.getElementById('feat-patrol').checked=s.features.patrolEnabled;
+    document.getElementById('feat-alert').checked=s.features.alertEnabled;document.getElementById('feat-codegraph').checked=s.features.codeGraphEnabled;
+    document.getElementById('sec-jwtSecret').placeholder=s.security.jwtSecret||'';document.getElementById('sec-cors').value=s.security.corsAllowedOrigins||'*';
+    toggleJdbc();}catch(e){showToast('Load failed: '+e.message,'error');}}
+    async function saveSettings(){var b={llm:{apiType:val('llm-apiType'),baseUrl:val('llm-baseUrl'),apiKey:val('llm-apiKey'),authToken:val('llm-authToken'),model:val('llm-model'),maxTokens:+val('llm-maxTokens')||8192,timeoutSeconds:+val('llm-timeoutSeconds')||120},jdbc:{enabled:document.getElementById('jdbc-enabled').checked,url:val('jdbc-url'),username:val('jdbc-username'),password:val('jdbc-password')},features:{anchorEnabled:document.getElementById('feat-anchor').checked,patrolEnabled:document.getElementById('feat-patrol').checked,alertEnabled:document.getElementById('feat-alert').checked,codeGraphEnabled:document.getElementById('feat-codegraph').checked},security:{jwtSecret:val('sec-jwtSecret'),corsAllowedOrigins:val('sec-cors')}};
+    try{var r=await fetch(API,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});if(r.ok){showToast('Saved','success');loadSettings();}else{showToast('Failed: '+r.status,'error');}}catch(e){showToast('Error: '+e.message,'error');}}
+    function val(id){return document.getElementById(id).value;}
+    function toggleJdbc(){var e=document.getElementById('jdbc-enabled').checked;document.getElementById('jdbc-fields').style.opacity=e?'1':'0.4';document.getElementById('jdbc-fields').querySelectorAll('input').forEach(function(el){el.disabled=!e;});}
+    function showToast(m,t){var el=document.getElementById('toast');el.textContent=m;el.className='toast '+t;el.style.display='block';setTimeout(function(){el.style.display='none';},3000);}
+    document.getElementById('jdbc-enabled').addEventListener('change',toggleJdbc);
+    loadSettings();
+    </script>
+</body>
+</html>
