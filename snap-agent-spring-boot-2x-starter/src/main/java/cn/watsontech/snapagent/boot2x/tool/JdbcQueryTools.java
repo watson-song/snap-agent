@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
+import org.springframework.beans.factory.ObjectProvider;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
@@ -27,6 +28,7 @@ public class JdbcQueryTools {
     private static final Logger log = LoggerFactory.getLogger(JdbcQueryTools.class);
 
     private final DataSource dataSource;
+    private final ObjectProvider<DataSource> dataSourceProvider;
     private final DataSourceRegistry registry;
     private final SqlGuard sqlGuard;
 
@@ -34,6 +36,20 @@ public class JdbcQueryTools {
         if (dataSource == null) throw new IllegalArgumentException("dataSource must not be null");
         if (sqlGuard == null) throw new IllegalArgumentException("sqlGuard must not be null");
         this.dataSource = dataSource;
+        this.dataSourceProvider = null;
+        this.registry = null;
+        this.sqlGuard = sqlGuard;
+    }
+
+    /**
+     * Lazy constructor: defers DataSource resolution to query time.
+     * Use this when DataSource may not be available at bean creation time
+     * (e.g., auto-configuration ordering issues).
+     */
+    public JdbcQueryTools(ObjectProvider<DataSource> dataSourceProvider, SqlGuard sqlGuard) {
+        if (sqlGuard == null) throw new IllegalArgumentException("sqlGuard must not be null");
+        this.dataSource = null;
+        this.dataSourceProvider = dataSourceProvider;
         this.registry = null;
         this.sqlGuard = sqlGuard;
     }
@@ -42,6 +58,7 @@ public class JdbcQueryTools {
         if (registry == null) throw new IllegalArgumentException("registry must not be null");
         if (sqlGuard == null) throw new IllegalArgumentException("sqlGuard must not be null");
         this.dataSource = null;
+        this.dataSourceProvider = null;
         this.registry = registry;
         this.sqlGuard = sqlGuard;
     }
@@ -69,9 +86,17 @@ public class JdbcQueryTools {
                 return "Error: " + e.getMessage();
             }
             log.info("Executing SQL (sanitized) on env '{}': {}", envName, sanitizedSql);
-        } else {
+        } else if (dataSource != null) {
             targetDs = dataSource;
             log.info("Executing SQL (sanitized): {}", sanitizedSql);
+        } else if (dataSourceProvider != null) {
+            targetDs = dataSourceProvider.getIfAvailable();
+            if (targetDs == null) {
+                return "Error: no DataSource available. Check snap-agent.jdbc.datasource-bean-name configuration.";
+            }
+            log.info("Executing SQL (sanitized, lazy-resolved): {}", sanitizedSql);
+        } else {
+            return "Error: no DataSource configured for JDBC tools.";
         }
 
         try (Connection conn = targetDs.getConnection();

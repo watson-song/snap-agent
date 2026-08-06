@@ -131,7 +131,6 @@ public class ToolAutoConfiguration {
     // ---- JdbcQueryTools ----
     @Bean
     @ConditionalOnProperty(prefix = "snap-agent.jdbc", name = "enabled", havingValue = "true")
-    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(DataSource.class)
     @ConditionalOnMissingBean
     public JdbcQueryTools jdbcQueryTools(
             ObjectProvider<DataSource> dataSourceProvider,
@@ -143,10 +142,11 @@ public class ToolAutoConfiguration {
             log.info("JdbcQueryTools assembled with DataSourceRegistry ({} envs)", registry.size());
             return new JdbcQueryTools(registry, sqlGuard);
         }
-        DataSource ds = dataSourceProvider.getIfAvailable();
-        log.info("JdbcQueryTools assembled with single DataSource: {}",
+        // Use lazy constructor: defers DataSource resolution to query time
+        // to avoid auto-configuration ordering issues with @ConditionalOnBean
+        log.info("JdbcQueryTools assembled with lazy DataSource resolution (bean name='{}')",
                 props.getJdbc().getDatasourceBeanName());
-        return new JdbcQueryTools(ds, sqlGuard);
+        return new JdbcQueryTools(dataSourceProvider, sqlGuard);
     }
 
     // ---- RedisReadTools ----
