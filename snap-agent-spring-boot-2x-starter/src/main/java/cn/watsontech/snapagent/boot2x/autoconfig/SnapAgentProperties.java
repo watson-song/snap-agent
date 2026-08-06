@@ -471,6 +471,8 @@ public class SnapAgentProperties {
         private int maxResultRows = 1000;
         private int maxToolResultChars = 50000;
         private int transcriptEventLimit = 500;
+        private int taskStoreMaxSize = 5000;
+        private int taskStoreTtlMinutes = 1440; // 24 hours
 
         public int getMaxTurns() {
             return maxTurns;
@@ -534,6 +536,22 @@ public class SnapAgentProperties {
 
         public void setTranscriptEventLimit(int transcriptEventLimit) {
             this.transcriptEventLimit = transcriptEventLimit;
+        }
+
+        public int getTaskStoreMaxSize() {
+            return taskStoreMaxSize;
+        }
+
+        public void setTaskStoreMaxSize(int taskStoreMaxSize) {
+            this.taskStoreMaxSize = taskStoreMaxSize;
+        }
+
+        public int getTaskStoreTtlMinutes() {
+            return taskStoreTtlMinutes;
+        }
+
+        public void setTaskStoreTtlMinutes(int taskStoreTtlMinutes) {
+            this.taskStoreTtlMinutes = taskStoreTtlMinutes;
         }
     }
 

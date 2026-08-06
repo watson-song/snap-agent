@@ -85,8 +85,10 @@ public class SnapAgentAutoConfiguration {
     // ---- TaskStore ----
     @Bean
     @ConditionalOnMissingBean
-    public TaskStore taskStore() {
-        return new TaskStore();
+    public TaskStore taskStore(SnapAgentProperties props) {
+        return new TaskStore(
+                props.getAgent().getTaskStoreMaxSize(),
+                props.getAgent().getTaskStoreTtlMinutes() * 60L * 1000L);
     }
 
     // ---- RateLimiter ----
