@@ -93,6 +93,13 @@ async function checkUserStatus() {
             script.src = 'bridge-client.js';
             document.head.appendChild(script);
         }
+        // Conditionally load llm-bridge-client.js when LLM bridge mode is enabled
+        if (info.llmBridgeEnabled && !document.getElementById('llmBridgeClientScript')) {
+            var llmScript = document.createElement('script');
+            llmScript.id = 'llmBridgeClientScript';
+            llmScript.src = 'llm-bridge-client.js';
+            document.head.appendChild(llmScript);
+        }
         return true;
     } catch (e) {
         showAuthPrompt('网络错误', '无法连接服务器，请检查网络后重试');

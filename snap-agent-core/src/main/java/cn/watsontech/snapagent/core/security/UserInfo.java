@@ -113,4 +113,13 @@ public class UserInfo {
     public void setBridgeEnabled(boolean bridgeEnabled) {
         this.bridgeEnabled = bridgeEnabled;
     }
+    private boolean llmBridgeEnabled;
+
+    public boolean isLlmBridgeEnabled() {
+        return llmBridgeEnabled;
+    }
+
+    public void setLlmBridgeEnabled(boolean llmBridgeEnabled) {
+        this.llmBridgeEnabled = llmBridgeEnabled;
+    }
 }
