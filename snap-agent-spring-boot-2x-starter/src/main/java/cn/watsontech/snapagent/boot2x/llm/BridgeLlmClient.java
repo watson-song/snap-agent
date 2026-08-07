@@ -34,11 +34,10 @@ public class BridgeLlmClient implements LlmClient {
 
     @Override
     public void stream(LlmRequest req, LlmEventSink events, String taskId) {
-        if (!bridgeService.isBridgeActive()) {
-            throw new BridgeNotActiveException("LLM bridge is not active. Check extension installation and configuration.");
-        }
-
         try {
+            if (!bridgeService.isBridgeActive()) {
+                throw new BridgeNotActiveException("LLM bridge is not active. Check extension installation and configuration.");
+            }
             log.info("Sending LLM request through bridge: task={}", taskId);
             
             CompletableFuture<BridgeLlmResponse> future = bridgeService.proxyLlmRequest(req, taskId);

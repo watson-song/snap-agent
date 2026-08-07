@@ -83,14 +83,16 @@ class BridgeLlmClientTest {
     }
 
     @Test
-    void shouldThrowWhenBridgeNotActive() {
+    void shouldCallOnErrorWhenBridgeNotActive() {
         // Given
         LlmRequest req = createTestRequest();
         when(bridgeService.isBridgeActive()).thenReturn(false);
 
-        // When/Then
-        assertThatThrownBy(() -> client.stream(req, eventSink, "task-3"))
-            .isInstanceOf(BridgeLlmClient.BridgeNotActiveException.class);
+        // When
+        client.stream(req, eventSink, "task-3");
+
+        // Then
+        verify(eventSink).onError(org.mockito.ArgumentMatchers.contains("not active"));
     }
 
     @Test
