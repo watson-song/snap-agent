@@ -2,6 +2,8 @@ package cn.watsontech.snapagent.standalone;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.URL;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -11,7 +13,6 @@ class KnowledgeLoadingTest {
 
     @Test
     void shouldLoadAllKnowledgeFiles() {
-        // 验证 9 个核心技术知识文件存在
         String[] expectedFiles = {
             "snap-agent-architecture.md",
             "snap-agent-memory-system.md",
@@ -25,7 +26,7 @@ class KnowledgeLoadingTest {
         };
 
         for (String file : expectedFiles) {
-            var resource = getClass().getClassLoader().getResource("docs/knowledge/" + file);
+            URL resource = getClass().getClassLoader().getResource("docs/knowledge/" + file);
             assertThat(resource)
                 .as("Knowledge file should exist: %s", file)
                 .isNotNull();
@@ -34,8 +35,7 @@ class KnowledgeLoadingTest {
 
     @Test
     void shouldHaveTechnicalArchitectureDiscoverySkill() {
-        // 验证新 skill 存在
-        var resource = getClass().getClassLoader()
+        URL resource = getClass().getClassLoader()
             .getResource("docs/skills/technical-architecture-discovery.md");
         assertThat(resource).isNotNull();
     }

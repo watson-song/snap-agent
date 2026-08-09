@@ -1,0 +1,94 @@
+name: Knowledge Base CI
+
+on:
+  push:
+    paths:
+      - 'snap-agent-*/src/main/java/**/*.java'
+      - 'snap-agent-standalone/src/main/resources/docs/knowledge/**/*.md'
+  pull_request:
+    paths:
+      - 'snap-agent-*/src/main/java/**/*.java'
+      - 'snap-agent-standalone/src/main/resources/docs/knowledge/**/*.md'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'corretto'
+
+      - name: Validate Code References
+        run: ./scripts/validate-code-references.sh
+
+      - name: Calculate Coverage
+        id: coverage
+        run: |
+          COVERAGE=$(./scripts/calculate-coverage.sh | tail -1)
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "覆盖率: $COVERAGE%"
+
+      - name: Check Coverage Threshold
+        if: steps.coverage.outputs.coverage < 90
+        run: |
+          echo "⚠️  知识库覆盖率低于 90%: ${{ steps.coverage.outputs.coverage }}%"
+          echo "请补充缺失的模块文档"
+
+      - name: Generate Review Report
+        run: |
+          echo "# Knowledge Base Review Report" > /tmp/review-report.md
+          echo "" >> /tmp/review-report.md
+          echo "Date: $(date)" >> /tmp/review-report.md
+          echo "Coverage: ${{ steps.coverage.outputs.coverage }}%" >> /tmp/review-report.md
+          echo "" >> /tmp/review-report.md
+          echo "## Missing Modules" >> /tmp/review-report.md
+          ./scripts/scan-missing-modules.sh >> /tmp/review-report.md || true
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-review-report
+          path: /tmp/review-report.md
+
+  regenerate:
+    needs: validate
+    if: needs.validate.outputs.coverage < 90 && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'corretto'
+
+      - name: Build SnapAgent
+        run: mvn clean package -DskipTests -q
+
+      - name: Start SnapAgent
+        run: |
+          java -jar snap-agent-standalone/target/snap-agent-standalone.jar \
+            --snap-agent.llm.api-type=anthropic \
+            --snap-agent.llm.base-url=https://api.anthropic.com \
+            --snap-agent.llm.api-key=${{ secrets.ANTHROPIC_API_KEY }} \
+            --server.port=8090 &
+          sleep 30
+
+      - name: Scan Missing Modules
+        run: ./scripts/scan-missing-modules.sh
+
+      - name: Wait for Generation
+        run: sleep 60
+
+      - name: Commit Generated Docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add snap-agent-standalone/src/main/resources/docs/knowledge/
+          git diff --staged --quiet || git commit -m "docs: auto-generate missing knowledge files"
+          git push
