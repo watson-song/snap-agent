@@ -68,8 +68,26 @@ snap-agent:
     project-root: ${PROJECT_ROOT:}
 
   # ---- Code Graph ----
+
+
+  domain-knowledge:
+    enabled: true
+    dir: classpath:/docs/knowledge/
+
+  knowledge:
+    enabled: true
+    sources:
+      - type: markdown
+        dir: classpath:/docs/knowledge/
+
   code-graph:
-    enabled: ${CODE_GRAPH_ENABLED:false}
+    enabled: true
+    scan-packages:
+      - cn.watsontech.snapagent
+    persistence: h2
+    h2-url: jdbc:h2:file:./data/codegraph
+    hot-reload-enabled: true
+    hot-reload-poll-ms: 2000
 
   # ---- Routing ----
   routing:

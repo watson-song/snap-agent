@@ -2,14 +2,16 @@
   "manifest_version": 3,
   "name": "SnapAgent Bridge",
   "version": "1.0.0",
-  "description": "Routes SnapAgent HTTP requests through your browser to bypass container network restrictions.",
+  "description": "Network bridge for SnapAgent — proxy HTTP requests through browser",
   "permissions": [
     "storage",
     "activeTab",
     "scripting"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
+    "https://api.anthropic.com/*",
+    "https://*.openai.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -23,7 +25,11 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "SnapAgent Bridge"
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
   },
   "icons": {
     "16": "icon.png",
