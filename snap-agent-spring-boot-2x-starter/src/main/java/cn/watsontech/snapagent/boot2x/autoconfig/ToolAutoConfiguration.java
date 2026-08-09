@@ -30,6 +30,7 @@ import cn.watsontech.snapagent.core.tool.PluginDescriptor;
 import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
+import cn.watsontech.snapagent.boot2x.tool.CodeReadTool;
 import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -463,4 +464,16 @@ public class ToolAutoConfiguration {
         }
         return bootstrap;
     }
+
+    // ---- Code Read Tool ----
+    @Bean
+    @ConditionalOnMissingBean
+    public CodeReadTool codeReadTool() {
+        String projectRoot = System.getProperty("user.dir");
+        return new CodeReadTool(
+            projectRoot + "/snap-agent-core/src/main/java",
+            projectRoot + "/snap-agent-spring-boot-2x-starter/src/main/java"
+        );
+    }
 }
+
