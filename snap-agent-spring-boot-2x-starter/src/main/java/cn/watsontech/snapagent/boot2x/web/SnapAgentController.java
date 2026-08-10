@@ -879,8 +879,12 @@ public class SnapAgentController {
         }
 
         String skillId = (String) body.get("skillId");
+        // Use default skill if no skillId provided
         if (skillId == null || skillId.isEmpty()) {
-            return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required");
+            skillId = properties.getDefaultSkill();
+            if (skillId == null || skillId.isEmpty()) {
+                return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", "skillId is required (no default skill configured)");
+            }
         }
 
         // Anchor Q&A routing: skillId="auto" or "off" with anchor context bypasses skill lookup
@@ -912,6 +916,18 @@ public class SnapAgentController {
 
         // Extract inputs (safe conversion from Map<String, Object> to Map<String, String>)
         Map<String, String> inputs = extractInputs(body.get("inputs"));
+
+        // Auto-inject user message as inputs.message if not provided (for chat-style interaction)
+        if (inputs == null) {
+            inputs = new HashMap<String, String>();
+        }
+        if (!inputs.containsKey("message")) {
+            String userMessage = (String) body.get("message");
+            if (userMessage != null && !userMessage.isEmpty()) {
+                inputs.put("message", userMessage);
+            }
+        }
+
         String validationError = validateInputs(skill, inputs);
         if (validationError != null) {
             return errorResponse(HttpStatus.BAD_REQUEST, "INVALID_INPUT", validationError);

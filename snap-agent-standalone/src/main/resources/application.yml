@@ -22,6 +22,7 @@ snap-agent:
   enabled: true
   base-path: /snap-agent
   builtin-skills-dir: classpath:/docs/skills/
+  default-skill: ${DEFAULT_SKILL:knowledge-qa}
 
   # ---- LLM Configuration ----
   llm:

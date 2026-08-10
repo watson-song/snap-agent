@@ -47,7 +47,7 @@ class SkillRegistrySubdirectoryTest {
         registry.refresh();
 
         // Verify: only root skill should be loaded
-        List<SkillMeta> skills = registry.getAll();
+        List<SkillMeta> skills = registry.all();
         assertThat(skills).hasSize(1);
         assertThat(skills.get(0).getName()).isEqualTo("test-skill");
     }
@@ -68,7 +68,7 @@ class SkillRegistrySubdirectoryTest {
         registry.refresh();
 
         // Verify: directory skill should be loaded
-        List<SkillMeta> skills = registry.getAll();
+        List<SkillMeta> skills = registry.all();
         assertThat(skills).hasSize(1);
         assertThat(skills.get(0).getName()).isEqualTo("my-directory-skill");
     }
@@ -89,7 +89,7 @@ class SkillRegistrySubdirectoryTest {
         registry.refresh();
 
         // Verify: no skills should be loaded from nested subdirectories
-        List<SkillMeta> skills = registry.getAll();
+        List<SkillMeta> skills = registry.all();
         assertThat(skills).isEmpty();
     }
 }

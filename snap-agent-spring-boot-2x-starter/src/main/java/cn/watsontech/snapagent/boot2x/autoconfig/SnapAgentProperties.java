@@ -39,6 +39,12 @@ public class SnapAgentProperties {
     private String uploadSkillsDir = "/tmp/snap-agent-skills";
 
     /**
+     * Default skill to use when no skillId is provided in the request.
+     * Allows users to chat directly without selecting a specific skill.
+     */
+    private String defaultSkill = "";
+
+    /**
      * Host application's active Spring profiles (comma-joined), auto-resolved at startup.
      * Exposed to skills as {@code {_app_profile}} and surfaced in the web UI so the LLM
      * does not need to ask which environment it is operating on.
@@ -109,6 +115,14 @@ public class SnapAgentProperties {
 
     public void setUploadSkillsDir(String uploadSkillsDir) {
         this.uploadSkillsDir = uploadSkillsDir;
+    }
+
+    public String getDefaultSkill() {
+        return defaultSkill;
+    }
+
+    public void setDefaultSkill(String defaultSkill) {
+        this.defaultSkill = defaultSkill;
     }
 
     public String getAppProfiles() {
