@@ -1,9 +1,10 @@
 ---
 name: snap-agent-graph-engine
-description: Graph 执行引擎 — StateGraph、CompiledGraph、GraphExecutor、ReAct 节点链、Checkpoint
-version: 2.0.0
+description: Graph 执行引擎 — Node、StateGraph、CompiledGraph、GraphExecutor、ReAct 节点链、Checkpoint、HITL
+version: 3.0.0
 modules:
   - snap-agent-core
+  - snap-agent-spring-boot-2x-starter
 author: SnapAgent
 ---
 
@@ -21,112 +22,180 @@ StateGraph (定义) → CompiledGraph (编译) → GraphExecutor (执行)
 
 ## 2. 核心 SPI
 
-### 2.1 Node 接口
+### 2.1 Node 接口（2 方法）
 
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/Node.java -->
 ```java
-// core/graph/Node.java
 public interface Node {
-    String getName();
-    GraphState execute(GraphState state, ExecutionContext ctx);
+    default String getName() {
+        return getClass().getSimpleName();
+    }
+    GraphState execute(GraphState state, ExecutionContext ctx) throws InterruptException;
 }
 ```
 
-### 2.2 GraphState（不可变状态容器）
+### 2.2 GraphState（不可变状态容器，14 方法）
 
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/GraphState.java -->
 ```java
-// core/graph/GraphState.java
 public class GraphState {
-    private final Map<String, Object> data;
-    public GraphState with(String key, Object value) { ... }  // 返回新实例
-    public <T> T get(String key) { ... }
+    public static GraphState empty(String threadId)
+    public <T> T get(String key)
+    public <T> T get(String key, T defaultValue)
+    public <T> T get(StateKey<T> key)
+    public <T> T get(StateKey<T> key, T defaultValue)
+    public GraphState with(String key, Object value)
+    public <T> GraphState with(StateKey<T> key, T value)
+    public GraphState nextTurn()
+    public int getTurn()
+    public String getThreadId()
+    public String getCheckpointId()
+    public GraphState withCheckpointId(String checkpointId)
+    public byte[] serialize()
+    public static GraphState deserialize(byte[] data)
 }
 ```
 
-`StateKey<T>` / `StateKeys` 提供 type-safe 的 key 定义。
+不可变类，`with()` / `nextTurn()` / `withCheckpointId()` 均返回新实例。支持 JSON 序列化。
 
-### 2.3 StateGraph + CompiledGraph
+### 2.3 StateGraph（Builder，6 public 方法）
 
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/StateGraph.java -->
 ```java
-// core/graph/StateGraph.java
-StateGraph g = new StateGraph();
-g.addNode("entry", entryNode)
- .addNode("agent", agentNode)
- .addNode("tools", toolsNode)
- .addNode("END", endNode)
- .addEdge("entry", "agent")
- .addConditionalEdges("agent", shouldContinue, Map.of("continue","tools","end","END"))
- .addEdge("tools", "agent")
- .setEntryPoint("entry");
-CompiledGraph compiled = g.compile();  // 拓扑排序 + 环路检测
+public class StateGraph {
+    public StateGraph addNode(String name, Node node)
+    public StateGraph addEdge(String from, String to)
+    public StateGraph addConditionalEdges(String from, EdgeCondition condition, Map<String, String> routing)
+    public StateGraph setEntryPoint(String entry)
+    public CompiledGraph compile()        // 允许环路（ReAct）
+    public CompiledGraph compileDag()     // 拒绝环路（Workflow）
+}
 ```
 
-### 2.4 GraphExecutor
+### 2.4 CompiledGraph（3 public 方法）
 
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/CompiledGraph.java -->
 ```java
-// core/graph/execution/GraphExecutor.java
+public class CompiledGraph {
+    public String getEntryPoint()
+    public Map<String, Node> getNodes()
+    public List<EdgeTarget> getEdgesFrom(String node)
+}
+```
+
+### 2.5 GraphExecutor（2 public 方法）
+
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/execution/GraphExecutor.java -->
+```java
 public class GraphExecutor {
-    private final CheckpointStore checkpointStore;
-    private final int maxTurns;
-    public TaskResult execute(CompiledGraph graph, GraphState initialState) { ... }
+    public GraphExecutor(CheckpointStore checkpointStore, int maxTurns)
+    public TaskResult execute(CompiledGraph graph, GraphState state, ExecutionContext ctx)
+    public TaskResult resume(CompiledGraph graph, String checkpointId, ExecutionContext ctx)
 }
 ```
 
-支持 interrupt/fail/cancel/timeout 四种异常处理模式。
+执行循环：检查 cancel → 检查 maxTurns → 执行 node → checkpoint → 路由下一节点。
+InterruptException → 保存 checkpoint + 返回 PAUSED。
 
-### 2.5 Edge 类型
+## 3. Edge 类型
 
-| 类 | 说明 |
-|---|------|
-| `Edge` | 固定边 A→B |
-| `ConditionalEdge` | 条件边，根据 state 路由 |
-| `EdgeCondition` | 决策函数 |
-| `EdgeTarget` | 目标节点 |
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/Edge.java -->
+```java
+public class Edge {
+    public Edge(String from, String to)
+    public String getFrom()
+    public String getTo()
+}
+```
 
-## 3. ReAct 节点链
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/ConditionalEdge.java -->
+```java
+public class ConditionalEdge {
+    public ConditionalEdge(String from, EdgeCondition condition, Map<String, String> routing)
+    public String getFrom()
+    public EdgeCondition getCondition()
+    public Map<String, String> getRouting()
+}
+```
+
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/EdgeCondition.java -->
+```java
+@FunctionalInterface
+public interface EdgeCondition {
+    String route(GraphState state);
+}
+```
+
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/EdgeTarget.java -->
+```java
+public class EdgeTarget {
+    public EdgeTarget(String nodeName)
+    public EdgeTarget(String nodeName, String label)
+    public EdgeTarget(String nodeName, String label, EdgeCondition condition)
+    public String getNodeName()
+    public String getLabel()
+    public EdgeCondition getCondition()
+}
+```
+
+## 4. ReAct 节点链
 
 | 节点 | 类 | 职责 |
 |------|-----|------|
-| Entry | `EntryNode` | 初始化 GraphState，构建 system prompt，注入防御 |
-| Agent | `AgentNode` | 调用 LlmClient.stream()，解析 tool_calls |
+| Entry | `EntryNode` | 构建 system prompt + user message |
+| Agent | `AgentNode` | LLM 流式调用，解析 tool_use blocks |
 | Tools | `ToolsNode` | 执行工具调用，截断结果，错误反馈 |
-| Route | `ShouldContinue` | 有 tool_calls→"tools"，否则→"end" |
-| END | 匿名 Node | 空操作终止 |
+| Route | `ShouldContinue` | end_turn→end, tool_use→tools, max_tokens→agent |
 
-所有节点通过 `AdvisorNode` 包装，注入 Advisor 链。
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/react/EntryNode.java -->
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/react/AgentNode.java -->
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/react/ToolsNode.java -->
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/react/ShouldContinue.java -->
 
-## 4. Checkpoint 机制
+所有节点通过 `AdvisorNode` 装饰器包装，注入 Advisor 链。
 
+## 5. Checkpoint 机制
+
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/checkpoint/CheckpointStore.java -->
 ```java
-// core/graph/checkpoint/CheckpointStore.java
 public interface CheckpointStore {
-    String save(String threadId, GraphState state);    // returns checkpointId
+    String save(String threadId, GraphState state);
     GraphState load(String checkpointId);
+    List<CheckpointMetadata> list(String threadId);
     void delete(String checkpointId);
     void deleteByThread(String threadId);
-    List<CheckpointMetadata> list(String threadId);
 }
 ```
 
-| 实现 | 说明 |
-|------|------|
-| `InMemoryCheckpointStore` | 内存，默认 |
-| `SqliteCheckpointStore` | SQLite 文件，开发环境 |
-| `CheckpointMetadata` | 检查点元数据（checkpointId, threadId, turn, createdAt）|
+| 实现 | 模块 | 说明 |
+|------|------|------|
+| `InMemoryCheckpointStore` | core | ConcurrentHashMap 内存存储 |
+| `SqliteCheckpointStore` | boot2x | SQLite 嵌入式文件存储 |
 
-## 5. HITL（人工审批）
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/checkpoint/InMemoryCheckpointStore.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/graph/checkpoint/SqliteCheckpointStore.java -->
 
+## 6. HITL（人工审批）
+
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/hitl/InterruptException.java -->
 ```java
-// core/graph/hitl/ToolApproval.java — 注解
-@ToolApproval(required = true)  // 标记工具需人工确认
-
-// core/graph/hitl/InterruptException.java — 中断执行
 public class InterruptException extends Exception {
-    private final String reason;
-    private final Map<String, Object> context;
+    public InterruptException(Map<String, Object> checkpointPayload)
+    public InterruptException(String message, Map<String, Object> checkpointPayload)
+    public Map<String, Object> getCheckpointPayload()
 }
 ```
 
-## 6. 异常类
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/graph/hitl/ToolApproval.java -->
+```java
+@Retention(RUNTIME) @Target(METHOD)
+public @interface ToolApproval {
+    boolean required() default false;
+    String prompt() default "";
+}
+```
+
+## 7. 异常类
 
 | 类 | 说明 |
 |---|------|

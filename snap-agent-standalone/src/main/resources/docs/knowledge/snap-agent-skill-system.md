@@ -1,7 +1,7 @@
 ---
 name: snap-agent-skill-system
 description: Skill 系统 — 加载、解析、校验、热重载、两层模型、ClasspathSkillScanner
-version: 2.0.0
+version: 3.0.0
 modules:
   - snap-agent-core
   - snap-agent-spring-boot-2x-starter
@@ -84,4 +84,4 @@ builtin skills (classpath:/docs/skills/)   +   custom skills (upload-skills-dir/
 | `ops-health-check` | metrics_query, log_search | 运维健康检查 |
 | `config-diff` | config_read, metrics_query | 配置对比 |
 
-> `domain-knowledge-discovery` 和 `technical-architecture-discovery` 不是内置 skill，而是集成阶段工具，位于 `docs/skills/`。
+> `technical-architecture-discovery` 不是内置 skill，而是集成阶段工具，位于 `docs/skills/`。

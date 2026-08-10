@@ -39,7 +39,7 @@ RetrievalAugmentationAdvisor (Order=200)
 ## 3. VectorStore
 
 ```java
-// core/vectorstore/VectorStore.java
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/vectorstore/VectorStore.java -->
 public interface VectorStore {
     void add(List<Document> documents);              // 批量添加（embedding 已内置）
     List<Document> similaritySearch(SearchRequest request);
@@ -56,7 +56,7 @@ public interface VectorStore {
 ## 4. EmbeddingModel
 
 ```java
-// core/embedding/EmbeddingModel.java
+<!-- source: snap-agent-core/src/main/java/cn/watsontech/snapagent/core/embedding/EmbeddingModel.java -->
 public interface EmbeddingModel {
     float[] embed(String text);
     List<float[]> embedBatch(List<String> texts);
@@ -66,7 +66,7 @@ public interface EmbeddingModel {
 ## 5. 知识 ETL 管道
 
 ```java
-// boot2x/knowledge/KnowledgeETLPipeline.java
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/knowledge/KnowledgeETLPipeline.java -->
 // 加载 Markdown → Chunk → Embed → 存入 VectorStore
 ```
 

@@ -1,7 +1,7 @@
 ---
 name: snap-agent-architecture
-description: SnapAgent 核心架构 — 模块划分、12 个 AutoConfiguration、REST 端点、配置总览
-version: 2.0.0
+description: SnapAgent 核心架构 — 模块划分、13 个 AutoConfiguration、Agent 引擎流程、REST 端点、配置总览
+version: 3.0.0
 modules:
   - snap-agent-core
   - snap-agent-spring-boot-2x-starter
@@ -17,37 +17,55 @@ snap-agent-parent
 ├── snap-agent-core                     # 核心 SPI + 领域模型（无 Spring 依赖）
 ├── snap-agent-spring-boot-2x-starter   # Spring Boot 2.x 自动装配 + Web 端点
 ├── snap-agent-standalone               # 独立部署 JAR（含 Settings Page + Bridge UI）
-└── snap-agent-demo                     # E2E 演示
+├── snap-agent-demo                     # E2E 演示
+├── snap-agent-client                   # REST API SDK（无 Spring 依赖）
+├── snap-agent-demo-plugin              # 插件开发示例
+└── snap-agent-plugin-archetype         # 插件 Maven archetype
 ```
 
 ## 2. 自动配置类（13 个）
 
-| 配置类 | 启用条件 | 核心 Bean |
-|--------|---------|----------|
-| `SnapAgentAutoConfiguration` | `snap-agent.enabled=true` | LlmClient, TaskStore, SkillRegistry, AgentService |
-| `WebAutoConfiguration` | enabled | SnapAgentController, ConversationStore |
-| `ToolAutoConfiguration` | enabled | ToolCallbackRegistry, 内置工具 |
-| `SecurityAutoConfiguration` | enabled | SecurityGateway, SqlGuard, AuditStore |
-| `BridgeAutoConfiguration` | `@ConditionalOnExpression(enabled AND bridge.enabled)` | IssueBridgeService, BridgeHttpExecutor |
-| `LlmBridgeAutoConfiguration` | `snap-agent.llm.api-type=bridge` | LlmBridgeService, BridgeLlmClient |
-| `FileBridgeAutoConfiguration` | enabled | FileBridgeService, FileBridgeController |
-| `CostAutoConfiguration` | `cost.enabled=true` | CostStore, CostTracker, CostCalculator, BudgetEnforcer |
-| `KnowledgeAutoConfiguration` | enabled | VectorStore, DocumentRetriever, KnowledgeETLPipeline |
-| `DomainKnowledgeAutoConfiguration` | enabled | DomainKnowledgeIndex, DomainKnowledgeLoader |
-| `IssueAutoConfiguration` | enabled | IssueStore, IssueTracker, VcsClient, FixExecutionService |
-| `PatrolAutoConfiguration` | `patrol.enabled=true` | PatrolScheduler, AlertConverger, AlertPushChannel |
-| `WorkflowAutoConfiguration` | `snap-agent.enabled=true`（内部 bean 按 `workflows.enabled`）| WorkflowEngine, WorkflowDefinition |
+| # | 配置类 | 顶层条件 | @Bean 数 |
+|---|--------|---------|---------|
+| 1 | `SnapAgentAutoConfiguration` | `snap-agent.enabled=true` | 11 |
+| 2 | `WebAutoConfiguration` | enabled | 5 |
+| 3 | `ToolAutoConfiguration` | enabled | 18 |
+| 4 | `SecurityAutoConfiguration` | enabled | 6 |
+| 5 | `BridgeAutoConfiguration` | `@ConditionalOnExpression(enabled AND bridge.enabled)` | 5 |
+| 6 | `LlmBridgeAutoConfiguration` | `snap-agent.llm.api-type=bridge` | 3 |
+| 7 | `FileBridgeAutoConfiguration` | `snap-agent.bridge.enabled=true` | 2 |
+| 8 | `CostAutoConfiguration` | `snap-agent.cost.enabled=true` | 5 |
+| 9 | `KnowledgeAutoConfiguration` | enabled | 8 |
+| 10 | `DomainKnowledgeAutoConfiguration` | enabled | 3 |
+| 11 | `IssueAutoConfiguration` | enabled | 17 |
+| 12 | `PatrolAutoConfiguration` | enabled | 9 |
+| 13 | `WorkflowAutoConfiguration` | enabled | 3 |
 
-## 3. Agent 引擎
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/SnapAgentAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/WebAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/ToolAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/SecurityAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/BridgeAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/LlmBridgeAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/FileBridgeAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/CostAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/KnowledgeAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/DomainKnowledgeAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/IssueAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/PatrolAutoConfiguration.java -->
+<!-- source: snap-agent-spring-boot-2x-starter/src/main/java/cn/watsontech/snapagent/boot2x/autoconfig/WorkflowAutoConfiguration.java -->
+
+## 3. Agent 引擎流程
 
 ```
 SnapAgentController → AgentService.execute(task, skill)
     → ReActGraphFactory.build(skill, task, advisors)
         → EntryNode → AdvisorNode(AgentNode) ⇄ AdvisorNode(ToolsNode) → END
-    → GraphExecutor.execute(compiledGraph, initialState)
+    → GraphExecutor.execute(compiledGraph, initialState, ctx)
+        → checkpoint each node → InterruptException → PAUSED
 ```
 
-## 4. REST 端点
+## 4. REST 端点表
 
 | 端点 | 说明 |
 |------|------|
@@ -71,25 +89,25 @@ SnapAgentController → AgentService.execute(task, skill)
 
 ```yaml
 snap-agent:
-  enabled: true
+  enabled: true                    # 总开关
   base-path: /snap-agent
   llm:
-    api-type: anthropic     # anthropic | openai | bridge
-    base-url: ...
-    auth-token: ...
+    api-type: anthropic            # anthropic | openai | bridge
+    base-url: https://api.anthropic.com
+    auth-token: ${TOKEN}
     model: claude-sonnet-4-20250514
   agent:
     max-turns: 20
     task-timeout-minutes: 30
-  knowledge:
-    enabled: true
-    sources: [{type: markdown, dir: classpath:/docs/knowledge/}]
-  code-graph:
-    enabled: false
+  memory:
+    repository-type: in-memory     # in-memory | file
+    max-messages: 50
   cost:
     enabled: false
   patrol:
     enabled: false
   bridge:
+    enabled: false
+  workflows:
     enabled: false
 ```
