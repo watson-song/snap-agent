@@ -30,27 +30,28 @@
 
 ## 2. 自动化扫描机制
 
-### 2.1 使用 technical-architecture-discovery Skill
+### 2.1 使用集成阶段知识生成工具
 
-**扫描流程**:
+> **注意**：`domain-knowledge-discovery` 和 `technical-architecture-discovery` 已从运行时内置 skill 移至 `docs/skills/` 作为集成阶段工具。不在运行时通过 REST API 调用，而是在集成阶段直接读取源码文件执行。
+
+**执行方式**（集成阶段，直接读取源码）:
 
 ```bash
-# 1. 扫描单个模块
-curl -X POST http://localhost:8090/snap-agent/runs \
-  -u demo:demo \
-  -H "Content-Type: application/json" \
-  -d '{
-    "skillId": "technical-architecture-discovery",
-    "inputs": {
-      "target_module": "snap-agent-core/src/main/java/cn/watsontech/snapagent/core/rag",
-      "output_dir": "/tmp/generated-docs"
-    }
-  }'
+# 在集成阶段使用 AI Agent 执行 docs/skills/ 下的知识生成工具
+# 工具直接读取项目源码文件，生成知识库 .md 文件到 output_dir
 
-# 2. 批量扫描所有缺失模块
+# 1. 业务领域知识生成（Service/Controller/Entity → 业务概念文档）
+# 输入: project_root, output_dir, scan_packages
+# 输出: allocation-plan.md, order-create.md 等
+
+# 2. 技术架构知识生成（SPI/AutoConfig/Advisor → 技术架构文档）
+# 输入: project_root, output_dir
+# 输出: myapp-auth-system.md, myapp-cache-layer.md 等
+
+# 3. 批量扫描所有缺失模块
 for module in rag embedding anchor patrol vcs domain; do
   echo "Scanning $module..."
-  # 调用 skill 生成文档
+  # 集成阶段工具直接扫描并生成
 done
 ```
 

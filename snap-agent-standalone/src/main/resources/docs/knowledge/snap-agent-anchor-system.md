@@ -1,67 +1,52 @@
 ---
 name: snap-agent-anchor-system
-description: Anchor 锚点系统详解 — AnchorGraphFactory、三种模式、HTML 注入
-version: 1.0.0
+description: Anchor 锚点系统 — AnchorOrchestrator、三种模式、HtmlOutputConverter
+version: 2.0.0
 modules:
   - snap-agent-core
+  - snap-agent-spring-boot-2x-starter
 author: SnapAgent
 ---
 
 # SnapAgent Anchor 锚点系统
 
-## 1. 架构概述
+## 1. 架构
 
-Anchor 系统提供三种模式，将网页内容作为上下文注入 Agent：
+Anchor 系统将网页内容作为上下文注入 Agent，支持三种模式。
 
 ```
-─────────────────────────────────────────────────────────
-│              AnchorGraphFactory                          │
-│                                                         │
-│  Mode.AUTO:   完整 ReAct 图，anchor 作为 skill body     │
-│  Mode.OFF:    线性图 entry → answer → END (无工具)     │
-│  Mode.INJECT: 线性图 entry → generate → cache → END    │
-└────────────────────────────────────────────────────────┘
+AnchorOrchestrator（协调器）
+  → AnchorContextSummarizer（摘要）
+  → AnchorSkillClassifier（分类）
+  → AnchorInjectionOrchestrator（注入）
+  → AnchorInjectionCache / AnchorSummaryCache（缓存）
 ```
 
-## 2. 三种模式
+## 2. 三种模式 (core/anchor/)
 
-### 2.1 AUTO 模式
+| 类 | 说明 |
+|----|------|
+| `AnchorGraphFactory` | 根据模式构建不同 Graph |
+| `HtmlOutputConverter` | LLM 输出 → HTML |
 
-- 委托给 ReActGraphFactory
-- Anchor 上下文作为 skill body
-- 支持工具调用
+- **AUTO**: 完整 ReAct 图，anchor 作为 skill body
+- **OFF**: 线性图 entry→answer→END，无工具
+- **INJECT**: 线性图 entry→generate→cache→END
 
-### 2.2 OFF 模式
+## 3. 组件 (boot2x/anchor/)
 
-- 线性图: entry → answer → END
-- 无工具节点
-- LLM 仅基于 anchor 上下文回答
-- 输出通过 HtmlOutputConverter 处理
+| 类 | 职责 |
+|----|------|
+| `AnchorOrchestrator` | 协调预处理+执行（非 Advisor）|
+| `AnchorContext` | 上下文数据 |
+| `AnchorContextSummarizer` | 摘要生成 |
+| `AnchorSkillClassifier` | 技能分类 |
+| `AnchorInjectionOrchestrator` | 注入编排 |
+| `AnchorInjectionCache` | 注入缓存 |
+| `AnchorSummaryCache` | 摘要缓存 |
+| `ClassifyResult` / `PreprocessResult` / `InjectionRequest` / `InjectionResult` / `InjectionCacheEntry` | 数据模型 |
 
-### 2.3 INJECT 模式
-
-- 线性图: entry → generate → cache → END
-- 生成 HTML 内容并缓存
-- 用于锚点注入场景
-
-## 3. HtmlOutputConverter
-
-```java
-public class HtmlOutputConverter {
-    /** 将 LLM 输出转换为 HTML 格式 */
-    public String convert(String markdownOutput) {
-        // Markdown → HTML 转换
-    }
-}
-```
-
-## 4. 使用场景
-
-- **Q&A**: 用户提供网页 URL，Agent 基于网页内容回答
-- **摘要生成**: 提取网页关键信息生成摘要
-- **HTML 注入**: 将生成的内容注入到网页中
-
-## 5. 配置属性
+## 4. 配置
 
 ```yaml
 snap-agent:
@@ -70,8 +55,4 @@ snap-agent:
     max-context-chars: 8000
     preprocess-enabled: true
     preprocess-timeout-ms: 5000
-    summary-threshold-chars: 4000
-    classifier-confidence-threshold: 0.5
-    summary-cache-ttl-seconds: 600
-    injection-cache-max-size: 512
 ```

@@ -1,69 +1,28 @@
 ---
 name: snap-agent-memory-system
-description: Memory 记忆系统详解 — ChatMemory 组装、MessageChatMemoryAdvisor、长期记忆
-version: 1.0.1
+description: Memory 记忆系统 — ChatMemory SPI、MessageChatMemoryAdvisor、长期记忆、记忆蒸馏
+version: 2.0.0
 modules:
   - snap-agent-core
   - snap-agent-spring-boot-2x-starter
 author: SnapAgent
-tools:
-  - code_read
-  - code_search
 ---
 
 # SnapAgent Memory 记忆系统
 
-## 1. 架构概述
+## 1. 四层记忆模型
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    AgentService                          │
-│  execute(taskId, skill, task, advisors)                 │
-│  ┌─────────────────────────────────────────────────┐   │
-│  │          ReActGraphFactory.build()               │   │
-│  │   EntryNode → ReActNode[] → ExitNode            │   │
-│  └─────────────────────────────────────────────────┘   │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          │ advisors 注入（按 Order 排序）
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                    Advisors 层                            │
-│  Order 50:   SafeGuardAdvisor (安全检查)                 │
-│  Order 100:  MessageChatMemoryAdvisor (对话记忆)  ◄核心   │
-│  Order 200:  RAGAdvisor (检索增强)                       │
-│  Order 300:  LongTermMemoryAdvisor (长期记忆)            │
-│  Order 400:  AnchorOrchestrator (锚点注入)               │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Memory 存储层                           │
-│  ┌────────────────────┐  ┌────────────────────────┐    │
-│  │  ChatMemory        │  │  LongTermMemoryStore   │    │
-│  │  - MessageWindow   │  │  - 向量检索            │    │
-│  │  - Summarizing     │  │  - 跨对话知识          │    │
-│  └─────────┬──────────┘  └────────────────────────┘    │
-│            ▼                                            │
-│  ┌────────────────────┐                                 │
-│  │ChatMemoryRepository│                                 │
-│  │  - InMemory        │                                 │
-│  │  - File            │                                 │
-│  │  - Redis (可扩展)  │                                 │
-│  └────────────────────┘                                 │
-└─────────────────────────────────────────────────────────┘
-```
+| 层级 | 组件 | 持久化 | 说明 |
+|------|------|--------|------|
+| 短期记忆 | `ChatMemory` + `MessageChatMemoryAdvisor` | 可选 | 滑动窗口对话历史 |
+| 摘要压缩 | `SummarizingChatMemory` + `Summarizer` | 可选 | 超长对话自动摘要 |
+| 长期记忆 | `LongTermMemoryAdvisor` + `UserProfileStore` / `ProjectFactsStore` | 内存/文件 | 跨对话经验沉淀 |
+| 记忆蒸馏 | `MemoryLearningExtractor` | 文件 | 从对话中提取持久化经验 |
 
-## 2. 核心代码
-
-### 2.1 ChatMemory SPI
+## 2. ChatMemory SPI
 
 ```java
-package cn.watsontech.snapagent.core.memory;
-
-import cn.watsontech.snapagent.core.llm.Message;
-import java.util.List;
-
+// core/memory/ChatMemory.java
 public interface ChatMemory {
     void add(String conversationId, Message message);
     List<Message> get(String conversationId, int lastN);
@@ -71,127 +30,72 @@ public interface ChatMemory {
 }
 ```
 
-### 2.2 MessageChatMemoryAdvisor（核心）
+| 实现 | 说明 |
+|------|------|
+| `MessageWindowChatMemory` | 滑动窗口，保留最近 N 条 |
+| `SummarizingChatMemory` | 超阈值时调 Summarizer 压缩历史 |
+
+## 3. ChatMemoryRepository
 
 ```java
-package cn.watsontech.snapagent.core.memory;
-
-import cn.watsontech.snapagent.core.graph.GraphState;
-import cn.watsontech.snapagent.core.graph.advisor.Advisor;
-
-public class MessageChatMemoryAdvisor implements Advisor {
-    private final ChatMemory chatMemory;
-    private final int retrieveLastN = 50;
-    private final String conversationIdKey = "conversation.id";
-
-    @Override
-    public int getOrder() { return 100; }
-
-    @Override
-    public String getName() { return "chat-memory"; }
-
-    @Override
-    public GraphState beforeNode(String nodeName, GraphState state, Object ctx) {
-        String conversationId = (String) state.get(conversationIdKey);
-        if (conversationId == null) {
-            return state.with("memory.messages", new ArrayList<>());
-        }
-        List<Message> history = chatMemory.get(conversationId, retrieveLastN);
-        return state.with("memory.messages", history);
-    }
-
-    @Override
-    public GraphState afterNode(String nodeName, GraphState state, Object ctx) {
-        String conversationId = (String) state.get(conversationIdKey);
-        if (conversationId == null) return state;
-
-        switch (nodeName) {
-            case "agent":
-                persistAssistantTurn(state, conversationId);
-                break;
-            case "tools":
-                persistToolResults(state, conversationId);
-                break;
-        }
-        return state;
-    }
+// core/memory/ChatMemoryRepository.java
+public interface ChatMemoryRepository {
+    void save(String conversationId, List<Message> messages);
+    List<Message> load(String conversationId);
+    List<String> listConversationIds();
+    void delete(String conversationId);
 }
 ```
 
-### 2.3 自动配置
+| 实现 | 模块 | 说明 |
+|------|------|------|
+| `InMemoryChatMemoryRepository` | core | 内存，默认 |
+| `FileChatMemoryRepository` | boot2x | JSON 文件持久化 |
+
+## 4. MessagePartitioner
 
 ```java
-@Bean
-public ChatMemoryRepository chatMemoryRepository(SnapAgentProperties props) {
-    String repoType = props.getMemory().getRepositoryType();
-    if ("file".equalsIgnoreCase(repoType)) {
-        String dir = props.getUploadSkillsDir() + "/memory/conversations";
-        return new FileChatMemoryRepository(dir);
-    }
-    return new InMemoryChatMemoryRepository();
-}
-
-@Bean
-public ChatMemory chatMemory(ChatMemoryRepository repo,
-                             ObjectProvider<Summarizer> summarizerProvider,
-                             SnapAgentProperties props) {
-    Summarizer summarizer = summarizerProvider.getIfAvailable();
-    if (summarizer != null) {
-        return new SummarizingChatMemory(repo, summarizer, 
-            props.getMemory().getMaxMessages(), 
-            props.getMemory().getSummarizeThreshold());
-    }
-    return new MessageWindowChatMemory(repo, props.getMemory().getMaxMessages());
-}
-
-@Bean
-public MessageChatMemoryAdvisor messageChatMemoryAdvisor(ChatMemory chatMemory) {
-    return new MessageChatMemoryAdvisor(chatMemory);
+// core/memory/MessagePartitioner.java
+public interface MessagePartitioner {
+    List<Message> partition(List<Message> messages, int maxTokens);
 }
 ```
 
-## 3. 执行流程
+| 实现 | 说明 |
+|------|------|
+| `LastNMessagePartitioner` | 取最后 N 条 |
+
+## 5. MessageChatMemoryAdvisor (Order=100)
 
 ```
-T=0: entryNode.beforeNode()
-     └─ 初始化 GraphState
+beforeNode("agent"):
+  → chatMemory.get(conversationId, lastN) → state["memory.messages"]
 
-T=1: MessageChatMemoryAdvisor.beforeNode("entry")
-     ─ 加载对话历史 → state["memory.messages"]
+afterNode("agent"):
+  → 持久化 assistant 消息到 chatMemory
 
-T=2: entryNode.execute()
-     ─ 注入 skill body 到 system prompt
-
-T=3: agentNode.beforeNode()
-     └─ Advisors 注入上下文
-
-T=4: agentNode.execute()
-     ├─ 组装 LLM 请求（system + history + tools）
-     ├─ 调用 LlmClient.stream()
-     └─ 解析 tool_calls
-
-T=5: MessageChatMemoryAdvisor.afterNode("agent")
-     └─ 持久化 assistant 消息
-
-T=6: ShouldContinue.evaluate()
-     ├─ 有 tool_calls? → "tools"
-     └─ 无 tool_calls? → "end"
-
-T=7: toolsNode.execute()
-     └─ 执行工具调用
-
-T=8: MessageChatMemoryAdvisor.afterNode("tools")
-     └─ 持久化 tool_result 消息
-
-T=9: 返回 T=3 继续循环...
+afterNode("tools"):
+  → 持久化 tool_result 消息到 chatMemory
 ```
 
-## 4. 配置
+## 6. 长期记忆
+
+| 组件 | 说明 |
+|------|------|
+| `LongTermMemoryAdvisor` (Order=150) | 检索用户画像和项目事实注入上下文 |
+| `UserProfileStore` / `InMemoryUserProfileStore` | 用户偏好存储 |
+| `ProjectFactsStore` / `InMemoryProjectFactsStore` | 项目事实存储 |
+| `Summarizer` / `LlmSummarizer` / `TruncatingSummarizer` | 摘要生成 |
+| `MemoryLearningExtractor` | 从对话中提取经验沉淀 |
+
+## 7. 配置
 
 ```yaml
 snap-agent:
   memory:
     repository-type: in-memory  # in-memory | file
-    max-messages: 50            # 滑动窗口大小
-    summarize-threshold: 100    # 触发摘要的 token 阈值
+    max-messages: 50
+    summarize-threshold: 100
+    learning:
+      enabled: true
 ```

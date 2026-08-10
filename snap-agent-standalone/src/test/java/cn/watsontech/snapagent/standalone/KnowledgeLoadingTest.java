@@ -45,10 +45,5 @@ class KnowledgeLoadingTest {
         }
     }
 
-    @Test
-    void shouldHaveTechnicalArchitectureDiscoverySkill() {
-        URL resource = getClass().getClassLoader()
-            .getResource("docs/skills/technical-architecture-discovery.md");
-        assertThat(resource).isNotNull();
-    }
+    // technical-architecture-discovery skill moved to docs/skills/ (integration-time tool, not runtime)
 }

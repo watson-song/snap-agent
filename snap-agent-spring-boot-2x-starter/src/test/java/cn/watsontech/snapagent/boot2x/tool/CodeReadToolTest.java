@@ -17,7 +17,6 @@ class CodeReadToolTest {
 
     @Test
     void shouldReadJavaFileByClassName() throws IOException {
-        // Create test Java file
         Path javaFile = tempDir.resolve("cn/watsontech/Test.java");
         Files.createDirectories(javaFile.getParent());
         Files.write(javaFile, "package cn.watsontech;\npublic class Test {}".getBytes());
@@ -69,18 +68,16 @@ class CodeReadToolTest {
     }
 
     @Test
-    void shouldSupportBridgeMode() {
-        // Bridge mode with null bridgeService should return not implemented message
-        CodeReadTool tool = new CodeReadTool(true, null, tempDir.toString());
+    void shouldSupportBridgeModeWithNullService() {
+        CodeReadTool tool = new CodeReadTool((cn.watsontech.snapagent.boot2x.bridge.FileBridgeService) null, tempDir.toString());
         String result = tool.readCode("Test");
 
-        assertThat(result).contains("Bridge mode file reading is not yet implemented");
+        assertThat(result).startsWith("ERROR: File not found");
     }
 
     @Test
     void shouldConvertClassNameToPath() {
         CodeReadTool tool = new CodeReadTool(tempDir.toString());
-        // 通过反射测试私有方法
         try {
             java.lang.reflect.Method method = CodeReadTool.class.getDeclaredMethod("convertToFilePath", String.class);
             method.setAccessible(true);

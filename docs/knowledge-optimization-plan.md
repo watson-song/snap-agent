@@ -1,116 +1,86 @@
-# 知识库持续优化计划
+# 知识库生成优化计划
 
-## 1. 优化目标
+> 最后更新：2026-08-10，配合 domain-knowledge-discovery / technical-architecture-discovery 重定位
 
-- **覆盖率**：从 40% → 90%+（核心模块全覆盖）
-- **准确率**：从 70% → 95%+（代码引用准确）
-- **响应时间**：从 30s → 10s（知识检索优化）
+## 1. 问题回顾
 
-## 2. 优化维度
+### 1.1 原始问题
 
-### 2.1 完整性优化
+知识库 21 个文件存在大量 LLM 编造的代码示例，根因是两个知识生成 skill 设计缺陷：
 
-**缺失模块**：
-- [ ] `snap-agent-client.md` — 客户端 SDK 详解
-- [ ] `snap-agent-security.md` — 安全框架（SqlGuard、AuditStore）
-- [ ] `snap-agent-cost-tracking.md` — 成本追踪系统
-- [ ] `snap-agent-patrol.md` — 主动巡检系统
-- [ ] `snap-anchor-system.md` — Anchor 锚点系统
+| 缺陷 | 说明 |
+|------|------|
+| tools 声明错误 | 声明了不存在的 `read_code`、`generate_module_arch`，实际工具是 `code_read` |
+| 无强制源码提取约束 | LLM 读不到源码时编造代码示例填满模板 |
+| 固定模板 | 强迫输出不存在的 section（如 SQL 性能分析），LLM 为填满而编造 |
+| 缺少自检验证 | 生成后没有步骤验证类名/配置项/方法签名是否真实存在 |
+| 两个 skill 职责重叠 | domain-knowledge-discovery 的 Step X/Y/Z 与 technical-architecture-discovery 完全重复 |
 
-**优先级**：P1（本周完成）
+### 1.2 已采取的修复
 
-### 2.2 准确性优化
+2026-08-10 完成 skill 重定位：
 
-**验证方法**：
+| 改动 | 说明 |
+|------|------|
+| 从 starter 移除 | 不再打包为内置 skill，移出 `snap-agent-spring-boot-2x-starter/src/main/resources/docs/skills/` |
+| 移至 `docs/skills/` | 作为集成阶段开发工具文档，位于项目根目录 `docs/skills/` |
+| 重定位为集成工具 | 添加 `type: integration-tool` 标记，明确不是运行时 Agent Skill |
+| 移除 tools 声明 | 集成阶段直接读取文件系统，不依赖 agent tools |
+| 添加强制约束 | "所有代码内容必须来自实际源文件，严禁编造" |
+| 动态模板 | 没有的 section 直接省略，不用占位 |
+| 添加自检验证 | 生成后验证类名/方法签名/配置项 |
+| 消除重叠 | Step X/Y/Z 从 domain skill 移到 tech skill，职责清晰分离 |
+
+## 2. 两个 skill 的当前定位
+
+| 维度 | domain-knowledge-discovery | technical-architecture-discovery |
+|------|---------------------------|--------------------------------|
+| 关注层 | 业务领域层 | 技术基础设施层 |
+| 扫描目标 | Service/Controller/Entity/Mapper | SPI/AutoConfig/Advisor/Factory |
+| 提取内容 | 业务概念、表结构、数据流向 | 接口定义、Bean 组装、配置属性 |
+| 输出文件 | `allocation-plan.md`、`order-create.md` | `myapp-auth-system.md`、`myapp-cache-layer.md` |
+| 运行时机 | 集成阶段，本地执行 | 集成阶段，本地执行 |
+| 文件位置 | `docs/skills/domain-knowledge-discovery.md` | `docs/skills/technical-architecture-discovery.md` |
+
+## 3. 待优化项
+
+### 3.1 知识库文件质量修复（P0）
+
+现有 21 个知识文件含大量虚构代码，需重新生成或手动修正：
+
+| 文件 | 状态 | 处理 |
+|------|------|------|
+| `snap-agent-graph-framework.md` | ❌ 含虚构 ParallelNode/StateCompressor | 用真实代码重写 |
+| `snap-agent-tool-system.md` | ❌ 含虚构 MySqlQueryTool/PluginToolCallbackRegistry | 用真实代码重写 |
+| `snap-agent-advisor-system.md` | ❌ 含虚构 RAGAdvisor/CostTrackingAdvisor/AnchorOrchestrator | 用真实代码重写 |
+| `snap-agent-security-system.md` | ❌ 含虚构 JwtTokenProvider/JwtAuthenticationFilter | 删除虚构 section |
+| `snap-agent-embedding.md` | ❌ 含虚构 OpenAiEmbeddingModel/OllamaEmbeddingModel | 用真实代码重写 |
+| `snap-agent-architecture.md` | ⚠️ AutoConfig 类不全、职责不准 | 补充缺失 6 个类 |
+| `snap-agent-cost-tracking.md` | ⚠️ 类名错误(FileCostStore) | 修正 |
+| `snap-agent-memory-system.md` | ⚠️ 需验证代码准确性 | 验证后修正 |
+| 其余 13 个文件 | ✅ 或 ⚠️ | 逐一验证 |
+
+### 3.2 重新生成知识库（P1）
+
+使用修正后的两个 skill 重新扫描 snap-agent 项目，生成准确的知识库文件：
+
 ```bash
-# 1. 代码引用验证
-grep -rn "class Xxx" docs/knowledge/*.md | while read line; do
-    file=$(echo $line | cut -d: -f1)
-    class=$(echo $line | grep -o "class [A-Za-z]*" | cut -d' ' -f2)
-    if ! find snap-agent-*/src/main/java -name "${class}.java" | grep -q .; then
-        echo " Class not found: $class in $file"
-    fi
-done
-
-# 2. 配置项验证
-grep -o "snap-agent\\.[a-z.-]*" docs/knowledge/*.md | sort -u | while read prop; do
-    if ! grep -rq "${prop##*.}" snap-agent-*/src/main/java; then
-        echo "⚠️  Property may be outdated: $prop"
-    fi
-done
+# 在集成阶段执行（非运行时）
+# 输入：project_root = snap-agent 项目根目录
+# 输出：docs/knowledge/*.md
 ```
 
-### 2.3 查询优化
+### 3.3 增量更新机制（P2）
 
-**向量检索优化**：
-- 增加文档 chunk 大小（512 → 1024 tokens）
-- 优化 embedding 模型（text-embedding-3-large）
-- 添加元数据过滤（module、version）
-
-## 3. 自动化生成
-
-### 3.1 使用 technical-architecture-discovery skill
-
-```bash
-# 扫描所有模块
-for module in snap-agent-core snap-agent-spring-boot-2x-starter snap-agent-client; do
-    echo "Scanning $module..."
-    # 调用 skill 生成技术文档
-done
-```
-
-### 3.2 增量更新机制
-
-```python
-# 检测代码变更
-git diff --name-only main...HEAD | grep ".java$" | while read file; do
-    module=$(echo $file | cut -d'/' -f1)
-    # 重新生成相关文档
-done
-```
+代码变更后自动触发知识文件重新生成：
+- 监听 `.java` 文件变更
+- 识别受影响的子系统
+- 重新生成对应知识文件
 
 ## 4. 验证标准
 
-### 4.1 完整性验证
-
-| 查询 | 期望结果 | 状态 |
-|------|----------|------|
-| "SnapAgent 如何组装 memory？" | 完整架构图 + 代码流程 | ✅ |
-| "Agent 引擎如何执行任务？" | ReAct Graph 流程 | ✅ |
-| "Advisor 如何注入上下文？" | Order 排序 + beforeNode/afterNode | ✅ |
-| "Tool 如何注册和发现？" | ToolCallbackRegistry 流程 | ✅ |
-| "Graph 状态如何管理？" | GraphState + Checkpoint | ✅ |
-| "Security 如何保护系统？" | SqlGuard + AuditStore | 🔄 |
-| "Cost 如何追踪消耗？" | CostTracker + BudgetEnforcer | 🔄 |
-
-### 4.2 准确性验证
-
-- [ ] 所有类名在代码中存在
-- [ ] 所有配置项在 Properties 类中定义
-- [ ] 所有流程图符合实际执行顺序
-
-## 5. 执行时间表
-
-| 阶段 | 任务 | 时间 | 负责人 |
-|------|------|------|--------|
-| Week 1 | 补充 5 个缺失模块文档 | 3 天 | AI |
-| Week 2 | 代码引用准确性验证 | 2 天 | AI + 人工 |
-| Week 3 | 向量检索优化 | 2 天 | AI |
-| Week 4 | 自动化生成流程 | 3 天 | AI |
-
-## 6. 度量指标
-
-```yaml
-metrics:
-  coverage:
-    target: 0.9  # 90% 模块覆盖
-    current: 0.6  # 60% 当前覆盖
-  
-  accuracy:
-    target: 0.95  # 95% 准确率
-    current: 0.85  # 85% 当前准确率
-  
-  response_time:
-    target: 10s  # 10 秒响应
-    current: 25s  # 25 秒当前响应
-```
+- [ ] 所有代码块中的类名在源码中存在
+- [ ] 所有方法签名与源码一致
+- [ ] 所有配置项在 @ConfigurationProperties 中定义
+- [ ] 没有虚构的工具调用痕迹（read_code、generate_module_arch）
+- [ ] 每个文件 100-200 行，不超过 300 行

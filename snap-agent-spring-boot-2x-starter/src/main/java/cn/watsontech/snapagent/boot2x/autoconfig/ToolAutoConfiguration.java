@@ -31,6 +31,7 @@ import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import cn.watsontech.snapagent.boot2x.tool.CodeReadTool;
+import cn.watsontech.snapagent.boot2x.bridge.FileBridgeService;
 
 import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import org.slf4j.Logger;
@@ -471,8 +472,15 @@ public class ToolAutoConfiguration {
     // ---- Code Read Tool ----
     @Bean
     @ConditionalOnMissingBean
-    public CodeReadTool codeReadTool() {
+    public CodeReadTool codeReadTool(ObjectProvider<FileBridgeService> fileBridgeServiceProvider) {
         String projectRoot = System.getProperty("user.dir");
+        FileBridgeService fbs = fileBridgeServiceProvider.getIfAvailable();
+        if (fbs != null) {
+            return new CodeReadTool(fbs,
+                projectRoot + "/snap-agent-core/src/main/java",
+                projectRoot + "/snap-agent-spring-boot-2x-starter/src/main/java"
+            );
+        }
         return new CodeReadTool(
             projectRoot + "/snap-agent-core/src/main/java",
             projectRoot + "/snap-agent-spring-boot-2x-starter/src/main/java"

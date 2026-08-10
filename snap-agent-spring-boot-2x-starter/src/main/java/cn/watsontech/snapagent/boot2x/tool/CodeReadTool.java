@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.boot2x.tool;
 
+import cn.watsontech.snapagent.boot2x.bridge.FileBridgeService;
 import cn.watsontech.snapagent.core.tool.Tool;
 import cn.watsontech.snapagent.core.tool.ToolParam;
 
@@ -14,13 +15,15 @@ import java.util.stream.Collectors;
  *
  * <p>Supports two modes:</p>
  * <ul>
- *   <li><b>Local mode</b>: Reads files from server-side directories (default)</li>
- *   <li><b>Bridge mode</b>: Reads files from user's local machine via browser extension</li>
+ *   <li><b>Local mode</b> (default): Reads files from server-side directories
+ *       using Java NIO. Used when running standalone locally.</li>
+ *   <li><b>Bridge mode</b>: Reads files from user's local machine via
+ *       Chrome extension's fileSystem API. Used when server is remote.</li>
  * </ul>
  *
  * <p>Bridge mode requires:</p>
  * <ol>
- *   <li>User has installed SnapAgent Bridge Chrome extension</li>
+ *   <li>User has installed SnapAgent Bridge Chrome extension v1.1.0+</li>
  *   <li>User has authorized a code directory in the extension popup</li>
  *   <li>SnapAgent server has bridge.enabled=true</li>
  * </ol>
@@ -28,34 +31,34 @@ import java.util.stream.Collectors;
 public class CodeReadTool {
 
     private final String[] baseDirs;
-    private final boolean useBridge;
-    private final Object bridgeService; // IssueBridgeService or LlmBridgeService
+    private final FileBridgeService fileBridgeService;
 
+    /** Local mode constructor. */
     public CodeReadTool(String... baseDirs) {
         this.baseDirs = baseDirs;
-        this.useBridge = false;
-        this.bridgeService = null;
+        this.fileBridgeService = null;
     }
 
-    public CodeReadTool(boolean useBridge, Object bridgeService, String... baseDirs) {
+    /** Bridge mode constructor. */
+    public CodeReadTool(FileBridgeService fileBridgeService, String... baseDirs) {
         this.baseDirs = baseDirs;
-        this.useBridge = useBridge;
-        this.bridgeService = bridgeService;
+        this.fileBridgeService = fileBridgeService;
     }
 
     @Tool(name = "code_read", description = "Read source code file by class name or relative path. " +
         "Supports .java, .py, .js, .ts, .md files. " +
         "Example: 'cn.watsontech.snapagent.core.memory.MessageChatMemoryAdvisor' or 'core/memory/MessageChatMemoryAdvisor.java'")
     public String readCode(
-            @ToolParam(description = "Class name (e.g., MessageChatMemoryAdvisor) or relative path (e.g., core/memory/MessageChatMemoryAdvisor.java)") 
+            @ToolParam(description = "Class name (e.g., MessageChatMemoryAdvisor) or relative path (e.g., core/memory/MessageChatMemoryAdvisor.java)")
             String identifier) {
-        
-        // 如果使用 bridge 模式
-        if (useBridge && bridgeService != null) {
-            return readViaBridge(identifier);
+
+        // Try bridge mode first if available
+        if (fileBridgeService != null && fileBridgeService.isActive()) {
+            String filePath = convertToFilePath(identifier);
+            return readViaBridge(filePath);
         }
-        
-        // 本地模式
+
+        // Fallback to local mode
         return readLocal(identifier);
     }
 
@@ -63,39 +66,33 @@ public class CodeReadTool {
         "Returns file paths and matching lines.")
     public String searchCode(
             @ToolParam(description = "Text to search for") String query,
-            @ToolParam(description = "File extension filter (e.g., '.java', '.py'). Leave empty for all.") 
+            @ToolParam(description = "File extension filter (e.g., '.java', '.py'). Leave empty for all.")
             String extension) {
-        
-        // Bridge 模式暂不支持搜索，只支持本地
         return searchLocal(query, extension);
     }
 
-    /**
-     * 通过 bridge 读取本地文件
-     */
-    private String readViaBridge(String identifier) {
+    // ---- Bridge mode ----
+
+    private String readViaBridge(String filePath) {
         try {
-            // 转换类名为文件路径
-            String filePath = convertToFilePath(identifier);
-            
-            // TODO: 通过 bridgeService 发送读取请求到浏览器
-            // 这需要 IssueBridgeService 或类似的桥接服务
-            // 目前返回提示
-            return "Bridge mode file reading is not yet implemented. " +
-                   "Please use local mode or wait for bridge implementation.";
+            FileBridgeService.FileReadResult result = fileBridgeService.readFile(filePath, 15000);
+            if (result.isSuccess()) {
+                return "File: " + filePath + " (via bridge)\n\n" + result.getContent();
+            } else {
+                return "ERROR (bridge): " + result.getError();
+            }
         } catch (Exception e) {
             return "ERROR: Bridge read failed: " + e.getMessage();
         }
     }
 
-    /**
-     * 本地模式读取文件
-     */
+    // ---- Local mode ----
+
     private String readLocal(String identifier) {
         try {
             Path filePath = resolveFilePath(identifier);
             if (filePath == null) {
-                return "ERROR: File not found for identifier: " + identifier + 
+                return "ERROR: File not found for identifier: " + identifier +
                        "\n\nSearched in:\n" + String.join("\n", baseDirs);
             }
 
@@ -112,9 +109,6 @@ public class CodeReadTool {
         }
     }
 
-    /**
-     * 本地模式搜索代码
-     */
     private String searchLocal(String query, String extension) {
         try {
             StringBuilder result = new StringBuilder();
@@ -129,7 +123,7 @@ public class CodeReadTool {
                 for (Path file : (Iterable<Path>) stream::iterator) {
                     if (Files.isRegularFile(file)) {
                         String fileName = file.toString();
-                        if (extension != null && !extension.isEmpty() 
+                        if (extension != null && !extension.isEmpty()
                             && !fileName.endsWith(extension)) {
                             continue;
                         }
@@ -167,11 +161,10 @@ public class CodeReadTool {
         }
     }
 
-    /**
-     * 将类名转换为文件路径
-     */
+    // ---- Helpers ----
+
     private String convertToFilePath(String identifier) {
-        if (identifier.contains("/") || identifier.endsWith(".java") 
+        if (identifier.contains("/") || identifier.endsWith(".java")
             || identifier.endsWith(".py") || identifier.endsWith(".js")) {
             return identifier;
         }
@@ -184,12 +177,8 @@ public class CodeReadTool {
         return className.replace('.', '/') + ".java";
     }
 
-    /**
-     * 解析文件路径
-     */
     private Path resolveFilePath(String identifier) {
-        // 如果是文件路径
-        if (identifier.contains("/") || identifier.endsWith(".java") 
+        if (identifier.contains("/") || identifier.endsWith(".java")
             || identifier.endsWith(".py") || identifier.endsWith(".js")) {
             for (String baseDir : baseDirs) {
                 Path path = Paths.get(baseDir, identifier);
@@ -198,10 +187,9 @@ public class CodeReadTool {
             return null;
         }
 
-        // 如果是类名（转换为路径）
         String className = identifier;
         String extension = ".java";
-        
+
         if (className.endsWith(".java")) {
             className = className.substring(0, className.length() - 5);
         }
