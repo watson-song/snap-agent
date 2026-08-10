@@ -1636,6 +1636,7 @@ public class SnapAgentController {
     // ---- POST /conversations (save/update a conversation) ----
     @PostMapping("/conversations")
     public ResponseEntity<Object> saveConversation(@RequestBody Map<String, Object> body) {
+        log.info("POST /conversations called with body keys: {}", body.keySet());
         ResponseEntity<Object> authError = requireAuth();
         if (authError != null) return authError;
 
@@ -1679,7 +1680,9 @@ public class SnapAgentController {
         long now = System.currentTimeMillis();
         Conversation conv = new Conversation(conversationId, userId, skillId, title,
                 now, now, messages);
+        log.info("Saving conversation with {} messages, skillId={}, userId={}", messages.size(), skillId, userId);
         Conversation saved = conversationStore.save(conv);
+        log.info("Conversation saved: id={}, messageCount={}", saved.getId(), saved.getMessages().size());
 
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("conversationId", saved.getId());

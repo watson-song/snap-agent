@@ -1,5 +1,8 @@
 package cn.watsontech.snapagent.boot2x.agent;
 
+import cn.watsontech.snapagent.boot2x.conversation.Conversation;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationMessage;
+import cn.watsontech.snapagent.boot2x.conversation.ConversationStore;
 import cn.watsontech.snapagent.core.agent.AgentTask;
 import cn.watsontech.snapagent.core.agent.TaskStatus;
 import cn.watsontech.snapagent.core.agent.TaskStore;
@@ -17,6 +20,7 @@ import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -39,15 +43,23 @@ public class AgentService {
     private final int maxTurns;
     private final List<Advisor> advisors;
     private final GraphExecutor graphExecutor;
+    private final ConversationStore conversationStore;
 
     public AgentService(LlmClient llmClient, ToolCallbackRegistry tools,
                         TaskStore taskStore, int maxTurns, List<Advisor> advisors) {
+        this(llmClient, tools, taskStore, maxTurns, advisors, null);
+    }
+
+    public AgentService(LlmClient llmClient, ToolCallbackRegistry tools,
+                        TaskStore taskStore, int maxTurns, List<Advisor> advisors,
+                        ConversationStore conversationStore) {
         this.llmClient = llmClient;
         this.tools = tools;
         this.taskStore = taskStore;
         this.maxTurns = maxTurns;
         this.advisors = advisors != null ? advisors : Collections.<Advisor>emptyList();
         this.graphExecutor = new GraphExecutor(new InMemoryCheckpointStore(), maxTurns);
+        this.conversationStore = conversationStore;
     }
 
     /**
@@ -90,9 +102,27 @@ public class AgentService {
 
             // Map graph TaskResult to AgentTask status
             TaskStatus finalStatus = mapStatus(result.getStatus());
+
+            // Check if the task had error events in its transcript — if so, override to FAILED
+            // (the graph executor may return SUCCEEDED even if an LLM error occurred mid-execution)
+            boolean hasErrorEvent = false;
+            for (TranscriptEvent ev : task.getTranscript()) {
+                if (TranscriptEvent.TYPE_ERROR.equals(ev.getType())) {
+                    hasErrorEvent = true;
+                    break;
+                }
+            }
+            if (hasErrorEvent && finalStatus == TaskStatus.SUCCEEDED) {
+                finalStatus = TaskStatus.FAILED;
+                log.info("Task {} had error events in transcript, overriding status to FAILED", task.getTaskId());
+            }
+
             task.setStatus(finalStatus);
             task.setReport(extractReport(task, result));
             taskStore.update(task);
+
+            // Save conversation messages to ConversationStore (if available)
+            saveConversationMessages(task, skill.getName());
 
             log.info("Task {} completed with status {}", task.getTaskId(), finalStatus);
 
@@ -126,5 +156,69 @@ public class AgentService {
         }
         String report = sb.toString().trim();
         return report.isEmpty() ? result.getReport() : report;
+    }
+
+    /**
+     * Saves conversation messages from the task transcript to the ConversationStore.
+     * This ensures that user messages and assistant responses are persisted even if
+     * the frontend doesn't call the /conversations endpoint.
+     */
+    private void saveConversationMessages(AgentTask task, String skillName) {
+        if (conversationStore == null) {
+            return;
+        }
+        try {
+            List<ConversationMessage> messages = new ArrayList<ConversationMessage>();
+            long now = System.currentTimeMillis();
+
+            // Extract user message from task inputs
+            if (task.getInputs() != null) {
+                String userMessage = null;
+                if (task.getInputs().containsKey("message")) {
+                    userMessage = String.valueOf(task.getInputs().get("message"));
+                } else if (task.getInputs().containsKey("_user_message")) {
+                    userMessage = String.valueOf(task.getInputs().get("_user_message"));
+                }
+                if (userMessage != null && !userMessage.isEmpty()) {
+                    messages.add(new ConversationMessage("user", userMessage, now, null));
+                }
+            }
+
+            // Extract assistant response directly from transcript THOUGHT events
+            // (avoid calling extractReport(task, null) which has NPE risk)
+            StringBuilder responseBuilder = new StringBuilder();
+            for (TranscriptEvent event : task.getTranscript()) {
+                if (TranscriptEvent.TYPE_THOUGHT.equals(event.getType()) && event.getText() != null) {
+                    responseBuilder.append(event.getText());
+                }
+            }
+            String assistantResponse = responseBuilder.toString().trim();
+            if (assistantResponse.isEmpty()) {
+                assistantResponse = null;
+            }
+            if (assistantResponse != null) {
+                messages.add(new ConversationMessage("assistant", assistantResponse, now + 1, null));
+            }
+
+            if (!messages.isEmpty()) {
+                // Create or update conversation
+                String conversationId = "conv_" + task.getTaskId();
+                Conversation conversation = new Conversation(
+                    conversationId,
+                    task.getUserId(),
+                    skillName,
+                    null, // title will be auto-generated
+                    now,
+                    now,
+                    messages
+                );
+                conversationStore.save(conversation);
+                log.info("Saved {} messages to conversation {} for task {}",
+                    messages.size(), conversationId, task.getTaskId());
+            }
+        } catch (Exception e) {
+            log.warn("Failed to save conversation messages for task {}: {}",
+                task.getTaskId(), e.getMessage());
+        }
     }
 }

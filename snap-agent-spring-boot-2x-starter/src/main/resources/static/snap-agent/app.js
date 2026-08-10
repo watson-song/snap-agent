@@ -869,6 +869,20 @@ function finalizeStreamingThought(streamState, toType) {
 async function runSkill() {
     // Support direct chat without skill selection
     const skillName = selectedSkill ? selectedSkill.name : '__default__';
+
+    // If no skill selected, set activeSkillName to __default__ so UI renders correctly
+    if (!selectedSkill) {
+        activeSkillName = '__default__';
+        // Update top bar to show "通用对话" instead of placeholder
+        const ctx = document.getElementById('skillContext');
+        if (ctx) {
+            ctx.innerHTML = '<span class="skill-name">💬 通用对话</span>';
+        }
+        // Hide welcome message if it's still showing
+        const welcome = document.getElementById('chatWelcome');
+        if (welcome) welcome.style.display = 'none';
+    }
+
     const state = getSkillState(skillName);
 
     // Collect inputs from form fields
@@ -1012,6 +1026,7 @@ function subscribeStream(taskId, skillName) {
             pendingRender: false,
             done: false,
             cancelled: false,
+            taskError: false,
             capturedSkillName: skillName,
             thoughtEl: null
         };
@@ -1025,6 +1040,7 @@ function subscribeStream(taskId, skillName) {
         streamState.pendingRender = false;
         streamState.done = false;
         streamState.cancelled = false;
+        streamState.taskError = false;
         streamState.thoughtEl = null;
     }
 
@@ -1137,8 +1153,10 @@ function subscribeStream(taskId, skillName) {
         streamState.done = true;
         if (activeSkillName === skillName) hideRobotWorking();
         try {
-            // Keep the in-progress entry as the final "回复"
-            finalizeStreamingThought(streamState, 'response');
+            // Only finalize as 'response' if no task_error was received
+            if (!streamState.taskError) {
+                finalizeStreamingThought(streamState, 'response');
+            }
             let status = 'SUCCEEDED';
             let report = '';
             try {
@@ -1148,9 +1166,16 @@ function subscribeStream(taskId, skillName) {
             } catch (err) {
                 if (e.data && e.data.trim()) status = e.data.trim();
             }
+            // If task_error was received, override status to FAILED
+            if (streamState.taskError && status === 'SUCCEEDED') {
+                status = 'FAILED';
+            }
             // Build terminal message — prominent for non-SUCCEEDED
             let completionContent, completionType = 'completion';
-            if (status === 'SUCCEEDED') {
+            if (streamState.taskError && !streamState.allText) {
+                // task_error already showed the error; only add completion if there was actual response text
+                completionContent = null; // skip completion message
+            } else if (status === 'SUCCEEDED') {
                 completionContent = `— 完成 —`;
             } else if (status === 'TIMEOUT') {
                 completionContent = `⚠ 任务超时：${report || '已达最大轮次上限，诊断未能完成'}`;
@@ -1163,7 +1188,9 @@ function subscribeStream(taskId, skillName) {
             } else {
                 completionContent = `— ${status} —`;
             }
-            appendTranscript(skillName, { type: completionType, content: completionContent, timestamp: Date.now() });
+            if (completionContent) {
+                appendTranscript(skillName, { type: completionType, content: completionContent, timestamp: Date.now() });
+            }
             // Save last task info for chat action bar
             state.lastTaskId = streamState.taskId;
             state.lastTaskStatus = status;
@@ -1203,6 +1230,7 @@ function subscribeStream(taskId, skillName) {
         console.log('[SSE] task_error for', skillName);
         if (activeSkillName === skillName) hideRobotWorking();
         finalizeStreamingThought(streamState, 'thought');
+        streamState.taskError = true;
         try {
             const data = JSON.parse(e.data);
             appendTranscript(skillName, { type: 'error', content: data.text || '任务执行出错', timestamp: Date.now() });
@@ -1332,10 +1360,17 @@ document.getElementById('historyBtn').addEventListener('click', showHistoryModal
 
 async function saveConversationToBackend(skillName) {
     const state = skillChatState[skillName];
-    if (!state) return;
+    if (!state) {
+        console.warn('[Conversation] No state for skill:', skillName);
+        return;
+    }
     // Save the full transcript (not just user/assistant messages) so that
     // tool calls, errors, and completions are restored on page refresh.
-    if (!state.transcript || state.transcript.length === 0) return;
+    if (!state.transcript || state.transcript.length === 0) {
+        console.warn('[Conversation] Empty transcript for skill:', skillName);
+        return;
+    }
+    console.log('[Conversation] Saving', state.transcript.length, 'messages for skill:', skillName);
     try {
         const resp = await fetch(`${BASE}/conversations`, {
             method: 'POST',
@@ -1355,6 +1390,8 @@ async function saveConversationToBackend(skillName) {
             const data = await resp.json();
             state.conversationId = data.conversationId;
             console.log('[Conversation] saved:', data.conversationId, 'messages:', data.messageCount);
+        } else {
+            console.error('[Conversation] save failed:', resp.status, await resp.text());
         }
     } catch (e) {
         console.error('[Conversation] save failed:', e);

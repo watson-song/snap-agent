@@ -226,7 +226,9 @@ public class SnapAgentAutoConfiguration {
             SnapAgentProperties props,
             ObjectProvider<Advisor> advisorProvider,
             ObjectProvider<CostTracker> costTrackerProvider,
-            ObjectProvider<CostCalculator> costCalculatorProvider) {
+            ObjectProvider<CostCalculator> costCalculatorProvider,
+            ConversationStore conversationStore) {
+        log.info("AgentService bean creation started, conversationStore={}", conversationStore != null ? "present" : "null");
         LlmClient llmClient = llmClientProvider.getIfAvailable();
         if (llmClient == null) {
             log.warn("LlmClient not available; AgentService will not function");
@@ -250,10 +252,11 @@ public class SnapAgentAutoConfiguration {
         }
         java.util.List<Advisor> advisors = advisorProvider.orderedStream()
                 .collect(java.util.stream.Collectors.toList());
-        log.info("AgentService assembled with {} Advisor(s): {}", advisors.size(),
-                advisors.stream().map(Advisor::getName).collect(java.util.stream.Collectors.joining(", ")));
+        log.info("AgentService assembled with {} Advisor(s): {}{}", advisors.size(),
+                advisors.stream().map(Advisor::getName).collect(java.util.stream.Collectors.joining(", ")),
+                conversationStore != null ? " (ConversationStore enabled)" : "");
         return new AgentService(llmClient, toolCallbackRegistry, taskStore,
-                props.getAgent().getMaxTurns(), advisors);
+                props.getAgent().getMaxTurns(), advisors, conversationStore);
     }
 
     // ---- ThreadPoolTaskExecutor ----

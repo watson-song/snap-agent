@@ -125,7 +125,7 @@ public class FileConversationStore implements ConversationStore {
                     ));
                 }
                 chatMemoryRepository.save(convId, messages);
-                log.debug("Saved {} messages to ChatMemoryRepository for conversation {}",
+                log.info("Saved {} messages to ChatMemoryRepository for conversation {}",
                         messages.size(), convId);
             } catch (Exception e) {
                 log.error("Failed to save messages to ChatMemoryRepository for conversation {}: {}",
@@ -171,6 +171,8 @@ public class FileConversationStore implements ConversationStore {
         if (chatMemoryRepository != null) {
             try {
                 List<Message> coreMessages = chatMemoryRepository.load(conversationId);
+                log.info("Loaded {} messages from ChatMemoryRepository for conversation {}",
+                        coreMessages != null ? coreMessages.size() : 0, conversationId);
                 if (coreMessages != null && !coreMessages.isEmpty()) {
                     messages = new ArrayList<ConversationMessage>();
                     for (Message msg : coreMessages) {
@@ -182,7 +184,7 @@ public class FileConversationStore implements ConversationStore {
                                 null  // taskId not available in Message
                         ));
                     }
-                    log.debug("Loaded {} messages from ChatMemoryRepository for conversation {}",
+                    log.info("Converted {} messages for conversation {}",
                             messages.size(), conversationId);
                 }
             } catch (Exception e) {
