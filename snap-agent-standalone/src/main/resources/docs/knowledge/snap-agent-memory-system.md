@@ -42,14 +42,14 @@ public interface ChatMemory {
 public interface ChatMemoryRepository {
     void save(String conversationId, List<Message> messages);
     List<Message> load(String conversationId);
-    List<String> listConversationIds();
+    default List<String> listConversations(String userId);  // 按用户过滤
     void delete(String conversationId);
 }
 ```
 
 | 实现 | 模块 | 说明 |
 |------|------|------|
-| `InMemoryChatMemoryRepository` | core | 内存，默认 |
+| `InMemoryChatMemoryRepository` | core | 内存，默认（listConversations 返回空）|
 | `FileChatMemoryRepository` | boot2x | JSON 文件持久化 |
 
 ## 4. MessagePartitioner
@@ -57,13 +57,13 @@ public interface ChatMemoryRepository {
 ```java
 // core/memory/MessagePartitioner.java
 public interface MessagePartitioner {
-    List<Message> partition(List<Message> messages, int maxTokens);
+    List<Message> partition(List<Message> history, String userMessage);
 }
 ```
 
 | 实现 | 说明 |
 |------|------|
-| `LastNMessagePartitioner` | 取最后 N 条 |
+| `LastNMessagePartitioner` | 保留历史 + 追加 userMessage |
 
 ## 5. MessageChatMemoryAdvisor (Order=100)
 

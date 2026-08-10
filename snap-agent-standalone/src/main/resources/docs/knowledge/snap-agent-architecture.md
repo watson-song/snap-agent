@@ -20,7 +20,7 @@ snap-agent-parent
 └── snap-agent-demo                     # E2E 演示
 ```
 
-## 2. 自动配置类（12 个）
+## 2. 自动配置类（13 个）
 
 | 配置类 | 启用条件 | 核心 Bean |
 |--------|---------|----------|
@@ -28,14 +28,15 @@ snap-agent-parent
 | `WebAutoConfiguration` | enabled | SnapAgentController, ConversationStore |
 | `ToolAutoConfiguration` | enabled | ToolCallbackRegistry, 内置工具 |
 | `SecurityAutoConfiguration` | enabled | SecurityGateway, SqlGuard, AuditStore |
-| `BridgeAutoConfiguration` | `bridge.enabled=true` | IssueBridgeService, BridgeHttpExecutor |
-| `LlmBridgeAutoConfiguration` | enabled | LlmBridgeService, BridgeLlmClient |
+| `BridgeAutoConfiguration` | `@ConditionalOnExpression(enabled AND bridge.enabled)` | IssueBridgeService, BridgeHttpExecutor |
+| `LlmBridgeAutoConfiguration` | `snap-agent.llm.api-type=bridge` | LlmBridgeService, BridgeLlmClient |
+| `FileBridgeAutoConfiguration` | enabled | FileBridgeService, FileBridgeController |
 | `CostAutoConfiguration` | `cost.enabled=true` | CostStore, CostTracker, CostCalculator, BudgetEnforcer |
 | `KnowledgeAutoConfiguration` | enabled | VectorStore, DocumentRetriever, KnowledgeETLPipeline |
 | `DomainKnowledgeAutoConfiguration` | enabled | DomainKnowledgeIndex, DomainKnowledgeLoader |
 | `IssueAutoConfiguration` | enabled | IssueStore, IssueTracker, VcsClient, FixExecutionService |
 | `PatrolAutoConfiguration` | `patrol.enabled=true` | PatrolScheduler, AlertConverger, AlertPushChannel |
-| `WorkflowAutoConfiguration` | `workflows.enabled=true` | WorkflowEngine |
+| `WorkflowAutoConfiguration` | `snap-agent.enabled=true`（内部 bean 按 `workflows.enabled`）| WorkflowEngine, WorkflowDefinition |
 
 ## 3. Agent 引擎
 

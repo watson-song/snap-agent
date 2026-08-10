@@ -73,8 +73,11 @@ ToolCallback[] callbacks = ToolCallbacks.from(myToolObject);
 // core/tool/ToolCallbackRegistry.java
 public interface ToolCallbackRegistry {
     ToolCallback find(String name);
+    default void register(ToolCallback callback) { ... }
+    default void unregister(String toolName) { ... }
     List<ToolCallback> getAll();
     String toToolDefinitionsJson();
+    default ToolCallbackRegistry subset(Map<String,String> pluginOverrides) { ... }
 }
 
 // core/tool/ToolCallbackRegistryImpl.java — ConcurrentHashMap 实现

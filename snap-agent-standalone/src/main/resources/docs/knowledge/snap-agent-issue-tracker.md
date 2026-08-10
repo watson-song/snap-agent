@@ -24,8 +24,8 @@ Agent 诊断完成 → IssueClosureNode → IssueClosureHandler
 
 | 接口 | 职责 |
 |------|------|
-| `IssueTracker` | createIssue / updateStatus / addComment |
-| `IssueStore` | save / load / findByTaskId / list / delete |
+| `IssueTracker` | createIssue / updateStatus / getIssueUrl / type / addComment(default) |
+| `IssueStore` | save / load / findByTaskId / findByPrNumber / list / listByStatus / delete |
 | `SolutionSuggester` | suggest → SolutionSuggestion |
 | `VerificationRunner` | verify → VerificationResult |
 | `IssueClosureHandler` | 闭环处理 SPI |
@@ -59,7 +59,7 @@ PR Merged webhook → FixExecutionService
 
 | 接口/类 | 说明 |
 |---------|------|
-| `VcsClient` (core/vcs) | createBranch / createMergeRequest / addComment |
+| `VcsClient` (core/vcs) | createBranch / commitFiles / createPullRequest / getMergeStatus / type |
 | `GitLabVcsClient` | GitLab 实现 |
 | `BitbucketVcsClient` | Bitbucket 实现 |
 | `AbstractHttpVcsClient` | HTTP 基类 |

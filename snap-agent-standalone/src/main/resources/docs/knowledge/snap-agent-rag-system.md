@@ -41,16 +41,16 @@ RetrievalAugmentationAdvisor (Order=200)
 ```java
 // core/vectorstore/VectorStore.java
 public interface VectorStore {
-    void add(Document document, float[] vector);
+    void add(List<Document> documents);              // 批量添加（embedding 已内置）
     List<Document> similaritySearch(SearchRequest request);
-    void delete(String id);
+    void delete(List<String> ids);                    // 批量删除
 }
 ```
 
 | 类 | 说明 |
 |----|------|
-| `Document` | id + content + metadata |
-| `SearchRequest` | queryVector + topK + minScore + metadataFilter |
+| `Document` | id + content + metadata + embedding |
+| `SearchRequest` | query + topK + similarityThreshold + filterExpression |
 | `InMemoryVectorStore` | 内存实现，余弦相似度 |
 
 ## 4. EmbeddingModel

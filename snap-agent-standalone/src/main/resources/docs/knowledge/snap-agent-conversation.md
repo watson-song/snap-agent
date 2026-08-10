@@ -10,11 +10,11 @@ author: SnapAgent
 
 # SnapAgent 会话管理
 
-## 1. 核心 SPI (core/conversation/)
+## 1. 核心 SPI (boot2x/conversation/)
 
 | 类 | 职责 |
 |----|------|
-| `ConversationStore` | SPI: save / load / list / delete / exportMarkdown |
+| `ConversationStore` | SPI: save / load / list(userId) / delete(id, userId) / exportMarkdown(id, userId) — 所有方法带 userId 归属校验 |
 | `Conversation` | 会话数据（id, userId, skillId, title, messages）|
 | `ConversationMessage` | 消息（role, content, timestamp）|
 | `ConversationSummary` | 列表用摘要（无 messages body）|

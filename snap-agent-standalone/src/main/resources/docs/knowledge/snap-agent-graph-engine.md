@@ -99,10 +99,11 @@ public class GraphExecutor {
 ```java
 // core/graph/checkpoint/CheckpointStore.java
 public interface CheckpointStore {
-    void save(String taskId, int turn, GraphState state);
-    GraphState load(String taskId, int turn);
-    void delete(String taskId);
-    List<Integer> listTurns(String taskId);
+    String save(String threadId, GraphState state);    // returns checkpointId
+    GraphState load(String checkpointId);
+    void delete(String checkpointId);
+    void deleteByThread(String threadId);
+    List<CheckpointMetadata> list(String threadId);
 }
 ```
 
@@ -110,7 +111,7 @@ public interface CheckpointStore {
 |------|------|
 | `InMemoryCheckpointStore` | 内存，默认 |
 | `SqliteCheckpointStore` | SQLite 文件，开发环境 |
-| `CheckpointMetadata` | 检查点元数据 |
+| `CheckpointMetadata` | 检查点元数据（checkpointId, threadId, turn, createdAt）|
 
 ## 5. HITL（人工审批）
 

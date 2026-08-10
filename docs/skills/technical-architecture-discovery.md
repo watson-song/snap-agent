@@ -169,7 +169,7 @@ name: 子系统名称
 description: 子系统描述
 version: 1.0.0
 modules: [模块列表]
-author: domain-knowledge-discovery
+author: technical-architecture-discovery
 ---
 
 # 子系统名称

@@ -13,7 +13,7 @@ author: SnapAgent
 ## 1. 架构
 
 ```
-ScheduledPatrolScheduler → PatrolTask → AgentExecutor(health-patrol skill)
+ScheduledPatrolScheduler → PatrolTask → AgentService(health-patrol skill)
     → PatrolReport → PatrolReportStore
     → AnomalyEvent → AnomalyEventListener → AlertConverger → AlertPushChannel
 ```

@@ -25,7 +25,7 @@ LlmClient 调用 → CostTrackingLlmClient(装饰器)
 public interface CostTracker {
     void record(CostRecord record);
     boolean isWithinBudget(String userId, String skillId);
-    CostSummary getSummary(String dimension, String value);
+    CostSummary getSummary(String dimension, String dimensionValue, long from, long to);
 }
 
 // core/cost/CostStore.java

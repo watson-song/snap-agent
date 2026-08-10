@@ -21,7 +21,7 @@ YAML 文件 → YamlWorkflowLoader → WorkflowDefinition
     → WorkflowResult
 ```
 
-## 2. 核心 SPI (core/workflow/)
+## 2. 数据模型 (boot2x/workflow/)
 
 | 类 | 职责 |
 |----|------|
@@ -37,7 +37,7 @@ YAML 文件 → YamlWorkflowLoader → WorkflowDefinition
 | `StepResult` | stepName + taskId + status + report |
 | `WorkflowResult` | status + Map<String, StepResult> |
 
-## 4. 实现 (boot2x/workflow/)
+## 4. 实现
 
 | 类 | 说明 |
 |----|------|
