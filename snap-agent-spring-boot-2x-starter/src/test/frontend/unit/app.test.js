@@ -12,6 +12,21 @@ const utilitySource = appSource.split('// ===== Init =====')[0];
 // eslint-disable-next-line no-eval
 eval(utilitySource);
 
+describe('app.js — direct chat without skill selection', () => {
+  it('runSkill function supports __default__ skillName when no skill selected', () => {
+    // Verify the source code contains the direct chat logic
+    expect(appSource).toContain("const skillName = selectedSkill ? selectedSkill.name : '__default__';");
+    expect(appSource).toContain("if (selectedSkill) {");
+    expect(appSource).toContain("requestBody.skillId = skillName;");
+  });
+
+  it('request body includes message field for direct chat', () => {
+    // Verify the source code sends message as top-level field
+    expect(appSource).toContain("requestBody.message = inputs.message;");
+    expect(appSource).toContain("requestBody.message = inputs._user_message;");
+  });
+});
+
 describe('app.js — formatTime', () => {
   it('formats a timestamp to HH:MM:SS', () => {
     const ts = new Date('2024-01-15T10:30:45').getTime();

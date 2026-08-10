@@ -79,7 +79,7 @@
         <!-- Top Bar -->
         <header class="top-bar">
             <div class="skill-context" id="skillContext">
-                <span class="placeholder">选择一个 Skill 开始</span>
+                <span class="placeholder">直接开始对话，或选择一个 Skill</span>
             </div>
             <div class="top-bar-right">
                 <div class="model-selector">
@@ -98,20 +98,20 @@
             <div class="chat-welcome" id="chatWelcome">
                 <div class="welcome-icon">⚡</div>
                 <h2>SnapAgent</h2>
-                <p>选择左侧的 Skill，输入参数后开始诊断</p>
+                <p>直接在下方输入您的问题，或选择左侧的 Skill 获得更专业的帮助</p>
             </div>
             <div class="chat-messages" id="chatMessages"></div>
         </div>
 
         <!-- Input Area -->
-        <footer class="input-area" id="inputArea" style="display:none;">
+        <footer class="input-area" id="inputArea">
             <div class="shortcut-bar" id="shortcutBar" style="display:none;"></div>
             <div class="input-form" id="inputForm"></div>
             <div class="input-bar">
                 <button class="btn btn-history" id="historyBtn" title="查看历史会话">
                     <span>📜</span>
                 </button>
-                <textarea id="messageInput" placeholder="输入消息或参数..." rows="1"></textarea>
+                <textarea id="messageInput" placeholder="输入您的问题..." rows="1"></textarea>
                 <button class="btn btn-send" id="runBtn" title="发送">
                     <span>➤</span>
                 </button>
@@ -120,6 +120,6 @@
     </main>
 </div>
 <script src="md.js"></script>
-<script src="app.js?v=41"></script>
+<script src="app.js?v=42"></script>
 </body>
 </html>

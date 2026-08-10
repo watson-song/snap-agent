@@ -867,8 +867,8 @@ function finalizeStreamingThought(streamState, toType) {
 
 // ===== Send / Run =====
 async function runSkill() {
-    if (!selectedSkill) return;
-    const skillName = selectedSkill.name;
+    // Support direct chat without skill selection
+    const skillName = selectedSkill ? selectedSkill.name : '__default__';
     const state = getSkillState(skillName);
 
     // Collect inputs from form fields
@@ -905,18 +905,29 @@ async function runSkill() {
     showRobotWorking();
     sendBtn.disabled = true;
 
-    console.log('[runSkill] Sending POST /runs, skillId=', skillName, 'model=', model);
+    console.log('[runSkill] Sending POST /runs, skillId=', selectedSkill ? skillName : '(default)', 'model=', model);
 
     try {
+        // Build request body - omit skillId if no skill selected (use backend default)
+        const requestBody = {
+            inputs,
+            model,
+            history: state.conversationMessages.length > 1 ? state.conversationMessages.slice(0, -1) : []
+        };
+        if (selectedSkill) {
+            requestBody.skillId = skillName;
+        }
+        // If message is in inputs, also send as top-level 'message' for direct chat
+        if (inputs.message) {
+            requestBody.message = inputs.message;
+        } else if (inputs._user_message) {
+            requestBody.message = inputs._user_message;
+        }
+
         const resp = await fetch(`${BASE}/runs`, {
             method: 'POST',
             headers: authHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({
-                skillId: skillName,
-                inputs,
-                model,
-                history: state.conversationMessages.length > 1 ? state.conversationMessages.slice(0, -1) : []
-            })
+            body: JSON.stringify(requestBody)
         });
         if (handleAuthError(resp)) { hideRobotWorking(); updateSendButtonState(); return; }
 
