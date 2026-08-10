@@ -242,8 +242,9 @@ public class SkillRegistry {
                             }
                             return FileVisitResult.SKIP_SUBTREE;
                         }
-                        // No SKILL.md → organizational directory, recurse
-                        return FileVisitResult.CONTINUE;
+                        // No SKILL.md → not a skill directory, skip
+                        // (prevents knowledge files or other data in subdirs from being loaded as skills)
+                        return FileVisitResult.SKIP_SUBTREE;
                     }
 
                     @Override
