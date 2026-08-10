@@ -31,6 +31,7 @@ import cn.watsontech.snapagent.core.tool.PluginRegistry;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
 import cn.watsontech.snapagent.core.tool.ToolCallbackRegistry;
 import cn.watsontech.snapagent.boot2x.tool.CodeReadTool;
+
 import cn.watsontech.snapagent.core.tool.ToolCallbacks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -309,6 +310,7 @@ public class ToolAutoConfiguration {
             ObjectProvider<CodeGraphTools> codeGraphTools,
             ObjectProvider<ModuleArchitectureTools> moduleArchTools,
             ObjectProvider<DomainKnowledgeTools> domainKnowledgeTools,
+            ObjectProvider<CodeReadTool> codeReadTool,
             ObjectProvider<McpBootstrap> mcpBootstrapProvider) {
         InMemoryPluginRegistry registry = new InMemoryPluginRegistry();
         // Collect all tools beans and register their ToolCallbacks
@@ -326,6 +328,7 @@ public class ToolAutoConfiguration {
         addIfAvailable(toolsBeans, codeGraphTools);
         addIfAvailable(toolsBeans, moduleArchTools);
         addIfAvailable(toolsBeans, domainKnowledgeTools);
+        addIfAvailable(toolsBeans, codeReadTool);
 
         McpBootstrap mcp = mcpBootstrapProvider.getIfAvailable();
         if (mcp != null) {

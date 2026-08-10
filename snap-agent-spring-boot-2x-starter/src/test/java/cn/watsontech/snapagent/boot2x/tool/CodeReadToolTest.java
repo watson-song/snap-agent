@@ -67,4 +67,27 @@ class CodeReadToolTest {
 
         assertThat(result).contains("No files found");
     }
+
+    @Test
+    void shouldSupportBridgeMode() {
+        // Bridge mode with null bridgeService should return not implemented message
+        CodeReadTool tool = new CodeReadTool(true, null, tempDir.toString());
+        String result = tool.readCode("Test");
+
+        assertThat(result).contains("Bridge mode file reading is not yet implemented");
+    }
+
+    @Test
+    void shouldConvertClassNameToPath() {
+        CodeReadTool tool = new CodeReadTool(tempDir.toString());
+        // 通过反射测试私有方法
+        try {
+            java.lang.reflect.Method method = CodeReadTool.class.getDeclaredMethod("convertToFilePath", String.class);
+            method.setAccessible(true);
+            String result = (String) method.invoke(tool, "cn.watsontech.Test");
+            assertThat(result).isEqualTo("cn/watsontech/Test.java");
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

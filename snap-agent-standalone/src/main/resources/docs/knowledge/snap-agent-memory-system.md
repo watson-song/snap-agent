@@ -6,6 +6,9 @@ modules:
   - snap-agent-core
   - snap-agent-spring-boot-2x-starter
 author: SnapAgent
+tools:
+  - code_read
+  - code_search
 ---
 
 # SnapAgent Memory 记忆系统
