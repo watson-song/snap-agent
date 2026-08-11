@@ -100,12 +100,12 @@ public class SnapAgentAutoConfiguration {
                 props.getAgent().getMaxRunsPerHour());
     }
 
-    // ---- LlmClient ----
+    // ---- Primary LlmClient (Anthropic/OpenAI direct API) ----
     @Bean
-    @ConditionalOnMissingBean
+    @ConditionalOnMissingBean(name = "primaryLlmClient")
     @org.springframework.boot.autoconfigure.condition.ConditionalOnExpression(
             "'${snap-agent.llm.api-key:}' != '' or '${snap-agent.llm.auth-token:}' != ''")
-    public LlmClient llmClient(SnapAgentProperties props) {
+    public LlmClient primaryLlmClient(SnapAgentProperties props) {
         String apiType = props.getLlm().getApiType();
         if ("openai".equalsIgnoreCase(apiType)) {
             log.info("Using OpenAiLlmClient (api-type=openai, base-url={})", props.getLlm().getBaseUrl());
