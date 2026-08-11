@@ -55,7 +55,7 @@ author: SnapAgent
    - controller/ web/ → REST API 入口
    - service/ → 业务服务类
    - mapper/ dao/ repository/ → 数据访问层
-   - entity/ model/ domain/ → 实体类
+   - entity/ model/ domain/ → 实体类（扫描目录下所有 .java 文件，不要仅依赖文件名包含 "Entity"）
    - dto/ vo/ → 数据传输对象
    - enums/ constant/ → 枚举和常量
    - job/ task/ → 定时任务
@@ -77,6 +77,8 @@ author: SnapAgent
 - public 方法签名（**逐字复制，含参数类型和返回类型**）
 - @Autowired 注入 → 依赖关系
 - @TableName → 表名
+- 实体类识别：扫描 entity/ 目录下所有 .java 文件 + 搜索 @TableName 注解的类
+- **重要**：很多项目实体类不以 "Entity" 结尾（如 DemandForecast.java、DrpWarehouse.java）
 - @Scheduled / @XxxTask → 定时任务入口
 
 **注意**：超过 1000 行的类只提取类注释 + public 方法签名 + 注入依赖。
