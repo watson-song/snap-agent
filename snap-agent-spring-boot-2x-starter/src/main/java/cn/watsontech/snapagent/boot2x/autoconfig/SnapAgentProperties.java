@@ -81,7 +81,7 @@ public class SnapAgentProperties {
     private Memory memory = new Memory();
     private Vcs vcs = new Vcs();
     private Fix fix = new Fix();
-    private Bridge bridge;
+    private Bridge bridge = new Bridge();
 
     // ---- getters / setters ----
 

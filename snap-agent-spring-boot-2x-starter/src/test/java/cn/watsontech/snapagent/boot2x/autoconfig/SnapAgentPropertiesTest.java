@@ -494,4 +494,12 @@ class SnapAgentPropertiesTest {
 
         assertThat(props.getFix().isEnabled()).isTrue();
     }
+
+    @Test
+    void bridgeShouldBeInitializedByDefault() {
+        SnapAgentProperties props = new SnapAgentProperties();
+
+        assertThat(props.getBridge()).isNotNull();
+        assertThat(props.getBridge().getRequestTimeoutMs()).isGreaterThan(0);
+    }
 }
