@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 集成阶段知识生成工具 — 扫描宿主项目源码，提取业务概念、表结构、服务依赖，生成领域知识总文档和模块业务文档，执行两轮 Review 后输出知识库 .md 文件供运行时 RAG 检索
-version: 5.0.0
+version: 5.1.0
 type: integration-tool
 triggers:
   - 从代码生成领域知识
@@ -57,11 +57,24 @@ author: SnapAgent
    - controller/ web/ → REST API 入口
    - service/ → 业务服务类
    - mapper/ dao/ repository/ → 数据访问层
-   - entity/ model/ domain/ → 实体类（扫描目录下所有 .java 文件，不要仅依赖文件名包含 "Entity"）
+   - entity/ model/ domain/ → 实体类（多级识别策略，见下方）
    - dto/ vo/ → 数据传输对象
    - enums/ constant/ → 枚举和常量
    - job/ task/ → 定时任务
 4. 规模评估：< 100 Service → 一次性；100-500 → 分模块；> 500 → 核心优先
+5. **跨模块扫描**：同一业务领域的实体可能分布在多个模块（如 biz/entity/ 和 sys/entity/），必须遍历所有模块的 entity/ 目录
+```
+
+**实体类识别策略**（按优先级，命中即停）：
+
+```
+1. @TableName / @Entity / @Table 注解 → 最可靠
+2. entity/ model/ domain/ 目录下的 .java 文件 → 约定俗成
+3. 文件名以 Entity/Model/DO/PO 结尾 → 命名约定
+4. 实现 Serializable 且字段与数据库列对应 → 兜底
+
+⚠️ 重要：很多项目实体类不以 "Entity" 结尾（如 DemandForecast.java、DrpWarehouse.java、AllocationParam.java）
+        必须使用策略 1 或 2，不能仅依赖策略 3
 ```
 
 #### Step 2: 逐文件信息提取
@@ -90,6 +103,21 @@ author: SnapAgent
 - 有 Mapper XML → 扫描 SQL 语句，记录性能风险（SELECT *、无 WHERE、LIKE '%xxx%'）
 - 有 DTO/VO 类 → 提取验证注解（@NotNull、@Size 等）和字段映射
 - 有 tenant_id 字段 → 记录多租户信息
+
+**废弃表识别**（新增）：
+
+```
+识别规则（满足任一即标记为废弃）：
+1. 类或字段有 @Deprecated 注解
+2. 表名前缀匹配已知废弃模式（如 dp_*、md_*，需从项目确认）
+3. 无对应的 Service/Mapper 引用（孤立表）
+4. git log 中有删除记录但文件仍存在
+
+处理方式：
+- 在文档中标注「⚠️ 已废弃」但不跳过
+- 在 Review 阶段确认是否应从文档中排除
+- 生成废弃表清单供项目方确认
+```
 
 ### ═══ 阶段 2：领域知识总文档生成（只写不读）═══
 
@@ -288,6 +316,44 @@ Review 清单：
 仍有问题 → 局部修复后再次 Review（最多 3 轮）
 ```
 
+### ═══ 阶段 5：CodeGraph 数据库生成与交叉验证（可选）═══
+
+#### Step 12: CodeGraph 数据库生成
+
+如果项目启用了 snap-agent 的 code-graph 功能：
+
+```
+1. 使用 H2CodeGraphIndex 扫描项目所有 src/main/java 源码
+2. 提取类信息（类名、类型、包名）和依赖关系（import、@Autowired、@Resource）
+3. 生成持久化的 H2 数据库：{project_root}/data/codegraph/amps-codegraph.mv.db
+4. 同时输出 CSV 文件：nodes.csv, edges.csv
+
+类类型识别策略（与实体识别一致）：
+- Controller / Service / ServiceImpl / Mapper / Entity / DTO / Enum / Interface / Class
+- Entity 识别：扫描 entity/ 目录 + @TableName 注解，不能仅依赖文件名
+```
+
+#### Step 13: CodeGraph 交叉验证（新增）
+
+使用 CodeGraph 数据库交叉验证实体文档：
+
+```
+验证清单：
+1. 文档中列出的每个实体类 → 在 CodeGraph NODES 表中是否存在？
+2. 文档中列出的每个 Service → 其依赖关系是否与 CodeGraph EDGES 一致？
+3. CodeGraph 中有但文档没有的类 → 标记为「可能遗漏」
+4. 文档中有但 CodeGraph 没有的类 → 标记为「需确认」（可能是动态生成的类）
+
+输出交叉验证报告：
+| 检查项 | 文档数量 | CodeGraph 数量 | 差异 | 处理 |
+|--------|----------|---------------|------|------|
+| Entity 类 | 208 | 208 | 0 | ✅ |
+| Service 类 | 248 | 248 | 0 | ✅ |
+| 遗漏类 | 0 | 3 | +3 | 需补充 |
+
+发现遗漏 → 回到阶段 1 补充缺失实体 → 重新生成受影响文档
+```
+
 ## 输出规范
 
 - 文件名 kebab-case，概念名中文
@@ -308,6 +374,7 @@ Review 清单：
 
 ## 版本历史
 
+- **v5.1.0**：新增阶段 5（CodeGraph 生成与交叉验证）、废弃表识别规则、多级实体识别策略、跨模块扫描说明
 - **v5.0.0**：新增阶段 3（模块业务文档生成）和阶段 4（两轮 Review），支持为项目生成领域知识总文档后为主要实体分模块添加模块业务文档，并执行两轮 Review 确保质量
 - **v4.0.0**：添加两阶段执行（收集→生成）、方法级自检、source 标注、版本一致性检查、动态 section 规则表
 - **v3.0.0**：重定位为集成阶段工具，移除 agent tools 依赖
