@@ -84,7 +84,8 @@
             <div class="top-bar-right">
                 <div class="model-selector">
                     <label>模型</label>
-                    <select id="modelSelect"></select>
+                    <input type="text" id="modelSelect" list="modelList" placeholder="输入或选择模型" style="width:180px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                    <datalist id="modelList"></datalist>
                 </div>
                 <div class="user-info" id="userInfo" style="display:none;">
                     <span class="user-icon">👤</span>
@@ -120,6 +121,6 @@
     </main>
 </div>
 <script src="md.js"></script>
-<script src="app.js?v=43"></script>
+<script src="app.js?v=44"></script>
 </body>
 </html>

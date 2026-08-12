@@ -441,21 +441,44 @@ async function loadModels() {
     const resp = await fetch(`${BASE}/models`, { headers: authHeaders() });
     if (handleAuthError(resp)) return;
     const data = await resp.json();
-    const select = document.getElementById('modelSelect');
-    select.innerHTML = '';
+    const datalist = document.getElementById('modelList');
+    const input = document.getElementById('modelSelect');
+    datalist.innerHTML = '';
+    // Populate datalist with allowed models
     data.allowed.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m;
-        opt.textContent = m;
-        if (m === data.default) opt.selected = true;
-        select.appendChild(opt);
+        datalist.appendChild(opt);
     });
+    // Add common Claude models for bridge mode
+    const commonModels = [
+        'claude-sonnet-4-20250514',
+        'claude-3-5-sonnet-20241022',
+        'claude-3-haiku-20240307',
+        'claude-3-opus-20240229'
+    ];
+    commonModels.forEach(m => {
+        if (!data.allowed.includes(m)) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            datalist.appendChild(opt);
+        }
+    });
+    // Set default value
     const cached = localStorage.getItem('snap-agent.model');
-    if (cached && data.allowed.includes(cached)) {
-        select.value = cached;
+    if (cached) {
+        input.value = cached;
+    } else if (data.default) {
+        input.value = data.default;
     }
-    select.addEventListener('change', () => {
-        localStorage.setItem('snap-agent.model', select.value);
+    // Save on change/blur
+    input.addEventListener('change', () => {
+        localStorage.setItem('snap-agent.model', input.value);
+    });
+    input.addEventListener('blur', () => {
+        if (input.value) {
+            localStorage.setItem('snap-agent.model', input.value);
+        }
     });
 }
 
