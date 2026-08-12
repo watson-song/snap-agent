@@ -1,7 +1,7 @@
 ---
 name: domain-knowledge-discovery
 description: 集成阶段知识生成工具 — 扫描宿主项目源码，提取业务概念、表结构、服务依赖，生成领域知识总文档和模块业务文档，执行两轮 Review 后输出知识库 .md 文件供运行时 RAG 检索
-version: 5.1.0
+version: 5.2.0
 type: integration-tool
 triggers:
   - 从代码生成领域知识
@@ -356,8 +356,34 @@ Review 清单：
 
 ## 输出规范
 
+### Frontmatter 要求（必须完整）
+
+每个文档的 YAML frontmatter **必须**包含以下字段，用于 `DomainKnowledgeLoader` 解析和 RAG 检索：
+
+```yaml
+---
+name: 业务概念名称（中文）
+description: 一句话描述（50 字以内）
+tables: [table1, table2]                    # 涉及的数据库表名列表
+services: [ServiceA, ServiceB]              # 涉及的 Service 类名列表
+entry_points: [POST /api/xxx, XxxTask.run()] # 入口方法或 API 端点
+related_concepts: [概念 A, 概念 B]           # 关联的业务概念
+tags: [tag1, tag2]                          # 分类标签（英文 kebab-case）
+version: 1.0.0
+module: 所属模块名
+author: SnapAgent
+---
+```
+
+**字段用途**：
+- `tables` → 按表名检索（如查询涉及 `drp_allocation_plan` 表的知识）
+- `services` → 按类名检索（如查询 `AllocationPlanService` 相关的知识）
+- `entry_points` → 按入口方法检索（如查询 `POST /api/allocation` 相关的知识）
+- `tags` → 按标签检索（如查询 `replenishment` 标签的知识）
+
+### 文档内容要求
+
 - 文件名 kebab-case，概念名中文
-- YAML frontmatter 必须包含
 - 代码块必须标注 `<!-- source: path/to/File.java -->`
 - 可精简（省略 private 方法等），不可编造
 - 每个文件 100-200 行，不超过 300 行
@@ -374,6 +400,7 @@ Review 清单：
 
 ## 版本历史
 
+- **v5.2.0**：增强 frontmatter 规范，要求完整填写 tables/services/entry_points/related_concepts/tags 字段，支持 DomainKnowledgeLoader 解析和 RAG 检索
 - **v5.1.0**：新增阶段 5（CodeGraph 生成与交叉验证）、废弃表识别规则、多级实体识别策略、跨模块扫描说明
 - **v5.0.0**：新增阶段 3（模块业务文档生成）和阶段 4（两轮 Review），支持为项目生成领域知识总文档后为主要实体分模块添加模块业务文档，并执行两轮 Review 确保质量
 - **v4.0.0**：添加两阶段执行（收集→生成）、方法级自检、source 标注、版本一致性检查、动态 section 规则表
