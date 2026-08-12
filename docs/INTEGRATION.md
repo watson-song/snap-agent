@@ -954,3 +954,129 @@ SqlGuard 拒绝了非 SELECT 语句。检查 Skill 文件中的 SQL 是否只包
 3. **LLM 超时设够大**：复杂诊断可能需要多轮 LLM 调用，建议 `timeout-seconds: 120`
 4. **限制并发**：生产环境建议 `max-concurrent-runs-per-user: 1`，防止资源滥用
 5. **监控线程池**：`snapAgentExecutor` 线程池（core=2, max=4, queue=10），高并发时需调整
+
+---
+
+## 一键集成（推荐）
+
+使用 `snap-agent-integration` skill 可以一句话完成所有集成步骤：
+
+```
+用户: 帮我把 /path/to/my-project 集成 SnapAgent
+```
+
+**自动执行流程**：
+
+```
+Phase 1: 环境探测（只读）
+  ├── 扫描项目结构 → Spring Boot 版本、Java 版本、模块列表
+  ├── 扫描配置 → 推断 DB、Redis、安全框架
+  └── 规模评估 → 决定文档生成策略
+
+Phase 2: 安装 SnapAgent（写入）
+  ├── 复制 lib/ (对应版本 JAR)
+  ├── 修改 starter 模块 pom.xml
+  └── 生成 application-snap.yml
+
+Phase 3: 知识生成
+  ├── domain-knowledge-discovery → 领域知识文档
+  ├── codegraph 生成 → SQLite 数据库 + 关键代码
+  └── 两轮 Review → 验证完整性
+
+Phase 4: 验证
+  ├── mvn clean package → 编译通过
+  ├── 启动应用 → Health UP
+  └── Chat UI 测试
+
+Phase 5: 输出报告
+  └── INTEGRATION_REPORT.md
+```
+
+**前提条件**：本地已 `mvn install` SnapAgent 项目（lib/ 已就绪）。
+
+---
+
+## CodeGraph 数据库生成
+
+集成完成后，为宿主项目生成 CodeGraph 数据库，支持代码关系查询和 bug 诊断。
+
+### 使用通用脚本
+
+```bash
+cd {project-root}
+python3 /path/to/skills-agent/scripts/generate-codegraph.py \
+  --project-root . \
+  --output-dir data/codegraph \
+  --project-name my-project
+```
+
+### 脚本功能
+
+| 功能 | 说明 |
+|------|------|
+| 多模块扫描 | 自动识别 Maven/Gradle 模块 |
+| 多级实体识别 | @TableName → entity/ 目录 → 命名约定 → Serializable 兜底 |
+| 关键代码提取 | 每个类提取 Javadoc、注解、字段、方法签名、业务注释（~500 字节/类） |
+| 依赖关系 | @Autowired/@Resource 注入 + import 分析 |
+| 废弃表识别 | @Deprecated + 命名模式 + 孤立表检测 |
+| 输出格式 | SQLite 数据库 + CSV 文件 |
+
+### 数据库结构
+
+```sql
+-- 节点表
+CODE_GRAPH_NODES (
+    NODE_ID,          -- 全限定类名
+    NAME,             -- 类名
+    TYPE,             -- Controller/Service/Entity/Mapper/DTO/...
+    PACKAGE,          -- 包名
+    FILE_PATH,        -- 源文件路径
+    TABLE_NAME,       -- @TableName 值（Entity 才有）
+    SOURCE_CODE,      -- 关键代码片段（诊断用）
+    SOURCE_LENGTH     -- 代码长度
+)
+
+-- 边表
+CODE_GRAPH_EDGES (
+    SOURCE,           -- 依赖方 FQN
+    TARGET,           -- 被依赖方 FQN
+    TYPE,             -- DEPENDS_ON / IMPORTS
+    DETAIL            -- 注入方式（Autowired/Resource/Constructor）
+)
+```
+
+### 典型产出
+
+| 项目规模 | 节点数 | 边数 | 数据库大小 | 源码存储 |
+|----------|--------|------|-----------|----------|
+| 小型（<500 类） | ~300 | ~800 | ~500KB | ~100KB |
+| 中型（500-2000 类） | ~1000 | ~2500 | ~1.5MB | ~350KB |
+| 大型（>2000 类） | ~2000+ | ~5000+ | ~3MB | ~700KB |
+
+---
+
+## 集成检查清单
+
+完成集成后，逐项验证：
+
+- [ ] `mvn clean package -DskipTests` 编译通过
+- [ ] Fat JAR 中包含 `snap-agent-core` 和 `snap-agent-spring-boot-2x-starter`
+- [ ] `/snap-agent/health` 返回 `{"status":"UP"}`
+- [ ] Chat UI (`/snap-agent/chat/index.html`) 可访问
+- [ ] Skills 列表 API 返回至少 1 个 Skill
+- [ ] LLM 对话正常（发送消息 → 收到回复）
+- [ ] CodeGraph 数据库已生成（`data/codegraph/*.db`）
+- [ ] 知识库文档已生成（`src/main/resources/docs/knowledge/*.md`）
+- [ ] Settings 页面 (`/snap-agent/settings.html`) 可访问
+
+## 故障排查
+
+| 问题 | 排查 |
+|------|------|
+| 编译失败：找不到 snap-agent | 检查 lib/ 目录和 pom.xml systemPath |
+| 启动失败：Bean 冲突 | 检查 `@ConditionalOnMissingBean` 配置 |
+| LLM 连接失败 | 检查 `LLM_AUTH_TOKEN` 环境变量 |
+| Chat UI 404 | 检查 `snap-agent.base-path` 配置 |
+| CodeGraph 为空 | 检查 `snap-agent.code-graph.scan-packages` 包名 |
+| 知识库未加载 | 检查文件是否在 `classpath:/docs/knowledge/` |
+
