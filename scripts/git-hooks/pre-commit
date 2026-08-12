@@ -55,7 +55,7 @@ while IFS= read -r file; do
       STAGED_DOCS+=("$file")
       HAS_DOC_CHANGE=true
       ;;
-    *.yml|*.yaml|*.xml|*.properties|*.conf|.gitignore|*.sh|*.json)
+    *.yml|*.yaml|*.xml|*.properties|*.conf|.gitignore|*.sh|*.json|*.py|scripts/*)
       # Config — no test requirement, no doc requirement
       ;;
     *)
