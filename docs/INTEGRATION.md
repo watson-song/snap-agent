@@ -540,6 +540,174 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 > **注意**：H2 文件放在 `/app/data/` 目录下，确保运行时 `h2-url` 指向此路径。如果用了 PVC，可以将 `data/` 挂载到 PVC 上，但通常不需要——图谱是 build-time 产物，不会在运行期变化（除非开启了热重建）。
 
+### 本地开发模式生成（通用脚本）
+
+对于本地开发，可以使用内置的通用脚本生成代码图谱：
+
+#### 方式一：使用 Maven 插件（推荐）
+
+```bash
+# 1. 安装 snap-agent 到本地仓库
+mvn install -DskipTests \
+  -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+
+# 2. 运行生成命令
+mvn cn.watsontech.snapagent:snap-agent-maven-plugin:generate-codegraph \
+  -Dproject.root=. \
+  -Dscan.packages=com.yourcompany \
+  -Doutput.path=./data/codegraph
+```
+
+#### 方式二：使用 Shell 脚本
+
+```bash
+# 1. 安装 snap-agent
+mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+
+# 2. 执行脚本
+java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+  --project-root . \
+  --scan-packages com.yourcompany \
+  --output ./data/codegraph
+```
+
+#### 方式三：使用 Python 脚本（跨平台）
+
+```bash
+python3 scripts/generate-codegraph.py \
+  --project-root . \
+  --output ./data/codegraph \
+  --packages com.yourcompany
+```
+
+#### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--project-root` | 项目根目录（包含 pom.xml） | 当前目录 |
+| `--scan-packages` | 扫描的包名（逗号分隔） | 扫描所有包 |
+| `--output` | 输出路径（不含 .mv.db 后缀） | ./data/codegraph |
+
+#### 验证生成结果
+
+```bash
+# 检查文件
+ls -lh data/codegraph.mv.db
+
+# 查看统计信息
+sqlite3 data/codegraph.db "SELECT COUNT(*) as nodes FROM code_graph_nodes;"
+sqlite3 data/codegraph.db "SELECT COUNT(*) as edges FROM code_graph_edges;"
+
+# 查询示例
+sqlite3 data/codegraph.db "SELECT name, type FROM code_graph_nodes WHERE type='Service' LIMIT 10;"
+```
+
+#### 在 application.yml 中配置
+
+```yaml
+snap-agent:
+  codegraph:
+    persistence: h2  # 使用 H2 持久化
+    h2-url: jdbc:h2:file:./data/codegraph  # 指向生成的文件
+    hot-reload-enabled: false  # 生产环境关闭热重载
+```
+
+### 自动化集成
+
+#### Maven 集成
+
+在 `pom.xml` 中添加插件：
+
+```xml
+<build>
+  <plugins>
+    <plugin>
+      <groupId>cn.watsontech.snapagent</groupId>
+      <artifactId>snap-agent-maven-plugin</artifactId>
+      <version>2.0.0-SNAPSHOT</version>
+      <executions>
+        <execution>
+          <goals>
+            <goal>generate-codegraph</goal>
+          </goals>
+          <configuration>
+            <scanPackages>com.yourcompany</scanPackages>
+            <outputPath>${project.build.directory}/data/codegraph</outputPath>
+          </configuration>
+        </execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+```
+
+然后运行：
+```bash
+mvn clean package
+```
+
+#### Gradle 集成
+
+在 `build.gradle` 中添加任务：
+
+```groovy
+task generateCodegraph(type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli'
+    args = [
+        '--project-root', project.rootDir.absolutePath,
+        '--scan-packages', 'com.yourcompany',
+        '--output', "${buildDir}/data/codegraph"
+    ]
+}
+
+build.dependsOn generateCodegraph
+```
+
+然后运行：
+```bash
+./gradlew build
+```
+
+#### CI/CD 集成
+
+**GitHub Actions 示例：**
+
+```yaml
+- name: Generate CodeGraph
+  run: |
+    mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+    java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
+      cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+      --project-root . \
+      --scan-packages com.yourcompany \
+      --output ./data/codegraph
+
+- name: Upload CodeGraph
+  uses: actions/upload-artifact@v3
+  with:
+    name: codegraph
+    path: data/codegraph.mv.db
+```
+
+**Jenkins 示例：**
+
+```groovy
+stage('Generate CodeGraph') {
+    steps {
+        sh '''
+            mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+            java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
+              cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+              --project-root . \
+              --scan-packages com.yourcompany \
+              --output ./data/codegraph
+        '''
+    }
+}
+```
+
 ### 第三步：配置 K8s Deployment
 
 ```yaml
