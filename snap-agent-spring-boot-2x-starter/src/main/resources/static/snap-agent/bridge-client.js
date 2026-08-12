@@ -60,30 +60,45 @@
 
     function updateIndicator() {
         var el = ensureIndicator();
-        if (!extensionStatus.installed) {
-            el.textContent = 'Bridge: Extension not installed';
-            el.style.background = '#660000';
-            el.style.color = '#ff6666';
-        } else if (!extensionStatus.masterEnabled) {
-            el.textContent = 'Bridge: Master switch OFF';
-            el.style.background = '#664400';
-            el.style.color = '#ffcc66';
-        } else {
-            var activeServices = Object.keys(extensionStatus.services)
-                .filter(function(k) { return extensionStatus.services[k]; });
-            if (activeServices.length > 0) {
-                el.textContent = 'Bridge: ON (' + activeServices.join(', ') + ')';
-                el.style.background = '#006600';
-                el.style.color = '#66ff66';
-                bridgeActive = true;
-            } else {
-                el.textContent = 'Bridge: No active services';
-                el.style.background = '#664400';
-                el.style.color = '#ffcc66';
-                bridgeActive = false;
-            }
+
+        // Check if LLM bridge client is connected
+        var llmBridgeConnected = window.llmBridgeClient && window.llmBridgeClient.connected;
+
+        // If master switch is OFF, hide indicator (nothing is active)
+        if (!extensionStatus.masterEnabled && !llmBridgeConnected) {
+            el.style.display = 'none';
+            bridgeActive = false;
+            return;
         }
+
+        // Collect active services (only if master is enabled)
+        var activeServices = [];
+        if (extensionStatus.masterEnabled) {
+            activeServices = Object.keys(extensionStatus.services)
+                .filter(function(k) { return extensionStatus.services[k]; });
+        }
+        // Add LLM to active services if connected
+        if (llmBridgeConnected) {
+            activeServices.push('LLM');
+        }
+
+        // Hide indicator if nothing is active
+        if (activeServices.length === 0) {
+            el.style.display = 'none';
+            bridgeActive = false;
+            return;
+        }
+
+        // Show indicator with active services
+        el.style.display = 'block';
+        el.textContent = 'Bridge: ON (' + activeServices.join(', ') + ')';
+        el.style.background = '#006600';
+        el.style.color = '#66ff66';
+        bridgeActive = true;
     }
+
+    // Periodically update indicator to reflect LLM bridge status
+    setInterval(updateIndicator, 2000);
 
     // ===== SSE connection =====
 

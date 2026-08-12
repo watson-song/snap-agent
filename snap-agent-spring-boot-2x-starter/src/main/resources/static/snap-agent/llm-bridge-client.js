@@ -10,17 +10,17 @@
     LlmBridgeClient.prototype.connect = function() {
         var self = this;
         var url = '/snap-agent/bridge/llm/stream';
-        
+
         console.log('[LLM Bridge] Connecting to:', url);
-        
+
         this.eventSource = new EventSource(url);
-        
+
         this.eventSource.onopen = function() {
             console.log('[LLM Bridge] Connected');
             self.connected = true;
             self.reconnectDelay = 1000;
         };
-        
+
         this.eventSource.onerror = function(e) {
             console.error('[LLM Bridge] Error:', e);
             self.connected = false;

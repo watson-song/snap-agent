@@ -5,7 +5,6 @@ import cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools;
 import cn.watsontech.snapagent.boot2x.domain.DomainKnowledgeTools;
 import cn.watsontech.snapagent.boot2x.context.ProjectContextAdvisor;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
-import cn.watsontech.snapagent.boot2x.tool.CodeReaderTools;
 import cn.watsontech.snapagent.boot2x.tool.ConfigReadTools;
 import cn.watsontech.snapagent.boot2x.tool.DataSourceRegistry;
 import cn.watsontech.snapagent.boot2x.tool.GitLogTools;
@@ -61,7 +60,7 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Activated only when {@code snap-agent.enabled=true} (default false).
  * Extracted from {@link SnapAgentAutoConfiguration} to keep tool wiring
- * (JdbcQueryTools, RedisReadTools, LogReadTools, CodeReaderTools, etc.)
+ * (JdbcQueryTools, RedisReadTools, LogReadTools, CodeReadTool, etc.)
  * separate from the core agent / security / LLM beans.</p>
  */
 @Configuration
@@ -223,15 +222,6 @@ public class ToolAutoConfiguration {
         return new ProjectContextAdvisor(codePathGuard);
     }
 
-    // ---- CodeReaderTools (v0.3) ----
-    @Bean
-    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
-    @ConditionalOnMissingBean
-    public CodeReaderTools codeReaderTools(CodePathGuard codePathGuard) {
-        log.info("CodeReaderTools assembled");
-        return new CodeReaderTools(codePathGuard);
-    }
-
     // ---- ProjectStructureTools (v0.3) ----
     @Bean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(CodePathGuard.class)
@@ -301,7 +291,6 @@ public class ToolAutoConfiguration {
             ObjectProvider<JdbcQueryTools> jdbcTools,
             ObjectProvider<RedisReadTools> redisTools,
             ObjectProvider<LogReadTools> logReadTools,
-            ObjectProvider<CodeReaderTools> codeReaderTools,
             ObjectProvider<ProjectStructureTools> projectStructureTools,
             ObjectProvider<GitLogTools> gitLogTools,
             ObjectProvider<MetricsTools> metricsTools,
@@ -319,7 +308,7 @@ public class ToolAutoConfiguration {
         addIfAvailable(toolsBeans, jdbcTools);
         addIfAvailable(toolsBeans, redisTools);
         addIfAvailable(toolsBeans, logReadTools);
-        addIfAvailable(toolsBeans, codeReaderTools);
+        addIfAvailable(toolsBeans, codeReadTool);
         addIfAvailable(toolsBeans, projectStructureTools);
         addIfAvailable(toolsBeans, gitLogTools);
         addIfAvailable(toolsBeans, metricsTools);

@@ -616,8 +616,8 @@ class SnapAgentControllerTest {
                 SkillAvailability.AVAILABLE, null,
                 "custom", false, "snap-agent:admin");
         when(skillRegistry.get("admin-skill")).thenReturn(skill);
-        // Global permission is OK, but skill-level permission is denied
-        when(securityGateway.hasPermission("snap-agent:access")).thenReturn(true);
+        // Global permission is empty (default), skill-level permission is denied
+        when(securityGateway.hasPermission("")).thenReturn(true);
         when(securityGateway.hasPermission("snap-agent:admin")).thenReturn(false);
 
         Map<String, Object> body = new LinkedHashMap<String, Object>();

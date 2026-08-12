@@ -2,7 +2,17 @@
 // Version: v25 (fix: knowledge search uses configured minScore, shows relevance score)
 console.log('[SnapAgent] app.js v25 loaded');
 
-const BASE = '/snap-agent';
+// Auto-detect context-path for host projects with server.servlet.context-path
+// e.g., if page loads at /rest/snap-agent/index.html, BASE = /rest/snap-agent
+const MOUNT_PATH = '/snap-agent';
+const BASE = (function() {
+    const pagePath = window.location.pathname;
+    const idx = pagePath.indexOf(MOUNT_PATH);
+    if (idx > 0) {
+        return pagePath.substring(0, idx) + MOUNT_PATH;
+    }
+    return MOUNT_PATH;
+})();
 let selectedSkill = null;            // currently active skill object
 let activeSkillName = null;           // name of the visible skill
 let skillsData = [];                 // cached skill objects (for restore / icon lookup)
@@ -86,8 +96,8 @@ async function checkUserStatus() {
         if (typeof info.issueClosureEnabled === 'boolean') {
             issueClosureEnabled = info.issueClosureEnabled;
         }
-        // Conditionally load bridge-client.js when the browser network bridge is enabled
-        if (info.bridgeEnabled && !document.getElementById('bridgeClientScript')) {
+        // Load bridge-client.js when any bridge mode is enabled (shows status indicator)
+        if ((info.bridgeEnabled || info.llmBridgeEnabled) && !document.getElementById('bridgeClientScript')) {
             var script = document.createElement('script');
             script.id = 'bridgeClientScript';
             script.src = 'bridge-client.js';
@@ -95,6 +105,7 @@ async function checkUserStatus() {
         }
         // Conditionally load llm-bridge-client.js when LLM bridge mode is enabled
         if (info.llmBridgeEnabled && !document.getElementById('llmBridgeClientScript')) {
+            window.snapAgentBridgeEnabled = true;  // Signal for auto-init in llm-bridge-client.js
             var llmScript = document.createElement('script');
             llmScript.id = 'llmBridgeClientScript';
             llmScript.src = 'llm-bridge-client.js';
