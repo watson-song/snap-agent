@@ -261,7 +261,7 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).doesNotHaveBean(
                             cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
                     assertThat(context).doesNotHaveBean(
-                            cn.watsontech.snapagent.boot2x.tool.CodeReaderTools.class);
+                            cn.watsontech.snapagent.boot2x.context.ProjectContextAdvisor.class);
                     assertThat(context).doesNotHaveBean(
                             cn.watsontech.snapagent.boot2x.tool.ProjectStructureTools.class);
                     assertThat(context).doesNotHaveBean(
@@ -282,7 +282,7 @@ class SnapAgentAutoConfigurationTest {
                     assertThat(context).hasSingleBean(
                             cn.watsontech.snapagent.boot2x.tool.CodePathGuard.class);
                     assertThat(context).hasSingleBean(
-                            cn.watsontech.snapagent.boot2x.tool.CodeReaderTools.class);
+                            cn.watsontech.snapagent.boot2x.tool.CodeReadTool.class);
                     assertThat(context).hasSingleBean(
                             cn.watsontech.snapagent.boot2x.tool.ProjectStructureTools.class);
                     assertThat(context).hasSingleBean(

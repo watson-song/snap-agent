@@ -318,7 +318,6 @@ public class ToolAutoConfiguration {
         addIfAvailable(toolsBeans, codeGraphTools);
         addIfAvailable(toolsBeans, moduleArchTools);
         addIfAvailable(toolsBeans, domainKnowledgeTools);
-        addIfAvailable(toolsBeans, codeReadTool);
 
         McpBootstrap mcp = mcpBootstrapProvider.getIfAvailable();
         if (mcp != null) {
