@@ -842,7 +842,7 @@ public class SnapAgentProperties {
     /** Security adapter configuration. */
     public static class Security {
         private String framework = "auto";
-        private String requiredPermission = "";  // Empty = no permission check by default
+        private String requiredPermission = "snap-agent:access";
         private int filterOrder = Integer.MAX_VALUE - 10;
         private String principalResolverClass = "";
         private boolean auditLog = true;

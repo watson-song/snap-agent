@@ -242,7 +242,13 @@ public class SkillRegistry {
                             }
                             return FileVisitResult.SKIP_SUBTREE;
                         }
-                        // No SKILL.md → organizational directory, recurse into it
+                        // No SKILL.md → organizational directory, recurse only if safe
+                        String dirName = dir.getFileName().toString();
+                        if (dirName.startsWith(".") || dirName.startsWith("_")
+                                || dirName.equals("node_modules") || dirName.equals("data")
+                                || dirName.equals("fixtures") || dirName.equals("test")) {
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
                         return FileVisitResult.CONTINUE;
                     }
 

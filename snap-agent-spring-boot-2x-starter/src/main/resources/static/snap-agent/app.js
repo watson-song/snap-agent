@@ -461,20 +461,7 @@ async function loadModels() {
         opt.value = m;
         datalist.appendChild(opt);
     });
-    // Add common Claude models for bridge mode
-    const commonModels = [
-        'claude-sonnet-4-20250514',
-        'claude-3-5-sonnet-20241022',
-        'claude-3-haiku-20240307',
-        'claude-3-opus-20240229'
-    ];
-    commonModels.forEach(m => {
-        if (!data.allowed.includes(m)) {
-            const opt = document.createElement('option');
-            opt.value = m;
-            datalist.appendChild(opt);
-        }
-    });
+    // Additional models (e.g. for bridge mode) come from backend /models endpoint
     // Set default value
     const cached = localStorage.getItem('snap-agent.model');
     if (cached) {

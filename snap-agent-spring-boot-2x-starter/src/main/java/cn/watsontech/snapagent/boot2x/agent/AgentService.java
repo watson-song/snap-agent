@@ -10,6 +10,7 @@ import cn.watsontech.snapagent.core.agent.TranscriptEvent;
 import cn.watsontech.snapagent.core.graph.CompiledGraph;
 import cn.watsontech.snapagent.core.graph.GraphState;
 import cn.watsontech.snapagent.core.graph.advisor.Advisor;
+import cn.watsontech.snapagent.core.graph.checkpoint.CheckpointStore;
 import cn.watsontech.snapagent.core.graph.checkpoint.InMemoryCheckpointStore;
 import cn.watsontech.snapagent.core.graph.execution.GraphExecutor;
 import cn.watsontech.snapagent.core.graph.execution.TaskResult;
@@ -43,6 +44,7 @@ public class AgentService {
     private final int maxTurns;
     private final List<Advisor> advisors;
     private final GraphExecutor graphExecutor;
+    private final CheckpointStore checkpointStore;
     private final ConversationStore conversationStore;
 
     public AgentService(LlmClient llmClient, ToolCallbackRegistry tools,
@@ -53,12 +55,25 @@ public class AgentService {
     public AgentService(LlmClient llmClient, ToolCallbackRegistry tools,
                         TaskStore taskStore, int maxTurns, List<Advisor> advisors,
                         ConversationStore conversationStore) {
+        this(llmClient, tools, taskStore, maxTurns, advisors, conversationStore, null);
+    }
+
+    /**
+     * Full constructor with CheckpointStore injection.
+     *
+     * @param checkpointStore checkpoint storage (null for InMemoryCheckpointStore default)
+     */
+    public AgentService(LlmClient llmClient, ToolCallbackRegistry tools,
+                        TaskStore taskStore, int maxTurns, List<Advisor> advisors,
+                        ConversationStore conversationStore,
+                        CheckpointStore checkpointStore) {
         this.llmClient = llmClient;
         this.tools = tools;
         this.taskStore = taskStore;
         this.maxTurns = maxTurns;
         this.advisors = advisors != null ? advisors : Collections.<Advisor>emptyList();
-        this.graphExecutor = new GraphExecutor(new InMemoryCheckpointStore(), maxTurns);
+        this.checkpointStore = checkpointStore != null ? checkpointStore : new InMemoryCheckpointStore();
+        this.graphExecutor = new GraphExecutor(this.checkpointStore, maxTurns);
         this.conversationStore = conversationStore;
     }
 

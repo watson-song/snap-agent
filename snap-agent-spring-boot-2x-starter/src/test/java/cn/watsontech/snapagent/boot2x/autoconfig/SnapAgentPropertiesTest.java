@@ -117,7 +117,7 @@ class SnapAgentPropertiesTest {
         SnapAgentProperties.Security security = props.getSecurity();
 
         assertThat(security.getFramework()).isEqualTo("auto");
-        assertThat(security.getRequiredPermission()).isEmpty();  // Default: no permission check
+        assertThat(security.getRequiredPermission()).isEqualTo("snap-agent:access");
         assertThat(security.getFilterOrder()).isEqualTo(Integer.MAX_VALUE - 10);
         assertThat(security.getPrincipalResolverClass()).isEmpty();
         assertThat(security.isAuditLog()).isTrue();

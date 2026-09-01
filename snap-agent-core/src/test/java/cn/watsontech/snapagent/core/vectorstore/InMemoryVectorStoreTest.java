@@ -26,7 +26,7 @@ class InMemoryVectorStoreTest {
             store.add(Collections.singletonList(
                     new Document("doc-" + i, "content " + i, null, randomUnitVector())));
         }
-        SearchRequest req = new SearchRequest("test", 4, -1.0, null);
+        SearchRequest req = new SearchRequest("test", 4, 0.0, null);
         List<Document> result = store.similaritySearch(req);
         assertThat(result).hasSize(4);
     }

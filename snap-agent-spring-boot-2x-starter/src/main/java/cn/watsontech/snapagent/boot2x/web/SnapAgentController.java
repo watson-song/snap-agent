@@ -486,8 +486,10 @@ public class SnapAgentController {
         // Surface whether the issue-closure (问题闭环) feature is enabled so the UI can show/hide action buttons
         info.setIssueClosureEnabled(issueClosureService != null);
         // Surface whether the browser network bridge is enabled so the UI can conditionally load bridge-client.js
-        // LLM bridge is always available when snap-agent is enabled (bridge-first fallback mode)
-        info.setLlmBridgeEnabled(true);
+        // LLM bridge enabled when api-type=bridge OR bridge extension is enabled
+        boolean bridgeMode = "bridge".equalsIgnoreCase(properties.getLlm().getApiType());
+        boolean bridgeExtEnabled = properties.getBridge() != null && properties.getBridge().isEnabled();
+        info.setLlmBridgeEnabled(bridgeMode || bridgeExtEnabled);
         info.setBridgeEnabled(properties.getBridge() != null && properties.getBridge().isEnabled());
         if (securityGateway == null) {
             info.setMessage("security not configured");
