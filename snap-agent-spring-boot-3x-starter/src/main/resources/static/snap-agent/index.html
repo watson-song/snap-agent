@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SnapAgent</title>
-    <link rel="stylesheet" href="style.css?v=31">
+    <link rel="stylesheet" href="style.css?v=32">
 </head>
 <body>
 <div id="app">
@@ -28,6 +28,9 @@
             <button class="btn btn-refresh" id="refreshBtn" title="刷新 Skills">
                 <span>🔄</span>
             </button>
+        </div>
+        <div class="skill-search-wrapper" id="skillSearchWrapper">
+            <input type="text" class="skill-search-input" id="skillSearchInput" placeholder="🔍 搜索 Skill..." autocomplete="off">
         </div>
         <div class="skill-list-header">
             <span>Skills</span>
@@ -109,6 +112,7 @@
             <div class="shortcut-bar" id="shortcutBar" style="display:none;"></div>
             <div class="input-form" id="inputForm"></div>
             <div class="input-bar">
+                <button class="btn btn-new-conv" id="newConvBtn" title="新建会话">🆕</button>
                 <button class="btn btn-history" id="historyBtn" title="查看历史会话">
                     <span>📜</span>
                 </button>
@@ -121,6 +125,6 @@
     </main>
 </div>
 <script src="md.js"></script>
-<script src="app.js?v=51"></script>
+<script src="app.js?v=52"></script>
 </body>
 </html>

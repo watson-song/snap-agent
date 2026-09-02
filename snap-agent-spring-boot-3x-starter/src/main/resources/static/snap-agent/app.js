@@ -366,6 +366,73 @@ function toggleSection(headerId, listId) {
     }
 }
 
+// ===== Skill Search Filter =====
+(function() {
+    var searchInput = document.getElementById('skillSearchInput');
+    if (!searchInput) return;
+    searchInput.addEventListener('input', function() {
+        var query = this.value.trim().toLowerCase();
+        var allLi = document.querySelectorAll('.skill-list li, .skill-icons li');
+        if (!query) {
+            allLi.forEach(function(li) { li.style.display = ''; });
+            // Show/hide sections based on default state
+            return;
+        }
+        // Expand both sections when searching
+        ['hostSectionHeader', 'builtinSectionHeader'].forEach(function(hid) {
+            var h = document.getElementById(hid);
+            if (h && h.dataset.collapsed === 'true') {
+                h.dataset.collapsed = 'false';
+                h.classList.remove('collapsed');
+                h.querySelector('.section-toggle').textContent = '▾';
+                var lid = hid === 'hostSectionHeader' ? 'hostSkills' : 'builtinSkills';
+                document.getElementById(lid).style.display = 'block';
+            }
+        });
+        // Show disabled section while searching
+        if (showDisabledSkills) {
+            document.getElementById('disabledSkills').style.display = 'block';
+        }
+        var matchCount = 0;
+        document.querySelectorAll('.skill-list li').forEach(function(li) {
+            var name = (li.dataset.skillId || '').toLowerCase();
+            var desc = li.querySelector('.skill-item-desc');
+            var descText = desc ? (desc.textContent || '').toLowerCase() : '';
+            var match = name.indexOf(query) !== -1 || descText.indexOf(query) !== -1;
+            li.style.display = match ? '' : 'none';
+            if (match) matchCount++;
+        });
+        // Sync icon list
+        document.querySelectorAll('.skill-icons li').forEach(function(li) {
+            var name = (li.dataset.skillId || '').toLowerCase();
+            var match = name.indexOf(query) !== -1;
+            li.style.display = match ? '' : 'none';
+        });
+        // Show disabled matches too
+        document.querySelectorAll('#disabledSkills li').forEach(function(li) {
+            var name = (li.dataset.skillId || '').toLowerCase();
+            var desc = li.querySelector('.skill-item-desc');
+            var descText = desc ? (desc.textContent || '').toLowerCase() : '';
+            var match = name.indexOf(query) !== -1 || descText.indexOf(query) !== -1;
+            li.style.display = match ? '' : 'none';
+        });
+    });
+    // Ctrl+K / Cmd+K to focus search
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            searchInput.focus();
+            searchInput.select();
+        }
+        // Escape to clear search
+        if (e.key === 'Escape' && document.activeElement === searchInput) {
+            searchInput.value = '';
+            searchInput.dispatchEvent(new Event('input'));
+            searchInput.blur();
+        }
+    });
+})();
+
 function escapeHtml(text) {
     if (!text) return '';
     var div = document.createElement('div');
@@ -1377,6 +1444,29 @@ document.getElementById('refreshBtn').addEventListener('click', async () => {
 // ===== History Button =====
 document.getElementById('historyBtn').addEventListener('click', showHistoryModal);
 
+// ===== New Conversation Button =====
+document.getElementById('newConvBtn').addEventListener('click', async function() {
+    var skillName = activeSkillName;
+    if (!skillName) {
+        toast('请先选择一个 Skill', 'info');
+        return;
+    }
+    var currentState = skillChatState[skillName];
+    // Save current conversation before starting fresh (if it has content)
+    if (currentState && currentState.transcript && currentState.transcript.length > 0) {
+        await saveConversationToBackend(skillName);
+    }
+    // Cancel any active stream
+    if (currentState && currentState.stream) {
+        cancelSkillStream(skillName, false);
+    }
+    // Clear in-memory state for this skill — forces fresh conversation
+    delete skillChatState[skillName];
+    // Re-render the chat area for this skill (empty)
+    selectSkill(selectedSkill, document.querySelector('.skill-list li.active'));
+    toast('已新建会话', 'success');
+});
+
 // ===== Conversation History (save, load, list, download, delete) =====
 
 async function saveConversationToBackend(skillName) {
@@ -1484,10 +1574,21 @@ async function showHistoryModal() {
     const modal = document.createElement('div');
     modal.className = 'history-modal-card';
 
+    // Build skill filter options
+    const skillOptions = ['<option value="">全部 Skills</option>'];
+    skillsData.forEach(function(s) {
+        const sel = selectedSkill && s.name === selectedSkill.name ? ' selected' : '';
+        skillOptions.push('<option value="' + escapeHtml(s.name) + '"' + sel + '>' + escapeHtml(s.name) + '</option>');
+    });
+
     modal.innerHTML = `
         <div class="history-modal-header">
-            <span class="history-modal-title">📜 历史会话${selectedSkill ? ' — ' + selectedSkill.name : ''}</span>
+            <span class="history-modal-title">📜 历史会话</span>
             <button class="history-modal-close" id="historyCloseBtn">✕</button>
+        </div>
+        <div class="history-modal-filters">
+            <select class="history-skill-filter" id="historySkillFilter">${skillOptions.join('')}</select>
+            <input type="text" class="history-search-input" id="historySearchInput" placeholder="搜索会话标题...">
         </div>
         <div class="history-modal-body" id="historyModalBody">
             <div class="history-loading">加载中...</div>
@@ -1502,33 +1603,54 @@ async function showHistoryModal() {
     document.getElementById('historyCloseBtn').addEventListener('click', () => overlay.remove());
 
     const body = document.getElementById('historyModalBody');
-    try {
-        let url = `${BASE}/conversations`;
-        if (selectedSkill) {
-            url += `?skillId=${encodeURIComponent(selectedSkill.name)}`;
-        }
-        const resp = await fetch(url, { headers: authHeaders() });
-        if (!resp.ok) {
-            body.innerHTML = '<div class="history-error">加载失败</div>';
-            return;
-        }
-        const data = await resp.json();
-        const conversations = data.conversations || [];
-        if (conversations.length === 0) {
-            body.innerHTML = '<div class="history-empty">暂无历史会话</div>';
-            return;
-        }
+    const filterSelect = document.getElementById('historySkillFilter');
+    const searchInput = document.getElementById('historySearchInput');
+    let allConversations = [];
 
+    async function loadConversations() {
+        body.innerHTML = '<div class="history-loading">加载中...</div>';
+        try {
+            let url = `${BASE}/conversations`;
+            const skillFilter = filterSelect.value;
+            if (skillFilter) {
+                url += `?skillId=${encodeURIComponent(skillFilter)}`;
+            }
+            const resp = await fetch(url, { headers: authHeaders() });
+            if (!resp.ok) {
+                body.innerHTML = '<div class="history-error">加载失败</div>';
+                return;
+            }
+            const data = await resp.json();
+            allConversations = data.conversations || [];
+            renderConversations();
+        } catch (e) {
+            body.innerHTML = '<div class="history-error">加载失败: ' + e.message + '</div>';
+        }
+    }
+
+    function renderConversations() {
+        const query = searchInput.value.trim().toLowerCase();
+        const filtered = query
+            ? allConversations.filter(c => (c.title || '').toLowerCase().indexOf(query) !== -1 ||
+                                           (c.skillId || '').toLowerCase().indexOf(query) !== -1)
+            : allConversations;
+        if (filtered.length === 0) {
+            body.innerHTML = query
+                ? '<div class="history-empty">没有匹配的会话</div>'
+                : '<div class="history-empty">暂无历史会话</div>';
+            return;
+        }
         body.innerHTML = '';
-        conversations.forEach(conv => {
+        filtered.forEach(conv => {
             const item = document.createElement('div');
             item.className = 'history-item';
             const date = new Date(conv.updatedAt || conv.createdAt);
             const dateStr = date.toLocaleString('zh-CN');
             item.innerHTML = `
                 <div class="history-item-info">
-                    <div class="history-item-title">${conv.title || '未命名对话'}</div>
+                    <div class="history-item-title">${escapeHtml(conv.title || '未命名对话')}</div>
                     <div class="history-item-meta">
+                        <span class="history-item-skill">${escapeHtml(conv.skillId || '')}</span>
                         <span class="history-item-date">${dateStr}</span>
                         <span class="history-item-count">${conv.messageCount} 条消息</span>
                     </div>
@@ -1549,13 +1671,15 @@ async function showHistoryModal() {
             item.querySelector('.history-btn-delete').addEventListener('click', async () => {
                 if (!confirm('确认删除此会话？')) return;
                 await deleteConversationById(conv.conversationId);
-                showHistoryModal();
+                await loadConversations();
             });
             body.appendChild(item);
         });
-    } catch (e) {
-        body.innerHTML = '<div class="history-error">加载失败: ' + e.message + '</div>';
     }
+
+    filterSelect.addEventListener('change', loadConversations);
+    searchInput.addEventListener('input', renderConversations);
+    await loadConversations();
 }
 
 async function restoreConversation(conversationId, skillId) {

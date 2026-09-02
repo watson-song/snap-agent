@@ -197,18 +197,18 @@ snap-agent-spring-boot-2x-starter (Spring Boot 实现, 169 文件)
 
 ## 八、行动路线图
 
-### Phase 1: 修复（1-2 周）
-- [ ] 恢复 `requiredPermission` 默认值
-- [ ] AgentService 依赖注入改造（P0 架构问题）
-- [ ] SkillRegistry 目录遍历安全加固
-- [ ] ToolCallback 超时控制
+### Phase 1: 修复（1-2 周）✅ 已完成
+- [x] 恢复 `requiredPermission` 默认值 (ff9de2ae)
+- [x] AgentService 依赖注入改造（P0 架构问题）(ff9de2ae)
+- [x] SkillRegistry 目录遍历安全加固 (ff9de2ae)
+- [x] ToolCallback 超时控制 (e0a43e7f)
 
-### Phase 2: 补强（1-2 月）
-- [ ] Spring Boot 3.x Starter
-- [ ] Metrics/Tracing 集成（Micrometer + OpenTelemetry）
-- [ ] ConversationStore JDBC/Redis 实现
-- [ ] SkillMeta Builder 模式重构
-- [ ] 前端 SPA 增强（历史记录、Skill 选择）
+### Phase 2: 补强（1-2 月）— 5/5 完成 ✅
+- [x] Spring Boot 3.x Starter (b7a4740d) — Jakarta EE 10, sync-from-2x.sh, JDK 17+ profile
+- [x] Metrics/Tracing 集成（Micrometer + OpenTelemetry）(c9c4b2ab) — MicrometerMetricsCollector + auto-config
+- [x] ConversationStore JDBC/Redis 实现 (e0a43e7f)
+- [x] SkillMeta Builder 模式重构 (e0a43e7f)
+- [x] 前端 SPA 增强 — Skill 搜索过滤（Ctrl/Cmd+K 快捷键）、新建会话按钮、历史会话跨 Skill 过滤+标题搜索
 
 ### Phase 3: 产品化（3-6 月）
 - [ ] 开源文档站 + GitHub Discussion

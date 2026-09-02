@@ -144,4 +144,82 @@ class StaticResourceTest {
                     .contains("<title>SnapAgent</title>");
         }
     }
+
+    // ---- SPA Enhancement: skill search filter + new conversation button ----
+
+    @Test
+    void indexHtmlShouldContainSkillSearchInput() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/index.html");
+        try (InputStream in = resource.getInputStream()) {
+            String html = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(html)
+                    .as("Skill search input should be present in sidebar")
+                    .contains("skillSearchInput")
+                    .contains("skill-search-input");
+        }
+    }
+
+    @Test
+    void indexHtmlShouldContainNewConversationButton() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/index.html");
+        try (InputStream in = resource.getInputStream()) {
+            String html = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(html)
+                    .as("New conversation button should be present in input bar")
+                    .contains("newConvBtn")
+                    .contains("btn-new-conv");
+        }
+    }
+
+    @Test
+    void appJsShouldContainSkillSearchFilterLogic() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/app.js");
+        try (InputStream in = resource.getInputStream()) {
+            String js = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(js)
+                    .as("app.js should contain skill search filter implementation")
+                    .contains("skillSearchInput")
+                    .contains("Skill Search Filter")
+                    .contains("ctrlKey");
+        }
+    }
+
+    @Test
+    void appJsShouldContainNewConversationHandler() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/app.js");
+        try (InputStream in = resource.getInputStream()) {
+            String js = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(js)
+                    .as("app.js should contain new conversation button handler")
+                    .contains("newConvBtn")
+                    .contains("New Conversation Button");
+        }
+    }
+
+    @Test
+    void appJsShouldContainHistoryFilterDropdown() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/app.js");
+        try (InputStream in = resource.getInputStream()) {
+            String js = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(js)
+                    .as("app.js should contain history modal skill filter and search")
+                    .contains("historySkillFilter")
+                    .contains("historySearchInput")
+                    .contains("history-modal-filters");
+        }
+    }
+
+    @Test
+    void styleCssShouldContainSpaEnhancementStyles() throws Exception {
+        ClassPathResource resource = new ClassPathResource("static/snap-agent/style.css");
+        try (InputStream in = resource.getInputStream()) {
+            String css = StreamUtils.copyToString(in, StandardCharsets.UTF_8);
+            assertThat(css)
+                    .as("style.css should contain styles for new SPA components")
+                    .contains(".skill-search-input")
+                    .contains(".btn-new-conv")
+                    .contains(".history-modal-filters")
+                    .contains(".history-skill-filter");
+        }
+    }
 }
