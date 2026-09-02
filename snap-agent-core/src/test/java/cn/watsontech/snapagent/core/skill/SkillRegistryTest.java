@@ -380,10 +380,14 @@ class SkillRegistryTest {
 
     @Test
     void shouldRecurseIntoOrganizationalDirectories() throws IOException {
+        // Organizational directories (without SKILL.md) are recursed to find
+        // nested directory skills (subdirs with SKILL.md).
+        // Loose .md files in subdirectories are NOT loaded as skills.
         Path orgDir = tempDir.resolve("category");
-        Files.createDirectories(orgDir);
+        Path skillDir = orgDir.resolve("nested-skill");
+        Files.createDirectories(skillDir);
         String skillContent = "---\nname: nested-skill\ndescription: d\ntools: [mysql_query]\n---\nbody\n";
-        Files.write(orgDir.resolve("nested.md"),
+        Files.write(skillDir.resolve("SKILL.md"),
                 skillContent.getBytes(StandardCharsets.UTF_8));
 
         SkillRegistry registry = new SkillRegistry(tempDir, toolRegistry);

@@ -242,13 +242,10 @@ public class SkillRegistry {
                             }
                             return FileVisitResult.SKIP_SUBTREE;
                         }
-                        // No SKILL.md → organizational directory, recurse only if safe
-                        String dirName = dir.getFileName().toString();
-                        if (dirName.startsWith(".") || dirName.startsWith("_")
-                                || dirName.equals("node_modules") || dirName.equals("data")
-                                || dirName.equals("fixtures") || dirName.equals("test")) {
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
+                        // No SKILL.md → organizational directory, recurse to find
+                        // nested directory skills (subdirs with SKILL.md).
+                        // Loose .md files in subdirectories are NOT loaded as skills;
+                        // they are treated as knowledge/reference documents.
                         return FileVisitResult.CONTINUE;
                     }
 
@@ -256,6 +253,14 @@ public class SkillRegistry {
                     public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
                         String fileName = file.getFileName().toString();
                         if (fileName.endsWith(".md")) {
+                            // Only load .md files from the root upload directory.
+                            // .md files in subdirectories are knowledge/reference docs,
+                            // not skill definitions. Subdirectory skills must use SKILL.md
+                            // (handled in preVisitDirectory).
+                            Path parent = file.getParent();
+                            if (!parent.equals(uploadDir)) {
+                                return FileVisitResult.CONTINUE;
+                            }
                             try {
                                 String content = new String(Files.readAllBytes(file),
                                         StandardCharsets.UTF_8);
