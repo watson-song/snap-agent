@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapAgent</title>
+    <link rel="stylesheet" href="style.css?v=31">
+</head>
+<body>
+<div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">SnapAgent</span>
+            </div>
+        </div>
+        <div class="sidebar-actions">
+            <label class="btn btn-upload" title="上传 Skill 文件 (.md / .zip)">
+                <span>📄 文件</span>
+                <input type="file" id="uploadInput" accept=".md,.zip" hidden>
+            </label>
+            <label class="btn btn-upload" title="上传 Skill 文件夹">
+                <span>📁 文件夹</span>
+                <input type="file" id="uploadFolderInput" webkitdirectory directory multiple hidden>
+            </label>
+            <button class="btn btn-refresh" id="refreshBtn" title="刷新 Skills">
+                <span>🔄</span>
+            </button>
+        </div>
+        <div class="skill-list-header">
+            <span>Skills</span>
+            <div class="skill-list-header-right">
+                <button class="btn btn-toggle-disabled" id="toggleDisabledBtn" title="显示/隐藏不可用 Skills">
+                    <span>🔍</span>
+                </button>
+                <span class="skill-count" id="skillCount">0</span>
+            </div>
+        </div>
+        <!-- Collapsed view: first-letter icons with hover tooltips (must precede skill-sections for CSS ~ selector) -->
+        <ul class="skill-icons" id="skillIcons"></ul>
+        <div class="skill-sections" id="skillSections">
+            <div class="skill-section">
+                <div class="skill-section-header" id="hostSectionHeader" data-collapsed="false">
+                    <span class="section-toggle">▾</span>
+                    <span class="section-title">📁 宿主 Skills</span>
+                    <span class="section-count" id="hostCount">0</span>
+                </div>
+                <ul class="skill-list" id="hostSkills"></ul>
+            </div>
+            <div class="skill-section">
+                <div class="skill-section-header collapsed" id="builtinSectionHeader" data-collapsed="true">
+                    <span class="section-toggle">▸</span>
+                    <span class="section-title">📦 内置 Skills</span>
+                    <span class="section-count" id="builtinCount">0</span>
+                </div>
+                <ul class="skill-list" id="builtinSkills" style="display:none;"></ul>
+            </div>
+            <ul class="skill-list disabled-skills-list" id="disabledSkills" style="display:none;"></ul>
+        </div>
+        <!-- Feature navigation bar -->
+        <div class="feature-nav" id="featureNav">
+            <button class="feature-nav-btn" id="navToolsBtn" title="工具 & 插件">🔧</button>
+            <button class="feature-nav-btn" id="navWorkflowsBtn" title="工作流">📋</button>
+            <button class="feature-nav-btn" id="navCostBtn" title="成本看板">💰</button>
+            <button class="feature-nav-btn" id="navIssuesBtn" title="问题闭环">🐛</button>
+            <button class="feature-nav-btn" id="navPatrolBtn" title="巡检任务">🛡️</button>
+            <button class="feature-nav-btn" id="navAlertsBtn" title="告警">🔔<span class="alert-badge" id="alertBadge" style="display:none;">0</span></button>
+            <button class="feature-nav-btn" id="navKnowledgeBtn" title="知识库">📚</button>
+        </div>
+        <div class="sidebar-footer">
+            <button class="sidebar-toggle" id="sidebarToggle" title="收起/展开菜单">‹</button>
+        </div>
+    </aside>
+
+    <!-- Main Area -->
+    <main class="main-area">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="skill-context" id="skillContext">
+                <span class="placeholder">直接开始对话，或选择一个 Skill</span>
+            </div>
+            <div class="top-bar-right">
+                <div class="model-selector">
+                    <label>模型</label>
+                    <input type="text" id="modelSelect" list="modelList" placeholder="输入或选择模型" style="width:180px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:13px;">
+                    <datalist id="modelList"></datalist>
+                </div>
+                <div class="user-info" id="userInfo" style="display:none;">
+                    <span class="user-icon">👤</span>
+                    <span class="user-name" id="userName"></span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Chat Area -->
+        <div class="chat-area" id="chatArea">
+            <div class="chat-welcome" id="chatWelcome">
+                <div class="welcome-icon">⚡</div>
+                <h2>SnapAgent</h2>
+                <p>直接在下方输入您的问题，或选择左侧的 Skill 获得更专业的帮助</p>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+        </div>
+
+        <!-- Input Area -->
+        <footer class="input-area" id="inputArea">
+            <div class="shortcut-bar" id="shortcutBar" style="display:none;"></div>
+            <div class="input-form" id="inputForm"></div>
+            <div class="input-bar">
+                <button class="btn btn-history" id="historyBtn" title="查看历史会话">
+                    <span>📜</span>
+                </button>
+                <textarea id="messageInput" placeholder="输入您的问题..." rows="1"></textarea>
+                <button class="btn btn-send" id="runBtn" title="发送">
+                    <span>➤</span>
+                </button>
+            </div>
+        </footer>
+    </main>
+</div>
+<script src="md.js"></script>
+<script src="app.js?v=51"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.BridgeAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.LlmBridgeAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.FileBridgeAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.KnowledgeAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.DomainKnowledgeAutoConfiguration
+cn.watsontech.snapagent.boot2x.autoconfig.EmbeddingAutoConfiguration

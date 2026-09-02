@@ -1,0 +1,1030 @@
+package cn.watsontech.snapagent.boot2x.issue;
+
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
+import cn.watsontech.snapagent.boot2x.agent.AgentService;
+import cn.watsontech.snapagent.boot2x.fix.FixExecutionService;
+import cn.watsontech.snapagent.boot2x.memory.MemoryLearningExtractor;
+import cn.watsontech.snapagent.core.agent.AgentTask;
+import cn.watsontech.snapagent.core.agent.TaskStore;
+import cn.watsontech.snapagent.core.issue.AcceptanceCriterion;
+import cn.watsontech.snapagent.core.issue.IssueClosure;
+import cn.watsontech.snapagent.core.issue.IssueStatus;
+import cn.watsontech.snapagent.core.issue.IssueStore;
+import cn.watsontech.snapagent.core.issue.IssueTracker;
+import cn.watsontech.snapagent.core.issue.SolutionOption;
+import cn.watsontech.snapagent.core.issue.SolutionSuggester;
+import cn.watsontech.snapagent.core.issue.SolutionSuggestion;
+import cn.watsontech.snapagent.core.issue.VerificationResult;
+import cn.watsontech.snapagent.core.issue.VerificationRunner;
+import cn.watsontech.snapagent.core.llm.Message;
+import cn.watsontech.snapagent.core.memory.ChatMemoryRepository;
+import cn.watsontech.snapagent.core.memory.ProjectFact;
+import cn.watsontech.snapagent.core.memory.ProjectFactsStore;
+import cn.watsontech.snapagent.core.memory.UserProfile;
+import cn.watsontech.snapagent.core.memory.UserProfileStore;
+import cn.watsontech.snapagent.core.skill.SkillMeta;
+import cn.watsontech.snapagent.core.skill.SkillRegistry;
+import cn.watsontech.snapagent.core.vcs.FixResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Orchestration service for the issue closure lifecycle:
+ * diagnose -> propose solution -> create issue -> verify -> close + sediment.
+ *
+ * <p>Connects {@link AgentService} (for running solution-suggest/verify-fix skills),
+ * {@link IssueStore} (for persistence), {@link IssueTracker} (for external issue
+ * systems), and optionally a {@link KnowledgeSedimentationService} (for experience
+ * sedimentation into the vector store).</p>
+ *
+ * <p>The {@link KnowledgeSedimentationService} dependency may be {@code null} when
+ * knowledge features are disabled; in that case, close() still records the
+ * knowledge entry ID but does not sediment into the vector store.</p>
+ */
+public class IssueClosureService {
+
+    private static final Logger log = LoggerFactory.getLogger(IssueClosureService.class);
+
+    private final AgentService agentService;
+    private final TaskStore taskStore;
+    private final SkillRegistry skillRegistry;
+    private final IssueStore issueStore;
+    private final IssueTracker issueTracker;
+    private final KnowledgeSedimentationService sedimentationService;
+    private final SolutionSuggester solutionSuggester;
+    private final VerificationRunner verificationRunner;
+    private final String systemUserId;
+    private final FixExecutionService fixExecutionService;
+
+    // P2.1: Optional memory learning dependencies
+    private MemoryLearningExtractor memoryLearningExtractor;
+    private ChatMemoryRepository chatMemoryRepository;
+    private UserProfileStore userProfileStore;
+    private ProjectFactsStore projectFactsStore;
+
+    /**
+     * Construct the issue closure service.
+     *
+     * @param agentService         the agent executor (for running skills synchronously)
+     * @param taskStore             the task store (for looking up diagnostic tasks)
+     * @param skillRegistry         the skill registry (for resolving skill metadata)
+     * @param issueStore            the issue store (for persistence)
+     * @param issueTracker          the issue tracker (for external issue systems)
+     * @param sedimentationService  the knowledge sedimentation service (may be {@code null} if knowledge disabled)
+     * @param solutionSuggester     the solution suggester (may be {@code null} to fall back to skill-based suggestion)
+     * @param verificationRunner    the verification runner (may be {@code null} to fall back to skill-based verification)
+     * @param systemUserId          the system user ID used when executing skills
+     * @param fixExecutionService   the fix execution service (may be {@code null} if auto-fix disabled)
+     */
+    public IssueClosureService(AgentService agentService,
+                                TaskStore taskStore,
+                                SkillRegistry skillRegistry,
+                                IssueStore issueStore,
+                                IssueTracker issueTracker,
+                                KnowledgeSedimentationService sedimentationService,
+                                SolutionSuggester solutionSuggester,
+                                VerificationRunner verificationRunner,
+                                String systemUserId,
+                                FixExecutionService fixExecutionService) {
+        this.agentService = agentService;
+        this.taskStore = taskStore;
+        this.skillRegistry = skillRegistry;
+        this.issueStore = issueStore;
+        this.issueTracker = issueTracker;
+        this.sedimentationService = sedimentationService;
+        this.solutionSuggester = solutionSuggester;
+        this.verificationRunner = verificationRunner;
+        this.systemUserId = systemUserId;
+        this.fixExecutionService = fixExecutionService;
+    }
+
+    /**
+     * Configure memory learning dependencies (P2.1).
+     *
+     * <p>When configured, {@link #close(String)} will extract user preferences
+     * and project facts from the conversation history and update the stores.</p>
+     *
+     * @param memoryLearningExtractor the memory learning extractor
+     * @param chatMemoryRepository    the chat memory repository (for loading conversation)
+     * @param userProfileStore        the user profile store (for saving extracted profile)
+     * @param projectFactsStore       the project facts store (for saving extracted facts)
+     */
+    public void configureMemoryLearning(MemoryLearningExtractor memoryLearningExtractor,
+                                        ChatMemoryRepository chatMemoryRepository,
+                                        UserProfileStore userProfileStore,
+                                        ProjectFactsStore projectFactsStore) {
+        this.memoryLearningExtractor = memoryLearningExtractor;
+        this.chatMemoryRepository = chatMemoryRepository;
+        this.userProfileStore = userProfileStore;
+        this.projectFactsStore = projectFactsStore;
+    }
+
+    /**
+     * Propose solutions for a completed diagnostic task.
+     *
+     * <p>Loads the diagnostic task, extracts the root cause from its report,
+     * then produces a {@link SolutionSuggestion}. When a {@link SolutionSuggester}
+     * is configured, it is invoked directly; otherwise the "solution-suggest"
+     * skill is run and its output is parsed into candidate options. The
+     * resulting issue closure has status {@link IssueStatus#SOLUTION_PROPOSED}.</p>
+     *
+     * @param taskId the diagnostic task ID
+     * @return the created issue closure, or {@code null} if the task or skill is not found
+     */
+    public IssueClosure proposeSolution(String taskId) {
+        AgentTask task = taskStore.get(taskId);
+        if (task == null) {
+            log.warn("Task not found for proposeSolution: {}", taskId);
+            return null;
+        }
+
+        String rootCause = task.getReport();
+        String userQuery = extractUserQuery(task.getInputs());
+        String userId = task.getUserId();
+
+        // Idempotency: if an issue closure already exists for this task,
+        // update it with the new solution rather than creating a duplicate.
+        IssueClosure existing = issueStore.findByTaskId(taskId);
+        long now = System.currentTimeMillis();
+
+        IssueClosure issue;
+        if (existing != null) {
+            issue = existing;
+        } else {
+            issue = new IssueClosure(
+                    "issue_" + now + "_" + randomSuffix(),
+                    null, null, taskId,
+                    null, userId, userQuery,
+                    rootCause,
+                    null, null,
+                    IssueStatus.DIAGNOSED, null,
+                    null, null,
+                    null, null,
+                    now, now
+            );
+        }
+
+        SolutionSuggestion suggestion;
+        if (solutionSuggester != null) {
+            log.info("Proposing solutions for task {} via SolutionSuggester", taskId);
+            suggestion = solutionSuggester.suggest(issue, rootCause);
+            if (suggestion == null) {
+                suggestion = new SolutionSuggestion(
+                        new ArrayList<SolutionOption>(), null, null, null, null);
+            }
+        } else {
+            suggestion = suggestViaSkill(taskId, rootCause, userQuery);
+            if (suggestion == null) {
+                // Skill not found in fallback path — preserve legacy null result.
+                return null;
+            }
+        }
+
+        long updated = System.currentTimeMillis();
+        issue = issue.withSolution(suggestion, updated)
+                .withStatus(IssueStatus.SOLUTION_PROPOSED, updated);
+        issueStore.save(issue);
+        log.info("Created issue {} with {} option(s) for task {}",
+                issue.getIssueId(),
+                suggestion.getOptions() != null ? suggestion.getOptions().size() : 0,
+                taskId);
+        return issue;
+    }
+
+    /**
+     * Fallback: runs the "solution-suggest" skill and parses its multi-line
+     * output into a {@link SolutionSuggestion} whose options each map to one
+     * non-empty line (id "opt-N", effort "medium", temporary=false).
+     *
+     * @return the suggestion, or {@code null} if the "solution-suggest" skill
+     *         is not registered (preserving the legacy null result).
+     */
+    private SolutionSuggestion suggestViaSkill(String taskId, String rootCause, String userQuery) {
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("root_cause", rootCause != null ? rootCause : "");
+        inputs.put("original_query", userQuery != null ? userQuery : "");
+        inputs.put("task_id", taskId);
+
+        SkillMeta skill = skillRegistry.get("solution-suggest");
+        if (skill == null) {
+            log.error("Skill 'solution-suggest' not found in registry");
+            return null;
+        }
+
+        AgentTask solutionTask = AgentTask.create(systemUserId, "solution-suggest", inputs, null);
+        agentService.execute(solutionTask, skill);
+
+        List<String> lines = parseSolutionLines(solutionTask.getReport());
+        List<SolutionOption> options = new ArrayList<SolutionOption>();
+        int index = 1;
+        for (String line : lines) {
+            String id = "opt-" + index;
+            options.add(new SolutionOption(id, line, line, "medium", false));
+            index++;
+        }
+        String recommended = options.isEmpty() ? null : "opt-1";
+        return new SolutionSuggestion(options, recommended,
+                "Generated from solution-suggest skill output.", null, null);
+    }
+
+    /**
+     * Create an external issue for the given task, recording the user's selected solution.
+     *
+     * @param taskId           the diagnostic task ID
+     * @param selectedSolution the user's selected solution text
+     * @return the updated issue closure, or {@code null} if no issue exists for the task
+     *         or the issue is not in {@link IssueStatus#SOLUTION_PROPOSED} /
+     *         {@link IssueStatus#FIX_IN_PROGRESS} status
+     */
+    public IssueClosure createExternalIssue(String taskId, String selectedSolution) {
+        IssueClosure issue = issueStore.findByTaskId(taskId);
+        if (issue == null) {
+            log.warn("Issue not found for taskId: {}", taskId);
+            return null;
+        }
+
+        // Idempotency guard: if an external issue was already created, return
+        // the existing issue without creating a duplicate.
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            log.info("External issue {} already exists for task {}; skipping creation",
+                    issue.getExternalIssueId(), taskId);
+            return issue;
+        }
+
+        // Status guard: only SOLUTION_PROPOSED (normal entry) and FIX_IN_PROGRESS
+        // (recovery when a previous noop tracker returned null) may create an
+        // external issue. Terminal statuses (VERIFIED, CLOSED, FAILED) and
+        // pre-solution statuses (DIAGNOSED, ISSUE_CREATED) are blocked.
+        IssueStatus status = issue.getStatus();
+        if (status != IssueStatus.SOLUTION_PROPOSED
+                && status != IssueStatus.FIX_IN_PROGRESS) {
+            log.warn("Cannot create external issue for task {}: issue status is {} (only {} or {} allowed)",
+                    taskId, status, IssueStatus.SOLUTION_PROPOSED, IssueStatus.FIX_IN_PROGRESS);
+            return null;
+        }
+
+        // Build a meaningful title: prefer the first meaningful line of the
+        // root cause (the diagnostic conclusion), falling back to userQuery.
+        // Using userQuery directly is unreliable — it's raw user input like
+        // "继续, local" which is not a meaningful issue title.
+        String title = buildIssueTitle(issue, taskId);
+        String description = buildIssueDescription(issue, selectedSolution);
+        String assignee = issue.getUserId();
+        String externalIssueId = issueTracker.createIssue(title, description, assignee);
+        String trackerType = issueTracker.type();
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withExternalIssue(externalIssueId, trackerType,
+                selectedSolution, IssueStatus.FIX_IN_PROGRESS, now);
+        issueStore.save(updated);
+        log.info("Created external issue {} (source={}) for issue {}",
+                externalIssueId, trackerType, issue.getIssueId());
+
+        // Add initial comment with root cause and solution details
+        if (externalIssueId != null && !externalIssueId.isEmpty()) {
+            try {
+                issueTracker.addComment(externalIssueId,
+                        buildCreationComment(issue, selectedSolution));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add creation comment to external issue {}: {}",
+                        externalIssueId, e.getMessage());
+            }
+        }
+
+        return updated;
+    }
+
+    /**
+     * Create an external issue with explicit title, description, severity, and priority
+     * from structured data (e.g. from create-issue skill output).
+     *
+     * @param taskId the task ID to associate with the issue
+     * @param title the issue title
+     * @param description the issue description
+     * @param severity severity level (1-4), or null for default
+     * @param pri priority level (1-4), or null for default
+     * @return the updated issue closure, or {@code null} if the task is not found
+     */
+    public IssueClosure createExternalIssueWithDetails(String taskId, String title,
+            String description, Integer severity, Integer pri) {
+        IssueClosure issue = findByTaskId(taskId);
+
+        // Auto-create IssueClosure if it doesn't exist
+        if (issue == null) {
+            log.info("No IssueClosure found for task {}; auto-proposing solution", taskId);
+            issue = proposeSolution(taskId);
+            if (issue == null) {
+                log.warn("Failed to auto-propose solution for task {}", taskId);
+                return null;
+            }
+            // Re-fetch to ensure we have the latest state
+            issue = findByTaskId(taskId);
+        }
+
+        // Status guard: only create from SOLUTION_PROPOSED or FIX_IN_PROGRESS
+        IssueStatus status = issue.getStatus();
+        if (status != IssueStatus.SOLUTION_PROPOSED && status != IssueStatus.FIX_IN_PROGRESS) {
+            log.warn("Cannot create external issue for task {}: status is {} (only SOLUTION_PROPOSED or FIX_IN_PROGRESS allowed)",
+                    taskId, status);
+            return null;
+        }
+
+        // Idempotency: skip if external issue already exists
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            log.info("External issue {} already exists for task {}; skipping creation",
+                    issue.getExternalIssueId(), taskId);
+            return issue;
+        }
+
+        String selectedSolution = issue.getSolution() != null ? issue.getSolution().getRecommendedOptionId() : null;
+
+        // Build title and description
+        String finalTitle = (title != null && !title.trim().isEmpty()) ? title.trim() : buildIssueTitle(issue, taskId);
+        String finalDesc = description != null ? description : (issue.getRootCause() != null ? issue.getRootCause() : "");
+
+        // Create the external issue
+        String externalIssueId = issueTracker.createIssue(finalTitle, finalDesc, null);
+        String trackerType = issueTracker.type();
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withExternalIssue(externalIssueId, trackerType,
+                selectedSolution, IssueStatus.FIX_IN_PROGRESS, now);
+        issueStore.save(updated);
+        log.info("Created external issue {} (source={}) for issue {} with custom title",
+                externalIssueId, trackerType, issue.getIssueId());
+
+        // Add initial comment
+        if (externalIssueId != null && !externalIssueId.isEmpty()) {
+            try {
+                issueTracker.addComment(externalIssueId,
+                        buildCreationComment(issue, selectedSolution));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add creation comment to external issue {}: {}",
+                        externalIssueId, e.getMessage());
+            }
+        }
+
+        return updated;
+    }
+
+    /**
+     * Verify the fix for an issue.
+     *
+     * <p>When a {@link VerificationRunner} is configured, it is invoked first.
+     * If the runner returns {@code null} (e.g. when the original diagnostic task
+     * is no longer in the in-memory TaskStore after an app restart), this method
+     * falls back to running the "verify-fix" skill, which relies on data stored
+     * on the issue itself (root_cause, original_query) rather than the lost task.
+     * Otherwise the issue is transitioned to {@link IssueStatus#VERIFIED}.</p>
+     *
+     * @param issueId the issue ID
+     * @return the updated issue closure, or {@code null} if the issue is not found
+     *         or both the verification runner and the verify-fix skill are unavailable
+     */
+    public IssueClosure verify(String issueId) {
+        IssueClosure issue = issueStore.load(issueId);
+        if (issue == null) {
+            log.warn("Issue not found for verify: {}", issueId);
+            return null;
+        }
+
+        // Status guard: only allow verification when a fix has been initiated
+        // (FIX_IN_PROGRESS, FIX_SUBMITTED, or FAILED for re-verification).
+        // Verifying a DIAGNOSED or SOLUTION_PROPOSED issue makes no sense.
+        IssueStatus currentStatus = issue.getStatus();
+        if (currentStatus != IssueStatus.FIX_IN_PROGRESS
+                && currentStatus != IssueStatus.FIX_SUBMITTED
+                && currentStatus != IssueStatus.FAILED) {
+            log.warn("Cannot verify issue {}: status is {} (only {}, {} or {} allowed)",
+                    issueId, currentStatus, IssueStatus.FIX_IN_PROGRESS, IssueStatus.FIX_SUBMITTED, IssueStatus.FAILED);
+            return null;
+        }
+
+        // 1. Extract acceptance criteria from solution
+        List<AcceptanceCriterion> criteria = extractAcceptanceCriteria(issue);
+
+        VerificationResult result;
+        if (criteria != null && !criteria.isEmpty()) {
+            // 2. Execute acceptance criteria
+            result = verifyViaCriteria(issue, criteria);
+        } else {
+            // 3. Fallback: use verification runner or verify-fix skill
+            if (verificationRunner != null) {
+                log.info("Verifying fix for issue {} via VerificationRunner", issueId);
+                result = verificationRunner.verify(issue);
+                if (result == null) {
+                    log.info("VerificationRunner returned null for issue {}; falling back to verify-fix skill", issueId);
+                    result = verifyViaSkill(issueId, issue);
+                }
+            } else {
+                result = verifyViaSkill(issueId, issue);
+            }
+        }
+        if (result == null) {
+            // verify-fix skill not found — preserve legacy null result.
+            return null;
+        }
+
+        long now = System.currentTimeMillis();
+        IssueStatus newStatus = result.isPassed() ? IssueStatus.VERIFIED : IssueStatus.FAILED;
+        IssueClosure updated = issue.withVerification(result, now)
+                .withStatus(newStatus, now);
+        issueStore.save(updated);
+        log.info("Issue {} verified (passed={})", issueId, result.isPassed());
+
+        // Push verification comment to external issue
+        if (updated.getExternalIssueId() != null && !updated.getExternalIssueId().isEmpty()) {
+            String comment = buildVerificationComment(updated, result);
+            log.info("Adding verification comment to external issue {} (source: {})",
+                    updated.getExternalIssueId(), updated.getExternalIssueSource());
+            try {
+                issueTracker.addComment(updated.getExternalIssueId(), comment);
+                log.info("Verification comment added successfully to external issue {}",
+                        updated.getExternalIssueId());
+            } catch (RuntimeException e) {
+                log.warn("Failed to add verification comment to external issue {}: {}",
+                        updated.getExternalIssueId(), e.getMessage(), e);
+            }
+        } else {
+            log.info("Skipping verification comment: no external issue ID for {}", issueId);
+        }
+
+        return updated;
+    }
+
+    /**
+     * Fallback: runs the "verify-fix" skill and builds a {@link VerificationResult}
+     * from its report.
+     *
+     * <p>The fix is considered passed only when the report contains an explicit
+     * verification conclusion line starting with "验证结果" or "Verification result"
+     * followed by "pass" or "通过". This prevents false positives from LLM
+     * reports that merely mention "通过" in passing during analysis.</p>
+     *
+     * @return the verification result, or {@code null} if the skill is not registered
+     */
+    VerificationResult verifyViaSkill(String issueId, IssueClosure issue) {
+        if (skillRegistry == null) {
+            log.error("SkillRegistry not available; cannot run verify-fix skill");
+            return null;
+        }
+        Map<String, String> inputs = new HashMap<String, String>();
+        inputs.put("root_cause", issue.getRootCause() != null ? issue.getRootCause() : "");
+        inputs.put("original_query", issue.getUserQuery() != null ? issue.getUserQuery() : "");
+        inputs.put("issue_id", issueId);
+
+        SkillMeta skill = skillRegistry.get("verify-fix");
+        if (skill == null) {
+            log.error("Skill 'verify-fix' not found in registry");
+            return null;
+        }
+
+        AgentTask verifyTask = AgentTask.create(systemUserId, "verify-fix", inputs, null);
+        agentService.execute(verifyTask, skill);
+
+        String report = verifyTask.getReport();
+        boolean passed = determineVerificationPassed(report);
+        String beforeStatus = issue.getStatus() != null ? issue.getStatus().name() : null;
+        String afterStatus = verifyTask.getStatus() != null ? verifyTask.getStatus().name() : null;
+        return new VerificationResult(passed, report, beforeStatus, afterStatus,
+                System.currentTimeMillis());
+    }
+
+    /**
+     * Determines whether the verify-fix report indicates a passed verification.
+     *
+     * <p>Looks for an explicit conclusion line containing "验证结果" or
+     * "Verification result" followed by "pass" or "通过". This is stricter
+     * than a simple substring match, preventing false positives where the
+     * LLM mentions "通过" in analysis text without an actual pass verdict.</p>
+     */
+    private static boolean determineVerificationPassed(String report) {
+        if (report == null || report.isEmpty()) {
+            return false;
+        }
+        String lower = report.toLowerCase();
+        // Check for explicit conclusion patterns
+        // Pattern 1: "验证结果: pass" or "验证结果：通过"
+        // Pattern 2: "Verification result: pass"
+        // Pattern 3: The report ends with a clear "pass" or "通过" verdict line
+        String[] lines = report.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim().toLowerCase();
+            if (trimmed.startsWith("验证结果") || trimmed.startsWith("verification result")) {
+                // This is the conclusion line — check for pass verdict
+                return trimmed.contains("pass") || trimmed.contains("通过");
+            }
+        }
+        // Fallback: check last non-empty line for explicit pass/fail verdict
+        String lastLine = null;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            String trimmed = lines[i].trim();
+            if (!trimmed.isEmpty()) {
+                lastLine = trimmed.toLowerCase();
+                break;
+            }
+        }
+        if (lastLine != null) {
+            // Only pass if the last line is an explicit verdict
+            return (lastLine.equals("pass") || lastLine.equals("通过")
+                    || lastLine.contains("验证通过") || lastLine.contains("verification passed"));
+        }
+        return false;
+    }
+
+    /**
+     * Close an issue and sediment the experience into the vector store.
+     *
+     * <p>When a {@link KnowledgeSedimentationService} is available, extracts the
+     * Q&A from the issue and writes it to the vector store via embed + add.
+     * Then marks the issue as {@link IssueStatus#CLOSED}.</p>
+     *
+     * @param issueId the issue ID
+     * @return the updated issue closure, or {@code null} if the issue is not found
+     */
+    public IssueClosure close(String issueId) {
+        IssueClosure issue = issueStore.load(issueId);
+        if (issue == null) {
+            log.warn("Issue not found for close: {}", issueId);
+            return null;
+        }
+
+        // Update external tracker status when an external issue exists.
+        // Wrapped in try/catch — external tracker failures should not block close.
+        if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+            try {
+                issueTracker.updateStatus(issue.getExternalIssueId(), "resolved");
+                log.info("External issue {} status updated to resolved via {}",
+                        issue.getExternalIssueId(), issueTracker.type());
+            } catch (RuntimeException e) {
+                log.warn("Failed to update external issue {} status: {}",
+                        issue.getExternalIssueId(), e.getMessage());
+            }
+            try {
+                issueTracker.addComment(issue.getExternalIssueId(),
+                        buildCloseComment(issue));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add close comment: {}", e.getMessage());
+            }
+        }
+
+        if (sedimentationService != null) {
+            try {
+                sedimentationService.sediment(issue);
+                log.info("Issue {} sedimented into vector store", issueId);
+            } catch (RuntimeException e) {
+                log.warn("Sedimentation failed for issue {}: {}", issueId, e.getMessage());
+            }
+        }
+
+        // P2.1: Memory learning - extract user profile and project facts from conversation
+        if (memoryLearningExtractor != null && chatMemoryRepository != null) {
+            try {
+                extractAndSaveMemory(issue);
+            } catch (RuntimeException e) {
+                log.warn("Memory learning failed for issue {}: {}", issueId, e.getMessage());
+            }
+        }
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withKnowledgeEntry("diagnosis-experience:" + issueId, now)
+                .withStatus(IssueStatus.CLOSED, now);
+        issueStore.save(updated);
+        log.info("Issue {} closed", issueId);
+        return updated;
+    }
+
+    /**
+     * Loads an issue closure by its ID.
+     *
+     * @param issueId the issue ID
+     * @return the issue closure, or {@code null} if not found
+     */
+    public IssueClosure loadIssue(String issueId) {
+        return issueStore.load(issueId);
+    }
+
+    /**
+     * Lists all issue closures sorted by {@code updatedAt} descending
+     * (newest first). Delegates to {@link IssueStore#list()}.
+     *
+     * @return list of issue closures (never null, empty if none)
+     */
+    public List<IssueClosure> listIssues() {
+        return issueStore.list();
+    }
+
+    // ---- auto-fix workflow (v1.1) ----
+
+    /**
+     * Finds an issue closure by its associated diagnostic task ID.
+     *
+     * @param taskId the diagnostic task ID
+     * @return the issue closure, or null if not found
+     */
+    public IssueClosure findByTaskId(String taskId) {
+        return issueStore.findByTaskId(taskId);
+    }
+
+    /**
+     * Returns the web URL for an external issue, or {@code null} if not available.
+     */
+    public String getExternalIssueUrl(String externalIssueId) {
+        if (externalIssueId == null || externalIssueId.isEmpty()) {
+            return null;
+        }
+        return issueTracker.getIssueUrl(externalIssueId);
+    }
+
+    /**
+     * Trigger AI auto-fix for an issue: runs the fix agent, creates a branch
+     * + commit + PR via VcsClient, then transitions to FIX_SUBMITTED.
+     *
+     * @param issueId the issue ID
+     * @return the updated issue closure, or null if not found / wrong status
+     */
+    public IssueClosure autoFix(String issueId) {
+        IssueClosure issue = issueStore.load(issueId);
+        if (issue == null) {
+            log.warn("Issue not found for autoFix: {}", issueId);
+            return null;
+        }
+        if (issue.getStatus() != IssueStatus.FIX_IN_PROGRESS) {
+            log.warn("Cannot auto-fix issue {}: status is {} (only FIX_IN_PROGRESS allowed)",
+                    issueId, issue.getStatus());
+            return null;
+        }
+        if (fixExecutionService == null) {
+            log.warn("FixExecutionService not configured; cannot auto-fix issue {}", issueId);
+            return null;
+        }
+
+        FixResult result;
+        try {
+            result = fixExecutionService.autoFix(issueId);
+        } catch (RuntimeException e) {
+            log.error("Auto-fix failed for issue {}: {}", issueId, e.getMessage(), e);
+            long now = System.currentTimeMillis();
+            IssueClosure failed = issue.withStatus(IssueStatus.FAILED, now);
+            issueStore.save(failed);
+            if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+                try {
+                    issueTracker.addComment(issue.getExternalIssueId(),
+                            "## ❌ 自动修复失败\n\n" + e.getMessage());
+                } catch (RuntimeException ce) {
+                    log.warn("Failed to post failure comment: {}", ce.getMessage());
+                }
+            }
+            return failed;
+        }
+
+        if (!result.isSuccess()) {
+            long now = System.currentTimeMillis();
+            IssueClosure failed = issue.withStatus(IssueStatus.FAILED, now);
+            issueStore.save(failed);
+            if (issue.getExternalIssueId() != null && !issue.getExternalIssueId().isEmpty()) {
+                try {
+                    issueTracker.addComment(issue.getExternalIssueId(),
+                            "## ❌ 自动修复失败\n\n" + result.getErrorMessage());
+                } catch (RuntimeException ce) {
+                    log.warn("Failed to post failure comment: {}", ce.getMessage());
+                }
+            }
+            return failed;
+        }
+
+        long now = System.currentTimeMillis();
+        IssueClosure updated = issue.withFix(
+                result.getCommitId(), result.getPrUrl(), result.getPrNumber(),
+                IssueStatus.FIX_SUBMITTED, now);
+        issueStore.save(updated);
+
+        // Update external tracker status
+        if (updated.getExternalIssueId() != null && !updated.getExternalIssueId().isEmpty()) {
+            try {
+                issueTracker.updateStatus(updated.getExternalIssueId(), "in_progress");
+            } catch (RuntimeException e) {
+                log.warn("Failed to update external issue status: {}", e.getMessage());
+            }
+            try {
+                issueTracker.addComment(updated.getExternalIssueId(),
+                        buildFixComment(updated, result));
+            } catch (RuntimeException e) {
+                log.warn("Failed to add fix comment: {}", e.getMessage());
+            }
+        }
+
+        log.info("Issue {} auto-fixed: PR {} ({})",
+                issueId, result.getPrUrl(), result.getCommitId());
+        return updated;
+    }
+
+    /**
+     * Called when a PR merge webhook is received. Finds the issue by PR number,
+     * verifies the fix, and closes it if verification passes.
+     *
+     * <p>Idempotent: returns null if no issue matches or the issue is not in
+     * FIX_SUBMITTED status.</p>
+     *
+     * @param prNumber the PR number/iid from the webhook
+     * @return the final issue state, or null if not applicable
+     */
+    public IssueClosure onPrMerged(String prNumber) {
+        IssueClosure issue = issueStore.findByPrNumber(prNumber);
+        if (issue == null) {
+            log.warn("No issue found for PR number: {}", prNumber);
+            return null;
+        }
+        if (issue.getStatus() != IssueStatus.FIX_SUBMITTED) {
+            log.info("Issue {} is not FIX_SUBMITTED (actual: {}); skipping onPrMerged",
+                    issue.getIssueId(), issue.getStatus());
+            return null;
+        }
+
+        IssueClosure verified = verify(issue.getIssueId());
+        if (verified == null) {
+            return null;
+        }
+
+        if (verified.getVerificationResult() != null
+                && verified.getVerificationResult().isPassed()) {
+            return close(issue.getIssueId());
+        }
+        return verified;
+    }
+
+    // ---- auto-fix helpers ----
+
+    /**
+     * Extracts acceptance criteria from the issue's solution suggestion.
+     */
+    private List<AcceptanceCriterion> extractAcceptanceCriteria(IssueClosure issue) {
+        if (issue.getSolution() == null) {
+            return null;
+        }
+        return issue.getSolution().getAcceptanceCriteria();
+    }
+
+    /**
+     * Verifies an issue by executing its acceptance criteria via available tools.
+     */
+    private VerificationResult verifyViaCriteria(IssueClosure issue,
+                                                  List<AcceptanceCriterion> criteria) {
+        log.info("Verifying issue {} with {} acceptance criteria",
+                issue.getIssueId(), criteria.size());
+        if (verificationRunner != null) {
+            VerificationResult result = verificationRunner.verify(issue);
+            if (result != null) {
+                return result;
+            }
+        }
+        return verifyViaSkill(issue.getIssueId(), issue);
+    }
+
+    private String buildFixComment(IssueClosure issue, FixResult result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 🔧 修复方案已提交\n\n");
+        sb.append("**Commit**: ").append(result.getCommitId()).append("\n");
+        sb.append("**PR**: ").append(result.getPrUrl()).append("\n\n");
+        sb.append("### 变更文件\n");
+        sb.append("| 文件 | 操作 |\n|------|------|\n");
+        if (result.getChangedFiles() != null) {
+            for (String file : result.getChangedFiles()) {
+                sb.append("| ").append(file).append(" | UPDATE |\n");
+            }
+        }
+        if (issue.getSolution() != null
+                && issue.getSolution().getAcceptanceCriteria() != null
+                && !issue.getSolution().getAcceptanceCriteria().isEmpty()) {
+            sb.append("\n### 验收标准\n");
+            int idx = 1;
+            for (AcceptanceCriterion ac : issue.getSolution().getAcceptanceCriteria()) {
+                sb.append(idx++).append(". ").append(ac.getDescription())
+                  .append(" (").append(ac.getExpected()).append(")\n");
+            }
+        }
+        sb.append("\n---\n_由 SnapAgent 自动生成_");
+        return sb.toString();
+    }
+
+    private String buildVerificationComment(IssueClosure issue, VerificationResult result) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(result.isPassed() ? "## ✅ 验收通过\n\n" : "## ❌ 验收未通过\n\n");
+        sb.append(result.getSummary() != null ? result.getSummary() : "").append("\n\n");
+        if (issue.getFixCommitId() != null) {
+            sb.append("**Commit**: ").append(issue.getFixCommitId()).append("\n");
+        }
+        sb.append("\n---\n_由 SnapAgent 自动生成_");
+        return sb.toString();
+    }
+
+    private String buildCloseComment(IssueClosure issue) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 🔒 Issue 已关闭\n\n");
+        sb.append("**根因**: ").append(truncate(issue.getRootCause(), 200)).append("\n");
+        if (issue.getFixCommitId() != null) {
+            sb.append("**修复 Commit**: ").append(issue.getFixCommitId()).append("\n");
+        }
+        if (issue.getVerificationResult() != null) {
+            sb.append("**验证**: ").append(issue.getVerificationResult().isPassed() ? "通过" : "未通过").append("\n");
+        }
+        sb.append("\n---\n_由 SnapAgent 自动生成_");
+        return sb.toString();
+    }
+
+    // ---- helpers ----
+
+    /**
+     * Builds a concise, meaningful title for the external issue.
+     *
+     * <p>Preference order:</p>
+     * <ol>
+     *   <li>First non-empty, non-markdown-header line of rootCause (diagnostic conclusion)</li>
+     *   <li>User query (truncated)</li>
+     *   <li>Fallback: "Issue for task {taskId}"</li>
+     * </ol>
+     */
+    private String buildIssueTitle(IssueClosure issue, String taskId) {
+        // Try to extract a meaningful summary from rootCause
+        if (issue.getRootCause() != null && !issue.getRootCause().isEmpty()) {
+            for (String line : issue.getRootCause().split("\n")) {
+                String trimmed = line.trim();
+                // Skip empty lines, markdown headers, horizontal rules, and code blocks
+                if (trimmed.isEmpty()) continue;
+                if (trimmed.startsWith("#")) continue;
+                if (trimmed.startsWith("---")) continue;
+                if (trimmed.startsWith("```")) continue;
+                if (trimmed.startsWith("|")) continue;
+                // This is a meaningful first line — use it as the title
+                return truncate(trimmed, 80);
+            }
+        }
+        // Fallback to userQuery if rootCause has no meaningful lines
+        if (issue.getUserQuery() != null && !issue.getUserQuery().isEmpty()) {
+            return truncate(issue.getUserQuery(), 80);
+        }
+        return "Issue for task " + taskId;
+    }
+
+    /**
+     * Builds a rich description for the external issue from the issue closure's
+     * root cause, user query, and solution options.
+     */
+    private String buildIssueDescription(IssueClosure issue, String selectedSolution) {
+        StringBuilder sb = new StringBuilder();
+        if (issue.getUserQuery() != null && !issue.getUserQuery().isEmpty()) {
+            sb.append("## 问题描述\n\n").append(issue.getUserQuery()).append("\n\n");
+        }
+        if (issue.getRootCause() != null && !issue.getRootCause().isEmpty()) {
+            sb.append("## 根因分析\n\n").append(issue.getRootCause()).append("\n\n");
+        }
+        if (issue.getSolution() != null && issue.getSolution().getOptions() != null) {
+            sb.append("## 建议方案\n\n");
+            int idx = 1;
+            for (SolutionOption opt : issue.getSolution().getOptions()) {
+                sb.append(idx++).append(". **").append(opt.getTitle() != null ? opt.getTitle() : "")
+                  .append("** — ").append(opt.getDescription() != null ? opt.getDescription() : "")
+                  .append(" (工作量: ").append(opt.getEffort() != null ? opt.getEffort() : "")
+                  .append(")\n");
+            }
+            if (issue.getSolution().getRecommendedOptionId() != null) {
+                sb.append("\n推荐方案: ").append(issue.getSolution().getRecommendedOptionId()).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (selectedSolution != null && !selectedSolution.isEmpty()) {
+            sb.append("## 选定方案\n\n").append(selectedSolution).append("\n");
+        }
+        if (sb.length() == 0) {
+            sb.append("由 SnapAgent 自动创建");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Builds the initial comment to add to the external issue after creation.
+     */
+    private String buildCreationComment(IssueClosure issue, String selectedSolution) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 📋 Issue 由 SnapAgent 自动创建\n\n");
+        sb.append("**关联任务**: ").append(issue.getTaskId()).append("\n");
+        if (issue.getUserId() != null) {
+            sb.append("**创建人**: ").append(issue.getUserId()).append("\n");
+        }
+        if (selectedSolution != null && !selectedSolution.isEmpty()) {
+            sb.append("**选定方案**: ").append(selectedSolution).append("\n");
+        }
+        sb.append("\n---\n_由 SnapAgent 自动生成_");
+        return sb.toString();
+    }
+
+    /**
+     * Extracts the user's original query from the diagnostic task's input map
+     * by concatenating all non-empty input values.
+     */
+    private String extractUserQuery(Map<String, String> inputs) {
+        if (inputs == null || inputs.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (Map.Entry<String, String> entry : inputs.entrySet()) {
+            String value = entry.getValue();
+            if (value != null && !value.isEmpty()) {
+                if (sb.length() > 0) {
+                    sb.append(", ");
+                }
+                sb.append(value);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Parses multi-line solution text into a list of non-empty lines.
+     */
+    private List<String> parseSolutionLines(String solutionText) {
+        List<String> lines = new ArrayList<String>();
+        if (solutionText == null || solutionText.isEmpty()) {
+            return lines;
+        }
+        for (String line : solutionText.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                lines.add(trimmed);
+            }
+        }
+        return lines;
+    }
+
+    private static String truncate(String text, int maxLength) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...";
+    }
+
+    private static String randomSuffix() {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    }
+
+    /**
+     * Extract and save memory from the conversation associated with this issue.
+     *
+     * <p>Loads the conversation messages, extracts user profile and project facts
+     * using the MemoryLearningExtractor, and saves them to the respective stores.</p>
+     *
+     * @param issue the issue closure with conversation context
+     */
+    private void extractAndSaveMemory(IssueClosure issue) {
+        String conversationId = issue.getConversationId();
+        if (conversationId == null || conversationId.isEmpty()) {
+            log.debug("No conversation ID for issue {}, skipping memory learning", issue.getIssueId());
+            return;
+        }
+
+        // Load conversation messages
+        List<Message> messages = chatMemoryRepository.load(conversationId);
+        if (messages == null || messages.isEmpty()) {
+            log.debug("No messages found for conversation {}, skipping memory learning", conversationId);
+            return;
+        }
+
+        String userId = issue.getUserId();
+
+        // Extract and save user profile
+        if (userProfileStore != null && userId != null && !userId.isEmpty()) {
+            try {
+                UserProfile profile = memoryLearningExtractor.extractUserProfile(userId, messages);
+                if (profile != null) {
+                    userProfileStore.save(userId, profile);
+                    log.info("User profile extracted and saved for user {}", userId);
+                }
+            } catch (RuntimeException e) {
+                log.warn("Failed to extract/save user profile for user {}: {}", userId, e.getMessage());
+            }
+        }
+
+        // Extract and save project facts
+        if (projectFactsStore != null) {
+            try {
+                List<ProjectFact> facts = memoryLearningExtractor.extractProjectFacts(messages, issue);
+                if (facts != null && !facts.isEmpty()) {
+                    // Use issueId as projectId for now - could be enhanced to use actual project context
+                    projectFactsStore.save(issue.getIssueId(), facts);
+                    log.info("Extracted and saved {} project facts from issue {}", facts.size(), issue.getIssueId());
+                }
+            } catch (RuntimeException e) {
+                log.warn("Failed to extract/save project facts for issue {}: {}", issue.getIssueId(), e.getMessage());
+            }
+        }
+    }
+}
