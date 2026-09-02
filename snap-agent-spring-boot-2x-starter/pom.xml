@@ -122,6 +122,14 @@
             <optional>true</optional>
         </dependency>
 
+        <!-- Micrometer (optional, for MicrometerMetricsCollector + MicrometerObservationAdvisor)
+             Auto-activated when MeterRegistry bean is present (typically via spring-boot-starter-actuator) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- SLF4J -->
         <dependency>
             <groupId>org.slf4j</groupId>

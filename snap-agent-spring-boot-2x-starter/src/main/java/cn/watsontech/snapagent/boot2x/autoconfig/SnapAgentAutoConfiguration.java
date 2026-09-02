@@ -72,7 +72,8 @@ import java.nio.file.Paths;
         IssueAutoConfiguration.class,
         CostAutoConfiguration.class,
         WorkflowAutoConfiguration.class,
-        BridgeAutoConfiguration.class
+        BridgeAutoConfiguration.class,
+        MetricsAutoConfiguration.class
 })
 public class SnapAgentAutoConfiguration {
 
