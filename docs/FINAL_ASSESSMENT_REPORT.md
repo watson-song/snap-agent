@@ -211,7 +211,7 @@ snap-agent-spring-boot-2x-starter (Spring Boot 实现, 169 文件)
 - [x] 前端 SPA 增强 — Skill 搜索过滤（Ctrl/Cmd+K 快捷键）、新建会话按钮、历史会话跨 Skill 过滤+标题搜索
 
 ### Phase 3: 产品化（3-6 月）— 进行中
-- [ ] 开源文档站 + GitHub Discussion
+- [x] 开源文档站 (68d8a946) — MkDocs Material 主题，6 个页面（首页、快速开始、概念、配置、API、部署）
 - [ ] Skill 市场/模板库
 - [x] 集群支持（分布式 CheckpointStore）— JdbcCheckpointStore + RedisCheckpointStore (17 tests)
 - [ ] A/B 测试框架

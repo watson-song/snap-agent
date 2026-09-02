@@ -16,7 +16,9 @@ import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
 import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.skill.SkillTemplateCatalog;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
+import cn.watsontech.snapagent.boot2x.web.SkillTemplateController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
 import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
@@ -208,5 +210,20 @@ public class WebAutoConfiguration {
         registration.setOrder(props.getSecurity().getFilterOrder());
         registration.setName("snapAgentFilter");
         return registration;
+    }
+
+    // ---- SkillTemplateCatalog + SkillTemplateController (Marketplace) ----
+    @Bean
+    @ConditionalOnMissingBean
+    public SkillTemplateCatalog skillTemplateCatalog(SnapAgentProperties props, SkillRegistry skillRegistry) {
+        java.nio.file.Path uploadDir = java.nio.file.Paths.get(props.getUploadSkillsDir());
+        return new SkillTemplateCatalog(uploadDir, skillRegistry);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public SkillTemplateController skillTemplateController(
+            SkillTemplateCatalog catalog, SnapAgentProperties props) {
+        return new SkillTemplateController(catalog, props.getBasePath());
     }
 }

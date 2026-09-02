@@ -3509,6 +3509,7 @@ document.getElementById('navIssuesBtn').addEventListener('click', showIssuesModa
 document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModal);
 document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
 document.getElementById('navKnowledgeBtn').addEventListener('click', showKnowledgeModal);
+document.getElementById('navMarketplaceBtn').addEventListener('click', showMarketplaceModal);
 
 // --- Alert badge polling ---
 async function refreshAlertBadge() {
@@ -3952,6 +3953,157 @@ async function showKnowledgeModal() {
     } catch (e) {
         body.innerHTML = featureEmpty('加载失败: ' + e.message);
     }
+}
+
+// --- Skill Marketplace ---
+async function showMarketplaceModal() {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'marketplaceModal';
+
+    var modal = document.createElement('div');
+    modal.className = 'modal marketplace-modal';
+    modal.innerHTML =
+        '<div class="modal-header">' +
+            '<h2>🏪 Skill 市场</h2>' +
+            '<div class="marketplace-filters">' +
+                '<select id="marketplaceCategoryFilter" class="marketplace-category-filter">' +
+                    '<option value="">全部分类</option>' +
+                '</select>' +
+                '<input type="text" id="marketplaceSearch" class="marketplace-search" placeholder="搜索模板...">' +
+            '</div>' +
+            '<button class="modal-close" id="closeMarketplace">&times;</button>' +
+        '</div>' +
+        '<div class="modal-body marketplace-body" id="marketplaceBody">' +
+            '<div class="loading">加载中...</div>' +
+        '</div>';
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    document.getElementById('closeMarketplace').onclick = function() { overlay.remove(); };
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+    // Load templates
+    try {
+        var resp = await fetch(BASE + '/templates', { headers: authHeaders() });
+        if (!resp.ok) throw new Error('Failed to load templates');
+        var data = await resp.json();
+        var templates = data.templates || [];
+        var categories = data.categories || [];
+
+        // Populate category filter
+        var catSelect = document.getElementById('marketplaceCategoryFilter');
+        categories.forEach(function(cat) {
+            var opt = document.createElement('option');
+            opt.value = cat;
+            opt.textContent = cat;
+            catSelect.appendChild(opt);
+        });
+
+        function renderTemplates(filter) {
+            var body = document.getElementById('marketplaceBody');
+            var filtered = templates;
+            if (filter) {
+                var q = filter.toLowerCase();
+                filtered = templates.filter(function(t) {
+                    return (t.name || '').toLowerCase().indexOf(q) >= 0 ||
+                           (t.description || '').toLowerCase().indexOf(q) >= 0 ||
+                           (t.category || '').toLowerCase().indexOf(q) >= 0 ||
+                           (t.tags || []).some(function(tag) { return tag.toLowerCase().indexOf(q) >= 0; });
+                });
+            }
+
+            if (filtered.length === 0) {
+                body.innerHTML = featureEmpty('没有找到匹配的模板');
+                return;
+            }
+
+            var html = '<div class="marketplace-grid">';
+            filtered.forEach(function(t) {
+                var installedBadge = t.installed
+                    ? '<span class="marketplace-badge installed">已安装</span>'
+                    : '<button class="marketplace-install-btn" data-name="' + t.name + '">安装</button>';
+                html +=
+                    '<div class="marketplace-card" data-name="' + t.name + '">' +
+                        '<div class="marketplace-card-header">' +
+                            '<span class="marketplace-icon">' + (t.icon || '📋') + '</span>' +
+                            '<div class="marketplace-card-title">' +
+                                '<h3>' + escapeHtml(t.name) + '</h3>' +
+                                '<span class="marketplace-category">' + escapeHtml(t.category || '通用') + '</span>' +
+                            '</div>' +
+                        '</div>' +
+                        '<p class="marketplace-desc">' + escapeHtml(t.description || '') + '</p>' +
+                        '<div class="marketplace-card-footer">' +
+                            '<div class="marketplace-tags">' +
+                                (t.tags || []).map(function(tag) {
+                                    return '<span class="marketplace-tag">' + escapeHtml(tag) + '</span>';
+                                }).join('') +
+                            '</div>' +
+                            '<div class="marketplace-action">' + installedBadge + '</div>' +
+                        '</div>' +
+                    '</div>';
+            });
+            html += '</div>';
+            body.innerHTML = html;
+
+            // Bind install buttons
+            body.querySelectorAll('.marketplace-install-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    installTemplate(btn.dataset.name, btn);
+                });
+            });
+        }
+
+        renderTemplates('');
+
+        // Filter handlers
+        catSelect.addEventListener('change', function() {
+            var cat = catSelect.value;
+            var search = document.getElementById('marketplaceSearch').value;
+            var filter = cat || search;
+            renderTemplates(filter);
+        });
+        document.getElementById('marketplaceSearch').addEventListener('input', function() {
+            var cat = catSelect.value;
+            var search = this.value;
+            var filter = search || cat;
+            renderTemplates(filter);
+        });
+
+    } catch (e) {
+        document.getElementById('marketplaceBody').innerHTML = featureEmpty('加载失败: ' + e.message);
+    }
+}
+
+async function installTemplate(name, btn) {
+    btn.textContent = '安装中...';
+    btn.disabled = true;
+    try {
+        var resp = await fetch(BASE + '/templates/' + encodeURIComponent(name) + '/install', {
+            method: 'POST',
+            headers: authHeaders()
+        });
+        if (!resp.ok) {
+            var err = await resp.json();
+            throw new Error(err.message || 'Install failed');
+        }
+        btn.textContent = '✅ 已安装';
+        btn.classList.add('installed');
+        // Refresh skills list
+        await loadSkills();
+    } catch (e) {
+        btn.textContent = '安装';
+        btn.disabled = false;
+        alert('安装失败: ' + e.message);
+    }
+}
+
+function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 // ===== Init =====

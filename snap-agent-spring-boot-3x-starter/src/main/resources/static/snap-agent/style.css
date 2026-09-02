@@ -1623,3 +1623,48 @@ body {
     color: var(--text-secondary);
     font-size: 13px;
 }
+
+/* ===== Marketplace ===== */
+.marketplace-modal { max-width: 800px; width: 90%; }
+.marketplace-body { padding: 0; }
+.marketplace-filters { display: flex; gap: 8px; align-items: center; margin-left: auto; margin-right: 16px; }
+.marketplace-category-filter {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 13px; background: var(--bg); color: var(--text);
+}
+.marketplace-search {
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
+    font-size: 13px; width: 160px; background: var(--bg); color: var(--text);
+}
+.marketplace-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px; padding: 16px;
+}
+.marketplace-card {
+    border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+    background: var(--bg); cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
+    display: flex; flex-direction: column;
+}
+.marketplace-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: var(--primary); }
+.marketplace-card-header { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.marketplace-icon { font-size: 28px; line-height: 1; }
+.marketplace-card-title h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.marketplace-category { font-size: 11px; color: var(--text-secondary); }
+.marketplace-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; flex: 1; margin: 0 0 10px; }
+.marketplace-card-footer { display: flex; justify-content: space-between; align-items: center; }
+.marketplace-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+.marketplace-tag {
+    font-size: 10px; padding: 2px 6px; border-radius: 3px;
+    background: var(--bg-secondary, #f0f0f0); color: var(--text-secondary);
+}
+.marketplace-badge.installed {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: #e8f5e9; color: #2e7d32;
+}
+.marketplace-install-btn {
+    font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
+    background: var(--primary); color: #fff; border: none; transition: opacity 0.15s;
+}
+.marketplace-install-btn:hover { opacity: 0.85; }
+.marketplace-install-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.marketplace-install-btn.installed { background: #4caf50; }

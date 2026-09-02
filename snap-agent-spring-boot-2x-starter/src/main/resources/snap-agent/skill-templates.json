@@ -1,0 +1,211 @@
+[
+  {
+    "name": "code-analysis",
+    "description": "分析项目代码，回答“这段逻辑为什么这样写”“这个接口在哪实现”等问题。调用 project_structure 定位文件，code_read 读取源码，git_log 查看变更历史。",
+    "category": "开发辅助",
+    "tags": [
+      "代码",
+      "源码",
+      "分析"
+    ],
+    "icon": "💻",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: code-analysis\ndescription: \"分析项目代码，回答“这段逻辑为什么这样写”“这个接口在哪实现”等问题。调用 project_structure 定位文件，code_read 读取源码，git_log 查看变更历史。\"\ntools: [project_structure, code_read, git_log]\ninputs:\n  - key: question\n    label: 代码相关问题（如”OrderService.createOrder 为什么跳过校验”）\n---\n\n# 代码分析\n\n## Phase 1: 理解问题\n确认用户想了解的类、方法或逻辑。从 {question} 中提取关键词（类名、方法名、业务概念）。\n\n## Phase 2: 定位代码\n调用 `project_structure` 扫描项目结构，根据关键词定位目标文件目录。\n- 如果涉及特定文件，直接用文件路径跳到 Phase 3\n- 如果不确定路径，先扫描 `src/main/java` 目录，缩小范围\n\n## Phase 3: 读取源码\n调用 `code_read` 读取目标文件内容。\n- 优先读取完整文件（了解上下文）\n- 文件过大时用 `keyword` 参数过滤关键方法\n- 需要看某方法的实现时，用 `start_line` / `end_line` 精确定位\n\n## Phase 4: 追溯历史（如需要）\n如果用户问\"为什么这样写\"或涉及历史决策，调用 `git_log` 查看变更历史：\n- `mode=log` + `file_path=目标文件` — 查看文件的提交历史\n- `mode=blame` + `file_path=目标文件` — 查看具体行的作者和提交\n- `mode=show` + `commit_hash=xxx` — 查看具体 commit 的改动详情\n\n## Phase 5: 输出结论\n给出结构化回答：\n- **代码位置**: 文件路径 + 行号范围\n- **逻辑说明**: 该代码做了什么、为什么这样设计\n- **变更历史**（如有）: 关键变更记录、作者、时间\n- **建议改进**（如适用）: 潜在问题或优化方向\n"
+  },
+  {
+    "name": "config-diff",
+    "description": "环境配置对比：读取不同环境配置，识别差异项，标记风险。适合'sit 和 prod 配置有什么不同'类问题。",
+    "category": "开发辅助",
+    "tags": [
+      "配置",
+      "对比",
+      "差异"
+    ],
+    "icon": "🔀",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: config-diff\ndescription: \"环境配置对比：读取不同环境配置，识别差异项，标记风险。适合'sit 和 prod 配置有什么不同'类问题。\"\ntools: [config_read, metrics_query]\n---\n\n# 环境配置对比\n\n## Phase 1: 读取配置\n- 调用 `config_read` (source=local) 读取当前环境配置\n- 如需对比远程环境，调用 `config_read` (source=nacos) 读取目标环境配置\n\n## Phase 2: 差异识别\n- 对比两个环境的配置 key\n- 标记: 仅一侧有的 key / 值不同的 key\n\n## Phase 3: 风险评估\n- 连接池/线程池大小差异 → 性能风险\n- 超时配置差异 → 可靠性风险\n- 日志级别差异 → 可观测性风险\n- 限流/熔断配置差异 → 稳定性风险\n\n## Phase 4: 输出\n- 差异项表格（key | sit值 | prod值 | 风险等级）\n- 高风险项重点标注\n- 建议对齐的配置项\n"
+  },
+  {
+    "name": "create-issue",
+    "description": "纯文本整理任务：根据已有的诊断结果，输出结构化的 Issue JSON。禁止调用任何工具，禁止查询数据库，禁止重新诊断。",
+    "category": "闭环管理",
+    "tags": [
+      "Issue",
+      "工单",
+      "跟踪"
+    ],
+    "icon": "🎫",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: create-issue\ndescription: \"纯文本整理任务：根据已有的诊断结果，输出结构化的 Issue JSON。禁止调用任何工具，禁止查询数据库，禁止重新诊断。\"\ntools: []\ninputs:\n  - key: root_cause\n    label: 根因分析/诊断报告\n    required: true\n    type: text\n  - key: original_query\n    label: 用户原始问题\n    required: true\n    type: text\n  - key: task_id\n    label: 关联诊断任务 ID\n    required: false\n    type: text\n---\n\n# Issue 数据整理（纯文本任务）\n\n**重要：这是一个纯文本整理任务。你不需要、也不应该调用任何工具。不要查询数据库，不要执行任何诊断步骤，不要检查任何系统状态。**\n\n用户已经完成了完整的诊断流程。你的唯一任务是：**阅读输入内容，然后输出一个结构化的 JSON 对象。**\n\n## 禁止行为\n\n- ❌ 不要调用 mysql_query、log_search、metrics_query 或任何其他工具\n- ❌ 不要查询数据库\n- ❌ 不要执行诊断步骤（Layer 0、Layer 1 等）\n- ❌ 不要检查系统状态\n- ❌ 不要重新分析根因\n\n## 允许行为\n\n- ✅ 阅读 `root_cause` 和 `original_query` 的内容\n- ✅ 从中提取关键信息\n- ✅ 整理成结构化 JSON 输出\n\n## 输入\n\n- **用户原始问题**: `{original_query}`\n- **诊断报告**: `{root_cause}`\n\n## 输出\n\n直接输出以下 JSON，不要添加任何解释、分析或诊断步骤：\n\n```json\n{\n  \"title\": \"一句话概括核心问题（不超过80字符）\",\n  \"description\": \"## 问题背景\\n（从诊断报告中提取）\\n\\n## 根因分析\\n（从诊断报告中提取）\\n\\n## 影响范围\\n（从诊断报告中提取）\",\n  \"severity\": 2,\n  \"pri\": 2,\n  \"acceptance_criteria\": [\n    {\n      \"id\": \"AC-1\",\n      \"description\": \"从诊断报告中提取的验收条件\",\n      \"tool\": \"mysql_query\",\n      \"verification\": \"从诊断报告中提取的SQL或命令\",\n      \"expected\": \"> 0\"\n    }\n  ]\n}\n```\n\n## 字段说明\n\n- **title**: 简洁的问题标题，用于禅道 Bug 标题\n- **description**: Markdown 格式的问题描述，从诊断报告中提取背景、根因、影响范围\n- **severity**: 1(致命) 2(严重) 3(一般) 4(轻微) — 根据影响范围判断\n- **pri**: 1(紧急) 2(高) 3(中) 4(低) — 根据业务影响判断\n- **acceptance_criteria**: 从诊断报告中提取 2-4 条可验证的验收条件\n\n## 再次强调\n\n**直接输出 JSON。不要调用工具。不要查询数据库。不要重新诊断。不要添加任何分析过程。你的任务只是整理已有的诊断结果。**\n"
+  },
+  {
+    "name": "database-query",
+    "description": "Queries the application database with read-only SQL. Use when the user asks to look up data, inspect records, count rows, or answer business questions from database data.",
+    "category": "数据查询",
+    "tags": [
+      "SQL",
+      "数据库",
+      "查询"
+    ],
+    "icon": "🗄️",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: database-query\ndescription: \"Queries the application database with read-only SQL. Use when the user asks to look up data, inspect records, count rows, or answer business questions from database data.\"\ntools: [mysql_query]\nshortcuts:\n  - label: \"📋 所有表\"\n    message: \"列出当前数据库的所有表\"\n  - label: \"📊 表数据量\"\n    message: \"查看当前数据库各表的数据量\"\n  - label: \"🔗 当前连接\"\n    message: \"查看当前数据库的连接列表\"\n  - label: \"💾 数据库版本\"\n    message: \"查看数据库版本信息\"\n---\n\n# Database Query\n\nA general-purpose read-only database query skill. Translate the user's natural-language question into a safe `SELECT` query and execute it.\n\n## Step 1: Understand the Question\n\nRead the user's message carefully. Identify:\n- What entity the user wants (orders, users, products, etc.)\n- What filter / condition applies (status, date range, id)\n- What aggregation is needed (count, sum, latest)\n\nIf the question is already valid SQL, skip to Step 3.\n\n## Step 2: Discover the Schema (if needed)\n\nIf you don't know the table/column names, inspect `INFORMATION_SCHEMA` first:\n\n```sql\nSELECT TABLE_NAME, TABLE_ROWS\nFROM INFORMATION_SCHEMA.TABLES\nWHERE TABLE_SCHEMA = DATABASE()\nORDER BY TABLE_NAME\nLIMIT 50\n```\n\nThen check columns of the target table:\n\n```sql\nSELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_KEY\nFROM INFORMATION_SCHEMA.COLUMNS\nWHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '{table}'\nORDER BY ORDINAL_POSITION\n```\n\n## Step 3: Build the Query\n\nConstruct a read-only `SELECT` query that answers the question. Rules:\n- Start with `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, or `EXPLAIN` only — write keywords are blocked.\n- Always include an explicit `LIMIT` (the guard will inject one if missing, but explicit is clearer).\n- Never use `SELECT *` on wide tables — pick the columns the user cares about.\n\n## Step 4: Execute\n\nCall the `mysql_query` tool with the SQL. The tool returns a pipe-delimited table.\n\n## Step 5: Present Results\n\nSummarize the result for the user:\n- Restate the question in one line.\n- Present the data as a readable table or bullet list.\n- If the result is empty, say so explicitly and suggest why.\n- If the query was rejected by the read-only guard, explain that only read queries are allowed.\n"
+  },
+  {
+    "name": "error-spike-investigation",
+    "description": "错误率突增排查：定位时间窗口 → 查日志 → 关联部署 → 定位根因。适合'错误率突然升高'或'为什么突然报错'类问题。",
+    "category": "运维排查",
+    "tags": [
+      "错误",
+      "异常",
+      "告警"
+    ],
+    "icon": "🚨",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: error-spike-investigation\ndescription: \"错误率突增排查：定位时间窗口 → 查日志 → 关联部署 → 定位根因。适合'错误率突然升高'或'为什么突然报错'类问题。\"\ntools: [metrics_query, log_search, trace_search, code_read, git_log]\n---\n\n# 错误率突增排查\n\n## Phase 1: 定位时间窗口\n调用 `metrics_query` 查错误率趋势：\n- query: `sum(rate(http_requests_total{status=~\"5..\"}[5m])) by (status)`\n- range: 过去 2 小时, step=1m\n- 识别错误率突增的起始时间\n\n## Phase 2: 提取错误日志\n调用 `log_search` 查对应时段的错误日志：\n- query: `{app=\"{service}\"} |= \"ERROR\" | json`\n- start: 突增时间, end: now\n- 分析错误类型频率\n\n## Phase 3: 关联变更\n- 调用 `git_log` 查突增时间前 1 小时的提交记录\n- 识别是否有相关服务代码变更\n\n## Phase 4: 调用链分析\n- 调用 `trace_search` 查突增时段的异常 trace\n- 定位慢/失败 span\n\n## Phase 5: 代码定位\n- 调用 `code_read` 读取报错对应的源码行\n- 结合 `git_log` blame 分析最近变更\n\n## Phase 6: 输出根因\n- 错误突增时间 + 持续时长\n- 错误类型 Top 3\n- 根因分析（代码变更/依赖故障/资源耗尽）\n- 修复建议\n"
+  },
+  {
+    "name": "health-check",
+    "description": "Performs a basic health check of the application — verifies database connectivity and key configuration. Use when the user asks 'is the system healthy?' or 'check health'.",
+    "category": "运维排查",
+    "tags": [
+      "健康检查",
+      "系统"
+    ],
+    "icon": "💓",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: health-check\ndescription: \"Performs a basic health check of the application — verifies database connectivity and key configuration. Use when the user asks 'is the system healthy?' or 'check health'.\"\ntools: [mysql_query]\n---\n\n# Health Check\n\n## Step 1: Verify Database Connectivity\nUse the `mysql_query` tool to run a simple query:\n```sql\nSELECT 1 AS ok\n```\nIf this fails, report that the database is unreachable.\n\n## Step 2: Check Table Counts\nCheck if key tables exist and have data:\n```sql\nSELECT TABLE_NAME, TABLE_ROWS\nFROM INFORMATION_SCHEMA.TABLES\nWHERE TABLE_SCHEMA = DATABASE()\nORDER BY TABLE_NAME\nLIMIT 20\n```\n\n## Step 3: Report Summary\nSummarize the health status:\n- Database connectivity: OK / FAILED\n- Table count summary\n- Any anomalies detected\n"
+  },
+  {
+    "name": "health-patrol",
+    "description": "Comprehensive health check using observability metrics. Queries CPU, memory, error rate, and latency from Prometheus, checks for anomalies, and generates a summary report. Use when proactively monitoring system health.",
+    "category": "主动巡检",
+    "tags": [
+      "巡检",
+      "监控",
+      "定时"
+    ],
+    "icon": "🏥",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: health-patrol\ndescription: \"Comprehensive health check using observability metrics. Queries CPU, memory, error rate, and latency from Prometheus, checks for anomalies, and generates a summary report. Use when proactively monitoring system health.\"\ntools: [metrics_query]\ninputs:\n  - key: service\n    label: \"Service name to check\"\n    required: true\n---\n\n# Health Patrol\n\n## Step 1: Query Key Metrics\nUse the `metrics_query` tool to query key health metrics for the `{service}` service:\n\n- CPU usage: `100 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100`\n- Memory available: `node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100`\n- Error rate: `rate(http_requests_total{service=\"{service}\",status=~\"5..\"}[5m])`\n- P99 latency: `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{service=\"{service}\"}[5m]))`\n\n## Step 2: Check for Anomalies\nEvaluate each metric against normal thresholds:\n- CPU > 80% for sustained period -> anomaly\n- Memory available < 20% -> anomaly\n- Error rate > 1% -> anomaly\n- P99 latency > 500ms -> anomaly\n\n## Step 3: Generate Summary Report\nSummarize the health status:\n- Overall: HEALTHY / WARNING / CRITICAL\n- List any anomalies detected with metric values\n- Recommend actions for any anomalies\n"
+  },
+  {
+    "name": "knowledge-qa",
+    "description": "通用知识问答 — 基于项目知识库回答关于架构、组件、配置、API 等问题。适合'xxx 是什么'、'如何配置 xxx'、'xxx 的工作原理'等通用问题。",
+    "category": "通用",
+    "tags": [
+      "知识库",
+      "问答",
+      "RAG"
+    ],
+    "icon": "📚",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: knowledge-qa\ndescription: \"通用知识问答 — 基于项目知识库回答关于架构、组件、配置、API 等问题。适合'xxx 是什么'、'如何配置 xxx'、'xxx 的工作原理'等通用问题。\"\nversion: 1.0.0\nauthor: SnapAgent\ntools: []\n---\n\n# 知识库问答助手\n\n你是一个专业的技术问答助手，基于项目的知识库文档回答用户的问题。\n\n## 回答原则\n\n1. **基于知识库回答**：优先从注入的知识库上下文中查找答案\n2. **准确引用**：如果答案来自知识库，明确指出来源文档\n3. **诚实回答**：如果知识库中没有相关信息，诚实告知用户\n4. **结构化输出**：使用清晰的格式组织答案（标题、列表、代码块等）\n\n## 回答流程\n\n### Step 1: 理解问题\n\n仔细阅读用户的问题，识别：\n- 问题涉及的子系统或组件（如 Advisor、Memory、Tool 等）\n- 问题的类型（概念解释、使用方法、配置说明、工作原理等）\n- 是否需要代码示例\n\n### Step 2: 查找答案\n\n从注入的知识库上下文中查找相关信息：\n- 查找相关的子系统文档\n- 提取关键概念、配置项、API 说明等\n- 如果需要，查找相关的代码示例\n\n### Step 3: 组织答案\n\n根据问题类型组织答案：\n\n**概念解释类问题**：\n- 先给出简明定义\n- 再详细解释工作原理\n- 提供架构图或流程图（如果有）\n- 给出使用场景\n\n**配置说明类问题**：\n- 列出相关配置项\n- 说明每个配置项的含义和默认值\n- 提供配置示例\n- 说明注意事项\n\n**使用方法类问题**：\n- 给出具体的使用步骤\n- 提供代码示例\n- 说明前置条件和依赖\n- 指出常见问题\n\n**工作原理类问题**：\n- 从整体架构开始\n- 逐步深入到具体实现\n- 说明关键组件的交互\n- 提供流程图或时序图（如果有）\n\n### Step 4: 验证答案\n\n- 确保答案准确反映了知识库的内容\n- 检查代码示例是否正确\n- 确认配置项名称和默认值准确\n- 如果不确定，明确告知用户\n\n## 输出格式\n\n使用 Markdown 格式组织答案：\n\n```markdown\n## 简短回答\n（一句话概括答案）\n\n## 详细说明\n（详细的解释和说明）\n\n## 示例\n（代码示例或配置示例，如果适用）\n\n## 参考\n（来源文档，如：参考 `snap-agent-advisor-system.md`）\n```\n\n## 注意事项\n\n- 如果问题超出知识库范围，诚实告知用户\n- 如果问题涉及多个子系统，分别说明它们的关系\n- 如果答案涉及代码修改，提醒用户注意兼容性\n- 如果配置项在不同版本有变化，说明版本差异\n"
+  },
+  {
+    "name": "log-analysis",
+    "description": "Analyzes application log files to find exceptions, trace user operations, or diagnose issues. Use when the user asks to check logs, find errors, investigate exceptions, trace what a user did, or diagnose what happened during a specific period.",
+    "category": "运维排查",
+    "tags": [
+      "日志",
+      "错误",
+      "排查"
+    ],
+    "icon": "🔍",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: log-analysis\ndescription: \"Analyzes application log files to find exceptions, trace user operations, or diagnose issues. Use when the user asks to check logs, find errors, investigate exceptions, trace what a user did, or diagnose what happened during a specific period.\"\ntools: [log_read]\nshortcuts:\n  - label: \"🔴 最近错误\"\n    message: \"查看最近的ERROR级别日志\"\n  - label: \"⚠️ 最近警告\"\n    message: \"查看最近的WARN级别日志\"\n  - label: \"📋 最近日志\"\n    message: \"查看最近的100行日志\"\n  - label: \"🔍 异常堆栈\"\n    message: \"查找日志中的异常堆栈信息\"\n---\n\n# Log Analysis\n\nAnalyze application log files to answer the user's question about exceptions, user operations, or system behavior.\n\n## Step 1: Determine the Log File Path\n\nThe application's log file path is provided in the `<user_inputs>` block as `{_app_log_file}`. **Always try this file first** — it is the host application's own log file and most likely contains the relevant logs.\n\nIf `{_app_log_file}` is empty or not found, fall back to the allowed log directories provided as `{_log_paths}`. Try common log file names in those directories:\n\n- `{log_dir}/application.log` — main application log\n- `{log_dir}/error.log` — error-only log (if configured)\n- `{log_dir}/access.log` — access log (if configured)\n- `{log_dir}/*.log` — any .log file in the directory\n\nIf the user mentions a specific log file, use that path instead. If the path is rejected by the guard, the error message will show the allowed directories — use those.\n\n## Step 2: Understand the Question\n\nRead the user's message carefully. Identify what they want:\n\n- **Exception analysis**: Find ERROR/Exception stack traces, identify root cause\n- **User operation tracing**: Find logs related to a specific user, request ID, or session\n- **Time range analysis**: What happened between time A and time B\n- **General diagnosis**: Anomalies, repeated errors, unusual patterns, slow requests\n\nExtract key search terms: user ID, request ID, exception class name, timestamp, error message fragment.\n\n## Step 3: Read the Log\n\nUse the `log_read` tool strategically. Start broad, then narrow down:\n\n### Strategy A: Recent issue (tail mode)\n```\nlog_read(file_path=<path>, tail=true, max_lines=200)\n```\n\n### Strategy B: Specific error/exception\n```\nlog_read(file_path=<path>, keyword=\"Exception\", level=ERROR, max_lines=100)\n```\n\n### Strategy C: User/request tracing\n```\nlog_read(file_path=<path>, keyword=\"userId12345\", max_lines=100)\n```\n\n### Strategy D: Error-level overview\n```\nlog_read(file_path=<path>, level=ERROR, max_lines=100)\n```\n\n## Step 4: Iterate if Needed\n\nIf the first read doesn't give enough context, call `log_read` again with different filters:\n\n1. First: `tail=true, max_lines=200` to see recent activity\n2. If you spot an exception: `keyword=\"<ExceptionClassName>\", max_lines=100`\n3. If you need surrounding context: `keyword=\"<timestamp or request id>\", max_lines=50`\n\n## Step 5: Analyze and Present Findings\n\n### For exceptions\n- List each exception with: timestamp, exception type, message, root cause\n- Include the stack trace excerpt (first few frames)\n- Note any patterns (same exception repeated, correlation with other events)\n\n### For user operations\n- Trace the sequence of actions the user performed, with timestamps\n- Note any failures or anomalies in the flow\n- If a request failed, identify at which step and why\n\n### For general diagnosis\n- Highlight anomalies, repeated errors, unusual patterns\n- Note frequency of errors (e.g., \"NullPointerException occurred 15 times in the last 500 log lines\")\n- Suggest potential root causes based on the log evidence\n\n## Notes\n\n- The tool only **reads** files; it cannot modify or delete logs.\n- Very large files are rejected (configurable via `snap-agent.logs.max-file-bytes`).\n- Output is capped at `max_lines` lines (default 500). Use strategic filtering to stay within limits.\n- If no matching lines are found, say so explicitly and suggest alternative search strategies.\n"
+  },
+  {
+    "name": "ops-health-check",
+    "description": "全面运营健康检查：查询关键指标（CPU/内存/延迟/错误率），识别异常，分析根因。适合'系统健康吗'或'有没有异常'类问题。",
+    "category": "主动巡检",
+    "tags": [
+      "运维",
+      "健康",
+      "巡检"
+    ],
+    "icon": "🩺",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: ops-health-check\ndescription: \"全面运营健康检查：查询关键指标（CPU/内存/延迟/错误率），识别异常，分析根因。适合'系统健康吗'或'有没有异常'类问题。\"\ntools: [metrics_query, log_search, mysql_query]\n---\n\n# 运营健康检查\n\n## Phase 1: 核心指标快照\n调用 `metrics_query` 查询以下指标（过去 5 分钟）：\n- QPS: `rate(http_requests_total[5m])`\n- 错误率: `sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))`\n- P99 延迟: `histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))`\n- CPU: `rate(process_cpu_seconds_total[5m])`\n- 内存: `process_resident_memory_bytes`\n\n## Phase 2: 异常识别\n对比指标是否超出阈值：\n- 错误率 > 1% → 异常\n- P99 > 1s → 延迟异常\n- CPU > 80% → 资源告警\n\n## Phase 3: 根因下钻\n对每个异常指标：\n- 调用 `log_search` 查对应服务的 ERROR 日志（过去 5 分钟）\n- 汇总错误模式（频率最高的异常类型）\n\n## Phase 4: 输出报告\n- 整体状态: 健康/告警/异常\n- 异常项列表（指标值 + 阈值 + 根因摘要）\n- 建议操作\n"
+  },
+  {
+    "name": "redis-query",
+    "description": "Reads a Redis key's value and checks its existence. Use when the user asks to look up a cache key, inspect Redis data, verify if a key exists, or debug caching issues.",
+    "category": "数据查询",
+    "tags": [
+      "Redis",
+      "缓存",
+      "Key"
+    ],
+    "icon": "🔴",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: redis-query\ndescription: \"Reads a Redis key's value and checks its existence. Use when the user asks to look up a cache key, inspect Redis data, verify if a key exists, or debug caching issues.\"\ntools: [redis_get]\nshortcuts:\n  - label: \"🔍 检查Key\"\n    message: \"我想检查一个Redis Key是否存在，请先问我要查询的Key名称\"\n  - label: \"📖 读取Key值\"\n    message: \"我想读取一个Redis Key的值，请先问我要查询的Key名称\"\n---\n\n# Redis Query\n\nA read-only Redis key inspection skill. The `redis_get` tool only supports `get` and `exists` — no `keys`, `scan`, or write commands.\n\n## Step 1: Get the Key Name\n\nAsk the user for the Redis key name they want to inspect. The key name is provided in the user's message.\n\n## Step 2: Check Existence\n\nCall the `redis_get` tool with `command: \"exists\"` to check whether the key exists:\n\n```json\n{ \"key\": \"{key}\", \"command\": \"exists\" }\n```\n\n- If the result is `false`, the key does not exist. Report this and suggest possible reasons (expired, wrong name, never populated).\n- If the result is `true`, proceed to Step 3.\n\n## Step 3: Read the Value\n\nCall the `redis_get` tool with `command: \"get\"` (the default) to fetch the value:\n\n```json\n{ \"key\": \"{key}\" }\n```\n\n## Step 4: Present Results\n\nSummarize for the user:\n- **Key**: the key name\n- **Exists**: yes / no\n- **Value**: the raw value (or `(nil)` / empty)\n- **Value length**: character count (useful for spotting truncated or oversized cache entries)\n\nIf the key does not exist, suggest possible reasons:\n- The key expired (TTL elapsed)\n- The key name is wrong (typos, case sensitivity, missing prefix)\n- The cache was never populated for this key\n\nNote: This skill cannot list keys or scan patterns. If the user wants to find keys by pattern, ask them to provide the exact key name.\n"
+  },
+  {
+    "name": "slow-query-analysis",
+    "description": "慢查询排查：查慢日志 → 分析执行计划 → 索引建议。适合'数据库为什么慢'或'有慢查询吗'类问题。",
+    "category": "运维排查",
+    "tags": [
+      "慢查询",
+      "SQL",
+      "性能"
+    ],
+    "icon": "🐢",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: slow-query-analysis\ndescription: \"慢查询排查：查慢日志 → 分析执行计划 → 索引建议。适合'数据库为什么慢'或'有慢查询吗'类问题。\"\ntools: [mysql_query, log_search, metrics_query]\n---\n\n# 慢查询分析\n\n## Phase 1: 发现慢查询\n- 调用 `mysql_query` 查 slow_log / pt-slow-log 表（若有）\n- 或调用 `log_search` 在应用日志中搜索 \"slow query\" 关键词\n- 或调用 `metrics_query` 查 `mysql_slow_queries` 指标\n\n## Phase 2: 分析执行计划\n对每条慢 SQL：\n- 调用 `mysql_query` 执行 `EXPLAIN` + SQL\n- 分析 type/key/rows/Extra 字段\n\n## Phase 3: 索引建议\n- 识别全表扫描（type=ALL）\n- 识别未用索引（key=NULL）\n- 建议创建索引（基于 WHERE/JOIN 字段）\n\n## Phase 4: 输出\n- 慢 SQL 列表 + 耗时 + 调用频率\n- 执行计划分析\n- 索引优化建议\n"
+  },
+  {
+    "name": "solution-suggest",
+    "description": "Based on diagnostic root cause analysis, generate 2-3 candidate solutions with recommendation levels. Use after a diagnostic task completes to propose remediation options.",
+    "category": "闭环管理",
+    "tags": [
+      "方案",
+      "建议",
+      "修复"
+    ],
+    "icon": "💡",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: solution-suggest\ndescription: \"Based on diagnostic root cause analysis, generate 2-3 candidate solutions with recommendation levels. Use after a diagnostic task completes to propose remediation options.\"\ninputs:\n  - key: root_cause\n    label: 根因摘要\n    required: true\n    type: text\n  - key: original_query\n    label: 用户原始问题\n    required: true\n    type: text\n  - key: task_id\n    label: 关联诊断任务 ID\n    required: false\n    type: text\n---\n\n# Solution Suggestion Generation\n\nYou are an operations diagnosis expert. Based on the root cause analysis result, provide 2-3 candidate solutions.\n\n## Steps\n\n1. Understand the root cause: `{root_cause}`\n2. Consider the user's original question: `{original_query}`\n3. If needed, use `impact_analysis` to check the modification impact scope\n4. Use `render_call_graph` to visualize the affected call chain (type=impact) for clarity\n5. Generate solutions:\n   - Solution 1: [description] (recommendation: high/medium/low)\n   - Solution 2: [description] (recommendation: high/medium/low)\n5. Recommend one solution and explain the reasoning\n\n## Output Format\n\nSolution 1: [description]\nRecommendation: high\nReason: [why recommended]\n\nSolution 2: [description]\nRecommendation: medium\nReason: [why]\n\nRecommendation: Solution 1 (immediate) + Solution 2 (long-term)\nRelated code: [file:line]\n"
+  },
+  {
+    "name": "trend-prediction",
+    "description": "Predicts trends from historical metrics and warns about potential issues. Queries 7-day metric trends, detects if current growth rate is unsustainable, estimates time-to-threshold, and generates early warnings. Use for proactive capacity planning.",
+    "category": "数据查询",
+    "tags": [
+      "趋势",
+      "预测",
+      "分析"
+    ],
+    "icon": "📈",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: trend-prediction\ndescription: \"Predicts trends from historical metrics and warns about potential issues. Queries 7-day metric trends, detects if current growth rate is unsustainable, estimates time-to-threshold, and generates early warnings. Use for proactive capacity planning.\"\ntools: [metrics_query]\ninputs:\n  - key: metric\n    label: \"PromQL expression for the metric to analyze\"\n    required: true\n---\n\n# Trend Prediction\n\n## Step 1: Query 7-Day Trend\nUse the `metrics_query` tool to query the metric `{metric}` over a 7-day range to understand the growth pattern.\n\n## Step 2: Detect Growth Rate\nAnalyze the trend data:\n- Calculate the average daily growth rate\n- Determine if the growth is linear, exponential, or stable\n- Identify any recent acceleration\n\n## Step 3: Estimate Time-to-Threshold\nBased on the growth rate:\n- Estimate when the metric will reach a critical threshold\n- Flag if time-to-threshold is less than 7 days\n- Note any inflection points in the trend\n\n## Step 4: Generate Early Warning\nOutput a prediction summary:\n- Current value and trend direction\n- Projected time-to-threshold (if applicable)\n- Confidence level of the prediction\n- Recommended actions (scale up, investigate, monitor)\n"
+  },
+  {
+    "name": "verify-fix",
+    "description": "Verifies whether a fix has resolved the original issue by re-running diagnostic checks against the root cause. Use after a fix is applied to confirm the issue is resolved.",
+    "category": "闭环管理",
+    "tags": [
+      "验证",
+      "修复",
+      "确认"
+    ],
+    "icon": "✅",
+    "author": "SnapAgent",
+    "version": "1.0",
+    "content": "---\nname: verify-fix\ndescription: \"Verifies whether a fix has resolved the original issue by re-running diagnostic checks against the root cause. Use after a fix is applied to confirm the issue is resolved.\"\ninputs:\n  - key: root_cause\n    label: 原始根因\n    required: true\n    type: text\n  - key: original_query\n    label: 用户原始问题\n    required: true\n    type: text\n  - key: issue_id\n    label: Issue ID\n    required: false\n    type: text\n---\n\n# Fix Verification\n\nYou are an operations verification expert. Verify whether the fix has resolved the original issue.\n\n## Steps\n\n1. Understand the original problem: `{original_query}`\n2. Understand the original root cause: `{root_cause}`\n3. Verify: use available tools (mysql_query/redis_read/metrics_query/log_search etc.) to re-check the symptoms\n4. Determine: has the issue been resolved?\n\n## Important\n\n- Do NOT simply re-run the diagnostic and assume \"succeeded\" = \"fixed\".\n- You must actively check whether the original error symptoms are gone.\n- If you cannot verify (tools unavailable, no baseline), report FAIL with explanation.\n\n## Output Format\n\nYou MUST output exactly the following format at the end of your report:\n\n```\n验证结果: pass\n检查项:\n1. [check description] -> [result]\n2. [check description] -> [result]\n结论: [judgment on whether the fix is effective]\n```\n\nOr if verification fails:\n\n```\n验证结果: fail\n检查项:\n1. [check description] -> [result]\n2. [check description] -> [result]\n结论: [reason why the fix is not effective or cannot be verified]\n```\n"
+  }
+]
