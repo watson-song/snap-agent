@@ -137,10 +137,29 @@ public class SnapAgentAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public ConversationStore conversationStore(SnapAgentProperties props,
-                                               ChatMemoryRepository chatMemoryRepository) {
+                                               ChatMemoryRepository chatMemoryRepository,
+                                               org.springframework.beans.factory.ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbcTemplateProvider,
+                                               org.springframework.beans.factory.ObjectProvider<org.springframework.data.redis.core.StringRedisTemplate> redisTemplateProvider) {
+        String storeType = props.getConversationStore();
+        if ("jdbc".equalsIgnoreCase(storeType)) {
+            org.springframework.jdbc.core.JdbcTemplate jdbc = jdbcTemplateProvider.getIfAvailable();
+            if (jdbc != null) {
+                log.info("Using JdbcConversationStore for conversation persistence");
+                return new cn.watsontech.snapagent.boot2x.conversation.JdbcConversationStore(jdbc, chatMemoryRepository);
+            }
+            log.warn("conversation-store=jdbc but no JdbcTemplate bean found; falling back to FileConversationStore");
+        }
+        if ("redis".equalsIgnoreCase(storeType)) {
+            org.springframework.data.redis.core.StringRedisTemplate redis = redisTemplateProvider.getIfAvailable();
+            if (redis != null) {
+                log.info("Using RedisConversationStore for conversation persistence");
+                return new cn.watsontech.snapagent.boot2x.conversation.RedisConversationStore(redis, chatMemoryRepository);
+            }
+            log.warn("conversation-store=redis but no StringRedisTemplate bean found; falling back to FileConversationStore");
+        }
         String baseDir = props.getUploadSkillsDir();
         log.info("Using FileConversationStore with base dir: {} and ChatMemoryRepository", baseDir);
-        return new FileConversationStore(baseDir, chatMemoryRepository);
+        return new cn.watsontech.snapagent.boot2x.conversation.FileConversationStore(baseDir, chatMemoryRepository);
     }
 
     // ---- ChatMemory (ReAct loop conversation history) ----

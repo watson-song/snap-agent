@@ -70,11 +70,13 @@ public class ToolCallbacks {
         String jsonSchema = buildJsonSchema(paramNames, paramAnnotations, params);
         String description = toolAnno.description();
         boolean returnDirect = toolAnno.returnDirect();
+        long timeoutSeconds = toolAnno.timeoutSeconds();
 
         final String toolName = name;
         final Method toolMethod = method;
         final Object toolInstance = instance;
         final boolean isApprovalRequired = approvalRequired;
+        final long toolTimeout = timeoutSeconds;
 
         return new ToolCallback() {
             @Override
@@ -89,6 +91,8 @@ public class ToolCallbacks {
             public boolean isSystem() { return false; }
             @Override
             public boolean isApprovalRequired() { return isApprovalRequired; }
+            @Override
+            public long getTimeoutSeconds() { return toolTimeout; }
 
             @Override
             public ToolResult execute(Map<String, Object> args, Object context) {

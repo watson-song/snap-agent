@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * ToolsNode executes tool calls from state["tool_use_blocks"].
@@ -65,7 +68,25 @@ public class ToolsNode implements Node {
             }
 
             try {
-                ToolResult result = callback.execute(toolUse.getInput(), null);
+                long timeoutSec = callback.getTimeoutSeconds();
+                ToolResult result;
+                if (timeoutSec > 0) {
+                    CompletableFuture<ToolResult> future = CompletableFuture.supplyAsync(
+                            () -> callback.execute(toolUse.getInput(), null));
+                    try {
+                        result = future.get(timeoutSec, TimeUnit.SECONDS);
+                    } catch (TimeoutException te) {
+                        future.cancel(true);
+                        log.warn("tool {} timed out after {}s", toolUse.getName(), timeoutSec);
+                        result = ToolResult.error(
+                                "tool execution timed out after " + timeoutSec + "s", 0);
+                    } catch (Exception e) {
+                        log.warn("tool {} async execution failed", toolUse.getName(), e);
+                        result = ToolResult.error("tool async execution failed: " + e.getMessage(), 0);
+                    }
+                } else {
+                    result = callback.execute(toolUse.getInput(), null);
+                }
                 if (result.getContent() != null && result.getContent().length() > maxToolResultChars) {
                     String suffix = "...[truncated]";
                     int cutLen = Math.max(0, maxToolResultChars - suffix.length());

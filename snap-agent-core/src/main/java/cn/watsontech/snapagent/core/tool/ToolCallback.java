@@ -14,4 +14,9 @@ public interface ToolCallback {
     default boolean isReturnDirect() { return false; }
     default boolean isSystem() { return false; }
     default boolean isApprovalRequired() { return false; }
+    /**
+     * Maximum execution time in seconds. 0 = no timeout.
+     * ToolsNode wraps execution in a CompletableFuture when > 0.
+     */
+    default long getTimeoutSeconds() { return 30; }
 }

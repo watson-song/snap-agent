@@ -18,4 +18,9 @@ public @interface Tool {
     String description();
     /** If true, result goes directly to user (not back to LLM). */
     boolean returnDirect() default false;
+    /**
+     * Maximum execution time in seconds before the tool is interrupted.
+     * 0 means no timeout (block indefinitely). Default is 30 seconds.
+     */
+    long timeoutSeconds() default 30;
 }

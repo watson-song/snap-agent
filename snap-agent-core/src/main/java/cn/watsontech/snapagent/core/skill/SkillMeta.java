@@ -82,6 +82,60 @@ public final class SkillMeta {
         this.mode = mode != null ? mode : SkillMode.READ_ONLY;
     }
 
+    /**
+     * Builder for constructing SkillMeta instances.
+     * <p>Replaces the 5 overloaded constructors with a fluent API.
+     * All fields have sensible defaults; only {@code name} is required.</p>
+     *
+     * <pre>{@code
+     * SkillMeta meta = SkillMeta.builder()
+     *     .name("my-skill")
+     *     .description("Does something useful")
+     *     .tools(Arrays.asList("tool1", "tool2"))
+     *     .mode(SkillMode.READ_WRITE)
+     *     .build();
+     * }</pre>
+     */
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+        private String name;
+        private String description;
+        private List<String> tools;
+        private List<InputSpec> inputs = Collections.emptyList();
+        private List<Shortcut> shortcuts = Collections.emptyList();
+        private String body;
+        private String outputFormat = "";
+        private SkillAvailability availability = SkillAvailability.AVAILABLE;
+        private String unavailableReason;
+        private String source = "custom";
+        private boolean overridesBuiltin;
+        private String requiredPermission = "";
+        private SkillMode mode = SkillMode.READ_ONLY;
+
+        public Builder name(String name) { this.name = name; return this; }
+        public Builder description(String description) { this.description = description; return this; }
+        public Builder tools(List<String> tools) { this.tools = tools; return this; }
+        public Builder inputs(List<InputSpec> inputs) { this.inputs = inputs; return this; }
+        public Builder shortcuts(List<Shortcut> shortcuts) { this.shortcuts = shortcuts; return this; }
+        public Builder body(String body) { this.body = body; return this; }
+        public Builder outputFormat(String outputFormat) { this.outputFormat = outputFormat; return this; }
+        public Builder availability(SkillAvailability availability) { this.availability = availability; return this; }
+        public Builder unavailableReason(String unavailableReason) { this.unavailableReason = unavailableReason; return this; }
+        public Builder source(String source) { this.source = source; return this; }
+        public Builder overridesBuiltin(boolean overridesBuiltin) { this.overridesBuiltin = overridesBuiltin; return this; }
+        public Builder requiredPermission(String requiredPermission) { this.requiredPermission = requiredPermission; return this; }
+        public Builder mode(SkillMode mode) { this.mode = mode; return this; }
+
+        public SkillMeta build() {
+            return new SkillMeta(name, description, tools, inputs, shortcuts, body,
+                    outputFormat, availability, unavailableReason, source,
+                    overridesBuiltin, requiredPermission, mode);
+        }
+    }
+
     public String getName() {
         return name;
     }

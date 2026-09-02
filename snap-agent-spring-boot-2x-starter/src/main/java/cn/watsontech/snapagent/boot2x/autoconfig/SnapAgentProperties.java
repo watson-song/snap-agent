@@ -82,6 +82,8 @@ public class SnapAgentProperties {
     private Vcs vcs = new Vcs();
     private Fix fix = new Fix();
     private Bridge bridge = new Bridge();
+    /** Conversation store type: "file" (default), "jdbc", or "redis". */
+    private String conversationStore = "file";
 
     // ---- getters / setters ----
 
@@ -373,6 +375,14 @@ public class SnapAgentProperties {
 
     public void setBridge(Bridge bridge) {
         this.bridge = bridge;
+    }
+
+    public String getConversationStore() {
+        return conversationStore;
+    }
+
+    public void setConversationStore(String conversationStore) {
+        this.conversationStore = conversationStore;
     }
 
     // ---- nested classes ----
