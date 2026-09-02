@@ -210,10 +210,10 @@ snap-agent-spring-boot-2x-starter (Spring Boot 实现, 169 文件)
 - [x] SkillMeta Builder 模式重构 (e0a43e7f)
 - [x] 前端 SPA 增强 — Skill 搜索过滤（Ctrl/Cmd+K 快捷键）、新建会话按钮、历史会话跨 Skill 过滤+标题搜索
 
-### Phase 3: 产品化（3-6 月）
+### Phase 3: 产品化（3-6 月）— 进行中
 - [ ] 开源文档站 + GitHub Discussion
 - [ ] Skill 市场/模板库
-- [ ] 集群支持（分布式 TaskStore/CheckpointStore）
+- [x] 集群支持（分布式 CheckpointStore）— JdbcCheckpointStore + RedisCheckpointStore (17 tests)
 - [ ] A/B 测试框架
 - [ ] 可视化 Skill 编排
 
