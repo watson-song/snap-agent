@@ -424,4 +424,62 @@ class H2CodeGraphIndexTest {
         assertThat(retrieved.getFilePath()).isEqualTo("src/main/java/com/example/MyClass.java");
         assertThat(retrieved.getLineNumber()).isEqualTo(42);
     }
+
+    @Test
+    void shouldPersistSourceCodeField() {
+        // Key source excerpt must round-trip through H2 (offline code view)
+        CodeGraphNode node = new CodeGraphNode(
+                "com.example.OrderService",
+                CodeGraphNode.NodeType.CLASS,
+                "OrderService",
+                "com.example",
+                "com.example.OrderService",
+                "",
+                "src/main/java/com/example/OrderService.java",
+                10,
+                "class OrderService {\n    public Order getOrder(Long id);\n}");
+        CodeGraph graph = new CodeGraph(
+                Collections.singletonList(node),
+                Collections.<CodeGraphEdge>emptyList());
+        index.loadGraph(graph);
+
+        CodeGraphNode retrieved = index.getNode("com.example.OrderService");
+        assertThat(retrieved).isNotNull();
+        assertThat(retrieved.getSourceCode()).isNotNull();
+        assertThat(retrieved.getSourceCode()).contains("OrderService");
+        assertThat(retrieved.getSourceCode()).contains("getOrder");
+    }
+
+    @Test
+    void shouldMigrateLegacySchemaWithoutSourceCodeColumn() throws Exception {
+        // Simulate an old H2 file built before SOURCE_CODE was added: create the
+        // table WITHOUT the column, then reopen via H2CodeGraphIndex and verify
+        // the column is added and queries still work.
+        index.close();
+
+        String legacyUrl = "jdbc:h2:mem:legacy-" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
+        Class.forName("org.h2.Driver");
+        try (java.sql.Connection legacy = java.sql.DriverManager.getConnection(legacyUrl);
+             java.sql.Statement stmt = legacy.createStatement()) {
+            stmt.execute("CREATE TABLE CODE_GRAPH_NODES ("
+                    + "ID VARCHAR PRIMARY KEY, TYPE VARCHAR, NAME VARCHAR, "
+                    + "PACKAGE VARCHAR, CLASS_NAME VARCHAR, RETURN_TYPE VARCHAR, "
+                    + "FILE_PATH VARCHAR, LINE_NUMBER INT)");
+            stmt.execute("CREATE TABLE CODE_GRAPH_EDGES ("
+                    + "FROM_ID VARCHAR, TO_ID VARCHAR, EDGE_TYPE VARCHAR, CONTEXT VARCHAR)");
+            stmt.execute("INSERT INTO CODE_GRAPH_NODES VALUES "
+                    + "('com.test.Legacy', 'CLASS', 'Legacy', 'com.test', 'com.test.Legacy', "
+                    + "'', 'Legacy.java', 1)");
+        }
+
+        H2CodeGraphIndex migrated = new H2CodeGraphIndex(legacyUrl);
+        try {
+            CodeGraphNode node = migrated.getNode("com.test.Legacy");
+            assertThat(node).isNotNull();
+            assertThat(node.getName()).isEqualTo("Legacy");
+            assertThat(node.getSourceCode()).isNull();
+        } finally {
+            migrated.close();
+        }
+    }
 }

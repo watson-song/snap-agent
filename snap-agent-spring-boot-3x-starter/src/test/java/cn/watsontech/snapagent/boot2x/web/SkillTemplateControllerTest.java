@@ -32,7 +32,7 @@ class SkillTemplateControllerTest {
         SkillRegistry skillRegistry = Mockito.mock(SkillRegistry.class);
         when(skillRegistry.all()).thenReturn(Collections.emptyList());
         catalog = new SkillTemplateCatalog(tempDir, skillRegistry);
-        controller = new SkillTemplateController(catalog, "/snap-agent");
+        controller = new SkillTemplateController(catalog);
     }
 
     @Test
@@ -73,7 +73,7 @@ class SkillTemplateControllerTest {
     @Test
     @DisplayName("constructor rejects null catalog")
     void shouldRejectNullCatalog() {
-        assertThatThrownBy(() -> new SkillTemplateController(null, "/snap-agent"))
+        assertThatThrownBy(() -> new SkillTemplateController(null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("SkillTemplateCatalog");
     }

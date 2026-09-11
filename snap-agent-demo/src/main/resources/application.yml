@@ -4,6 +4,7 @@ server:
 snap-agent:
   enabled: true
   base-path: /snap-agent
+  default-skill: knowledge-qa
   builtin-skills-dir: classpath:/docs/skills/
   upload-skills-dir: /Users/HuaSheng.Song/IdeaProjects/skills-agent/snap-agent-demo/src/main/resources/skills
   llm:
@@ -45,11 +46,21 @@ snap-agent:
     enabled: true
     sources:
       - type: markdown
-        dir: classpath:/docs/knowledge/
+        dir: file:/Users/HuaSheng.Song/IdeaProjects/skills-agent/docs/knowledge/
   code-graph:
     enabled: true
+    # 关键点优先示范:集成阶段用 CodeGraphCli 预构建 H2,运行时无源码直接加载。
+    # 步骤:
+    #   1) 集成阶段(有源码): java ... CodeGraphCli \
+    #        --project-root <宿主源码根> --scan-mode skills \
+    #        --skill-dir docs/skills --output ./data/codegraph
+    #   2) 运行时: persistence=h2 直接加载 data/codegraph.mv.db,不再扫描源码
+    persistence: h2
+    h2-url: jdbc:h2:file:./data/codegraph
+    scan-mode: skills
     scan-packages:
       - cn.watsontech.snapagent
+    hot-reload-enabled: false
   issue-closure:
     enabled: true
     system-user-id: system

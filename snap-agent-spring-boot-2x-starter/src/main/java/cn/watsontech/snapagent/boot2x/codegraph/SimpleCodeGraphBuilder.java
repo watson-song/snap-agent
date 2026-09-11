@@ -35,6 +35,13 @@ import java.util.stream.Stream;
  *   <li>Method calls within method bodies</li>
  * </ul>
  *
+ * <p><b>Deprecated.</b> The production code graph is now built by
+ * {@link AstCodeGraphBuilder} (JavaParser AST), which is the single canonical
+ * implementation wired into {@code KnowledgeAutoConfiguration} and
+ * {@code CodeGraphCli}. This class is retained only as a zero-dependency
+ * fallback for constrained environments and for its existing tests; it must
+ * NOT be used for new integrations — prefer {@link AstCodeGraphBuilder}.</p>
+ *
  * <p><b>Known limitations (documented honestly):</b></p>
  * <ul>
  *   <li>Comments containing method-call-like patterns produce false positives</li>
@@ -42,10 +49,8 @@ import java.util.stream.Stream;
  *   <li>Lambda/Stream method calls may be missed</li>
  *   <li>Generics are preserved in type strings (not erased)</li>
  * </ul>
- *
- * <p>These limitations can be resolved by replacing with a JavaParser-based
- * builder in v0.8.1.</p>
  */
+@Deprecated
 public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(SimpleCodeGraphBuilder.class);
@@ -118,9 +123,12 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
         Path root = pathGuard.getProjectRoot();
 
         List<Path> javaFiles = new ArrayList<Path>();
+        final long maxFileBytes = pathGuard.getMaxFileBytes();
         try (Stream<Path> stream = Files.walk(root)) {
             stream.filter(Files::isRegularFile)
                     .filter(p -> p.toString().toLowerCase().endsWith(".java"))
+                    .filter(p -> !isInExcludedDir(root, p))
+                    .filter(p -> isWithinSizeLimit(p, maxFileBytes))
                     .forEach(javaFiles::add);
         } catch (IOException e) {
             log.error("Failed to walk project root for code graph: {}", e.getMessage());
@@ -168,6 +176,60 @@ public class SimpleCodeGraphBuilder implements CodeGraphBuilder {
     @Override
     public String type() {
         return "regex";
+    }
+
+    /**
+     * Return true if the file is within {@link CodePathGuard#getMaxFileBytes()}.
+     * Files exceeding the limit are skipped to avoid OOM during readAllBytes.
+     */
+    private static final java.util.Set<String> EXCLUDED_DIR_NAMES =
+            new java.util.HashSet<String>(java.util.Arrays.asList(
+                    "target", "build", ".git", ".idea", "node_modules"));
+
+    /**
+     * Return true if {@code file} lives under an excluded directory
+     * ({@code target/}, {@code build/}, {@code .git/}, {@code .idea/},
+     * {@code node_modules/}) or under {@code src/test/}.
+     */
+    private boolean isInExcludedDir(Path root, Path file) {
+        Path rel;
+        try {
+            rel = root.relativize(file);
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
+        String normalized = rel.toString().replace('\\', '/');
+        for (String segment : normalized.split("/")) {
+            if (EXCLUDED_DIR_NAMES.contains(segment)) {
+                return true;
+            }
+        }
+        if (normalized.startsWith("src/test/")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Return true if the file is within {@link CodePathGuard#getMaxFileBytes()}.
+     * Files exceeding the limit are skipped to avoid OOM during readAllBytes.
+     */
+    private boolean isWithinSizeLimit(Path file, long maxFileBytes) {
+        if (maxFileBytes <= 0) {
+            return true;
+        }
+        try {
+            long size = Files.size(file);
+            if (size > maxFileBytes) {
+                log.warn("Skipping Java file larger than {} bytes: {} ({} bytes)",
+                        maxFileBytes, file, size);
+                return false;
+            }
+            return true;
+        } catch (IOException e) {
+            log.warn("Failed to read file size for {}: {}", file, e.getMessage());
+            return false;
+        }
     }
 
     /**

@@ -473,167 +473,78 @@ env:
 
 并确保 `/snap-agent-internal/**` 路径在 Service 和 Ingress 中可被 Pod 间访问。
 
-## 代码图谱持久化（CI/CD 集成）
+## 代码图谱持久化（集成阶段构建 → 运行时加载）
 
-代码图谱（Code Graph）通过扫描 `.java` 源码构建调用链和影响分析。在 K8s 容器中通常没有源码，需要 CI 阶段预构建图谱并打入镜像。
+代码图谱（Code Graph）通过扫描 `.java` 源码构建调用链和影响分析。嵌入式运行时的宿主 JVM **没有源码**，因此图谱必须在**集成阶段（有源码时）构建成 H2 文件**，运行时直接加载。
 
-### 背景
+### 核心闭环
+
+```
+功能代码迭代
+   │
+   ▼
+mvn clean package ──► CodeGraphCli 自动重建 H2（绑定 package 阶段，无需手动）
+   │                       │
+   │                       └─ 含关键业务类完整方法体，排除 target/src-test
+   ▼
+部署（镜像内携带 codegraph.mv.db）
+   │
+   ▼
+运行时 persistence=h2 直接加载 ──► code_view 工具离线查关键代码定位 bug
+```
+
+**数据跟随代码变更**：只要把 `CodeGraphCli` 绑定到 Maven `package`（或 Gradle `build`）阶段，每次构建都会自动重建图谱，代码迭代后无需人工手动更新知识库。
+
+### 构建时机总览
+
+| 方案 | 触发时机 | 适用场景 |
+|------|----------|----------|
+| **方案一（首选）**：Maven `package` / Gradle `build` 阶段自动重建 | 每次 `mvn clean package` / `./gradlew build` | 功能迭代自动跟随，推荐 |
+| **方案二**：CI 流水线预构建 | CI 每次跑流水线时 | 已有 CI/CD 流程，或图谱要跨项目复用 |
+| **方案三**：手动运行 CLI | 集成阶段一次性 | 接入验证、本地联调 |
+
+### 背景：memory vs h2
 
 | 模式 | 说明 | 适用场景 |
 |------|------|----------|
 | `memory`（默认） | 每次启动全量扫描源码，结果存内存 | 本地开发，有源码 |
-| `h2` | 持久化到 H2 文件，启动直接加载 | K8s/CI 部署，无源码 |
+| `h2` | 持久化到 H2 文件，启动直接加载 | 集成/生产部署，无源码 |
 
-### 第一步：CI 阶段预构建图谱
+### 方案一（首选）：构建阶段自动重建
 
-在 CI 流水线中（有源码的阶段），用 `CodeGraphCli` 预构建 H2 文件：
+> **功能迭代后无需手动重跑 CodeGraphCli**：把 CLI 绑定到构建生命周期，代码一改、一打包，图谱自动重建，数据始终跟随代码变更。
 
-```bash
-# 确保已安装 snap-agent JAR 到本地 Maven 仓库
-mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+#### Maven（package 阶段）
 
-# 构建 H2 图谱文件
-java -cp "$(mvn dependency:build-classpath -pl snap-agent-spring-boot-2x-starter -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout):snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar" \
-  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
-  --project-root . \
-  --scan-packages com.yourcompany \
-  --output ./data/codegraph
-```
-
-构建完成后，`./data/codegraph.mv.db` 文件包含完整的代码图谱。
-
-**验证 H2 文件构建成功：**
-
-```bash
-# 检查文件存在且大小合理（通常 10MB~500MB，取决于项目规模）
-ls -lh ./data/codegraph.mv.db
-
-# 如果文件为 0 字节或不存在，检查 CI 日志中的错误信息
-# 常见问题：
-#   - "H2 database driver not found" → classpath 缺少 h2.jar
-#   - "project root does not exist" → --project-root 路径错误
-#   - 文件存在但 nodeCount=0 → scan-packages 过滤掉了所有文件
-```
-
-### 第二步：将 H2 文件打入 Docker 镜像
-
-```dockerfile
-# Dockerfile 多阶段构建
-FROM maven:3.9-openjdk-8 AS codegraph-builder
-COPY src/ /app/src/
-COPY pom.xml /app/
-COPY lib/ /app/lib/   # 如果用 lib/ 本地仓库方式
-WORKDIR /app
-# 构建图谱
-RUN java -cp "lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/2.0.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar:lib/cn/watsontech/snapagent/snap-agent-core/2.0.0-SNAPSHOT/snap-agent-core-2.0.0-SNAPSHOT.jar:lib/com/h2database/h2/1.4.200/h2-1.4.200.jar" \
-  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
-  --project-root /app \
-  --scan-packages com.yourcompany \
-  --output /app/data/codegraph
-
-FROM openjdk:8-jre-slim
-COPY --from=codegraph-builder /app/data/codegraph.mv.db /app/data/codegraph.mv.db
-COPY target/your-app.jar /app/app.jar
-WORKDIR /app
-ENTRYPOINT ["java", "-jar", "app.jar"]
-```
-
-> **注意**：H2 文件放在 `/app/data/` 目录下，确保运行时 `h2-url` 指向此路径。如果用了 PVC，可以将 `data/` 挂载到 PVC 上，但通常不需要——图谱是 build-time 产物，不会在运行期变化（除非开启了热重建）。
-
-### 本地开发模式生成（通用脚本）
-
-对于本地开发，可以使用内置的通用脚本生成代码图谱：
-
-#### 方式一：使用 Maven 插件（推荐）
-
-```bash
-# 1. 安装 snap-agent 到本地仓库
-mvn install -DskipTests \
-  -pl snap-agent-core,snap-agent-spring-boot-2x-starter
-
-# 2. 运行生成命令
-mvn cn.watsontech.snapagent:snap-agent-maven-plugin:generate-codegraph \
-  -Dproject.root=. \
-  -Dscan.packages=com.yourcompany \
-  -Doutput.path=./data/codegraph
-```
-
-#### 方式二：使用 Shell 脚本
-
-```bash
-# 1. 安装 snap-agent
-mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
-
-# 2. 执行脚本
-java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
-  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
-  --project-root . \
-  --scan-packages com.yourcompany \
-  --output ./data/codegraph
-```
-
-#### 方式三：使用 Python 脚本（跨平台）
-
-```bash
-python3 scripts/generate-codegraph.py \
-  --project-root . \
-  --output ./data/codegraph \
-  --packages com.yourcompany
-```
-
-#### 参数说明
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--project-root` | 项目根目录（包含 pom.xml） | 当前目录 |
-| `--scan-packages` | 扫描的包名（逗号分隔） | 扫描所有包 |
-| `--output` | 输出路径（不含 .mv.db 后缀） | ./data/codegraph |
-
-#### 验证生成结果
-
-```bash
-# 检查文件
-ls -lh data/codegraph.mv.db
-
-# 查看统计信息
-sqlite3 data/codegraph.db "SELECT COUNT(*) as nodes FROM code_graph_nodes;"
-sqlite3 data/codegraph.db "SELECT COUNT(*) as edges FROM code_graph_edges;"
-
-# 查询示例
-sqlite3 data/codegraph.db "SELECT name, type FROM code_graph_nodes WHERE type='Service' LIMIT 10;"
-```
-
-#### 在 application.yml 中配置
-
-```yaml
-snap-agent:
-  codegraph:
-    persistence: h2  # 使用 H2 持久化
-    h2-url: jdbc:h2:file:./data/codegraph  # 指向生成的文件
-    hot-reload-enabled: false  # 生产环境关闭热重载
-```
-
-### 自动化集成
-
-#### Maven 集成
-
-在 `pom.xml` 中添加插件：
+在宿主 `pom.xml` 中用 `exec-maven-plugin` 调用 `CodeGraphCli`（无需单独的 Maven 插件），绑定到 `package` 阶段。每次 `mvn clean package` 都自动重建图谱：
 
 ```xml
 <build>
   <plugins>
     <plugin>
-      <groupId>cn.watsontech.snapagent</groupId>
-      <artifactId>snap-agent-maven-plugin</artifactId>
-      <version>2.0.0-SNAPSHOT</version>
+      <groupId>org.codehaus.mojo</groupId>
+      <artifactId>exec-maven-plugin</artifactId>
+      <version>3.1.0</version>
       <executions>
         <execution>
+          <id>generate-codegraph</id>
+          <phase>package</phase>
           <goals>
-            <goal>generate-codegraph</goal>
+            <goal>java</goal>
           </goals>
           <configuration>
-            <scanPackages>com.yourcompany</scanPackages>
-            <outputPath>${project.build.directory}/data/codegraph</outputPath>
+            <mainClass>cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli</mainClass>
+            <arguments>
+              <argument>--project-root</argument>
+              <argument>${project.basedir}</argument>
+              <!-- 关键点优先:按 skill 标注的关键类过滤(含完整方法体) -->
+              <argument>--scan-mode</argument>
+              <argument>skills</argument>
+              <argument>--skill-dir</argument>
+              <argument>${project.basedir}/docs/skills</argument>
+              <argument>--output</argument>
+              <argument>${project.build.directory}/data/codegraph</argument>
+            </arguments>
           </configuration>
         </execution>
       </executions>
@@ -647,7 +558,9 @@ snap-agent:
 mvn clean package
 ```
 
-#### Gradle 集成
+> **注意**：`CodeGraphCli` 会自动排除 `target/`、`src/test/`、`.git/` 等目录，所以绑定在 `package` 阶段不会把编译产物或测试代码扫进图谱。
+
+#### Gradle（build 阶段）
 
 在 `build.gradle` 中添加任务：
 
@@ -657,7 +570,8 @@ task generateCodegraph(type: JavaExec) {
     mainClass = 'cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli'
     args = [
         '--project-root', project.rootDir.absolutePath,
-        '--scan-packages', 'com.yourcompany',
+        '--scan-mode', 'skills',
+        '--skill-dir', "${project.rootDir}/docs/skills",
         '--output', "${buildDir}/data/codegraph"
     ]
 }
@@ -670,7 +584,9 @@ build.dependsOn generateCodegraph
 ./gradlew build
 ```
 
-#### CI/CD 集成
+### 方案二：CI 流水线预构建
+
+若已有 CI/CD 流程、或图谱需要在多个下游项目间复用，可在 CI 阶段单独跑一次 `CodeGraphCli`（不依赖 Maven 构建生命周期）。
 
 **GitHub Actions 示例：**
 
@@ -681,7 +597,8 @@ build.dependsOn generateCodegraph
     java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
       cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
       --project-root . \
-      --scan-packages com.yourcompany \
+      --scan-mode skills \
+      --skill-dir docs/skills \
       --output ./data/codegraph
 
 - name: Upload CodeGraph
@@ -701,14 +618,116 @@ stage('Generate CodeGraph') {
             java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
               cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
               --project-root . \
-              --scan-packages com.yourcompany \
+              --scan-mode skills \
+              --skill-dir docs/skills \
               --output ./data/codegraph
         '''
     }
 }
 ```
 
-### 第三步：配置 K8s Deployment
+> 如果用了方案一（构建阶段自动重建），CI 里通常**不需要**再单独跑这一步 —— 图谱已经随 `mvn clean package` 产出到 `${project.build.directory}/data/codegraph`，直接打镜像即可。
+
+### 方案三：手动运行 CLI（集成验证 / 本地联调）
+
+在集成阶段一次性生成、或本地联调时，直接运行 `CodeGraphCli` 构建 H2 文件：
+
+```bash
+# 确保已安装 snap-agent JAR 到本地 Maven 仓库
+mvn install -DskipTests -pl snap-agent-core,snap-agent-spring-boot-2x-starter
+
+# 构建 H2 图谱文件（关键点优先：只收 skill 标注的关键业务类）
+java -cp "$(mvn dependency:build-classpath -pl snap-agent-spring-boot-2x-starter -q -DincludeScope=runtime -Dmdep.outputFile=/dev/stdout):snap-agent-spring-boot-2x-starter/target/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+  --project-root . \
+  --scan-mode skills \
+  --skill-dir docs/skills \
+  --output ./data/codegraph
+```
+
+> 若要扫描整个包（非关键点优先），把 `--scan-mode skills --skill-dir docs/skills` 换成 `--scan-packages com.yourcompany` 即可。
+
+构建完成后，`./data/codegraph.mv.db` 文件包含关键业务类的完整代码图谱。
+
+#### 参数说明
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--project-root` | 项目根目录（包含 pom.xml） | 必填 |
+| `--scan-mode` | 扫描模式：`all`（全部）/ `skills`（按 skill 标注的关键类）/ `packages`（按包名） | `all` |
+| `--skill-dir` | skill `.md` 文件目录（`scan-mode=skills` 时从中提取类名/方法名/表名关键字） | 空 |
+| `--scan-packages` | 扫描的包名（逗号分隔，`scan-mode=packages` 时使用） | 扫描所有包 |
+| `--output` | 输出路径（不含 .mv.db 后缀） | ./data/codegraph |
+
+> **关键点优先**：嵌入式部署推荐 `--scan-mode skills --skill-dir docs/skills`，只把 skill 文档中标注的关键业务类（含完整方法体）写入 H2，而非全项目。这样 `codegraph.mv.db` 体积可控，运行时经 `code_view` 工具即可离线查看关键业务代码定位 bug。
+
+#### 验证生成结果
+
+```bash
+# 检查文件
+ls -lh data/codegraph.mv.db
+
+# 查看统计信息（H2 数据库）
+java -cp "h2*.jar" org.h2.tools.Shell \
+  -url jdbc:h2:file:./data/codegraph \
+  -sql "SELECT COUNT(*) FROM CODE_GRAPH_NODES;"
+java -cp "h2*.jar" org.h2.tools.Shell \
+  -url jdbc:h2:file:./data/codegraph \
+  -sql "SELECT COUNT(*) FROM CODE_GRAPH_EDGES;"
+```
+
+#### 在 application.yml 中配置
+
+```yaml
+snap-agent:
+  code-graph:                              # 注意:属性前缀带连字符
+    enabled: true
+    persistence: h2                        # 使用 H2 持久化（运行时无源码直接加载）
+    h2-url: jdbc:h2:file:./data/codegraph  # 指向集成阶段生成的文件
+    scan-mode: skills                      # 与构建时一致
+    hot-reload-enabled: false              # 生产环境关闭热重载
+```
+
+### 将 H2 文件打入 Docker 镜像
+
+若采用**方案一**（package 阶段自动重建），图谱已随 `mvn clean package` 产出到 `${project.build.directory}/data/codegraph`，镜像只需 COPY 即可，无需在 Dockerfile 里再跑 CLI：
+
+```dockerfile
+FROM openjdk:8-jre-slim
+# 方案一：直接 COPY package 阶段产出的图谱
+COPY target/data/codegraph.mv.db /app/data/codegraph.mv.db
+COPY target/your-app.jar /app/app.jar
+WORKDIR /app
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+若必须在镜像内现场构建（例如 Dockerfile 阶段拿不到构建产物），可用多阶段构建调用 CLI：
+
+```dockerfile
+# Dockerfile 多阶段构建（方案二/三的替代：镜像内构建）
+FROM maven:3.9-openjdk-8 AS codegraph-builder
+COPY src/ /app/src/
+COPY pom.xml /app/
+COPY lib/ /app/lib/   # 如果用 lib/ 本地仓库方式
+WORKDIR /app
+# 构建图谱（关键点优先）
+RUN java -cp "lib/cn/watsontech/snapagent/snap-agent-spring-boot-2x-starter/2.0.0-SNAPSHOT/snap-agent-spring-boot-2x-starter-2.0.0-SNAPSHOT.jar:lib/cn/watsontech/snapagent/snap-agent-core/2.0.0-SNAPSHOT/snap-agent-core-2.0.0-SNAPSHOT.jar:lib/com/h2database/h2/1.4.200/h2-1.4.200.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
+  --project-root /app \
+  --scan-mode skills \
+  --skill-dir /app/docs/skills \
+  --output /app/data/codegraph
+
+FROM openjdk:8-jre-slim
+COPY --from=codegraph-builder /app/data/codegraph.mv.db /app/data/codegraph.mv.db
+COPY target/your-app.jar /app/app.jar
+WORKDIR /app
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+> **注意**：H2 文件放在 `/app/data/` 目录下，确保运行时 `h2-url` 指向此路径。如果用了 PVC，可以将 `data/` 挂载到 PVC 上，但通常不需要——图谱是 build-time 产物，不会在运行期变化（除非开启了热重建）。
+
+### 配置 K8s Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -736,17 +755,16 @@ spec:
 
 > 如果 H2 文件已打入镜像（推荐），不需要 PVC。`emptyDir` 仅用于运行期 H2 临时写入（如热重建）。
 
-### 第四步：配置 application.yml
+### 配置 application.yml（K8s 部署）
 
 ```yaml
 snap-agent:
   code-graph:
     enabled: true
-    scan-packages:
-      - com.yourcompany           # 你的项目包名
-    persistence: h2               # 使用 H2 持久化
+    persistence: h2                       # 使用 H2 持久化（运行时无源码直接加载）
     h2-url: jdbc:h2:file:/app/data/codegraph
-    hot-reload-enabled: false     # K8s 中无源码，关闭热重建
+    scan-mode: skills                     # 与构建时一致（关键点优先）
+    hot-reload-enabled: false             # K8s 中无源码，关闭热重建
     hot-reload-poll-ms: 2000
 ```
 
@@ -758,7 +776,7 @@ snap-agent:
 |-----------|------|----------|
 | `H2 code graph loaded from disk: N nodes` | 成功从 H2 文件加载 | 正常 |
 | `H2 code graph DB is empty, triggering initial build...` | H2 文件为空，正在构建 | K8s 中不应出现，说明镜像中 H2 文件缺失 |
-| `H2 code graph build complete: N nodes` | 首次构建完成 | K8s 中不应出现（应在 CI 阶段完成） |
+| `H2 code graph build complete: N nodes` | 首次构建完成 | K8s 中不应出现（应在集成阶段完成） |
 | `H2 code graph build failed: ...` | 构建失败 | 检查 H2 驱动是否在 classpath 中 |
 | `CodeGraphHotReloader assembled` | 热重建已启用 | K8s 中应设置 `hot-reload-enabled: false` |
 
@@ -778,8 +796,9 @@ curl -s -u demo:demo "http://localhost:8080/snap-agent/api/codegraph/search?name
 |--------|---------|---------|
 | `persistence` | `memory`（默认）或 `h2` | `h2` |
 | `h2-url` | `jdbc:h2:file:./data/codegraph` | `jdbc:h2:file:/app/data/codegraph` |
+| `scan-mode` | `skills`（关键点优先） | `skills`（与构建时一致） |
 | `hot-reload-enabled` | `true`（改代码自动重建） | `false`（无源码） |
-| H2 文件来源 | 首次启动自动构建 | CI 预构建，打入镜像 |
+| H2 文件来源 | 首次启动自动构建，或方案三手动生成 | 方案一 package 自动重建 / 方案二 CI 预构建，打入镜像 |
 | 启动时间 | 首次 ~20s，重启 ~2s（H2） | ~2s（直接加载 H2） |
 | H2 驱动 | pom.xml 需添加 `h2` 依赖 | 镜像中需包含 H2 驱动 |
 
@@ -980,7 +999,7 @@ Phase 2: 安装 SnapAgent（写入）
 
 Phase 3: 知识生成
   ├── domain-knowledge-discovery → 领域知识文档
-  ├── codegraph 生成 → SQLite 数据库 + 关键代码
+  ├── codegraph 生成 → H2 数据库（CodeGraphCli）
   └── 两轮 Review → 验证完整性
 
 Phase 4: 验证
@@ -998,60 +1017,44 @@ Phase 5: 输出报告
 
 ## CodeGraph 数据库生成
 
-集成完成后，为宿主项目生成 CodeGraph 数据库，支持代码关系查询和 bug 诊断。
-
-### 使用通用脚本
-
-```bash
-cd {project-root}
-python3 /path/to/skills-agent/scripts/generate-codegraph.py \
-  --project-root . \
-  --output-dir data/codegraph \
-  --project-name my-project
-```
-
-### 脚本功能
-
-| 功能 | 说明 |
-|------|------|
-| 多模块扫描 | 自动识别 Maven/Gradle 模块 |
-| 多级实体识别 | @TableName → entity/ 目录 → 命名约定 → Serializable 兜底 |
-| 关键代码提取 | 每个类提取 Javadoc、注解、字段、方法签名、业务注释（~500 字节/类） |
-| 依赖关系 | @Autowired/@Resource 注入 + import 分析 |
-| 废弃表识别 | @Deprecated + 命名模式 + 孤立表检测 |
-| 输出格式 | SQLite 数据库 + CSV 文件 |
+> **构建方式与配置详见 [代码图谱持久化](#代码图谱持久化集成阶段构建--运行时加载) 章节**。这里只补充 H2 数据库结构与典型产出的参考信息。
 
 ### 数据库结构
 
 ```sql
--- 节点表
+-- 节点表（H2，运行时消费格式）
 CODE_GRAPH_NODES (
-    NODE_ID,          -- 全限定类名
-    NAME,             -- 类名
-    TYPE,             -- Controller/Service/Entity/Mapper/DTO/...
+    ID,               -- 全限定类名 / 方法签名
+    TYPE,             -- CLASS / METHOD / FIELD
+    NAME,             -- 简短名称
     PACKAGE,          -- 包名
+    CLASS_NAME,       -- 所属类
+    RETURN_TYPE,      -- 返回类型（方法节点）
     FILE_PATH,        -- 源文件路径
-    TABLE_NAME,       -- @TableName 值（Entity 才有）
-    SOURCE_CODE,      -- 关键代码片段（诊断用）
-    SOURCE_LENGTH     -- 代码长度
+    LINE_NUMBER,      -- 行号
+    SOURCE_CODE       -- 关键类完整源码（含完整方法体，运行时 code_view 离线诊断用）
 )
 
 -- 边表
 CODE_GRAPH_EDGES (
-    SOURCE,           -- 依赖方 FQN
-    TARGET,           -- 被依赖方 FQN
-    TYPE,             -- DEPENDS_ON / IMPORTS
-    DETAIL            -- 注入方式（Autowired/Resource/Constructor）
+    FROM_ID,          -- 源节点
+    TO_ID,            -- 目标节点
+    EDGE_TYPE,        -- CALLS / EXTENDS / IMPLEMENTS / DEPENDS_ON / REFERENCES
+    CONTEXT           -- 位置信息
 )
 ```
 
-### 典型产出
+> `SOURCE_CODE` 列由 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 自动迁移，旧库升级无需重建。
 
-| 项目规模 | 节点数 | 边数 | 数据库大小 | 源码存储 |
-|----------|--------|------|-----------|----------|
-| 小型（<500 类） | ~300 | ~800 | ~500KB | ~100KB |
-| 中型（500-2000 类） | ~1000 | ~2500 | ~1.5MB | ~350KB |
-| 大型（>2000 类） | ~2000+ | ~5000+ | ~3MB | ~700KB |
+### 典型产出（scan-mode=skills 关键点优先）
+
+| 项目规模 | 关键类数 | 节点数 | 数据库大小 | 源码存储 |
+|----------|----------|--------|-----------|----------|
+| 小型（<10 关键类） | ~10 | ~50 | ~200KB | 含完整方法体 |
+| 中型（10-50 关键类） | ~30 | ~150 | ~1MB | 含完整方法体 |
+| 大型（>50 关键类） | ~50+ | ~300+ | ~3MB | 含完整方法体 |
+
+> 体积远小于全量扫描（全量扫描会把所有类都纳入，动辄 10MB~500MB）。关键点优先只收 skill 标注的关键业务类，运行时 `code_view` 工具离线查看关键代码定位 bug。
 
 ---
 
@@ -1065,7 +1068,7 @@ CODE_GRAPH_EDGES (
 - [ ] Chat UI (`/snap-agent/chat/index.html`) 可访问
 - [ ] Skills 列表 API 返回至少 1 个 Skill
 - [ ] LLM 对话正常（发送消息 → 收到回复）
-- [ ] CodeGraph 数据库已生成（`data/codegraph/*.db`）
+- [ ] CodeGraph 数据库已生成（`data/codegraph.mv.db`）
 - [ ] 知识库文档已生成（`src/main/resources/docs/knowledge/*.md`）
 - [ ] Settings 页面 (`/snap-agent/settings.html`) 可访问
 

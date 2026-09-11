@@ -323,10 +323,9 @@ Review 清单：
 如果项目启用了 snap-agent 的 code-graph 功能：
 
 ```
-1. 使用 H2CodeGraphIndex 扫描项目所有 src/main/java 源码
-2. 提取类信息（类名、类型、包名）和依赖关系（import、@Autowired、@Resource）
-3. 生成持久化的 H2 数据库：{project_root}/data/codegraph/amps-codegraph.mv.db
-4. 同时输出 CSV 文件：nodes.csv, edges.csv
+1. 使用 CodeGraphCli（JavaParser AST）扫描项目所有 src/main/java 源码
+2. 提取类/方法/字段信息与关系（EXTENDS / IMPLEMENTS / CALLS / DEPENDS_ON）
+3. 生成持久化的 H2 数据库：{project_root}/data/codegraph/codegraph.mv.db
 
 类类型识别策略（与实体识别一致）：
 - Controller / Service / ServiceImpl / Mapper / Entity / DTO / Enum / Interface / Class

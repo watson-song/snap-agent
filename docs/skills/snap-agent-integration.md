@@ -18,7 +18,7 @@ output:
   - pom.xml 修改
   - application-snap.yml
   - docs/knowledge/*.md
-  - data/codegraph/*.db
+  - data/codegraph.mv.db
   - INTEGRATION_REPORT.md
 author: SnapAgent
 ---
@@ -289,20 +289,22 @@ spring:
 
 #### Step 8: 生成 CodeGraph 数据库
 
-使用通用 codegraph 生成脚本：
+使用内置 `CodeGraphCli`（JavaParser AST 解析，输出 H2 图谱文件）。**关键点优先**：用 `scan-mode skills` 只把 skill 文档标注的关键业务类（含完整方法体）写入 H2，而非全项目。
 
 ```bash
 cd {project_root}
-python3 scripts/generate-codegraph.py \
+java -cp "snap-agent-spring-boot-2x-starter/target/*.jar:snap-agent-core/target/*.jar" \
+  cn.watsontech.snapagent.boot2x.codegraph.CodeGraphCli \
   --project-root . \
-  --output-dir data/codegraph \
-  --project-name ${project-name}
+  --scan-mode skills \
+  --skill-dir docs/skills \
+  --output data/codegraph
 ```
 
+> 若希望扫描整个包（非关键点优先），改用 `--scan-packages ${project-package}` 并省略 `--scan-mode skills`。
+
 输出：
-- `data/codegraph/{project-name}-codegraph.mv.db`
-- `data/codegraph/nodes.csv`
-- `data/codegraph/edges.csv`
+- `data/codegraph.mv.db`（H2 数据库，含关键业务类完整方法体，运行时 `H2CodeGraphIndex` 直接加载，`code_view` 工具离线查看）
 
 ### ═══ 阶段 4：验证（自动化测试）═══
 
@@ -375,7 +377,7 @@ curl http://localhost:8080/snap-agent/code-graph/status -u demo:demo
 - ${starter-module}/src/main/resources/application.yml
 - 新增: lib/ 目录
 - 新增: src/main/resources/docs/knowledge/*.md
-- 新增: data/codegraph/*.db
+- 新增: data/codegraph.mv.db
 
 ## 待配置项
 - [ ] LLM_AUTH_TOKEN 环境变量

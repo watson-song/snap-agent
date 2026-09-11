@@ -1453,6 +1453,17 @@ public class SnapAgentProperties {
         /** Minimum relevance score [0.0, 1.0] for a fragment to be injected. */
         private double minScore = 0.1;
 
+        /**
+         * Whether to enable hot reload via WatchService. When true, a daemon
+         * thread watches the knowledge root for {@code .md} file changes and
+         * re-ingests into the vector store + domain index. OFF by default to
+         * avoid consuming host resources in embedded deployments.
+         */
+        private boolean hotReload = false;
+
+        /** Poll interval in ms for the knowledge hot reload watch service. */
+        private long hotReloadPollMs = 2000;
+
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }
         public List<KnowledgeSourceConfig> getSources() { return sources; }
@@ -1461,6 +1472,10 @@ public class SnapAgentProperties {
         public void setMaxFragments(int maxFragments) { this.maxFragments = maxFragments; }
         public double getMinScore() { return minScore; }
         public void setMinScore(double minScore) { this.minScore = minScore; }
+        public boolean isHotReload() { return hotReload; }
+        public void setHotReload(boolean hotReload) { this.hotReload = hotReload; }
+        public long getHotReloadPollMs() { return hotReloadPollMs; }
+        public void setHotReloadPollMs(long hotReloadPollMs) { this.hotReloadPollMs = hotReloadPollMs; }
     }
 
     /**

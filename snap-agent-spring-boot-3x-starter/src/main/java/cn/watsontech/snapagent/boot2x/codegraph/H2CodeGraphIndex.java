@@ -96,7 +96,8 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
                     + "CLASS_NAME VARCHAR, "
                     + "RETURN_TYPE VARCHAR, "
                     + "FILE_PATH VARCHAR, "
-                    + "LINE_NUMBER INT)");
+                    + "LINE_NUMBER INT, "
+                    + "SOURCE_CODE CLOB)");
             stmt.execute("CREATE TABLE IF NOT EXISTS CODE_GRAPH_EDGES ("
                     + "FROM_ID VARCHAR, "
                     + "TO_ID VARCHAR, "
@@ -105,9 +106,22 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
             stmt.execute("CREATE INDEX IF NOT EXISTS IDX_EDGES_FROM ON CODE_GRAPH_EDGES(FROM_ID)");
             stmt.execute("CREATE INDEX IF NOT EXISTS IDX_EDGES_TO ON CODE_GRAPH_EDGES(TO_ID)");
             stmt.execute("CREATE INDEX IF NOT EXISTS IDX_NODES_NAME ON CODE_GRAPH_NODES(NAME)");
+            migrateSourceCodeColumn(stmt);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to create H2 tables", e);
         }
+    }
+
+    /**
+     * Add the {@code SOURCE_CODE} column to pre-existing code graph databases
+     * that were created before the key-source excerpt feature was introduced.
+     * Old files lack the column; a plain {@code SELECT ... SOURCE_CODE} would
+     * fail with "column not found". {@code ADD COLUMN IF NOT EXISTS} is a no-op
+     * on newer schemas that already have it.
+     */
+    private void migrateSourceCodeColumn(Statement stmt) throws SQLException {
+        stmt.execute("ALTER TABLE CODE_GRAPH_NODES ADD COLUMN IF NOT EXISTS "
+                + "SOURCE_CODE CLOB");
     }
 
     // ------------------------------------------------------------------
@@ -136,8 +150,8 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
             // Batch-insert nodes (MERGE to handle duplicate IDs from the builder)
             try (PreparedStatement ps = connection.prepareStatement(
                     "MERGE INTO CODE_GRAPH_NODES "
-                            + "(ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER) "
-                            + "KEY(ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                            + "(ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER, SOURCE_CODE) "
+                            + "KEY(ID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
                 for (CodeGraphNode node : graph.getNodes()) {
                     ps.setString(1, node.getId());
                     ps.setString(2, node.getType() != null ? node.getType().name() : null);
@@ -147,6 +161,7 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
                     ps.setString(6, node.getReturnType());
                     ps.setString(7, node.getFilePath());
                     ps.setInt(8, node.getLineNumber());
+                    ps.setString(9, node.getSourceCode());
                     ps.addBatch();
                 }
                 ps.executeBatch();
@@ -209,7 +224,7 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
         String likePattern = "%" + namePattern.toLowerCase() + "%";
         List<CodeGraphNode> results = new ArrayList<CodeGraphNode>();
         try (PreparedStatement ps = connection.prepareStatement(
-                "SELECT ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER "
+                "SELECT ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER, SOURCE_CODE "
                         + "FROM CODE_GRAPH_NODES WHERE LOWER(NAME) LIKE ?")) {
             ps.setString(1, likePattern);
             try (ResultSet rs = ps.executeQuery()) {
@@ -229,7 +244,7 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
             return null;
         }
         try (PreparedStatement ps = connection.prepareStatement(
-                "SELECT ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER "
+                "SELECT ID, TYPE, NAME, PACKAGE, CLASS_NAME, RETURN_TYPE, FILE_PATH, LINE_NUMBER, SOURCE_CODE "
                         + "FROM CODE_GRAPH_NODES WHERE ID = ?")) {
             ps.setString(1, id);
             try (ResultSet rs = ps.executeQuery()) {
@@ -381,7 +396,8 @@ public class H2CodeGraphIndex implements CodeGraphIndex {
                 rs.getString("CLASS_NAME"),
                 rs.getString("RETURN_TYPE"),
                 rs.getString("FILE_PATH"),
-                rs.getInt("LINE_NUMBER"));
+                rs.getInt("LINE_NUMBER"),
+                rs.getString("SOURCE_CODE"));
     }
 
     private CodeGraphEdge mapEdge(ResultSet rs) throws SQLException {

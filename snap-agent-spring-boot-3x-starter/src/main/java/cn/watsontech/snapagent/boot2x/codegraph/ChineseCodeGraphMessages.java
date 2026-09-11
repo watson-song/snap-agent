@@ -79,4 +79,14 @@ public class ChineseCodeGraphMessages implements CodeGraphMessages {
     public String typeLabel() {
         return "类型";
     }
+
+    @Override
+    public String sourceExcerpt(String nodeId) {
+        return "关键代码片段 (" + nodeId + "):";
+    }
+
+    @Override
+    public String noSourceExcerpt(String nodeId) {
+        return "节点 " + nodeId + " 未存储代码片段。该节点可能由旧版图谱构建，或为无源码的运行时环境。";
+    }
 }

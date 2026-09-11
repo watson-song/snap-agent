@@ -22,9 +22,27 @@ public class CodeGraphNode {
     private final String returnType;
     private final String filePath;
     private final int lineNumber;
+    private final String sourceCode;
 
+    /**
+     * Backward-compatible constructor: {@code sourceCode} is null.
+     */
     public CodeGraphNode(String id, NodeType type, String name, String packageName,
                          String className, String returnType, String filePath, int lineNumber) {
+        this(id, type, name, packageName, className, returnType, filePath, lineNumber, null);
+    }
+
+    /**
+     * Full constructor including a key-source excerpt captured at build time.
+     *
+     * @param sourceCode optional excerpt of the class/method body (or null). Stored
+     *                   with the node so the code can be shown offline — i.e. when
+     *                   the runtime JVM has no source files, the CI/integration-built
+     *                   graph still carries the key business code for diagnostics.
+     */
+    public CodeGraphNode(String id, NodeType type, String name, String packageName,
+                         String className, String returnType, String filePath, int lineNumber,
+                         String sourceCode) {
         this.id = id;
         this.type = type;
         this.name = name;
@@ -33,6 +51,7 @@ public class CodeGraphNode {
         this.returnType = returnType;
         this.filePath = filePath;
         this.lineNumber = lineNumber;
+        this.sourceCode = sourceCode;
     }
 
     public String getId() { return id; }
@@ -43,6 +62,7 @@ public class CodeGraphNode {
     public String getReturnType() { return returnType; }
     public String getFilePath() { return filePath; }
     public int getLineNumber() { return lineNumber; }
+    public String getSourceCode() { return sourceCode; }
 
     @Override
     public String toString() {

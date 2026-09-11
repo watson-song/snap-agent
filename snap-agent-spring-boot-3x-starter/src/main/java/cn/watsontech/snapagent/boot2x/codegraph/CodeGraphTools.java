@@ -30,12 +30,13 @@ import java.util.Set;
  * {@link cn.watsontech.snapagent.core.tool.ToolCallbackRegistry} alongside
  * built-in tools.</p>
  *
- * <p>Provides four tools for navigating code relationships:</p>
+ * <p>Provides five tools for navigating code relationships:</p>
  * <ul>
  *   <li>{@code call_chain} — forward call chain (A→B→C)</li>
  *   <li>{@code reverse_chain} — reverse call chain (who calls X)</li>
  *   <li>{@code impact_analysis} — change impact scope</li>
  *   <li>{@code find} — name-based node lookup</li>
+ *   <li>{@code code_view} — key source excerpt lookup (offline diagnosis)</li>
  * </ul>
  */
 public class CodeGraphTools {
@@ -96,6 +97,12 @@ public class CodeGraphTools {
     public String find(
             @ToolParam(description = "名称模式（模糊匹配，不区分大小写）") String query) {
         return handleFind(query);
+    }
+
+    @Tool(name = "code_view", description = "查看关键业务代码片段。输入类名或方法签名，返回该节点在集成阶段抽取并随图谱持久化的代码片段（类声明+字段+方法签名，不含方法体），用于离线诊断代码问题。")
+    public String codeView(
+            @ToolParam(description = "类名或方法签名，如 'OrderService' 或 'com.example.Foo#check()'") String query) {
+        return handleCodeView(query);
     }
 
     @Tool(name = "render_call_graph", description = "将调用链/影响范围渲染为可交互的 HTML 图形。先执行查询，再生成带 Mermaid.js 的 HTML 文件，返回文件路径。支持三种模式：call_chain（正向调用链）、reverse_chain（反向调用链）、impact（影响范围）。")
@@ -524,6 +531,29 @@ public class CodeGraphTools {
             if (n.getReturnType() != null && !n.getReturnType().isEmpty()) {
                 sb.append("   ").append(messages.typeLabel()).append(": ").append(n.getReturnType()).append("\n");
             }
+        }
+        return sb.toString();
+    }
+
+    private String handleCodeView(String query) {
+        if (query == null || query.isEmpty()) {
+            return messages.notFound();
+        }
+        List<CodeGraphNode> targets = resolveNodes(query);
+        if (targets.isEmpty()) {
+            return messages.notFoundQuery(query);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (CodeGraphNode node : targets) {
+            sb.append(messages.sourceExcerpt(node.getId())).append("\n");
+            String sourceCode = node.getSourceCode();
+            if (sourceCode == null || sourceCode.isEmpty()) {
+                sb.append("  ").append(messages.noSourceExcerpt(node.getId())).append("\n");
+            } else {
+                sb.append(sourceCode).append("\n");
+            }
+            sb.append("\n");
         }
         return sb.toString();
     }

@@ -1,5 +1,6 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
+import cn.watsontech.snapagent.core.embedding.EmbeddingException;
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.vectorstore.InMemoryVectorStore;
 import cn.watsontech.snapagent.core.vectorstore.VectorStore;
@@ -117,8 +118,8 @@ public class EmbeddingAutoConfiguration {
                 // Read response
                 int responseCode = conn.getResponseCode();
                 if (responseCode != 200) {
-                    log.error("OpenAI embedding API returned {}: {}", responseCode, conn.getResponseMessage());
-                    return new float[1536];
+                    throw new EmbeddingException("OpenAI embedding API returned " + responseCode
+                            + ": " + conn.getResponseMessage());
                 }
 
                 String responseBody;
@@ -140,12 +141,12 @@ public class EmbeddingAutoConfiguration {
                     }
                 }
 
-                log.warn("Failed to parse OpenAI embedding response");
-                return new float[1536];
+                throw new EmbeddingException("Failed to parse OpenAI embedding response");
 
+            } catch (EmbeddingException e) {
+                throw e;
             } catch (Exception e) {
-                log.error("OpenAI embedding call failed: {}", e.getMessage());
-                return new float[1536];
+                throw new EmbeddingException("OpenAI embedding call failed: " + e.getMessage(), e);
             }
         }
 
@@ -196,8 +197,8 @@ public class EmbeddingAutoConfiguration {
                 // Read response
                 int responseCode = conn.getResponseCode();
                 if (responseCode != 200) {
-                    log.error("Ollama embedding API returned {}: {}", responseCode, conn.getResponseMessage());
-                    return new float[1536];
+                    throw new EmbeddingException("Ollama embedding API returned " + responseCode
+                            + ": " + conn.getResponseMessage());
                 }
 
                 String responseBody;
@@ -216,12 +217,12 @@ public class EmbeddingAutoConfiguration {
                     return vector;
                 }
 
-                log.warn("Failed to parse Ollama embedding response");
-                return new float[1536];
+                throw new EmbeddingException("Failed to parse Ollama embedding response");
 
+            } catch (EmbeddingException e) {
+                throw e;
             } catch (Exception e) {
-                log.error("Ollama embedding call failed: {}", e.getMessage());
-                return new float[1536];
+                throw new EmbeddingException("Ollama embedding call failed: " + e.getMessage(), e);
             }
         }
 

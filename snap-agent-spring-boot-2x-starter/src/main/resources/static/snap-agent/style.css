@@ -1624,6 +1624,35 @@ body {
     font-size: 13px;
 }
 
+/* ===== Generic Modal ===== */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center;
+    z-index: 1000; animation: fadeIn 0.2s;
+}
+.modal {
+    background: var(--bg-secondary); border-radius: 12px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    max-width: 600px; width: 90%; max-height: 85vh; overflow: hidden;
+    display: flex; flex-direction: column; animation: slideUp 0.25s;
+    border: 1px solid var(--border);
+}
+.modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    background: var(--bg-tertiary);
+}
+.modal-header h2 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.modal-close {
+    background: none; border: none; font-size: 24px; cursor: pointer;
+    color: var(--text-secondary); padding: 0; width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center; border-radius: 4px;
+}
+.modal-close:hover { background: var(--border-hover); color: var(--text-primary); }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; background: var(--bg-secondary); color: var(--text-primary); }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
 /* ===== Marketplace ===== */
 .marketplace-modal { max-width: 800px; width: 90%; }
 .marketplace-body { padding: 0; }
@@ -1667,4 +1696,413 @@ body {
 }
 .marketplace-install-btn:hover { opacity: 0.85; }
 .marketplace-install-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== A/B Experiments ===== */
+.experiments-list { display: flex; flex-direction: column; gap: 10px; }
+.experiment-card {
+    border: 1px solid #e0e0e0; border-radius: 8px; padding: 14px;
+    cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s;
+}
+.experiment-card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.experiment-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.experiment-name { font-weight: 600; font-size: 14px; }
+.experiment-status {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+}
+.experiment-status.created { background: #e3f2fd; color: #1565c0; }
+.experiment-status.running { background: #fff3e0; color: #e65100; }
+.experiment-status.completed { background: #e8f5e9; color: #2e7d32; }
+.experiment-status.failed { background: #fce4ec; color: #c62828; }
+.experiment-meta { display: flex; gap: 16px; font-size: 12px; color: #666; }
+.experiment-compare-table {
+    width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px;
+}
+.experiment-compare-table th {
+    background: #f5f5f5; padding: 8px 10px; text-align: left;
+    border-bottom: 2px solid #e0e0e0; font-weight: 600;
+}
+.experiment-compare-table td {
+    padding: 8px 10px; border-bottom: 1px solid #f0f0f0;
+}
+.experiment-compare-table tr:hover { background: #fafafa; }
 .marketplace-install-btn.installed { background: #4caf50; }
+
+/* ---- Visual Workflow Designer ---- */
+.designer-container {
+    display: flex;
+    height: 100%;
+    min-height: 500px;
+    gap: 0;
+}
+.designer-palette {
+    width: 200px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border, #e0e0e0);
+    overflow-y: auto;
+    padding: 12px;
+    background: #fafafa;
+}
+.designer-palette h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    margin: 0 0 8px;
+}
+.designer-skill-card {
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #fff;
+    cursor: grab;
+    font-size: 12px;
+    transition: box-shadow 0.15s, border-color 0.15s;
+    user-select: none;
+}
+.designer-skill-card:hover {
+    border-color: #1976d2;
+    box-shadow: 0 1px 4px rgba(25,118,210,0.15);
+}
+.designer-skill-card:active {
+    cursor: grabbing;
+}
+.designer-skill-card .skill-name {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 2px;
+}
+.designer-skill-card .skill-desc {
+    color: #888;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.designer-canvas {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    position: relative;
+    min-height: 400px;
+}
+.designer-canvas-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #aaa;
+    font-size: 14px;
+}
+.designer-canvas-empty .icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+}
+.designer-step-node {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 4px;
+    position: relative;
+    animation: stepSlideIn 0.2s ease-out;
+}
+@keyframes stepSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.designer-step-card {
+    flex: 1;
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    position: relative;
+}
+.designer-step-card:hover {
+    border-color: #90caf9;
+}
+.designer-step-card.selected {
+    border-color: #1976d2;
+    box-shadow: 0 0 0 2px rgba(25,118,210,0.2);
+}
+.designer-step-card .step-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.designer-step-card .step-number {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #1976d2;
+    color: #fff;
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.designer-step-card .step-skill {
+    font-weight: 600;
+    font-size: 13px;
+    color: #333;
+}
+.designer-step-card .step-name {
+    font-size: 11px;
+    color: #888;
+}
+.designer-step-card .step-badges {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+}
+.designer-step-card .step-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #f0f0f0;
+    color: #666;
+}
+.designer-step-card .step-badge.condition {
+    background: #fff3e0;
+    color: #e65100;
+}
+.designer-step-card .step-badge.failure {
+    background: #fce4ec;
+    color: #c62828;
+}
+.designer-step-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 0 8px;
+}
+.designer-step-actions button {
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    color: #666;
+    transition: background 0.1s;
+}
+.designer-step-actions button:hover {
+    background: #f0f0f0;
+}
+.designer-step-actions button.delete-btn:hover {
+    background: #fce4ec;
+    color: #c62828;
+}
+.designer-arrow {
+    display: flex;
+    justify-content: center;
+    padding: 2px 0;
+    color: #bbb;
+    font-size: 18px;
+}
+.designer-properties {
+    width: 260px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border, #e0e0e0);
+    padding: 12px;
+    overflow-y: auto;
+    background: #fafafa;
+}
+.designer-properties h4 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    margin: 0 0 12px;
+}
+.designer-prop-group {
+    margin-bottom: 12px;
+}
+.designer-prop-group label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 4px;
+}
+.designer-prop-group input,
+.designer-prop-group select,
+.designer-prop-group textarea {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    background: #fff;
+    box-sizing: border-box;
+}
+.designer-prop-group textarea {
+    resize: vertical;
+    min-height: 60px;
+    font-family: monospace;
+}
+.designer-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border, #e0e0e0);
+    background: #fff;
+}
+.designer-toolbar .designer-save-btn {
+    background: #1976d2;
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.designer-toolbar .designer-save-btn:hover {
+    background: #1565c0;
+}
+.designer-toolbar .designer-run-btn {
+    background: #2e7d32;
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.designer-toolbar .designer-run-btn:hover {
+    background: #1b5e20;
+}
+.designer-toolbar .designer-export-btn {
+    background: #fff;
+    color: #333;
+    border: 1px solid #ddd;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+.designer-toolbar .designer-export-btn:hover {
+    background: #f5f5f5;
+}
+.designer-toolbar .designer-name-input {
+    border: 1px solid #ddd;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    width: 160px;
+}
+.designer-result-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.95);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    overflow-y: auto;
+}
+.designer-result-overlay .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.designer-result-overlay .result-status {
+    font-size: 14px;
+    font-weight: 600;
+}
+.designer-result-overlay .result-status.success {
+    color: #2e7d32;
+}
+.designer-result-overlay .result-status.failure {
+    color: #c62828;
+}
+.designer-prop-inputs-container {
+    border: 1px solid #eee;
+    border-radius: 4px;
+    padding: 8px;
+    margin-top: 4px;
+}
+.designer-prop-input-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+    align-items: center;
+}
+.designer-prop-input-row input {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: monospace;
+}
+.designer-prop-input-row .remove-input-btn {
+    background: none;
+    border: none;
+    color: #c62828;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+}
+.designer-add-input-btn {
+    background: none;
+    border: 1px dashed #ccc;
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-size: 11px;
+    color: #888;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 4px;
+}
+.designer-add-input-btn:hover {
+    border-color: #1976d2;
+    color: #1976d2;
+}
+.designer-palette-search {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+}
+.designer-load-section {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border, #e0e0e0);
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.designer-load-section select {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 12px;
+}
+.designer-load-section button {
+    padding: 4px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 12px;
+}
+.designer-load-section button:hover {
+    background: #f0f0f0;
+}

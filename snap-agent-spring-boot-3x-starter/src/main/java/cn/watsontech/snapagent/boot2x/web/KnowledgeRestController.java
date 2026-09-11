@@ -3,6 +3,7 @@ package cn.watsontech.snapagent.boot2x.web;
 import cn.watsontech.snapagent.boot2x.autoconfig.SnapAgentProperties;
 import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools;
 import cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools;
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeReloadService;
 import cn.watsontech.snapagent.core.codegraph.CodeGraphIndex;
 import cn.watsontech.snapagent.core.codegraph.CodeGraphNode;
 import cn.watsontech.snapagent.core.tool.ToolCallback;
@@ -57,6 +58,7 @@ public class KnowledgeRestController {
     private final ObjectProvider<CodeGraphIndex> codeGraphIndexProvider;
     private final ObjectProvider<CodeGraphTools> codeGraphToolsProvider;
     private final ObjectProvider<ModuleArchitectureTools> moduleArchToolsProvider;
+    private final ObjectProvider<KnowledgeReloadService> knowledgeReloadServiceProvider;
     private final SnapAgentProperties props;
 
     public KnowledgeRestController(
@@ -64,11 +66,13 @@ public class KnowledgeRestController {
             ObjectProvider<CodeGraphIndex> codeGraphIndexProvider,
             ObjectProvider<CodeGraphTools> codeGraphToolsProvider,
             ObjectProvider<ModuleArchitectureTools> moduleArchToolsProvider,
+            ObjectProvider<KnowledgeReloadService> knowledgeReloadServiceProvider,
             SnapAgentProperties props) {
         this.vectorStoreProvider = vectorStoreProvider;
         this.codeGraphIndexProvider = codeGraphIndexProvider;
         this.codeGraphToolsProvider = codeGraphToolsProvider;
         this.moduleArchToolsProvider = moduleArchToolsProvider;
+        this.knowledgeReloadServiceProvider = knowledgeReloadServiceProvider;
         this.props = props;
     }
 
@@ -179,9 +183,31 @@ public class KnowledgeRestController {
     @PostMapping("/reload")
     public ResponseEntity<Map<String, Object>> reload() {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
-        result.put("status", "ok");
-        result.put("fragmentCount", 0);
-        // TODO: implement actual reload via KnowledgeETLPipeline
+        KnowledgeReloadService reloadService = knowledgeReloadServiceProvider.getIfAvailable();
+        if (reloadService == null) {
+            result.put("status", "unavailable");
+            result.put("message", "Knowledge reload service not available (vectorstore disabled?)");
+            return ResponseEntity.ok(result);
+        }
+
+        try {
+            KnowledgeReloadService.ReloadResult r = reloadService.reload();
+            if (r == null) {
+                result.put("status", "ok");
+                result.put("message", "No knowledge infrastructure to reload");
+                result.put("fragmentCount", 0);
+                return ResponseEntity.ok(result);
+            }
+            result.put("status", "ok");
+            result.put("documentsLoaded", r.getDocumentsLoaded());
+            result.put("conceptsLoaded", r.getConceptsLoaded());
+            result.put("vectorStoreCleared", r.isVectorStoreCleared());
+            result.put("domainIndexCleared", r.isDomainIndexCleared());
+        } catch (Exception e) {
+            log.warn("Knowledge reload failed: {}", e.getMessage());
+            result.put("status", "error");
+            result.put("message", e.getMessage());
+        }
         return ResponseEntity.ok(result);
     }
 

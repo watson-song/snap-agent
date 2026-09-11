@@ -331,7 +331,7 @@ snap-agent:
 | 组件 | 职责 |
 |------|------|
 | `CodeGraphBuilder` | 基于 JavaParser (或 Spoon) 解析 AST，构建调用图 |
-| `CodeGraphIndex` | 图索引存储（节点表 + 边表 + 全文检索），默认文件存储（SQLite/H2） |
+| `CodeGraphIndex` | 图索引存储（节点表 + 边表 + 全文检索），默认文件存储（H2） |
 | `@Tool` code_graph | Agent 工具：查询调用链、反向调用链、依赖路径、影响范围 |
 | `@Tool` code_semantic_search | 语义搜索：用自然语言查找代码（如"处理订单超时的逻辑在哪"） |
 

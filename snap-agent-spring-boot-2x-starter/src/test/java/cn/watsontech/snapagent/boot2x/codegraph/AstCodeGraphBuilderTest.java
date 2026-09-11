@@ -471,6 +471,202 @@ class AstCodeGraphBuilderTest {
                 && e.getToId().equals("com.test.Helper"));
     }
 
+    // ---- Scan mode "skills" (keyword-based file filtering) ----
+
+    @Test
+    void shouldRespectSkillsScanMode() throws IOException {
+        Path pkgA = tempDir.resolve("src/com/test/a");
+        Path pkgB = tempDir.resolve("src/com/test/b");
+        writeFile(pkgA, "Relevant.java",
+                "package com.test.a;\n"
+                + "public class Relevant {\n"
+                + "    private AllocationPlanService svc;\n"
+                + "}\n");
+        writeFile(pkgB, "Irrelevant.java",
+                "package com.test.b;\npublic class Irrelevant {}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")),
+                Collections.<String>emptyList(),
+                "skills",
+                Collections.singleton("AllocationPlanService"));
+        CodeGraph graph = builder.build();
+
+        // Only files containing the keyword are scanned
+        assertThat(graph.getNodes()).anyMatch(n -> n.getName().equals("Relevant"));
+        assertThat(graph.getNodes()).noneMatch(n -> n.getName().equals("Irrelevant"));
+    }
+
+    @Test
+    void shouldNotFilterWhenSkillsModeHasNoKeywords() throws IOException {
+        Path pkgA = tempDir.resolve("src/com/test/a");
+        Path pkgB = tempDir.resolve("src/com/test/b");
+        writeFile(pkgA, "ClassA.java", "package com.test.a;\npublic class ClassA {}\n");
+        writeFile(pkgB, "ClassB.java", "package com.test.b;\npublic class ClassB {}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")),
+                Collections.<String>emptyList(),
+                "skills",
+                Collections.<String>emptySet());
+        CodeGraph graph = builder.build();
+
+        // Empty keywords → no filtering (matches SimpleCodeGraphBuilder contract)
+        assertThat(graph.getNodes()).anyMatch(n -> n.getName().equals("ClassA"));
+        assertThat(graph.getNodes()).anyMatch(n -> n.getName().equals("ClassB"));
+    }
+
+    // ---- Scan mode "packages" (package-prefix file filtering) ----
+
+    @Test
+    void shouldRespectPackagesScanMode() throws IOException {
+        Path pkgA = tempDir.resolve("src/com/test/a");
+        Path pkgB = tempDir.resolve("src/com/test/b");
+        writeFile(pkgA, "ClassA.java", "package com.test.a;\npublic class ClassA {}\n");
+        writeFile(pkgB, "ClassB.java", "package com.test.b;\npublic class ClassB {}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")),
+                Collections.singletonList("com.test.a"),
+                "packages",
+                Collections.<String>emptySet());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getNodes()).anyMatch(n -> n.getName().equals("ClassA"));
+        assertThat(graph.getNodes()).noneMatch(n -> n.getName().equals("ClassB"));
+    }
+
+    // ---- Variable type resolution (no guess-by-capitalization) ----
+
+    @Test
+    void shouldResolveCallTargetFromFieldTypeNotNameGuess() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "OrderService.java",
+                "package com.test;\n\n"
+                + "public class OrderService {\n"
+                + "    private AuditLogger logger;\n"
+                + "    public void process() {\n"
+                + "        logger.record();\n"
+                + "    }\n"
+                + "}\n");
+        writeFile(srcDir, "AuditLogger.java",
+                "package com.test;\n\n"
+                + "public class AuditLogger {\n"
+                + "    public void record() {}\n"
+                + "}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        // The variable is named `logger` (lowercase) but typed `AuditLogger`.
+        // Resolution must use the field TYPE, not a capitalized name guess
+        // (`Logger#record(*)` would be a false edge).
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.CALLS
+                && e.getToId().equals("com.test.AuditLogger#record(*)"));
+        assertThat(graph.getEdges()).noneMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.CALLS
+                && e.getToId().startsWith("Logger#"));
+    }
+
+    @Test
+    void shouldResolveCallTargetFromParameterType() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "Processor.java",
+                "package com.test;\n\n"
+                + "public class Processor {\n"
+                + "    public void run(Notifier notifier) {\n"
+                + "        notifier.notify();\n"
+                + "    }\n"
+                + "}\n");
+        writeFile(srcDir, "Notifier.java",
+                "package com.test;\n\n"
+                + "public class Notifier {\n"
+                + "    public void notify() {}\n"
+                + "}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.CALLS
+                && e.getToId().equals("com.test.Notifier#notify(*)"));
+    }
+
+    @Test
+    void shouldResolveCallTargetFromLocalVariableType() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "Worker.java",
+                "package com.test;\n\n"
+                + "public class Worker {\n"
+                + "    public void doWork() {\n"
+                + "        MetricsClient client = new MetricsClient();\n"
+                + "        client.report();\n"
+                + "    }\n"
+                + "}\n");
+        writeFile(srcDir, "MetricsClient.java",
+                "package com.test;\n\n"
+                + "public class MetricsClient {\n"
+                + "    public void report() {}\n"
+                + "}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.CALLS
+                && e.getToId().equals("com.test.MetricsClient#report(*)"));
+    }
+
+    // ---- Spring dependency-injection edges ----
+
+    @Test
+    void shouldExtractAutowiredFieldDependency() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "Controller.java",
+                "package com.test;\n\n"
+                + "public class Controller {\n"
+                + "    @Autowired\n"
+                + "    private OrderService orderService;\n"
+                + "}\n");
+        writeFile(srcDir, "OrderService.java",
+                "package com.test;\npublic class OrderService {}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.Controller")
+                && e.getToId().equals("com.test.OrderService"));
+    }
+
+    @Test
+    void shouldExtractAutowiredConstructorDependency() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "ServiceA.java",
+                "package com.test;\n\n"
+                + "public class ServiceA {\n"
+                + "    @Autowired\n"
+                + "    public ServiceA(ServiceB serviceB) {}\n"
+                + "}\n");
+        writeFile(srcDir, "ServiceB.java",
+                "package com.test;\npublic class ServiceB {}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getEdges()).anyMatch(e ->
+                e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
+                && e.getFromId().equals("com.test.ServiceA")
+                && e.getToId().equals("com.test.ServiceB"));
+    }
+
     // ---- Cross-package import resolution ----
 
     @Test
@@ -492,5 +688,135 @@ class AstCodeGraphBuilderTest {
                 e.getType() == CodeGraphEdge.EdgeType.DEPENDS_ON
                 && e.getFromId().equals("com.test.Importer")
                 && e.getToId().equals("org.external.Service"));
+    }
+
+    // ---- Large-file guard (GAP-5) ----
+
+    @Test
+    void shouldSkipFileLargerThanMaxFileBytes() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        // A normal small file that MUST be parsed
+        writeFile(srcDir, "Small.java",
+                "package com.test;\npublic class Small {\n    public void ok() {}\n}\n");
+
+        // A file that exceeds the tiny max-file-bytes limit (set below)
+        StringBuilder big = new StringBuilder("package com.test;\npublic class Huge {\n");
+        big.append("    public void big() {\n        // filler\n");
+        for (int i = 0; i < 2000; i++) {
+            big.append("        System.out.println(\"line ").append(i).append("\");\n");
+        }
+        big.append("    }\n}\n");
+        writeFile(srcDir, "Huge.java", big.toString());
+
+        // maxFileBytes=512 so Huge.java (much larger) is skipped
+        CodePathGuard tinyGuard = new CodePathGuard(
+                tempDir.resolve("src").toString(),
+                Arrays.asList(".java", ".xml"), 500, 512);
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                tinyGuard, Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getNodes()).anyMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS
+                && n.getName().equals("Small"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS
+                && n.getName().equals("Huge"));
+    }
+
+    // ---- Key source code excerpt (sourceCode) ----
+
+    @Test
+    void shouldSkipTargetAndTestDirectories() throws IOException {
+        // A real source file that MUST be parsed
+        Path srcDir = tempDir.resolve("src/main/java/com/test");
+        writeFile(srcDir, "BizService.java",
+                "package com.test;\npublic class BizService {\n    public void run() {}\n}\n");
+
+        // Simulate build artifacts under target/ (as present during `mvn package`)
+        Path targetDir = tempDir.resolve("target/generated-sources/com/test");
+        writeFile(targetDir, "GeneratedService.java",
+                "package com.test;\npublic class GeneratedService {\n    public void gen() {}\n}\n");
+
+        // Simulate test sources under src/test/
+        Path testDir = tempDir.resolve("src/test/java/com/test");
+        writeFile(testDir, "TestOnlyService.java",
+                "package com.test;\npublic class TestOnlyService {\n    public void t() {}\n}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getNodes()).anyMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS
+                && n.getName().equals("BizService"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS
+                && n.getName().equals("GeneratedService"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS
+                && n.getName().equals("TestOnlyService"));
+    }
+
+    @Test
+    void shouldExtractKeySourceExcerptForClass() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "OrderService.java",
+                "package com.test;\n\n"
+                + "/**\n"
+                + " * 订单服务\n"
+                + " */\n"
+                + "public class OrderService {\n"
+                + "    private OrderRepository orderRepository;\n"
+                + "    private String tenantId;\n"
+                + "\n"
+                + "    public Order getOrder(Long id) {\n"
+                + "        return orderRepository.findById(id);\n"
+                + "    }\n"
+                + "\n"
+                + "    public void cancelOrder(Long id) {\n"
+                + "        // business logic\n"
+                + "    }\n"
+                + "}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        CodeGraphNode node = graph.getNodes().stream()
+                .filter(n -> n.getType() == CodeGraphNode.NodeType.CLASS
+                        && n.getName().equals("OrderService"))
+                .findFirst().orElse(null);
+        assertThat(node).isNotNull();
+        assertThat(node.getSourceCode()).isNotNull();
+        assertThat(node.getSourceCode()).contains("OrderService");
+        assertThat(node.getSourceCode()).contains("getOrder");
+        assertThat(node.getSourceCode()).contains("orderRepository");
+    }
+
+    @Test
+    void shouldStoreFullMethodBodyInSourceCode() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        writeFile(srcDir, "Calc.java",
+                "package com.test;\n"
+                + "public class Calc {\n"
+                + "    public int add(int a, int b) {\n"
+                + "        return a + b;\n"
+                + "    }\n"
+                + "}\n");
+
+        AstCodeGraphBuilder builder = new AstCodeGraphBuilder(
+                makeGuard(tempDir.resolve("src")), Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        CodeGraphNode node = graph.getNodes().stream()
+                .filter(n -> n.getType() == CodeGraphNode.NodeType.CLASS
+                        && n.getName().equals("Calc"))
+                .findFirst().orElse(null);
+        assertThat(node).isNotNull();
+        // The full method body (not just the signature) must be preserved
+        // so the LLM can diagnose bugs offline.
+        assertThat(node.getSourceCode()).contains("add");
+        assertThat(node.getSourceCode()).contains("return a + b");
     }
 }

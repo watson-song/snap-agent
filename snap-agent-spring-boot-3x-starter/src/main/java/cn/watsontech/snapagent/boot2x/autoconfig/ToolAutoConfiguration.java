@@ -460,19 +460,18 @@ public class ToolAutoConfiguration {
     // ---- Code Read Tool ----
     @Bean
     @ConditionalOnMissingBean
-    public CodeReadTool codeReadTool(ObjectProvider<FileBridgeService> fileBridgeServiceProvider) {
-        String projectRoot = System.getProperty("user.dir");
+    public CodeReadTool codeReadTool(ObjectProvider<FileBridgeService> fileBridgeServiceProvider,
+                                    SnapAgentProperties props) {
+        String projectRoot = props.getCode().getProjectRoot();
+        // Fallback to user.dir when code.project-root is empty (standalone/local dev)
+        if (projectRoot == null || projectRoot.trim().isEmpty()) {
+            projectRoot = System.getProperty("user.dir");
+        }
         FileBridgeService fbs = fileBridgeServiceProvider.getIfAvailable();
         if (fbs != null) {
-            return new CodeReadTool(fbs,
-                projectRoot + "/snap-agent-core/src/main/java",
-                projectRoot + "/snap-agent-spring-boot-2x-starter/src/main/java"
-            );
+            return new CodeReadTool(fbs, projectRoot);
         }
-        return new CodeReadTool(
-            projectRoot + "/snap-agent-core/src/main/java",
-            projectRoot + "/snap-agent-spring-boot-2x-starter/src/main/java"
-        );
+        return new CodeReadTool(projectRoot);
     }
 }
 

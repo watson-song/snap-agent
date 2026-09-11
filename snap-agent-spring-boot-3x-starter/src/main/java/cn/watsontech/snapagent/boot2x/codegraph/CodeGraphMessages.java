@@ -54,4 +54,10 @@ public interface CodeGraphMessages {
 
     /** Label preceding the return type in find output. */
     String typeLabel();
+
+    /** Header for the code_view section, e.g. "Source excerpt (nodeId):". */
+    String sourceExcerpt(String nodeId);
+
+    /** Hint when a node has no stored source excerpt. */
+    String noSourceExcerpt(String nodeId);
 }

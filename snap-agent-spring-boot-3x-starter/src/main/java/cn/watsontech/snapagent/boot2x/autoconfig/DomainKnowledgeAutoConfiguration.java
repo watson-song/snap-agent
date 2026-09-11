@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.event.EventListener;
@@ -43,6 +44,9 @@ public class DomainKnowledgeAutoConfiguration {
 
     @Autowired
     private SnapAgentProperties props;
+
+    @Autowired
+    private ApplicationContext context;
 
     @Bean
     @ConditionalOnMissingBean
@@ -85,14 +89,14 @@ public class DomainKnowledgeAutoConfiguration {
             return;
         }
 
+        // Reuse the Spring-managed index (not manual `new`) and pass the real
+        // VectorStore so domain knowledge is ALSO written to the vector store
+        // for RAG retrieval — previously this passed null and only indexed.
         DomainKnowledgeLoader loader;
-        DomainKnowledgeIndex index;
         try {
-            loader = new DomainKnowledgeLoader(
-                    (DomainKnowledgeIndex) domainKnowledgeIndex(),
-                    null);
+            loader = new DomainKnowledgeLoader(domainKnowledgeIndex(), vectorStoreProvider());
         } catch (Exception e) {
-            log.warn("Failed to create DomainKnowledgeLoader for startup load: {}", e.getMessage());
+            log.warn("Failed to resolve DomainKnowledgeLoader for startup load: {}", e.getMessage());
             return;
         }
 
@@ -102,6 +106,20 @@ public class DomainKnowledgeAutoConfiguration {
         } catch (Exception e) {
             log.warn("Failed to load domain knowledge from {}: {}", dir, e.getMessage());
         }
+    }
+
+    private VectorStore vectorStoreProvider() {
+        // Resolved lazily via ApplicationContext to avoid a circular dependency
+        // at configuration time; null is acceptable when the vector store is
+        // not enabled (index-only mode).
+        try {
+            if (context != null) {
+                return context.getBeanProvider(VectorStore.class).getIfAvailable();
+            }
+        } catch (RuntimeException e) {
+            log.debug("VectorStore not available: {}", e.getMessage());
+        }
+        return null;
     }
 
     private boolean isDomainKnowledgeEnabled() {

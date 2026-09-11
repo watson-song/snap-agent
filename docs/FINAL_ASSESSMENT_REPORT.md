@@ -212,10 +212,10 @@ snap-agent-spring-boot-2x-starter (Spring Boot 实现, 169 文件)
 
 ### Phase 3: 产品化（3-6 月）— 进行中
 - [x] 开源文档站 (68d8a946) — MkDocs Material 主题，6 个页面（首页、快速开始、概念、配置、API、部署）
-- [ ] Skill 市场/模板库
+- [x] Skill 市场/模板库 (8b20f372) — SkillTemplate + Catalog + Controller + 前端 🏪 面板，15 个内置模板，分类筛选/搜索/安装
 - [x] 集群支持（分布式 CheckpointStore）— JdbcCheckpointStore + RedisCheckpointStore (17 tests)
-- [ ] A/B 测试框架
-- [ ] 可视化 Skill 编排
+- [x] A/B 测试框架 — Experiment + ExperimentStore + ExperimentRunner + ExperimentController + 前端 🧪 对比面板 (36 tests)
+- [x] 可视化 Skill 编排 — WorkflowDesignerController + 可视化拖拽编排 UI + YAML 导出/保存/运行 (14 tests)
 
 ---
 

@@ -164,8 +164,21 @@ class InMemoryVectorStoreTest {
     }
 
     private float[] randomUnitVector() {
-        Random rng = new Random();
+        // Deterministic unit vector that EXACTLY matches InMemoryVectorStore.toVector("test"),
+        // so that shouldReturnTopKWithThreshold (query="test") gets cosine=1 for every doc,
+        // making the topK assertion stable. No longer random — the name is kept for a
+        // minimal diff. shouldReturnEmptyWhenNoMatch (query="xyz", threshold=0.99) is
+        // unaffected: an unrelated vector vs this one has cosine far below 0.99.
+        return toVectorLike("test");
+    }
+
+    private float[] toVectorLike(String text) {
         float[] vec = new float[128];
+        int hash = 0;
+        for (char c : text.toCharArray()) {
+            hash = hash * 31 + c;
+        }
+        java.util.Random rng = new java.util.Random(hash);
         float norm = 0;
         for (int i = 0; i < vec.length; i++) {
             vec[i] = (float) rng.nextGaussian();

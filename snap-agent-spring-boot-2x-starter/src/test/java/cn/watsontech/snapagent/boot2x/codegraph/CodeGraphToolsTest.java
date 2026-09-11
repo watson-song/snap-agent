@@ -39,7 +39,8 @@ class CodeGraphToolsTest {
         CodeGraphNode c = new CodeGraphNode("com.test.C#c()", CodeGraphNode.NodeType.METHOD,
                 "c", "com.test", "com.test.C", "void", "C.java", 30);
         CodeGraphNode classB = new CodeGraphNode("com.test.B", CodeGraphNode.NodeType.CLASS,
-                "B", "com.test", "com.test.B", "", "B.java", 1);
+                "B", "com.test", "com.test.B", "", "B.java", 1,
+                "class B {\n    public void b() {\n        System.out.println(\"b\");\n    }\n}");
 
         CodeGraph graph = new CodeGraph(
                 Arrays.asList(a, b, c, classB),
@@ -70,16 +71,17 @@ class CodeGraphToolsTest {
         return map;
     }
 
-    // ---- AC17: ToolCallbacks.from() discovers 5 @Tool methods ----
+    // ---- AC17: ToolCallbacks.from() discovers 6 @Tool methods ----
 
     @Test
-    void shouldReflectFiveToolMethods() {
-        assertThat(callbacks).hasSize(5);
+    void shouldReflectSixToolMethods() {
+        assertThat(callbacks).hasSize(6);
         assertThat(findByName("call_chain")).isNotNull();
         assertThat(findByName("reverse_chain")).isNotNull();
         assertThat(findByName("impact_analysis")).isNotNull();
         assertThat(findByName("find")).isNotNull();
         assertThat(findByName("render_call_graph")).isNotNull();
+        assertThat(findByName("code_view")).isNotNull();
     }
 
     @Test
@@ -138,6 +140,30 @@ class CodeGraphToolsTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getContent()).contains("匹配节点");
         assertThat(result.getContent()).contains("com.test.B");
+    }
+
+    // ---- code_view tool ----
+
+    @Test
+    void codeView_shouldReturnSourceExcerpt() {
+        ToolResult result = findByName("code_view").execute(args("com.test.B"), null);
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).contains("class B");
+        assertThat(result.getContent()).contains("public void b()");
+    }
+
+    @Test
+    void codeView_noSourceExcerpt_returnsHint() {
+        // Node "a" has no sourceCode set; code_view should still succeed with a hint
+        ToolResult result = findByName("code_view").execute(args("com.test.A#a()"), null);
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getContent()).contains("com.test.A#a()");
+    }
+
+    @Test
+    void codeView_noMatch_returnsNotFoundMessage() {
+        ToolResult result = findByName("code_view").execute(args("xyzNonExistent"), null);
+        assertThat(result.getContent()).contains("未找到");
     }
 
     // ---- Fuzzy match by method name ----

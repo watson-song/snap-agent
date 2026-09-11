@@ -4,9 +4,9 @@ package cn.watsontech.snapagent.core.codegraph;
  * Code graph builder SPI.
  *
  * <p>Implementations parse source code and produce a {@link CodeGraph}.
- * The default starter implementation ({@code SimpleCodeGraphBuilder}) uses
- * regex-based parsing. Custom implementations can use JavaParser/Spoon for
- * more accurate AST-level analysis.</p>
+ * The default starter implementation ({@code AstCodeGraphBuilder}) uses
+ * JavaParser-based AST parsing. Custom implementations can use Spoon or
+ * other analysis tooling.</p>
  */
 public interface CodeGraphBuilder {
 

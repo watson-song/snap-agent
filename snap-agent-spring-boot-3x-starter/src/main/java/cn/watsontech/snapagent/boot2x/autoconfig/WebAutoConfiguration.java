@@ -16,10 +16,15 @@ import cn.watsontech.snapagent.boot2x.routing.PeerSseRelay;
 import cn.watsontech.snapagent.boot2x.routing.StaticPeerRouter;
 import cn.watsontech.snapagent.boot2x.tool.PluginUploader;
 import cn.watsontech.snapagent.boot2x.tool.ToolPluginRegistry;
+import cn.watsontech.snapagent.boot2x.experiment.DefaultExperimentRunner;
 import cn.watsontech.snapagent.boot2x.skill.SkillTemplateCatalog;
+import cn.watsontech.snapagent.boot2x.web.ExperimentController;
+import cn.watsontech.snapagent.boot2x.web.WorkflowDesignerController;
 import cn.watsontech.snapagent.boot2x.web.InternalTaskController;
 import cn.watsontech.snapagent.boot2x.web.SkillTemplateController;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentController;
+import cn.watsontech.snapagent.core.experiment.ExperimentRunner;
+import cn.watsontech.snapagent.core.experiment.ExperimentStore;
 import cn.watsontech.snapagent.boot2x.web.SnapAgentFilter;
 import cn.watsontech.snapagent.boot2x.workflow.WorkflowEngine;
 import cn.watsontech.snapagent.boot2x.workflow.YamlWorkflowLoader;
@@ -43,6 +48,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
 
+import java.nio.file.Path;
 import jakarta.servlet.Filter;
 
 /**
@@ -223,7 +229,52 @@ public class WebAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public SkillTemplateController skillTemplateController(
-            SkillTemplateCatalog catalog, SnapAgentProperties props) {
-        return new SkillTemplateController(catalog, props.getBasePath());
+            SkillTemplateCatalog catalog) {
+        return new SkillTemplateController(catalog);
+    }
+
+    // ---- A/B Experiment Framework ----
+    @Bean
+    @ConditionalOnMissingBean
+    public ExperimentStore experimentStore() {
+        return new ExperimentStore();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(ExperimentRunner.class)
+    public ExperimentRunner experimentRunner(AgentService agentService, SkillRegistry skillRegistry) {
+        return new DefaultExperimentRunner(agentService, skillRegistry);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public ExperimentController experimentController(
+            ExperimentStore experimentStore,
+            ObjectProvider<ExperimentRunner> experimentRunnerProvider) {
+        return new ExperimentController(experimentStore, experimentRunnerProvider.getIfAvailable());
+    }
+
+    // ---- Visual Workflow Designer ----
+    @Bean
+    @ConditionalOnMissingBean
+    public WorkflowDesignerController workflowDesignerController(
+            SkillRegistry skillRegistry,
+            ObjectProvider<YamlWorkflowLoader> workflowLoaderProvider,
+            ObjectProvider<WorkflowEngine> workflowEngineProvider,
+            SnapAgentProperties props) {
+        Path workflowsDir = null;
+        String dir = props.getWorkflows().getDir();
+        if (dir != null && !dir.isEmpty()) {
+            String path = dir;
+            if (path.startsWith("file:")) path = path.substring(5);
+            workflowsDir = java.nio.file.Paths.get(path);
+        } else {
+            workflowsDir = java.nio.file.Paths.get(props.getUploadSkillsDir()).resolve("workflows");
+        }
+        return new WorkflowDesignerController(
+                skillRegistry,
+                workflowLoaderProvider.getIfAvailable(),
+                workflowEngineProvider.getIfAvailable(),
+                workflowsDir);
     }
 }

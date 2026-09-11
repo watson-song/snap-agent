@@ -38,6 +38,11 @@ public class InMemoryVectorStore implements VectorStore {
     }
 
     @Override
+    public synchronized void clear() {
+        store.clear();
+    }
+
+    @Override
     public synchronized List<Document> similaritySearch(SearchRequest request) {
         if (request == null || request.getQuery() == null || request.getQuery().trim().isEmpty()) {
             return Collections.emptyList();

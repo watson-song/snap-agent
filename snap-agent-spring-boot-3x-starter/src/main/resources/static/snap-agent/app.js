@@ -433,12 +433,505 @@ function toggleSection(headerId, listId) {
     });
 })();
 
-function escapeHtml(text) {
-    if (!text) return '';
-    var div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+
+// ===== Visual Workflow Designer =====
+var designerSkills = [];
+var designerSteps = [];
+var designerSelectedIdx = -1;
+var designerSavedWorkflows = [];
+
+async function showDesignerModal() {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'designerModal';
+    overlay.innerHTML = '<div class="modal" style="max-width:1100px;width:95vw;height:85vh;padding:0;overflow:hidden;">' +
+        '<div class="modal-header" style="padding:8px 16px;border-bottom:1px solid #e0e0e0;">' +
+        '<h2 style="margin:0;">🎨 可视化 Skill 编排</h2>' +
+        '<button class="modal-close" onclick="closeDesignerModal()">&times;</button></div>' +
+        '<div id="designerLoadSection" class="designer-load-section">' +
+        '<span style="font-size:12px;color:#666;">加载:</span>' +
+        '<select id="designerLoadSelect"><option value="">— 选择已保存的工作流 —</option></select>' +
+        '<button onclick="designerLoadWorkflow()">加载</button>' +
+        '<button onclick="designerDeleteWorkflow()" style="color:#c62828;">删除</button>' +
+        '</div>' +
+        '<div class="designer-toolbar">' +
+        '<input type="text" id="designerNameInput" class="designer-name-input" placeholder="工作流名称">' +
+        '<input type="text" id="designerDescInput" class="designer-name-input" placeholder="描述 (可选)" style="width:200px;">' +
+        '<div style="flex:1;"></div>' +
+        '<button class="designer-export-btn" onclick="designerExportYaml()">📄 导出 YAML</button>' +
+        '<button class="designer-save-btn" onclick="designerSaveWorkflow()">💾 保存</button>' +
+        '<button class="designer-run-btn" onclick="designerRunWorkflow()">▶ 运行</button>' +
+        '</div>' +
+        '<div class="designer-container" id="designerContainer">' +
+        '<div class="designer-palette" id="designerPalette"><div class="feature-empty">加载中...</div></div>' +
+        '<div class="designer-canvas" id="designerCanvas"><div class="designer-canvas-empty"><div class="icon">🎨</div><div>从左侧拖拽 Skill 到这里<br>或点击 + 按钮添加步骤</div></div></div>' +
+        '<div class="designer-properties" id="designerProperties"><h4>属性</h4><div style="color:#aaa;font-size:12px;">选择一个步骤来编辑属性</div></div>' +
+        '</div>' +
+        '<div id="designerResultArea"></div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeDesignerModal(); });
+    await designerLoadSkills();
+    designerLoadSavedList();
 }
+
+function closeDesignerModal() {
+    var m = document.getElementById('designerModal');
+    if (m) m.remove();
+    designerSteps = [];
+    designerSelectedIdx = -1;
+}
+
+async function designerLoadSkills() {
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/skills', { headers: authHeaders() });
+        if (!resp.ok) return;
+        designerSkills = await resp.json();
+        designerRenderPalette();
+    } catch (e) { /* ignore */ }
+}
+
+function designerRenderPalette() {
+    var palette = document.getElementById('designerPalette');
+    if (!palette) return;
+    var html = '<input type="text" class="designer-palette-search" placeholder="搜索 Skill..." oninput="designerFilterPalette(this.value)">';
+    html += '<h4>Skill 列表</h4>';
+    html += '<div id="designerSkillList">';
+    for (var i = 0; i < designerSkills.length; i++) {
+        var s = designerSkills[i];
+        html += '<div class="designer-skill-card" draggable="true" data-skill-idx="' + i + '" data-skill-name="' + escapeHtml(s.name) + '">' +
+            '<div class="skill-name">' + escapeHtml(s.name) + '</div>' +
+            '<div class="skill-desc">' + escapeHtml(s.description || '') + '</div></div>';
+    }
+    html += '</div>';
+    palette.innerHTML = html;
+    // Attach drag events
+    palette.querySelectorAll('.designer-skill-card').forEach(function(card) {
+        card.addEventListener('dragstart', function(e) {
+            e.dataTransfer.setData('text/plain', card.dataset.skillName);
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+        card.addEventListener('dblclick', function() {
+            designerAddStep(card.dataset.skillName);
+        });
+    });
+}
+
+function designerFilterPalette(query) {
+    var list = document.getElementById('designerSkillList');
+    if (!list) return;
+    var q = query.toLowerCase();
+    list.querySelectorAll('.designer-skill-card').forEach(function(card) {
+        var name = card.dataset.skillName.toLowerCase();
+        var desc = (card.querySelector('.skill-desc') || {}).textContent || '';
+        card.style.display = (name.indexOf(q) >= 0 || desc.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+    });
+}
+
+async function designerLoadSavedList() {
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/workflows', { headers: authHeaders() });
+        if (!resp.ok) return;
+        designerSavedWorkflows = await resp.json();
+        var select = document.getElementById('designerLoadSelect');
+        if (!select) return;
+        select.innerHTML = '<option value="">— 选择已保存的工作流 —</option>';
+        for (var i = 0; i < designerSavedWorkflows.length; i++) {
+            var wf = designerSavedWorkflows[i];
+            select.innerHTML += '<option value="' + escapeHtml(wf.name) + '">' + escapeHtml(wf.name) + ' (' + (wf.steps ? wf.steps.length : 0) + ' 步)</option>';
+        }
+    } catch (e) { /* ignore */ }
+}
+
+async function designerLoadWorkflow() {
+    var select = document.getElementById('designerLoadSelect');
+    if (!select || !select.value) return;
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/workflows/' + encodeURIComponent(select.value), { headers: authHeaders() });
+        if (!resp.ok) { alert('加载失败'); return; }
+        var wf = await resp.json();
+        document.getElementById('designerNameInput').value = wf.name || '';
+        document.getElementById('designerDescInput').value = wf.description || '';
+        designerSteps = [];
+        if (wf.steps) {
+            for (var i = 0; i < wf.steps.length; i++) {
+                var s = wf.steps[i];
+                designerSteps.push({
+                    name: s.name || '',
+                    skill: s.skill || '',
+                    condition: s.condition || '',
+                    onFailure: s.onFailure || '',
+                    inputs: s.inputs || {}
+                });
+            }
+        }
+        designerSelectedIdx = -1;
+        designerRenderCanvas();
+        designerRenderProperties();
+    } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+async function designerDeleteWorkflow() {
+    var select = document.getElementById('designerLoadSelect');
+    if (!select || !select.value) return;
+    if (!confirm('确定删除工作流 "' + select.value + '"?')) return;
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/workflows/' + encodeURIComponent(select.value),
+            { method: 'DELETE', headers: authHeaders() });
+        if (resp.ok) {
+            designerLoadSavedList();
+            designerSteps = [];
+            designerRenderCanvas();
+        }
+    } catch (e) { alert('删除失败'); }
+}
+
+// Canvas setup (drag-and-drop zone)
+function designerSetupCanvas() {
+    var canvas = document.getElementById('designerCanvas');
+    if (!canvas) return;
+    canvas.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    canvas.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var skillName = e.dataTransfer.getData('text/plain');
+        if (skillName) designerAddStep(skillName);
+    });
+}
+
+function designerAddStep(skillName) {
+    var step = {
+        name: skillName + '-' + (designerSteps.length + 1),
+        skill: skillName,
+        condition: '',
+        onFailure: 'STOP',
+        inputs: {}
+    };
+    // Auto-populate inputs from skill definition
+    for (var i = 0; i < designerSkills.length; i++) {
+        if (designerSkills[i].name === skillName) {
+            var inputs = designerSkills[i].inputs || [];
+            for (var j = 0; j < inputs.length; j++) {
+                step.inputs[inputs[j].key] = '';
+            }
+            break;
+        }
+    }
+    designerSteps.push(step);
+    designerSelectedIdx = designerSteps.length - 1;
+    designerRenderCanvas();
+    designerRenderProperties();
+}
+
+function designerRenderCanvas() {
+    var canvas = document.getElementById('designerCanvas');
+    if (!canvas) return;
+    // Remove result overlay if present
+    var existingOverlay = canvas.querySelector('.designer-result-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    if (designerSteps.length === 0) {
+        canvas.innerHTML = '<div class="designer-canvas-empty"><div class="icon">🎨</div><div>从左侧拖拽 Skill 到这里<br>或双击 Skill 添加步骤</div></div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < designerSteps.length; i++) {
+        if (i > 0) {
+            html += '<div class="designer-arrow">↓</div>';
+        }
+        var step = designerSteps[i];
+        var selClass = i === designerSelectedIdx ? ' selected' : '';
+        html += '<div class="designer-step-node" data-idx="' + i + '">';
+        html += '<div class="designer-step-card' + selClass + '" onclick="designerSelectStep(' + i + ')">';
+        html += '<div class="step-header"><span class="step-number">' + (i+1) + '</span>' +
+            '<span class="step-skill">' + escapeHtml(step.skill) + '</span></div>';
+        html += '<div class="step-name">' + escapeHtml(step.name) + '</div>';
+        var badges = '';
+        if (step.condition) badges += '<span class="step-badge condition">条件</span>';
+        if (step.onFailure && step.onFailure !== 'STOP') badges += '<span class="step-badge failure">' + escapeHtml(step.onFailure) + '</span>';
+        var inputCount = Object.keys(step.inputs || {}).length;
+        if (inputCount > 0) badges += '<span class="step-badge">' + inputCount + ' 参数</span>';
+        if (badges) html += '<div class="step-badges">' + badges + '</div>';
+        html += '</div>';
+        html += '<div class="designer-step-actions">' +
+            '<button onclick="event.stopPropagation();designerMoveStep(' + i + ',-1)"' + (i === 0 ? ' disabled' : '') + '>↑</button>' +
+            '<button onclick="event.stopPropagation();designerMoveStep(' + i + ',1)"' + (i === designerSteps.length-1 ? ' disabled' : '') + '>↓</button>' +
+            '<button class="delete-btn" onclick="event.stopPropagation();designerRemoveStep(' + i + ')">✕</button>' +
+            '</div>';
+        html += '</div>';
+    }
+    html += '<div style="text-align:center;padding:12px;"><button onclick="designerShowAddDialog()" style="background:#fff;border:1px dashed #ccc;padding:8px 20px;border-radius:6px;cursor:pointer;color:#888;font-size:12px;">+ 添加步骤</button></div>';
+    canvas.innerHTML = html;
+    designerSetupCanvas();
+}
+
+function designerShowAddDialog() {
+    if (designerSkills.length === 0) { alert('没有可用的 Skill'); return; }
+    var names = designerSkills.map(function(s) { return s.name; });
+    var name = prompt('输入 Skill 名称:\n\n可用: ' + names.join(', '));
+    if (name && names.indexOf(name) >= 0) {
+        designerAddStep(name);
+    } else if (name) {
+        alert('未找到 Skill: ' + name);
+    }
+}
+
+function designerSelectStep(idx) {
+    designerSelectedIdx = idx;
+    designerRenderCanvas();
+    designerRenderProperties();
+}
+
+function designerMoveStep(idx, dir) {
+    var newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= designerSteps.length) return;
+    var tmp = designerSteps[idx];
+    designerSteps[idx] = designerSteps[newIdx];
+    designerSteps[newIdx] = tmp;
+    if (designerSelectedIdx === idx) designerSelectedIdx = newIdx;
+    else if (designerSelectedIdx === newIdx) designerSelectedIdx = idx;
+    designerRenderCanvas();
+    designerRenderProperties();
+}
+
+function designerRemoveStep(idx) {
+    designerSteps.splice(idx, 1);
+    if (designerSelectedIdx >= designerSteps.length) designerSelectedIdx = designerSteps.length - 1;
+    designerRenderCanvas();
+    designerRenderProperties();
+}
+
+function designerRenderProperties() {
+    var panel = document.getElementById('designerProperties');
+    if (!panel) return;
+    if (designerSelectedIdx < 0 || designerSelectedIdx >= designerSteps.length) {
+        panel.innerHTML = '<h4>属性</h4><div style="color:#aaa;font-size:12px;">选择一个步骤来编辑属性</div>';
+        return;
+    }
+    var step = designerSteps[designerSelectedIdx];
+    var html = '<h4>步骤属性</h4>';
+    html += '<div class="designer-prop-group"><label>步骤名称</label>' +
+        '<input type="text" value="' + escapeHtml(step.name) + '" onchange="designerUpdateProp(\'name\', this.value)"></div>';
+    html += '<div class="designer-prop-group"><label>Skill</label>' +
+        '<input type="text" value="' + escapeHtml(step.skill) + '" onchange="designerUpdateProp(\'skill\', this.value)"></div>';
+    html += '<div class="designer-prop-group"><label>条件表达式</label>' +
+        '<input type="text" value="' + escapeHtml(step.condition) + '" placeholder="${stepName.result != null}" onchange="designerUpdateProp(\'condition\', this.value)">' +
+        '<div style="font-size:10px;color:#888;margin-top:2px;">空 = 总是执行</div></div>';
+    html += '<div class="designer-prop-group"><label>失败策略</label>' +
+        '<select onchange="designerUpdateProp(\'onFailure\', this.value)">' +
+        '<option value="STOP"' + (step.onFailure === 'STOP' ? ' selected' : '') + '>STOP - 终止</option>' +
+        '<option value="SKIP"' + (step.onFailure === 'SKIP' ? ' selected' : '') + '>SKIP - 跳过</option>' +
+        '<option value="RETRY"' + (step.onFailure === 'RETRY' ? ' selected' : '') + '>RETRY - 重试</option>' +
+        '</select></div>';
+    html += '<div class="designer-prop-group"><label>输入参数</label>';
+    html += '<div class="designer-prop-inputs-container" id="designerInputsContainer">';
+    var inputs = step.inputs || {};
+    var keys = Object.keys(inputs);
+    for (var i = 0; i < keys.length; i++) {
+        html += '<div class="designer-prop-input-row">' +
+            '<input type="text" value="' + escapeHtml(keys[i]) + '" placeholder="key" data-old-key="' + escapeHtml(keys[i]) + '" onchange="designerRenameInput(this)" style="width:40%;">' +
+            '<input type="text" value="' + escapeHtml(inputs[keys[i]]) + '" placeholder="value / ${trigger.x}" onchange="designerUpdateInput(\'' + escapeHtml(keys[i]) + '\', this.value)" style="width:55%;">' +
+            '<button class="remove-input-btn" onclick="designerRemoveInput(\'' + escapeHtml(keys[i]) + '\')">×</button></div>';
+    }
+    html += '</div>';
+    html += '<button class="designer-add-input-btn" onclick="designerAddInput()">+ 添加参数</button>';
+    html += '</div>';
+    panel.innerHTML = html;
+}
+
+function designerUpdateProp(key, value) {
+    if (designerSelectedIdx < 0) return;
+    designerSteps[designerSelectedIdx][key] = value;
+    if (key === 'skill' || key === 'name') designerRenderCanvas();
+}
+
+function designerUpdateInput(key, value) {
+    if (designerSelectedIdx < 0) return;
+    if (!designerSteps[designerSelectedIdx].inputs) designerSteps[designerSelectedIdx].inputs = {};
+    designerSteps[designerSelectedIdx].inputs[key] = value;
+}
+
+function designerRenameInput(el) {
+    if (designerSelectedIdx < 0) return;
+    var step = designerSteps[designerSelectedIdx];
+    var oldKey = el.dataset.oldKey;
+    var newKey = el.value;
+    if (oldKey === newKey || !newKey) return;
+    var val = step.inputs[oldKey] || '';
+    delete step.inputs[oldKey];
+    step.inputs[newKey] = val;
+    el.dataset.oldKey = newKey;
+}
+
+function designerRemoveInput(key) {
+    if (designerSelectedIdx < 0) return;
+    delete designerSteps[designerSelectedIdx].inputs[key];
+    designerRenderProperties();
+}
+
+function designerAddInput() {
+    if (designerSelectedIdx < 0) return;
+    var key = prompt('参数名 (key):');
+    if (!key) return;
+    if (!designerSteps[designerSelectedIdx].inputs) designerSteps[designerSelectedIdx].inputs = {};
+    designerSteps[designerSelectedIdx].inputs[key] = '';
+    designerRenderProperties();
+}
+
+function designerBuildPayload() {
+    var name = document.getElementById('designerNameInput').value || 'unnamed-workflow';
+    var desc = document.getElementById('designerDescInput').value || '';
+    var steps = [];
+    for (var i = 0; i < designerSteps.length; i++) {
+        var s = designerSteps[i];
+        var step = { name: s.name, skill: s.skill };
+        if (s.condition) step.condition = s.condition;
+        if (s.onFailure && s.onFailure !== 'STOP') step.onFailure = s.onFailure;
+        var inputKeys = Object.keys(s.inputs || {});
+        if (inputKeys.length > 0) {
+            step.inputs = {};
+            for (var j = 0; j < inputKeys.length; j++) {
+                if (s.inputs[inputKeys[j]]) {
+                    step.inputs[inputKeys[j]] = s.inputs[inputKeys[j]];
+                }
+            }
+        }
+        steps.push(step);
+    }
+    return { name: name, description: desc, steps: steps };
+}
+
+async function designerSaveWorkflow() {
+    if (designerSteps.length === 0) { alert('请至少添加一个步骤'); return; }
+    var payload = designerBuildPayload();
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/save', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        if (!resp.ok) { var err = await resp.json(); alert('保存失败: ' + (err.message || resp.status)); return; }
+        alert('工作流 "' + payload.name + '" 已保存!');
+        designerLoadSavedList();
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+async function designerRunWorkflow() {
+    if (designerSteps.length === 0) { alert('请至少添加一个步骤'); return; }
+    var payload = designerBuildPayload();
+    // Collect trigger vars
+    var triggerVars = designerExtractTriggerVars();
+    if (triggerVars.length > 0) {
+        var triggerInputs = {};
+        for (var i = 0; i < triggerVars.length; i++) {
+            var val = prompt('触发参数: ' + triggerVars[i]);
+            if (val !== null) triggerInputs[triggerVars[i]] = val;
+        }
+        payload.triggerInputs = triggerInputs;
+    }
+    var canvas = document.getElementById('designerCanvas');
+    // Show loading overlay
+    var overlayHtml = '<div class="designer-result-overlay"><div style="text-align:center;padding:40px;"><div style="font-size:36px;margin-bottom:12px;">⏳</div><div>工作流运行中...</div></div></div>';
+    canvas.insertAdjacentHTML('beforeend', overlayHtml);
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/run', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        var data = await resp.json();
+        designerShowResult(data);
+    } catch (e) {
+        canvas.querySelector('.designer-result-overlay').innerHTML =
+            '<div style="padding:16px;color:#c62828;">运行失败: ' + escapeHtml(e.message) +
+            '<br><button onclick="this.parentElement.parentElement.remove()" style="margin-top:8px;padding:4px 12px;cursor:pointer;">关闭</button></div>';
+    }
+}
+
+function designerShowResult(data) {
+    var canvas = document.getElementById('designerCanvas');
+    var overlay = canvas.querySelector('.designer-result-overlay');
+    if (!overlay) return;
+    var statusClass = data.success ? 'success' : 'failure';
+    var statusIcon = data.success ? '✅' : '❌';
+    var html = '<div class="result-header">' +
+        '<span class="result-status ' + statusClass + '">' + statusIcon + ' ' +
+        (data.success ? '成功' : '失败') + '</span>' +
+        '<span style="font-size:12px;color:#888;">耗时: ' + (data.durationMs / 1000).toFixed(1) + 's</span>' +
+        '<button onclick="this.parentElement.parentElement.remove()" style="padding:4px 12px;cursor:pointer;">关闭</button></div>';
+    if (data.errorMessage) {
+        html += '<div style="color:#c62828;font-size:12px;margin-bottom:8px;">错误: ' + escapeHtml(data.errorMessage) +
+            (data.failedStep ? ' (步骤: ' + escapeHtml(data.failedStep) + ')' : '') + '</div>';
+    }
+    var stepResults = data.stepResults || {};
+    var keys = Object.keys(stepResults);
+    if (keys.length > 0) {
+        html += '<table class="feature-table" style="font-size:12px;"><thead><tr><th>步骤</th><th>状态</th><th>输出</th></tr></thead><tbody>';
+        for (var i = 0; i < keys.length; i++) {
+            var sr = stepResults[keys[i]];
+            var srStatus = sr.status || 'SKIPPED';
+            var srColor = srStatus === 'SUCCEEDED' ? '#2e7d32' : srStatus === 'FAILED' ? '#c62828' : '#888';
+            var report = sr.report ? (sr.report.length > 200 ? sr.report.substring(0, 200) + '...' : sr.report) : '-';
+            html += '<tr><td>' + escapeHtml(sr.stepName || keys[i]) + '</td>' +
+                '<td style="color:' + srColor + ';">' + srStatus + '</td>' +
+                '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:11px;">' + escapeHtml(report) + '</td></tr>';
+        }
+        html += '</tbody></table>';
+    }
+    overlay.innerHTML = html;
+}
+
+function designerExtractTriggerVars() {
+    var vars = new Set();
+    var pattern = /\$\{trigger\.([^}]+)\}/g;
+    for (var i = 0; i < designerSteps.length; i++) {
+        var inputs = designerSteps[i].inputs || {};
+        var keys = Object.keys(inputs);
+        for (var j = 0; j < keys.length; j++) {
+            var val = inputs[keys[j]];
+            if (!val) continue;
+            var m;
+            pattern.lastIndex = 0;
+            while ((m = pattern.exec(val)) !== null) {
+                vars.add(m[1]);
+            }
+        }
+        var cond = designerSteps[i].condition || '';
+        pattern.lastIndex = 0;
+        while ((m = pattern.exec(cond)) !== null) {
+            vars.add(m[1]);
+        }
+    }
+    return Array.from(vars);
+}
+
+async function designerExportYaml() {
+    if (designerSteps.length === 0) { alert('请至少添加一个步骤'); return; }
+    var payload = designerBuildPayload();
+    try {
+        var resp = await fetch(BASE + '/workflow-designer/export', {
+            method: 'POST',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        if (!resp.ok) { alert('导出失败'); return; }
+        var data = await resp.json();
+        // Show YAML in a text area overlay
+        var canvas = document.getElementById('designerCanvas');
+        var overlayHtml = '<div class="designer-result-overlay">' +
+            '<div class="result-header"><span style="font-weight:600;">📄 YAML 导出</span>' +
+            '<div><button onclick="designerCopyYaml()" style="padding:4px 12px;cursor:pointer;margin-right:8px;">📋 复制</button>' +
+            '<button onclick="this.parentElement.parentElement.parentElement.remove()" style="padding:4px 12px;cursor:pointer;">关闭</button></div></div>' +
+            '<textarea id="designerYamlOutput" style="width:100%;flex:1;font-family:monospace;font-size:12px;padding:12px;border:1px solid #ddd;border-radius:4px;resize:none;min-height:300px;">' +
+            escapeHtml(data.yaml) + '</textarea></div>';
+        canvas.insertAdjacentHTML('beforeend', overlayHtml);
+    } catch (e) { alert('导出失败: ' + e.message); }
+}
+
+function designerCopyYaml() {
+    var ta = document.getElementById('designerYamlOutput');
+    if (ta) { ta.select(); document.execCommand('copy'); }
+}
+
 
 function showSkillDetail(skill) {
     // Remove existing modal if any
@@ -3510,6 +4003,8 @@ document.getElementById('navPatrolBtn').addEventListener('click', showPatrolModa
 document.getElementById('navAlertsBtn').addEventListener('click', showAlertsModal);
 document.getElementById('navKnowledgeBtn').addEventListener('click', showKnowledgeModal);
 document.getElementById('navMarketplaceBtn').addEventListener('click', showMarketplaceModal);
+document.getElementById('navExperimentsBtn').addEventListener('click', showExperimentsModal);
+document.getElementById('navDesignerBtn').addEventListener('click', showDesignerModal);
 
 // --- Alert badge polling ---
 async function refreshAlertBadge() {
@@ -4097,6 +4592,128 @@ async function installTemplate(name, btn) {
         btn.textContent = '安装';
         btn.disabled = false;
         alert('安装失败: ' + e.message);
+    }
+}
+
+// ===== A/B Experiments Modal =====
+async function showExperimentsModal() {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'experimentsModal';
+    overlay.innerHTML = '<div class="modal" style="max-width:900px;">' +
+        '<div class="modal-header"><h2>🧪 A/B 实验</h2>' +
+        '<button class="modal-close" onclick="closeExperimentsModal()">&times;</button></div>' +
+        '<div class="modal-body" id="experimentsBody">加载中...</div></div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeExperimentsModal(); });
+    await loadExperiments();
+}
+
+function closeExperimentsModal() {
+    var m = document.getElementById('experimentsModal');
+    if (m) m.remove();
+}
+
+async function loadExperiments() {
+    var body = document.getElementById('experimentsBody');
+    if (!body) return;
+    try {
+        var resp = await fetch(BASE + '/experiments', { headers: authHeaders() });
+        if (!resp.ok) { body.innerHTML = '<p>加载实验失败</p>'; return; }
+        var data = await resp.json();
+        var experiments = data.experiments || [];
+        if (experiments.length === 0) {
+            body.innerHTML = '<div style="text-align:center;padding:40px;color:#888;">' +
+                '<p style="font-size:48px;margin-bottom:16px;">🧪</p>' +
+                '<p>暂无实验</p>' +
+                '<p style="font-size:13px;margin-top:8px;">通过 API 创建实验，比较不同模型/参数的效果</p>' +
+                '<pre style="text-align:left;background:#f5f5f5;padding:12px;border-radius:6px;margin-top:16px;font-size:12px;">POST /experiments\n{\n  "name": "模型对比",\n  "skillId": "log-analysis",\n  "inputs": {"query": "test"},\n  "variants": [\n    {"name": "gpt4", "model": "gpt-4", "temperature": 0.7},\n    {"name": "haiku", "model": "claude-3-haiku", "temperature": 0.5}\n  ]\n}</pre></div>';
+            return;
+        }
+        var html = '<div class="experiments-list">';
+        for (var i = 0; i < experiments.length; i++) {
+            var exp = experiments[i];
+            var statusClass = exp.status === 'COMPLETED' ? 'completed' :
+                              exp.status === 'RUNNING' ? 'running' :
+                              exp.status === 'FAILED' ? 'failed' : 'created';
+            html += '<div class="experiment-card" onclick="showExperimentDetail(\'' + exp.id + '\')">' +
+                '<div class="experiment-card-header">' +
+                '<span class="experiment-name">' + escapeHtml(exp.name) + '</span>' +
+                '<span class="experiment-status ' + statusClass + '">' + exp.status + '</span></div>' +
+                '<div class="experiment-meta">' +
+                '<span>Skill: ' + escapeHtml(exp.skillId) + '</span>' +
+                '<span>变体: ' + exp.variantCount + '</span>' +
+                '<span>' + new Date(exp.createdAt).toLocaleString() + '</span></div></div>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<p>加载实验失败: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+async function showExperimentDetail(id) {
+    var body = document.getElementById('experimentsBody');
+    if (!body) return;
+    try {
+        var resp = await fetch(BASE + '/experiments/' + id + '/compare', { headers: authHeaders() });
+        if (!resp.ok) { body.innerHTML = '<p>加载实验详情失败</p>'; return; }
+        var data = await resp.json();
+        var html = '<div style="margin-bottom:16px;"><button onclick="loadExperiments()" style="background:none;border:1px solid #ddd;padding:4px 12px;border-radius:4px;cursor:pointer;">← 返回列表</button></div>';
+        html += '<h3>实验状态: ' + data.status + '</h3>';
+        if (data.bestVariant) {
+            html += '<p style="color:green;">🏆 最优变体: ' + escapeHtml(data.bestVariant) + ' (成本最低)</p>';
+        }
+        html += '<table class="experiment-compare-table"><thead><tr>' +
+            '<th>变体</th><th>模型</th><th>温度</th><th>耗时</th><th>输入Token</th><th>输出Token</th><th>成本</th><th>迭代</th><th>状态</th></tr></thead><tbody>';
+        var variants = data.variants || [];
+        for (var i = 0; i < variants.length; i++) {
+            var v = variants[i];
+            var isBest = v.name === data.bestVariant;
+            var rowStyle = isBest ? ' style="background:#e8f5e9;"' : '';
+            html += '<tr' + rowStyle + '>';
+            html += '<td>' + escapeHtml(v.name) + (isBest ? ' 🏆' : '') + '</td>';
+            html += '<td>' + escapeHtml(v.model || '-') + '</td>';
+            html += '<td>' + (v.temperature != null ? v.temperature : '-') + '</td>';
+            if (v.pending) {
+                html += '<td colspan="5" style="text-align:center;color:#888;">等待执行...</td>';
+            } else {
+                html += '<td>' + (v.durationMs / 1000).toFixed(1) + 's</td>';
+                html += '<td>' + (v.inputTokens || 0) + '</td>';
+                html += '<td>' + (v.outputTokens || 0) + '</td>';
+                html += '<td>$' + (v.cost || 0).toFixed(4) + '</td>';
+                html += '<td>' + (v.iterationCount || 0) + '</td>';
+                html += '<td>' + (v.success ? '✅' : '❌ ' + escapeHtml(v.error || '')) + '</td>';
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        if (data.status === 'CREATED') {
+            html += '<div style="margin-top:16px;"><button onclick="runExperiment(\'' + id + '\')" class="marketplace-install-btn">▶ 运行实验</button></div>';
+        }
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<p>加载实验详情失败: ' + escapeHtml(e.message) + '</p>';
+    }
+}
+
+async function runExperiment(id) {
+    try {
+        var resp = await fetch(BASE + '/experiments/' + id + '/run', { method: 'POST', headers: authHeaders() });
+        if (!resp.ok) { alert('启动实验失败'); return; }
+        showExperimentDetail(id);
+        // Poll for completion
+        var poll = setInterval(async function() {
+            var r = await fetch(BASE + '/experiments/' + id + '/compare', { headers: authHeaders() });
+            if (!r.ok) return;
+            var d = await r.json();
+            if (d.status !== 'RUNNING') {
+                clearInterval(poll);
+                showExperimentDetail(id);
+            }
+        }, 2000);
+    } catch (e) {
+        alert('启动实验失败: ' + e.message);
     }
 }
 

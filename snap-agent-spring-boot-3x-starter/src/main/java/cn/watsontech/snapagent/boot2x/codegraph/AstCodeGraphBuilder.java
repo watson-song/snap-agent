@@ -19,6 +19,8 @@ import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.FieldAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
+import com.github.javaparser.ast.expr.VariableDeclarationExpr;
 import com.github.javaparser.ast.stmt.ExpressionStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.Type;
@@ -39,6 +41,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
@@ -80,8 +84,13 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
 
     private static final Logger log = LoggerFactory.getLogger(AstCodeGraphBuilder.class);
 
+    private static final Pattern PACKAGE_PATTERN =
+            Pattern.compile("^\\s*package\\s+([\\w.]+)\\s*;", Pattern.MULTILINE);
+
     private final CodePathGuard pathGuard;
     private final List<String> scanPackages;
+    private final String scanMode;
+    private final Set<String> skillKeywords;
 
     private static final Set<String> JAVA_KEYWORDS = new HashSet<String>(Arrays.asList(
             "if", "else", "for", "while", "switch", "case", "break", "continue",
@@ -90,8 +99,23 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
             "implements", "this", "super", "null", "true", "false"));
 
     public AstCodeGraphBuilder(CodePathGuard pathGuard, List<String> scanPackages) {
+        this(pathGuard, scanPackages, "all", new HashSet<String>());
+    }
+
+    /**
+     * Full constructor with scan-mode filtering (mirrors {@code SimpleCodeGraphBuilder}).
+     *
+     * @param pathGuard     project root access guard
+     * @param scanPackages  package prefixes to scan (empty = all)
+     * @param scanMode      {@code all}, {@code skills} (keyword filter), or {@code packages}
+     * @param skillKeywords keywords extracted from skill files, used only by {@code skills} mode
+     */
+    public AstCodeGraphBuilder(CodePathGuard pathGuard, List<String> scanPackages,
+                               String scanMode, Set<String> skillKeywords) {
         this.pathGuard = pathGuard;
         this.scanPackages = scanPackages != null ? scanPackages : new ArrayList<String>();
+        this.scanMode = scanMode != null ? scanMode : "all";
+        this.skillKeywords = skillKeywords != null ? skillKeywords : new HashSet<String>();
     }
 
     @Override
@@ -104,14 +128,21 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
         Path root = pathGuard.getProjectRoot();
 
         List<Path> javaFiles = new ArrayList<Path>();
+        final long maxFileBytes = pathGuard.getMaxFileBytes();
         try (Stream<Path> stream = Files.walk(root)) {
             stream.filter(Files::isRegularFile)
                     .filter(p -> p.toString().toLowerCase().endsWith(".java"))
+                    .filter(p -> !isInExcludedDir(root, p))
+                    .filter(p -> isWithinSizeLimit(p, maxFileBytes))
                     .forEach(javaFiles::add);
         } catch (IOException e) {
             log.error("Failed to walk project root for code graph: {}", e.getMessage());
             return new CodeGraph(new ArrayList<CodeGraphNode>(), new ArrayList<CodeGraphEdge>());
         }
+
+        // Filter files by scan mode BEFORE parsing, to keep the parse cost low
+        // (matches SimpleCodeGraphBuilder's filterFilesBySkills / filterFilesByPackages).
+        javaFiles = filterFiles(javaFiles);
 
         // Parse files in parallel — each thread accumulates into its own ParseResult,
         // then results are merged on the calling thread to avoid shared-state races.
@@ -160,6 +191,132 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
     @Override
     public String type() {
         return "javaparser";
+    }
+
+    // ---- Scan-mode file filtering ----
+
+    /**
+     * Directory names that are always excluded from the code graph walk.
+     * These contain build artifacts, test code, or VCS metadata, none of which
+     * belong in a graph of the host application's production source.
+     *
+     * <p>Excluding {@code target/} is especially important when the graph is
+     * built during {@code mvn package}: by then the {@code target/} tree holds
+     * compiled classes and generated sources that would otherwise pollute the
+     * graph. {@code src/test} is excluded for the same reason (test code is not
+     * the business logic the agent should diagnose).</p>
+     */
+    private static final java.util.Set<String> EXCLUDED_DIR_NAMES =
+            new java.util.HashSet<String>(java.util.Arrays.asList(
+                    "target", "build", ".git", ".idea", "node_modules"));
+
+    /**
+     * Return true if {@code file} lives under an excluded directory
+     * ({@code target/}, {@code build/}, {@code .git/}, {@code .idea/},
+     * {@code node_modules/}) or under {@code src/test/}.
+     */
+    private boolean isInExcludedDir(Path root, Path file) {
+        Path rel;
+        try {
+            rel = root.relativize(file);
+        } catch (IllegalArgumentException e) {
+            return true; // different filesystem root — skip defensively
+        }
+        String normalized = rel.toString().replace('\\', '/');
+        for (String segment : normalized.split("/")) {
+            if (EXCLUDED_DIR_NAMES.contains(segment)) {
+                return true;
+            }
+        }
+        // src/test/ segment (windows-safe)
+        if (normalized.startsWith("src/test/")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Return true if the file is within {@link CodePathGuard#getMaxFileBytes()}.
+     *
+     * <p>Files exceeding the limit are skipped with a warning — this prevents
+     * a single huge source file from triggering an OOM during
+     * {@link Files#readAllBytes}. This is the same guard used by
+     * {@code CodePathGuard.validate}, applied here at scan time so a
+     * defensive copy of the guard logic stays unnecessary.</p>
+     */
+    private boolean isWithinSizeLimit(Path file, long maxFileBytes) {
+        if (maxFileBytes <= 0) {
+            return true; // no limit configured
+        }
+        try {
+            long size = Files.size(file);
+            if (size > maxFileBytes) {
+                log.warn("Skipping Java file larger than {} bytes: {} ({} bytes)",
+                        maxFileBytes, file, size);
+                return false;
+            }
+            return true;
+        } catch (IOException e) {
+            log.warn("Failed to read file size for {}: {}", file, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Filter collected Java files by the configured scan mode.
+     *
+     * <ul>
+     *   <li>{@code skills}: keep only files whose content contains any skill keyword</li>
+     *   <li>{@code packages}: keep only files whose package matches a scan prefix</li>
+     *   <li>{@code all}: no filtering</li>
+     * </ul>
+     */
+    private List<Path> filterFiles(List<Path> javaFiles) {
+        if ("skills".equalsIgnoreCase(scanMode)) {
+            if (skillKeywords.isEmpty()) {
+                return javaFiles;
+            }
+            List<Path> filtered = new ArrayList<Path>();
+            for (Path file : javaFiles) {
+                try {
+                    String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                    for (String keyword : skillKeywords) {
+                        if (content.contains(keyword)) {
+                            filtered.add(file);
+                            break;
+                        }
+                    }
+                } catch (IOException e) {
+                    // Skip unreadable files
+                }
+            }
+            return filtered;
+        }
+        if ("packages".equalsIgnoreCase(scanMode)) {
+            if (scanPackages.isEmpty()) {
+                return javaFiles;
+            }
+            List<Path> filtered = new ArrayList<Path>();
+            for (Path file : javaFiles) {
+                try {
+                    String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+                    Matcher pkgMatcher = PACKAGE_PATTERN.matcher(content);
+                    if (pkgMatcher.find()) {
+                        String packageName = pkgMatcher.group(1);
+                        for (String pkg : scanPackages) {
+                            if (packageName.equals(pkg) || packageName.startsWith(pkg + ".")) {
+                                filtered.add(file);
+                                break;
+                            }
+                        }
+                    }
+                } catch (IOException e) {
+                    // Skip unreadable files
+                }
+            }
+            return filtered;
+        }
+        return javaFiles;
     }
 
     // ---- Per-file parsing ----
@@ -240,7 +397,8 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
             int lineNumber = decl.getBegin().map(b -> b.line).orElse(0);
 
             ctx.nodes.add(new CodeGraphNode(fqcn, CodeGraphNode.NodeType.CLASS,
-                    name, ctx.packageName, fqcn, "", ctx.filePath, lineNumber));
+                    name, ctx.packageName, fqcn, "", ctx.filePath, lineNumber,
+                    buildClassExcerpt(decl)));
             ctx.classNameToId.put(name, fqcn);
             ctx.classNameToId.put(fqcn, fqcn);
 
@@ -308,6 +466,9 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
                 paramSig.append(sep).append(paramType);
                 sep = ", ";
 
+                // Record parameter name → declared type for variable call resolution
+                ctx.variableTypes.put(param.getNameAsString(), paramType);
+
                 // DEPENDS_ON edge from class to param type
                 if (!isJavaBuiltin(paramType)) {
                     String depId = resolveTypeName(paramType, ctx);
@@ -347,6 +508,9 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
                 paramSig.append(sep).append(paramType);
                 sep = ", ";
 
+                // Record parameter name → declared type for variable call resolution
+                ctx.variableTypes.put(param.getNameAsString(), paramType);
+
                 if (!isJavaBuiltin(paramType)) {
                     String depId = resolveTypeName(paramType, ctx);
                     ctx.edges.add(new CodeGraphEdge(ctx.currentClass.fqcn, depId,
@@ -382,6 +546,9 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
                         fieldName, ctx.packageName, ctx.currentClass.fqcn,
                         fieldType, ctx.filePath, lineNumber));
 
+                // Record field name → declared type for variable call resolution
+                ctx.variableTypes.put(fieldName, fieldType);
+
                 // DEPENDS_ON edge from class to field type
                 if (!isJavaBuiltin(fieldType)) {
                     String depId = resolveTypeName(fieldType, ctx);
@@ -394,6 +561,29 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
             // expressions (they could contain method calls but that adds noise).
             // If we want calls from field initializers, uncomment:
             // super.visit(decl, ctx);
+        }
+
+        @Override
+        public void visit(VariableDeclarationExpr decl, FileContext ctx) {
+            // Record local variable name → declared type for variable call resolution
+            // (e.g. `MetricsClient client = new MetricsClient();` → client → MetricsClient)
+            for (VariableDeclarator var : decl.getVariables()) {
+                String varName = var.getNameAsString();
+                String varType = eraseGenerics(var.getType().asString());
+                if (varType == null || varType.isEmpty()) {
+                    // var-typed with initializer? Try to infer from ObjectCreationExpr
+                    if (var.getInitializer().isPresent()
+                            && var.getInitializer().get() instanceof ObjectCreationExpr) {
+                        ObjectCreationExpr creation =
+                                (ObjectCreationExpr) var.getInitializer().get();
+                        varType = eraseGenerics(creation.getType().asString());
+                    }
+                }
+                if (varType != null && !varType.isEmpty() && !varName.isEmpty()) {
+                    ctx.variableTypes.put(varName, varType);
+                }
+            }
+            super.visit(decl, ctx);
         }
 
         @Override
@@ -415,6 +605,35 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
     }
 
     // ---- Call target resolution ----
+
+    /**
+     * Maximum characters stored in a class's source excerpt. Full method bodies
+     * are preserved so the LLM can diagnose bugs offline; this cap only guards
+     * against pathological single classes. "Key points first" is enforced by
+     * {@code scanMode=skills} filtering BEFORE build, not by truncating bodies.
+     */
+    private static final int EXCERPT_MAX_CHARS = 64 * 1024;
+
+    /**
+     * Build the source excerpt for a class node: the COMPLETE class declaration
+     * including full method bodies (JavaParser {@code toString()} reproduces the
+     * original source faithfully). This is what lets the agent answer "why did
+     * it fail / which code is wrong" without source files at runtime.
+     *
+     * <p>Only the classes that pass {@code scanMode} filtering reach here, so
+     * for {@code skills} mode this is the key business classes the skill files
+     * declare — not the whole project.</p>
+     */
+    private static String buildClassExcerpt(ClassOrInterfaceDeclaration decl) {
+        String excerpt = decl.toString();
+        if (excerpt == null) {
+            return null;
+        }
+        if (excerpt.length() > EXCERPT_MAX_CHARS) {
+            excerpt = excerpt.substring(0, EXCERPT_MAX_CHARS) + "\n// ... (truncated)";
+        }
+        return excerpt;
+    }
 
     /**
      * Best-effort resolution of a method call's target method node ID.
@@ -462,13 +681,23 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
                 return classId + "#" + calledMethodName + "(*)";
             }
 
+            // Resolve the variable's declared type from the symbol table
+            // (field / parameter / local variable). This is the precise path —
+            // only fall back to capitalization guessing when the type is unknown.
+            String declaredType = ctx.variableTypes.get(varName);
+            if (declaredType != null && !declaredType.isEmpty()) {
+                String resolved = resolveTypeName(declaredType, ctx);
+                return resolved + "#" + calledMethodName + "(*)";
+            }
+
             // If varName starts with uppercase, assume it's a class name
             if (!varName.isEmpty() && Character.isUpperCase(varName.charAt(0))) {
                 return varName + "#" + calledMethodName + "(*)";
             }
 
-            // Best-effort: capitalize first letter (Java convention)
-            // e.g. "helper" → "Helper#execute(*)"
+            // Last-resort fallback: capitalize first letter (Java convention)
+            // e.g. "helper" → "Helper#execute(*)". This only runs when the
+            // variable type was never recorded (e.g. from a different file).
             if (!varName.isEmpty()) {
                 String guessedClass = Character.toUpperCase(varName.charAt(0)) + varName.substring(1);
                 return guessedClass + "#" + calledMethodName + "(*)";
@@ -668,6 +897,8 @@ public class AstCodeGraphBuilder implements CodeGraphBuilder {
         final List<CodeGraphNode> nodes;
         final List<CodeGraphEdge> edges;
         final Map<String, String> classNameToId;
+        /** variable name → declared type (simple name), for field/param/local scope. */
+        final Map<String, String> variableTypes = new HashMap<String, String>();
         ClassContext currentClass;
         String currentMethodId;
 

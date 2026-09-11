@@ -18,19 +18,18 @@ import java.util.*;
  * upload directory for customization.</p>
  */
 @RestController
+@RequestMapping("${snap-agent.base-path:/snap-agent}")
 public class SkillTemplateController {
 
     private static final Logger log = LoggerFactory.getLogger(SkillTemplateController.class);
 
     private final SkillTemplateCatalog catalog;
-    private final String basePath;
 
-    public SkillTemplateController(SkillTemplateCatalog catalog, String basePath) {
+    public SkillTemplateController(SkillTemplateCatalog catalog) {
         if (catalog == null) {
             throw new IllegalArgumentException("SkillTemplateCatalog must not be null");
         }
         this.catalog = catalog;
-        this.basePath = basePath != null ? basePath : "/snap-agent";
     }
 
     /**

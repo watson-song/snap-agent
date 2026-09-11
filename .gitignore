@@ -42,3 +42,9 @@ snapagent-bridge-extension.pem
 
 # Local Data
 data/
+
+# Third-party tool cache
+.understand-anything/
+
+# Editor / tool backups
+*.bak

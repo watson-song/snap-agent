@@ -1,8 +1,10 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.codegraph.AsyncCodeGraphIndex;
+import cn.watsontech.snapagent.boot2x.codegraph.AstCodeGraphBuilder;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
+import cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder;
 import cn.watsontech.snapagent.core.codegraph.CodeGraphIndex;
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor;
@@ -182,6 +184,24 @@ class KnowledgeAutoConfigurationTest {
     }
 
     @Test
+    void shouldAssembleAstCodeGraphBuilderByDefault() throws Exception {
+        java.nio.file.Path tempDir = Files.createTempDirectory("snapagent-codegraph-test");
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.code.enabled=true",
+                        "snap-agent.code.project-root=" + tempDir.toString(),
+                        "snap-agent.code-graph.enabled=true")
+                .withBean(CodePathGuard.class, () -> new CodePathGuard(
+                        tempDir.toString(), Arrays.asList(".java"), 1000, 65536L))
+                .run(context -> {
+                    assertThat(context).hasSingleBean(CodeGraphBuilder.class);
+                    CodeGraphBuilder builder = context.getBean(CodeGraphBuilder.class);
+                    assertThat(builder).isInstanceOf(AstCodeGraphBuilder.class);
+                });
+    }
+
+    @Test
     void shouldNotCreateCodeGraphBeansWhenCodeGraphDisabled() {
         contextRunner
                 .withPropertyValues(
@@ -189,6 +209,65 @@ class KnowledgeAutoConfigurationTest {
                         "snap-agent.code-graph.enabled=false")
                 .run(context -> {
                     assertThat(context).doesNotHaveBean(CodeGraphIndex.class);
+                });
+    }
+
+    // ---- KnowledgeReloadService + KnowledgeRestController wiring ----
+
+    @Test
+    void shouldAssembleKnowledgeReloadServiceWhenVectorStoreEnabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.vectorstore.enabled=true")
+                .withBean(VectorStore.class, () -> new InMemoryVectorStore())
+                .withBean(EmbeddingModel.class, KnowledgeAutoConfigurationTest::stubEmbeddingModel)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.knowledge.KnowledgeReloadService.class);
+                });
+    }
+
+    @Test
+    void shouldAssembleKnowledgeRestController() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.vectorstore.enabled=true")
+                .withBean(VectorStore.class, () -> new InMemoryVectorStore())
+                .withBean(EmbeddingModel.class, KnowledgeAutoConfigurationTest::stubEmbeddingModel)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.web.KnowledgeRestController.class);
+                });
+    }
+
+    @Test
+    void shouldNotAssembleKnowledgeHotReloaderByDefault() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.vectorstore.enabled=true")
+                .withBean(VectorStore.class, () -> new InMemoryVectorStore())
+                .withBean(EmbeddingModel.class, KnowledgeAutoConfigurationTest::stubEmbeddingModel)
+                .run(context -> {
+                    assertThat(context).doesNotHaveBean(
+                            cn.watsontech.snapagent.boot2x.knowledge.KnowledgeHotReloader.class);
+                });
+    }
+
+    @Test
+    void shouldAssembleKnowledgeHotReloaderWhenEnabled() {
+        contextRunner
+                .withPropertyValues(
+                        "snap-agent.enabled=true",
+                        "snap-agent.vectorstore.enabled=true",
+                        "snap-agent.knowledge.hot-reload=true")
+                .withBean(VectorStore.class, () -> new InMemoryVectorStore())
+                .withBean(EmbeddingModel.class, KnowledgeAutoConfigurationTest::stubEmbeddingModel)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(
+                            cn.watsontech.snapagent.boot2x.knowledge.KnowledgeHotReloader.class);
                 });
     }
 

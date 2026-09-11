@@ -80,4 +80,15 @@ public class EnglishCodeGraphMessages implements CodeGraphMessages {
     public String typeLabel() {
         return "Type";
     }
+
+    @Override
+    public String sourceExcerpt(String nodeId) {
+        return "Key source excerpt (" + nodeId + "):";
+    }
+
+    @Override
+    public String noSourceExcerpt(String nodeId) {
+        return "Node " + nodeId + " has no stored source excerpt "
+                + "(built by an older graph, or a runtime without sources).";
+    }
 }

@@ -304,4 +304,64 @@ class SimpleCodeGraphBuilderTest {
         // No edges expected (no calls, no dependencies, no extends)
         assertThat(graph.edgeCount()).isZero();
     }
+
+    // ---- Large-file guard (GAP-5) ----
+
+    @Test
+    void shouldSkipFileLargerThanMaxFileBytes() throws IOException {
+        Path srcDir = tempDir.resolve("src/com/test");
+        Files.createDirectories(srcDir);
+        Files.write(srcDir.resolve("Small.java"), (
+                "package com.test;\npublic class Small {\n    public void ok() {}\n}\n").getBytes());
+
+        StringBuilder big = new StringBuilder("package com.test;\npublic class Huge {\n");
+        big.append("    public void big() {\n");
+        for (int i = 0; i < 2000; i++) {
+            big.append("        int x").append(i).append(" = ").append(i).append(";\n");
+        }
+        big.append("    }\n}\n");
+        Files.write(srcDir.resolve("Huge.java"), big.toString().getBytes());
+
+        CodePathGuard tinyGuard = new CodePathGuard(
+                tempDir.resolve("src").toString(),
+                Arrays.asList(".java", ".xml"), 500, 512);
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                tinyGuard, Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getNodes()).anyMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("Small"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("Huge"));
+    }
+
+    @Test
+    void shouldSkipTargetAndTestDirectories() throws IOException {
+        Path srcDir = tempDir.resolve("src/main/java/com/test");
+        Files.createDirectories(srcDir);
+        Files.write(srcDir.resolve("BizService.java"), (
+                "package com.test;\npublic class BizService {\n    public void run() {}\n}\n").getBytes());
+
+        Path targetDir = tempDir.resolve("target/generated-sources/com/test");
+        Files.createDirectories(targetDir);
+        Files.write(targetDir.resolve("GeneratedService.java"), (
+                "package com.test;\npublic class GeneratedService {\n    public void gen() {}\n}\n").getBytes());
+
+        Path testDir = tempDir.resolve("src/test/java/com/test");
+        Files.createDirectories(testDir);
+        Files.write(testDir.resolve("TestOnlyService.java"), (
+                "package com.test;\npublic class TestOnlyService {\n    public void t() {}\n}\n").getBytes());
+
+        SimpleCodeGraphBuilder builder = new SimpleCodeGraphBuilder(
+                new CodePathGuard(tempDir.toString(), Arrays.asList(".java", ".xml"), 500, 512 * 1024),
+                Collections.<String>emptyList());
+        CodeGraph graph = builder.build();
+
+        assertThat(graph.getNodes()).anyMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("BizService"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("GeneratedService"));
+        assertThat(graph.getNodes()).noneMatch(n ->
+                n.getType() == CodeGraphNode.NodeType.CLASS && n.getName().equals("TestOnlyService"));
+    }
 }

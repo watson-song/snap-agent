@@ -39,4 +39,17 @@ public interface VectorStore {
      * @return ranked list of documents (may be empty, never null)
      */
     List<Document> similaritySearch(SearchRequest request);
+
+    /**
+     * Remove all documents from the store, restoring it to an empty state.
+     *
+     * <p>Used by the knowledge reload flow (code change → re-ingest): clearing
+     * first guarantees the store does not accumulate stale/duplicate documents
+     * across reloads.</p>
+     *
+     * <p>Default is a no-op for backward compatibility; implementations with a
+     * mutable backing store (e.g. {@code InMemoryVectorStore}) override it.</p>
+     */
+    default void clear() {
+    }
 }

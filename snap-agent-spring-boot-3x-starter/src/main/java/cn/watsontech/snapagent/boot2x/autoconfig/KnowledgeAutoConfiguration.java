@@ -1,15 +1,20 @@
 package cn.watsontech.snapagent.boot2x.autoconfig;
 
 import cn.watsontech.snapagent.boot2x.tool.CodePathGuard;
+import cn.watsontech.snapagent.boot2x.domain.DomainKnowledgeLoader;
 import cn.watsontech.snapagent.core.codegraph.CodeGraphBuilder;
 import cn.watsontech.snapagent.core.codegraph.CodeGraphIndex;
+import cn.watsontech.snapagent.core.domain.DomainKnowledgeIndex;
 import cn.watsontech.snapagent.core.embedding.EmbeddingModel;
 import cn.watsontech.snapagent.core.rag.RetrievalAugmentationAdvisor;
 import cn.watsontech.snapagent.core.vectorstore.VectorStore;
 import cn.watsontech.snapagent.boot2x.knowledge.IdentityQueryTransformer;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeETLPipeline;
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeHotReloader;
+import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeReloadService;
 import cn.watsontech.snapagent.boot2x.knowledge.KnowledgeSedimentationService;
 import cn.watsontech.snapagent.boot2x.knowledge.VectorStoreDocumentRetriever;
+import cn.watsontech.snapagent.boot2x.codegraph.AstCodeGraphBuilder;
 import cn.watsontech.snapagent.boot2x.codegraph.AsyncCodeGraphIndex;
 import cn.watsontech.snapagent.boot2x.codegraph.ChineseCodeGraphMessages;
 import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphHotReloader;
@@ -17,7 +22,7 @@ import cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools;
 import cn.watsontech.snapagent.boot2x.codegraph.H2CodeGraphIndex;
 import cn.watsontech.snapagent.boot2x.codegraph.InMemoryCodeGraphIndex;
 import cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools;
-import cn.watsontech.snapagent.boot2x.codegraph.SimpleCodeGraphBuilder;
+import cn.watsontech.snapagent.boot2x.codegraph.SkillKeywordExtractor;
 import cn.watsontech.snapagent.core.rag.DefaultQueryAugmenter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,13 +48,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 /**
  * Knowledge, RAG, and code graph auto-configuration.
@@ -117,6 +118,58 @@ public class KnowledgeAutoConfiguration {
     }
 
     /**
+     * Knowledge reload coordinator — the engine behind "code changes → update
+     * the knowledge base with the built-in tool". Wired when the vector store
+     * is enabled; the domain loader/index are optional (resolved via
+     * {@link ObjectProvider} so the reload still works when domain knowledge
+     * is not configured).
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "snap-agent.vectorstore", name = "enabled", havingValue = "true")
+    @ConditionalOnMissingBean
+    public KnowledgeReloadService knowledgeReloadService(
+            ObjectProvider<VectorStore> vectorStoreProvider,
+            ObjectProvider<DomainKnowledgeIndex> domainIndexProvider,
+            ObjectProvider<KnowledgeETLPipeline> etlPipelineProvider,
+            ObjectProvider<DomainKnowledgeLoader> domainLoaderProvider,
+            SnapAgentProperties props) {
+        log.info("KnowledgeReloadService assembled");
+        return new KnowledgeReloadService(
+                vectorStoreProvider.getIfAvailable(),
+                domainIndexProvider.getIfAvailable(),
+                etlPipelineProvider.getIfAvailable(),
+                domainLoaderProvider.getIfAvailable(),
+                props);
+    }
+
+    /**
+     * Knowledge REST controller — the {@code /knowledge/*} UI endpoints.
+     *
+     * <p>Fix: previously this controller was annotated {@code @RestController}
+     * but never registered as a bean (no component scan covers the web
+     * package), so the endpoints were unreachable. It is now explicitly wired
+     * here, following the same pattern as the other controllers.</p>
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    public cn.watsontech.snapagent.boot2x.web.KnowledgeRestController knowledgeRestController(
+            ObjectProvider<VectorStore> vectorStoreProvider,
+            ObjectProvider<CodeGraphIndex> codeGraphIndexProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.codegraph.CodeGraphTools> codeGraphToolsProvider,
+            ObjectProvider<cn.watsontech.snapagent.boot2x.codegraph.ModuleArchitectureTools> moduleArchToolsProvider,
+            ObjectProvider<KnowledgeReloadService> knowledgeReloadServiceProvider,
+            SnapAgentProperties props) {
+        log.info("KnowledgeRestController assembled");
+        return new cn.watsontech.snapagent.boot2x.web.KnowledgeRestController(
+                vectorStoreProvider,
+                codeGraphIndexProvider,
+                codeGraphToolsProvider,
+                moduleArchToolsProvider,
+                knowledgeReloadServiceProvider,
+                props);
+    }
+
+    /**
      * Fix P0-2: Build {@link RetrievalAugmentationAdvisor} using config values
      * from {@code snap-agent.rag} (when enabled) or falling back to
      * {@code snap-agent.knowledge} defaults.
@@ -150,11 +203,11 @@ public class KnowledgeAutoConfiguration {
     @ConditionalOnProperty(prefix = "snap-agent.code-graph", name = "enabled", havingValue = "true")
     @ConditionalOnBean(CodePathGuard.class)
     @ConditionalOnMissingBean
-    public CodeGraphBuilder simpleCodeGraphBuilder(
+    public CodeGraphBuilder codeGraphBuilder(
             CodePathGuard codePathGuard,
             SnapAgentProperties props) {
         String scanMode = props.getCodeGraph().getScanMode();
-        log.info("SimpleCodeGraphBuilder assembled (scanMode={}, scanPackages={})",
+        log.info("AstCodeGraphBuilder assembled (scanMode={}, scanPackages={})",
                 scanMode, props.getCodeGraph().getScanPackages());
 
         // Extract keywords from skills for 'skills' scan mode
@@ -163,7 +216,7 @@ public class KnowledgeAutoConfiguration {
             skillKeywords = extractSkillKeywords(props);
         }
 
-        return new SimpleCodeGraphBuilder(
+        return new AstCodeGraphBuilder(
                 codePathGuard, props.getCodeGraph().getScanPackages(),
                 scanMode, skillKeywords);
     }
@@ -214,28 +267,13 @@ public class KnowledgeAutoConfiguration {
 
     /**
      * Extract keywords from skill files on the filesystem.
+     *
+     * <p>Delegates to {@link SkillKeywordExtractor} — the SAME extractor the
+     * {@code CodeGraphCli} uses — so the integration-time graph and the runtime
+     * graph filter identically.</p>
      */
     private void extractFromFilesystem(String dirPath, Set<String> keywords) {
-        Path dir = Paths.get(dirPath);
-        if (!Files.exists(dir) || !Files.isDirectory(dir)) {
-            log.debug("Skill directory not found: {}", dirPath);
-            return;
-        }
-
-        try (Stream<Path> stream = Files.walk(dir)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(p -> p.toString().endsWith(".md"))
-                    .forEach(file -> {
-                        try {
-                            String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
-                            extractKeywordsFromContent(content, keywords);
-                        } catch (IOException e) {
-                            log.debug("Failed to read skill file: {}", file);
-                        }
-                    });
-        } catch (IOException e) {
-            log.warn("Failed to scan skill directory: {}", dirPath);
-        }
+        keywords.addAll(SkillKeywordExtractor.extractFromDirectory(Paths.get(dirPath)));
     }
 
     /**
@@ -257,7 +295,7 @@ public class KnowledgeAutoConfiguration {
                     }
                     is.close();
                     String content = new String(bytes, StandardCharsets.UTF_8);
-                    extractKeywordsFromContent(content, keywords);
+                    SkillKeywordExtractor.extractFromContent(content, keywords);
                 } catch (IOException e) {
                     log.debug("Failed to read classpath resource: {}", resource);
                 }
@@ -265,93 +303,6 @@ public class KnowledgeAutoConfiguration {
         } catch (IOException e) {
             log.warn("Failed to scan classpath pattern: {}", classpathPattern);
         }
-    }
-
-    /**
-     * Extract keywords from skill markdown content.
-     * Extracts class names, method names, package names, table names, and column names.
-     */
-    private void extractKeywordsFromContent(String content, Set<String> keywords) {
-        // Pattern 1: Java class names (CamelCase, typically 3+ chars, starts with uppercase)
-        // Examples: AllocationPlanService, DrpAllocationPlan, SimpleCodeGraphBuilder
-        Matcher classMatcher = Pattern.compile("\\b([A-Z][a-z]+(?:[A-Z][a-z]+){1,})\\b").matcher(content);
-        while (classMatcher.find()) {
-            String word = classMatcher.group(1);
-            // Filter out common non-class words
-            if (!isCommonWord(word) && word.length() >= 3) {
-                keywords.add(word);
-            }
-        }
-
-        // Pattern 2: Method names (camelCase, typically 2+ words)
-        // Examples: getAllocationPlan, checkStatus, updateRecord
-        Matcher methodMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:[A-Z][a-z0-9]+){1,})\\b").matcher(content);
-        while (methodMatcher.find()) {
-            String word = methodMatcher.group(1);
-            if (!isCommonMethodWord(word) && word.length() >= 4) {
-                keywords.add(word);
-            }
-        }
-
-        // Pattern 3: Table names (snake_case, typically 3+ parts)
-        // Examples: drp_allocation_plan, sys_batch_log, dws_alg_allocation_output
-        Matcher tableMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:_[a-z0-9]+){2,})\\b").matcher(content);
-        while (tableMatcher.find()) {
-            String word = tableMatcher.group(1);
-            if (word.length() >= 8) {
-                keywords.add(word);
-            }
-        }
-
-        // Pattern 4: Column names (snake_case, typically 2+ parts)
-        // Examples: sku_code, batch_id, generate_date
-        Matcher colMatcher = Pattern.compile("\\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\\b").matcher(content);
-        while (colMatcher.find()) {
-            String word = colMatcher.group(1);
-            if (word.length() >= 5) {
-                keywords.add(word);
-            }
-        }
-
-        // Pattern 5: Package names (dot-separated, 3+ parts)
-        // Examples: com.watsontech.snapagent, cn.watsontech.snapagent.boot2x
-        Matcher pkgMatcher = Pattern.compile("\\b([a-z][a-z0-9]+\\.[a-z][a-z0-9]+(?:\\.[a-z][a-z0-9]+)+)\\b").matcher(content);
-        while (pkgMatcher.find()) {
-            String word = pkgMatcher.group(1);
-            if (word.length() >= 10) {
-                keywords.add(word);
-            }
-        }
-    }
-
-    /**
-     * Filter out common English words that are not class names.
-     */
-    private boolean isCommonWord(String word) {
-        Set<String> commonWords = new HashSet<String>(Arrays.asList(
-                "The", "This", "That", "When", "Where", "What", "How", "Why", "Which", "Who",
-                "After", "Before", "During", "While", "Some", "Many", "All", "Each",
-                "Use", "Used", "Using", "Check", "Make", "Made", "Take", "Need",
-                "Show", "Find", "Get", "Set", "Run", "Stop", "Start", "Read", "Write",
-                "Parse", "Build", "Data", "Date", "Time", "Name", "Type", "Code",
-                "Id", "Key", "Value", "Item", "List", "Map", "Test", "Test"
-        ));
-        return commonWords.contains(word);
-    }
-
-    /**
-     * Filter out common method names that are too generic.
-     */
-    private boolean isCommonMethodWord(String word) {
-        Set<String> commonMethods = new HashSet<String>(Arrays.asList(
-                "toString", "hashCode", "equals", "compareTo", "valueOf",
-                "parseInt", "parseFloat", "parseLong", "getString", "getValue",
-                "getName", "getId", "setType", "setValue", "setName", "setId",
-                "isEnabled", "isEmpty", "isNull", "hasNext", "iterator",
-                "contains", "indexOf", "length", "append", "insert", "delete",
-                "update", "select", "query", "execute", "process"
-        ));
-        return commonMethods.contains(word);
     }
 
     /**
@@ -457,6 +408,30 @@ public class KnowledgeAutoConfiguration {
         long pollMs = props.getCodeGraph().getHotReloadPollMs();
         log.info("CodeGraphHotReloader assembled (watchRoot={}, pollMs={})", watchRoot, pollMs);
         CodeGraphHotReloader reloader = new CodeGraphHotReloader(watchRoot, index, builder, pollMs);
+        reloader.start();
+        return reloader;
+    }
+
+    /**
+     * Optional knowledge hot reloader that watches the knowledge root for
+     * {@code .md} file changes and re-ingests into the vector store + domain
+     * index without a restart.
+     *
+     * <p>Only active when {@code snap-agent.knowledge.hot-reload=true}
+     * (default false — an embedded tool must not consume host resources
+     * unnecessarily). Requires the reload service and a filesystem watch root.</p>
+     */
+    @Bean(destroyMethod = "stop")
+    @ConditionalOnProperty(prefix = "snap-agent.knowledge", name = "hot-reload", havingValue = "true")
+    @ConditionalOnBean(KnowledgeReloadService.class)
+    @ConditionalOnMissingBean
+    public KnowledgeHotReloader knowledgeHotReloader(
+            KnowledgeReloadService reloadService,
+            SnapAgentProperties props) {
+        Path watchRoot = Paths.get(props.getUploadSkillsDir());
+        long pollMs = props.getKnowledge().getHotReloadPollMs();
+        log.info("KnowledgeHotReloader assembled (watchRoot={}, pollMs={})", watchRoot, pollMs);
+        KnowledgeHotReloader reloader = new KnowledgeHotReloader(watchRoot, reloadService, 1000L, pollMs);
         reloader.start();
         return reloader;
     }

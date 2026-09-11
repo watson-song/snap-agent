@@ -1,7 +1,7 @@
 # TDD需求规格说明书 — 代码图谱 (Code Graph)
 
-> 版本: 1.1 (SnapAgent 2.x 架构适配) | 模块: 12-codegraph | 基于 TEMPLATE.md
-> 变更: CodeGraphToolProvider → @Tool 注解方法 (由 ToolCallbacks.from() 反射发现); CodeGraph 模型 (nodes/edges/BFS) 与正则解析保持不变
+> 版本: 1.2 (SnapAgent 2.x 架构适配 + 离线代码正文) | 模块: 12-codegraph | 基于 TEMPLATE.md
+> 变更: CodeGraphToolProvider → @Tool 注解方法 (由 ToolCallbacks.from() 反射发现); CodeGraph 模型 (nodes/edges/BFS) 与正则解析保持不变; v1.2 新增 CodeGraphNode.sourceCode (关键代码片段) + code_view 工具,支持嵌入式运行时无源码场景离线查看业务代码
 
 ---
 
@@ -17,19 +17,19 @@
 ```
 
 ### 1.1 背景与目标
-- **业务背景**: SnapAgent 需要理解宿主项目代码结构，为 LLM 提供调用链、影响范围等代码级上下文。SnapAgent 2.x 中，CodeGraph 模型与正则解析保持不变，仅将 `CodeGraphToolProvider` 的工具暴露方式从自定义 ToolProvider 改为 `@Tool` 注解方法，由 `ToolCallbacks.from()` 反射发现并注册到 `ToolCallbackRegistry`，与内置工具统一。
-- **用户价值**: AI 问答时能回答"谁调用了这个方法"、"改这个类影响哪些代码"等问题，无需人工翻代码；2.x 后 CodeGraph 工具与其他 @Tool 工具一致地参与图执行。
-- **成功指标**: 正则解析覆盖率 > 80% 常见 Java 模式；BFS 查询 < 10ms；循环检测 100%；@Tool 方法反射注册成功率 100%。
+- **业务背景**: SnapAgent 需要理解宿主项目代码结构，为 LLM 提供调用链、影响范围等代码级上下文。SnapAgent 2.x 中，CodeGraph 模型保持不变，工具暴露方式从自定义 ToolProvider 改为 `@Tool` 注解方法，由 `ToolCallbacks.from()` 反射发现并注册到 `ToolCallbackRegistry`；生产装配已切换为 JavaParser AST 实现 `AstCodeGraphBuilder`（`SimpleCodeGraphBuilder` 保留为轻量备选并标记 `@Deprecated`）。**嵌入式部署时宿主 JVM 无源码**：v1.2 起 `AstCodeGraphBuilder` 在构建阶段抽取**完整类源码（含完整方法体）**写入 `CodeGraphNode.sourceCode`，随 H2 图谱持久化，运行时经 `code_view` 工具离线查看，实现"对话式代码诊断"（能定位具体 bug）。
+- **用户价值**: AI 问答时能回答"谁调用了这个方法"、"改这个类影响哪些代码"等问题，无需人工翻代码；2.x 后 CodeGraph 工具与其他 @Tool 工具一致地参与图执行。**无源码的运行时也能查看关键业务代码正文并诊断问题**。
+- **成功指标**: AST 解析覆盖常见 Java 模式；BFS 查询 < 10ms；循环检测 100%；@Tool 方法反射注册成功率 100%。
 
 ### 1.2 范围边界
-- **包含**: `CodeGraph`、`CodeGraphNode`、`CodeGraphEdge`、`CodeGraphBuilder` (SPI)、`CodeGraphIndex` (SPI)、`SimpleCodeGraphBuilder`、`InMemoryCodeGraphIndex`、`CodeGraphTools` (含 `@Tool` 注解方法)。
-- **不包含**: AST 级精确解析 (JavaParser/Spoon)、持久化索引 (SQLite/H2)、跨仓库分析、`CodeGraphToolProvider` 旧实现 (已删除)。
+- **包含**: `CodeGraph`、`CodeGraphNode`（含 `sourceCode`）、`CodeGraphEdge`、`CodeGraphBuilder` (SPI)、`CodeGraphIndex` (SPI)、`AstCodeGraphBuilder` (JavaParser AST，默认，含关键代码片段抽取)、`SimpleCodeGraphBuilder` (regex，@Deprecated 轻量备选)、`InMemoryCodeGraphIndex`、`H2CodeGraphIndex`（含 SOURCE_CODE 列与旧库迁移）、`CodeGraphTools` (含 `@Tool` 注解方法: call_chain/reverse_chain/impact_analysis/find/code_view/render_call_graph)。
+- **不包含**: 完整 classpath 符号求解 (JavaSymbolSolver)、跨仓库分析、`CodeGraphToolProvider` 旧实现 (已删除)。
 
 ### 1.3 风险与假设
 
 | 风险ID | 描述 | 概率 | 影响 | 缓解 |
 |--------|------|------|------|------|
-| R1 | 正则解析对复杂 Java 语法误解析 | 中 | 中 | 标注为 regex 模式，后续可替换为 AST |
+| R1 | regex 解析对复杂 Java 语法误解析 | 低 | 中 | 生产默认使用 AST (`AstCodeGraphBuilder`)；`SimpleCodeGraphBuilder` 仅作轻量备选并标 `@Deprecated` |
 | R2 | 大项目 OOM | 低 | 高 | 文件大小限制 + 路径白名单 |
 | R3 | BFS 遇到环死循环 | 中 | 高 | visited 集合去重 |
 | R4 | @Tool 方法签名与 ToolCallbacks.from() 反射解析不兼容 | 低 | 中 | 扫描期校验 + 启动日志警告 |
@@ -218,6 +218,39 @@ AC24: Given CodeGraphTools 实例被销毁
   Then 4 个工具均不再可见，其他工具不受影响
 ```
 
+### US-11: 离线关键代码正文 (sourceCode + code_view)
+```gherkin
+作为 嵌入式运行时的 LLM
+我希望 在无源码的宿主 JVM 里仍能查看到关键业务代码片段
+以便 对话式诊断"为什么出错、是代码哪里问题"
+```
+**AC:**
+```gherkin
+AC25: Given 源码含 public class OrderService (字段 + public 方法)
+  When AstCodeGraphBuilder.build() 执行
+  Then CLASS 节点 sourceCode 非空，含类名/字段名/public 方法签名与完整方法体
+
+AC26: Given CLASS 节点 sourceCode 非空
+  When H2CodeGraphIndex.loadGraph() 后 getNode(id)
+  Then 节点 sourceCode 与原值一致 (SOURCE_CODE 列往返)
+
+AC27: Given 旧版 H2 库 (CODE_GRAPH_NODES 无 SOURCE_CODE 列)
+  When H2CodeGraphIndex 打开该库
+  Then 自动 ALTER TABLE 加列，查询正常 (旧节点 sourceCode=null)
+
+AC28: Given CodeGraphTools 含 @Tool(name="code_view")
+  When ToolCallbacks.from() 反射
+  Then ToolCallback 含 code_view (工具总数 = 6)
+
+AC29: Given code_view query="OrderService" 且节点有 sourceCode
+  When 执行
+  Then content 含关键代码片段正文
+
+AC30: Given code_view query 命中节点但 sourceCode 为空
+  When 执行
+  Then 返回提示信息 (不抛异常)
+```
+
 ---
 
 ## 2.5 用户故事地图
@@ -231,7 +264,8 @@ AC24: Given CodeGraphTools 实例被销毁
 | 检索 | US-6 | 模糊搜索 | 命中率 100% | US-1 |
 | 调用链 | US-7/8 | 依赖分析 | 深度限制+循环 100% | US-1 |
 | 影响 | US-9 | 变更评估 | 受影响节点 100% | US-1 |
-| 工具 | US-10 | LLM 可用 | 4种 @Tool 方法全覆盖 | US-7/8/9 |
+| 工具 | US-10 | LLM 可用 | 6种 @Tool 方法全覆盖 | US-7/8/9 |
+| 离线代码 | US-11 | 无源码可诊断 | sourceCode 持久化 100% | US-1 |
 
 ---
 
@@ -249,7 +283,7 @@ AC24: Given CodeGraphTools 实例被销毁
 | UC-06 | 解析方法调用 CALLS | P0 | AC6 | 单元 |
 | UC-07 | 包名过滤 | P1 | AC7 | 单元 |
 | UC-08 | 解析 interface/enum | P1 | - | 单元 |
-| UC-09 | type() 返回 "regex" | P1 | - | 单元 |
+| UC-09 | type() 返回 "javaparser" (默认) / "regex" (备选) | P1 | - | 单元 |
 | UC-10 | findByName 匹配 | P0 | AC8 | 单元 |
 | UC-11 | findByName 大小写不敏感 | P0 | AC9 | 单元 |
 | UC-12 | findByName 空/null | P0 | AC10 | 单元 |
@@ -276,6 +310,12 @@ AC24: Given CodeGraphTools 实例被销毁
 | UC-33 | unregister 不影响其他 | P1 | AC24 | 单元 |
 | UC-34 | @Tool: 模糊匹配方法名 | P1 | - | 单元 |
 | UC-35 | @Tool: 无匹配返回提示 | P1 | - | 单元 |
+| UC-36 | AstCodeGraphBuilder 抽取类关键代码片段 (sourceCode) | P1 | AC25 | 单元 |
+| UC-37 | sourceCode 含完整方法体 | P1 | AC25 | 单元 |
+| UC-38 | H2 SOURCE_CODE 列持久化往返 | P1 | AC26 | 单元 |
+| UC-39 | H2 旧库无 SOURCE_CODE 列自动迁移 | P1 | AC27 | 单元 |
+| UC-40 | @Tool: code_view 返回代码片段 | P1 | AC28/AC29 | 单元 |
+| UC-41 | @Tool: code_view 无片段返回提示 | P1 | AC30 | 单元 |
 
 ### 3.2 详细用例 (Gherkin)
 
@@ -438,7 +478,7 @@ AC24: Given CodeGraphTools 实例被销毁
 ```java
 // SPI: 构建器 (不变)
 CodeGraph build();                    // 解析源码构建图谱
-String type();                        // 构建器类型标识 ("regex")
+String type();                        // 构建器类型标识 ("javaparser" 默认 / "regex" 备选)
 
 // SPI: 索引 (不变)
 List<CodeGraphNode> findByName(String namePattern);
@@ -482,6 +522,8 @@ tools (经 @Tool 注解):
   - reverse_chain: { query: string (必填), max_depth: int (可选，默认5) }
   - impact_analysis: { query: string (必填), max_depth: int (可选，默认3) }
   - find: { query: string (必填) }
+  - code_view: { query: string (必填) }  # v1.2: 返回关键代码片段
+  - render_call_graph: { query: string, graph_type: string, max_depth: int (可选) }
 返回: ToolResult content 含文本格式化结果
 ```
 
@@ -499,6 +541,7 @@ CodeGraphNode:
   returnType: String
   filePath: String
   lineNumber: int
+  sourceCode: String (关键代码片段，可null；v1.2新增，构建期抽取，随图谱持久化供离线查看)
 
 CodeGraphEdge:
   fromId: String
@@ -512,8 +555,8 @@ CodeGraph:
 
 CodeGraphTools (2.x):
   index: CodeGraphIndex (注入)
-  @Tool 方法: call_chain / reverse_chain / impact_analysis / find
-  反射: ToolCallbacks.from(instance) → ToolCallback[4]
+  @Tool 方法: call_chain / reverse_chain / impact_analysis / find / code_view / render_call_graph
+  反射: ToolCallbacks.from(instance) → ToolCallback[6]
 ```
 
 ---
@@ -545,11 +588,13 @@ CodeGraphTools (2.x):
 
 | 测试文件 | 模块 | 覆盖 | 数量 |
 |----------|------|------|------|
-| `SimpleCodeGraphBuilderTest` | starter | class/method/field解析、extends/implements、CALLS、包名过滤、空项目、null root、type()、interface/enum | 8 |
+| `SimpleCodeGraphBuilderTest` | starter | class/method/field解析、extends/implements、CALLS、包名过滤、空项目、null root、type()、interface/enum、大文件跳过 | 9 |
 | `InMemoryCodeGraphIndexTest` | starter | findByName(匹配/大小写/空null)、findCallChain(正向/depth/不存在/循环)、findReverseCallChain、findImpactScope、getOutgoingEdges、getIncomingEdges、getNode(命中/null)、nodeCount | 14 |
-| `CodeGraphToolsTest` | starter | ToolCallbacks.from 反射发现 4 个 @Tool、call_chain、reverse_chain、impact_analysis、find、模糊匹配、unknown error、missing param、无匹配、maxDepth、toToolDefinitionsJson 一致、unregister 不影响其他 | 15 |
+| `AstCodeGraphBuilderTest` | starter | AST解析、大文件跳过、完整类源码抽取(sourceCode 含完整方法体) | 32 |
+| `H2CodeGraphIndexTest` | starter | H2持久化、SOURCE_CODE 列往返、旧库无列自动迁移 | 17 |
+| `CodeGraphToolsTest` | starter | ToolCallbacks.from 反射发现 6 个 @Tool、call_chain、reverse_chain、impact_analysis、find、code_view、模糊匹配、unknown error、missing param、无匹配、maxDepth、toToolDefinitionsJson 一致、unregister 不影响其他 | 21 |
 
-**总结**: 3个测试文件，37个测试用例，覆盖全部 SPI 方法、@Tool 反射注册和 4 种工具调用。CodeGraph 模型与正则解析部分与 1.0 版本完全一致；仅工具暴露方式改为 @Tool 注解方法。
+**总结**: 5个测试文件，覆盖全部 SPI 方法、@Tool 反射注册和 6 种工具调用、关键代码片段抽取与 H2 持久化迁移。CodeGraph 模型与正则解析部分与 1.0 版本完全一致；工具暴露方式改为 @Tool 注解方法，v1.2 新增 sourceCode + code_view 离线代码正文能力。
 
 ### 8.3 E2E 关键路径
 
@@ -571,9 +616,10 @@ CodeGraphTools (2.x):
 | GAP-2 | `CodeGraphNode.toString` / `CodeGraphEdge.toString` 无断言 | P3 | 格式化输出验证 |
 | GAP-3 | ⚠SPI集成: CodeGraphBuilder SPI 可替换性需 Spring 上下文或手动组装验证 (InMemoryCodeGraphIndex + mock builder) | P2 | 需 Spring 集成测试 |
 | GAP-4 | ✅已关闭: DEPENDS_ON 边类型已由 `SimpleCodeGraphBuilderTest` 覆盖 (build_parsesDependsOnFromFieldType/build_parsesDependsOnMethodParam)。OVERRIDES/REFERENCES 不由 SimpleCodeGraphBuilder 产生，CodeGraphTest 验证所有 EdgeType 可存储。 | — | P2 |
-| GAP-5 | ⚠功能缺失: SimpleCodeGraphBuilder.build() 未实现大文件跳过逻辑（CodePathGuard.validate 有 maxFileBytes 但 builder 直接用 Files.readAllBytes）。需先实现再测试。 | P2 | 功能未实现 |
+| GAP-5 | ✅已关闭: 大文件跳过逻辑已由 `AstCodeGraphBuilderTest.shouldSkipFileLargerThanMaxFileBytes` 和 `SimpleCodeGraphBuilderTest.shouldSkipFileLargerThanMaxFileBytes` 覆盖 — build() 在文件收集阶段用 `CodePathGuard.getMaxFileBytes()` 跳过超限文件，避免 OOM。 | — | P2 |
 | GAP-6 | ⚠E2E缺失: POST /runs (tool=call_chain/reverse_chain/impact_analysis) 端到端流程无 E2E 覆盖 — 见 E2E-4 | P2 | 需 E2E 集成测试 |
 | GAP-7 | ✅已关闭: @Tool 反射注册 (ToolCallbacks.from + ToolCallbackRegistry) 已由 `CodeGraphToolsTest` 覆盖 (shouldReflectFourToolMethods/shouldGenerateConsistentJsonSchema/shouldUnregisterWithoutAffectingOthers) | — | P0 |
+| GAP-8 | ✅已关闭: 关键代码片段抽取与持久化已由 `AstCodeGraphBuilderTest` (shouldExtractKeySourceExcerptForClass/shouldNotStoreMethodBodyInClassExcerpt)、`H2CodeGraphIndexTest` (shouldPersistSourceCodeField/shouldMigrateLegacySchemaWithoutSourceCodeColumn)、`CodeGraphToolsTest` (codeView_*) 覆盖 | — | P1 |
 
 ### 8.5 Mock策略
 ```yaml
@@ -592,8 +638,10 @@ ToolCallbackRegistry 使用 Mockito mock (验证 register/unregister 调用)。
 | CodePathGuard | 已完成 | 路径校验 |
 | ToolCallbackRegistry SPI (2.x) | 已完成 | - |
 | ToolCallbacks.from() 反射工具 (2.x) | 已完成 | - |
-| SimpleCodeGraphBuilder | 已完成 | 正则解析 |
+| AstCodeGraphBuilder | 已完成 | JavaParser AST（默认） |
+| SimpleCodeGraphBuilder | 已完成 | 正则解析（@Deprecated 轻量备选） |
 | InMemoryCodeGraphIndex | 已完成 | 内存索引 |
+| H2CodeGraphIndex | 已完成 | H2 持久化索引 |
 
 ---
 
@@ -614,6 +662,9 @@ ToolCallbackRegistry 使用 Mockito mock (验证 register/unregister 调用)。
 |------|------|------|------|
 | 1.0 | 2026-07-24 | Team | 初始TDD规格 |
 | 1.1 | 2026-07-25 | Team | 适配 2.x: CodeGraphToolProvider 改为 CodeGraphTools (@Tool 注解方法); 由 ToolCallbacks.from() 反射发现并注册到 ToolCallbackRegistry; CodeGraph 模型与正则解析保持不变; 新增 UC-31/32/33 反射注册/JSON 一致/unregister 隔离 |
+| 1.2 | 2026-09-11 | Team | 新增 CodeGraphNode.sourceCode 完整类源码 + code_view 工具 (US-11, AC25~AC30, UC-36~41): AstCodeGraphBuilder 构建期抽取完整类源码(含完整方法体,上限64KB,仅防病态单类;"关键点优先"由 scanMode=skills 过滤保证), H2 SOURCE_CODE 列 + 旧库自动迁移, 支持嵌入式无源码运行时离线诊断定位 bug |
+| 1.3 | 2026-09-11 | Team | 新增 SkillKeywordExtractor(纯 Java 工具,抽取 skill 类名/方法名/表名/列名/包名关键字,供 CLI 与运行时共用保证一致); CodeGraphCli 重构出可测 run() 方法并新增 --scan-mode/--skill-dir 参数,支持集成阶段按 skill 关键类预构建 H2; 新增 SkillKeywordExtractorTest(3)/CodeGraphCliTest(1 E2E) |
+| 1.4 | 2026-09-11 | Team | 两个 builder(Ast/Simple)文件收集阶段排除 target/build/.git/.idea/node_modules 与 src/test 目录,避免 package 阶段自动构建时把编译产物/生成代码/测试代码污染进图谱; 新增 AstCodeGraphBuilderTest.shouldSkipTargetAndTestDirectories / SimpleCodeGraphBuilderTest.shouldSkipTargetAndTestDirectories |
 
 ### 12.2 参考文档
 - `snap-agent-core/src/main/java/.../codegraph/CodeGraph.java`
@@ -632,7 +683,7 @@ ToolCallbackRegistry 使用 Mockito mock (验证 register/unregister 调用)。
 | CodeGraph | 不可变的代码图谱，含节点和边 |
 | CodeGraphNode | 图谱节点 (CLASS/METHOD/FIELD) |
 | CodeGraphEdge | 有向边 (CALLS/IMPLEMENTS/EXTENDS等) |
-| CodeGraphBuilder | 构建器 SPI，默认实现为 regex |
+| CodeGraphBuilder | 构建器 SPI，默认实现为 AstCodeGraphBuilder (javaparser) |
 | CodeGraphIndex | 索引 SPI，默认实现为内存 BFS |
 | CodeGraphTools | 2.x 工具类，含 @Tool 注解方法，由 ToolCallbacks.from() 反射注册为 ToolCallback[] |
 | ToolCallbacks.from() | 2.x 反射工具，自动发现 @Tool 方法并包装为 ToolCallback |
